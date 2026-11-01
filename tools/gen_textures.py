@@ -125,11 +125,17 @@ def floor_tile():
     base = 0.30 + 0.10 * chk + 0.12 * wear
     alb = np.dstack([base * 0.9, base, base * 1.05])
     # hazard chevron stripe on the middle row of tiles
-    stripe = ((x + y) // 8) % 2 == 0
+    # Supersampled: a hard diagonal on the texel grid is a staircase that
+    # magnified bilinear sampling turns into a visible zigzag.
+    ss = 8
+    sy, sx = np.mgrid[0:N * ss, 0:N * ss]
+    hard = ((((sx + sy) // 8 // ss) % 2) == 0).astype(float)
+    stripe = hard.reshape(N, ss, N, ss).mean(axis=(1, 3))
     band = (y >= 48) & (y < 80)
     hz = np.dstack([0.85 * np.ones_like(base), 0.65 * np.ones_like(base), 0.05 * np.ones_like(base)]) * (0.7 + 0.3 * wear)[..., None]
     dark = np.array([0.08, 0.08, 0.08]) * np.ones((N, N, 1))
-    alb = np.where((band & stripe)[..., None], hz, np.where(band[..., None], dark, alb))
+    mix = stripe[..., None]
+    alb = np.where(band[..., None], hz * mix + dark * (1 - mix), alb)
     alb[grout] *= 0.35
     h = np.where(grout, 0.0, 0.8 + 0.1 * wear)
     return alb, h, 4.0

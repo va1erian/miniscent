@@ -9,7 +9,7 @@
 //! points, crawl of the edge contour and the stair-step of the contour; see
 //! `tests/support/crawl.rs`. PNGs (2x nearest, followed points marked, plus
 //! an amplified difference of two frames) go to `out_dir`
-//! (default `target/shots/crawl`).
+//! (default `target/shots/crawl`); the followed points are marked only in the `_marked` copies.
 
 #[allow(dead_code)]
 #[path = "../tests/support/crawl.rs"]
@@ -68,12 +68,11 @@ fn write(dir: &Path, name: &str, fb: &Framebuffer, marks: &[(f32, f32)]) {
 
 fn dump(dir: &Path, rig: &Rig, run: &Run, tag: &str) {
     let (first, last) = (&run.frames[0], &run.frames[2]);
-    write(
-        dir,
-        &format!("{}_{tag}_first", rig.name),
-        first,
-        &run.points[0],
-    );
+    // The followed points are magenta pixels: kept out of the plain frame so
+    // they are not mistaken for dotted artifacts in the shading.
+    let name = format!("{}_{tag}", rig.name);
+    write(dir, &format!("{name}_first"), first, &[]);
+    write(dir, &format!("{name}_first_marked"), first, &run.points[0]);
     write(
         dir,
         &format!("{}_{tag}_diff", rig.name),
@@ -97,29 +96,34 @@ fn main() {
         } else {
             Quality::High
         };
+        let name = format!("{look:?}").to_lowercase();
         println!("== {look:?} {q:?}: lum = levels, contour/saw = pixels");
         for rig in crawl::rigs() {
             for (tag, size) in [("full", FULL), ("s750", REDUCED), ("s500", LOW)] {
                 for (step_name, px) in [("1/16px", FINE), ("1/4px", COARSE)] {
                     let c = crawl::measure(&r, &rig, q, size, px).expect("measure");
+                    // Texture detail (stripes, grout, mortar) crosses the profile
+                    // and reads as a zigzag, so the stair-step is only a shading
+                    // measure on the flat look.
+                    let saw = if look == Look::Flat {
+                        format!("saw {:.3} (pp {:.2})", c.saw_px, c.saw_pp)
+                    } else {
+                        "saw n/a (texture detail)".to_string()
+                    };
                     println!(
-                        "{:<10} {tag:<5} {step_name:<6} lum {:.2} (edge {:.2})  contour {:.3} (max {:.3})  saw {:.3} (pp {:.2})  [{} pts, {} samples]",
+                        "{:<10} {tag:<5} {step_name:<6} lum {:.2} (edge {:.2})  contour {:.3} (max {:.3})  {saw}  [{} pts, {} samples]",
                         rig.name,
                         c.lum_rms,
                         c.lum_rms_edge,
                         c.contour_px,
                         c.contour_max,
-                        c.saw_px,
-                        c.saw_pp,
                         c.points,
                         c.contour_samples
                     );
                 }
-                if look == Look::Flat {
-                    let run =
-                        crawl::run(&r, &rig, Motion::Strafe, q, size, COARSE, true).expect("run");
-                    dump(&out, &rig, &run, tag);
-                }
+                let run = crawl::run(&r, &rig, Motion::Strafe, q, size, COARSE, true).expect("run");
+                let tag = format!("{name}_{tag}");
+                dump(&out, &rig, &run, &tag);
             }
         }
     }

@@ -81,7 +81,7 @@ impl Default for BuildConfig {
     fn default() -> Self {
         Self {
             luxel_size: 0.125,
-            ambient: Vec3::new(0.04, 0.038, 0.055),
+            ambient: Vec3::new(0.025, 0.024, 0.036),
             light_gain: 4.6,
             light_radius: 0.3,
             shadow_samples: 64,
@@ -223,7 +223,7 @@ impl LevelRenderer {
         let bake_cfg = BakeConfig {
             luxel_size: cfg.luxel_size,
             ambient: cfg.ambient,
-            bounce_gain: 0.3,
+            bounce_gain: 0.18,
             light_radius: cfg.light_radius,
             shadow_samples: cfg.shadow_samples,
             ..BakeConfig::default()

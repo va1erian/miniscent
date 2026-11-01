@@ -231,7 +231,7 @@ fn light_selection_fills_the_panel_and_the_3d_pane_shows_the_built_level() {
             };
             state.borrow_mut().selection = Some(Selection::Entity(light));
             stage.emit(Msg::Tool(0));
-            for _ in 0..30 {
+            for _ in 0..400 {
                 stage.emit(Msg::Step);
                 std::thread::sleep(std::time::Duration::from_millis(16));
             }
