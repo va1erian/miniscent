@@ -1,5 +1,7 @@
 //! The 6DoF player (M6.1): thrust on three axes, pitch, yaw and roll held as
-//! a quaternion, and inertia on both motion and rotation.
+//! a quaternion, and inertia on both motion and rotation. It flies like a
+//! big drone: thrust ramps in and out, the hull bobs while hovering, banks
+//! into turns and strafes, and a free roll settles on the nearest quarter turn.
 //!
 //! Orientation is a unit quaternion updated by body-frame increments, so no
 //! pitch angle is singular: looping through 90 degrees up behaves like any
@@ -22,9 +24,25 @@ pub const DRAG: f32 = 3.0;
 pub const BRAKE: f32 = 5.0;
 /// Extra drag per second on the velocity sideways to the thrust, so the
 /// ship follows where it is pointed instead of drifting.
-pub const STEER: f32 = 6.0;
-/// How fast a free roll returns to level, per second (proportional).
-pub const LEVEL_RATE: f32 = 2.5;
+pub const STEER: f32 = 3.0;
+/// How fast the applied thrust follows the stick, in stick units per second:
+/// the drone spools up and down instead of snapping.
+pub const THRUST_RAMP: f32 = 9.0;
+/// How fast a free roll settles on a quarter turn, per second (proportional).
+pub const LEVEL_RATE: f32 = 3.0;
+/// Hover bob: peak height in metres, angular rate in radians per second, and
+/// the speed above which it fades out completely.
+pub const BOB_AMPLITUDE: f32 = 0.07;
+pub const BOB_RATE: f32 = 2.2;
+pub const BOB_FADE_SPEED: f32 = 3.0;
+/// Banking: radians per radian/second of turn and per m/s of strafe, the
+/// cap, and how fast the hull follows its target, per second.
+pub const BANK_PER_TURN: f32 = 0.16;
+pub const BANK_PER_STRAFE: f32 = 0.03;
+pub const MAX_BANK: f32 = 0.4;
+pub const BANK_FOLLOW: f32 = 5.0;
+/// Smoothing of the mouse-turn rate estimate used for banking, per step.
+const LOOK_SMOOTHING: f32 = 0.05;
 /// Turn rate at full stick, radians per second.
 pub const MAX_TURN_RATE: f32 = 2.5;
 /// How fast the turn rate follows the stick, radians per second squared.
@@ -42,6 +60,26 @@ pub struct Player {
     /// World-space up used by mouse yaw and roll self-levelling; `None` is
     /// pure 6DoF with no preferred up.
     pub up_ref: Option<Vec3>,
+    /// Thrust actually applied, in the body frame; follows the stick.
+    thrust_applied: Vec3,
+    /// Phase of the hover bob, radians.
+    bob_phase: f32,
+    /// Cosmetic roll into turns, radians (positive banks left).
+    bank: f32,
+    /// Yaw from mouse look since the last step, and its smoothed rate.
+    look_kick: f32,
+    look_rate: f32,
+}
+
+/// Moves `cur` toward `want` by at most `max` in length.
+fn approach(cur: Vec3, want: Vec3, max: f32) -> Vec3 {
+    let diff = want - cur;
+    let len = diff.length();
+    if len <= max {
+        want
+    } else {
+        cur + diff * (max / len)
+    }
 }
 
 impl Player {
@@ -55,6 +93,11 @@ impl Player {
             ang_vel: Vec3::ZERO,
             health: MAX_HEALTH,
             up_ref: None,
+            thrust_applied: Vec3::ZERO,
+            bob_phase: 0.0,
+            bank: 0.0,
+            look_kick: 0.0,
+            look_rate: 0.0,
         }
     }
 
@@ -88,11 +131,13 @@ impl Player {
         let i = input.sanitized();
         self.turn(Vec3::new(i.pitch, i.yaw, i.roll));
         // Forward on the stick is -Z in the body frame.
-        let local = Vec3::new(i.thrust.x, i.thrust.y, -i.thrust.z);
+        let want = Vec3::new(i.thrust.x, i.thrust.y, -i.thrust.z);
+        self.thrust_applied = approach(self.thrust_applied, want, THRUST_RAMP * STEP_DT);
+        let local = self.thrust_applied;
         let thrust = self.orientation.rotate(local) * THRUST_ACCEL;
         let vel = self.body.vel;
         let mut drag = vel * DRAG;
-        if local.length() < 1e-3 {
+        if want.length() < 1e-3 {
             drag = drag + vel * BRAKE;
         } else {
             let dir = thrust * (1.0 / THRUST_ACCEL);
@@ -100,6 +145,7 @@ impl Player {
             drag = drag + (vel - dir * vel.dot(dir)) * STEER;
         }
         self.body.step(bsp, thrust - drag);
+        self.animate();
         if let (0.0, Some(up)) = (i.roll, self.up_ref) {
             self.level(up);
         }
@@ -112,6 +158,7 @@ impl Player {
         if !(pitch.is_finite() && yaw.is_finite()) {
             return;
         }
+        self.look_kick += yaw;
         let pitch_q = Quat::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), pitch);
         let Some(up) = self.up_ref else {
             let yaw_q = Quat::from_axis_angle(Vec3::new(0.0, 1.0, 0.0), yaw);
@@ -123,9 +170,36 @@ impl Player {
         self.orientation = (yaw_q * self.orientation * pitch_q).normalized();
     }
 
-    /// Eases the roll back toward upright about the view axis.
+    /// Advances the hover bob and the bank toward what the motion asks for.
+    fn animate(&mut self) {
+        self.bob_phase = (self.bob_phase + BOB_RATE * STEP_DT) % std::f32::consts::TAU;
+        let kick_rate = std::mem::take(&mut self.look_kick) / STEP_DT;
+        self.look_rate += (kick_rate - self.look_rate) * LOOK_SMOOTHING;
+        let strafe = self.orientation.conjugate().rotate(self.body.vel).x;
+        let target = ((self.ang_vel.y + self.look_rate) * BANK_PER_TURN - strafe * BANK_PER_STRAFE)
+            .clamp(-MAX_BANK, MAX_BANK);
+        self.bank += (target - self.bank) * (BANK_FOLLOW * STEP_DT).min(1.0);
+    }
+
+    /// Vertical hover bob for the camera. It fades out as the drone speeds
+    /// up, and is cosmetic only: collision and aim ignore it.
+    pub fn bob_offset(&self) -> Vec3 {
+        let still = (1.0 - self.body.vel.length() / BOB_FADE_SPEED).clamp(0.0, 1.0);
+        let up = self.up_ref.unwrap_or_else(|| self.up());
+        up * (BOB_AMPLITUDE * still * self.bob_phase.sin())
+    }
+
+    /// Cosmetic bank, applied to the camera about the view axis.
+    pub fn bank_rotation(&self) -> Quat {
+        Quat::from_axis_angle(Vec3::new(0.0, 0.0, 1.0), self.bank)
+    }
+
+    /// Eases the roll to the nearest quarter turn about the view axis, so a
+    /// released roll locks onto upright, on its side or inverted.
     fn level(&mut self, world_up: Vec3) {
-        let err = -self.right().dot(world_up).atan2(self.up().dot(world_up));
+        let roll = self.right().dot(world_up).atan2(self.up().dot(world_up));
+        let quarter = std::f32::consts::FRAC_PI_2;
+        let err = (roll / quarter).round() * quarter - roll;
         let k = (LEVEL_RATE * STEP_DT).min(1.0);
         let delta = Quat::from_axis_angle(Vec3::new(0.0, 0.0, 1.0), err * k);
         self.orientation = (self.orientation * delta).normalized();
