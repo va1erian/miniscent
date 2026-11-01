@@ -41,6 +41,7 @@ const ALONG: usize = 41;
 const ACROSS: usize = 49;
 /// Half width of the profile across the edge, in world units.
 const REACH: f32 = 1.2;
+const MERGE: f32 = 4.0; // samples: crossings closer than this are one edge
 /// A profile whose two ends differ by less than this is not an edge.
 const MIN_STEP: f32 = 8.0;
 
@@ -338,9 +339,17 @@ fn crossing(p: &[f32]) -> Option<f32> {
     let mid = 0.5 * (a + b);
     let centre = (p.len() - 1) as f32 / 2.0;
     let mut best: Option<f32> = None;
+    let mut last = f32::NEG_INFINITY;
     for (j, w) in p.windows(2).enumerate() {
         if (w[0] - mid) * (w[1] - mid) <= 0.0 && w[0] != w[1] {
             let x = j as f32 + (mid - w[0]) / (w[1] - w[0]);
+            // A second, separate crossing means texture detail (a grout
+            // line) crosses the profile: the contour is ambiguous and its
+            // jumps between frames would be read as crawl of the shadow.
+            if x - last > MERGE && last.is_finite() {
+                return None;
+            }
+            last = x;
             if best.is_none_or(|b| (x - centre).abs() < (b - centre).abs()) {
                 best = Some(x);
             }
@@ -464,4 +473,28 @@ pub fn measure(
         acc.contour_samples = acc.contour_samples.max(c.contour_samples);
     }
     Some(acc)
+}
+
+#[cfg(test)]
+mod crossing_tests {
+    use super::*;
+
+    fn profile(f: impl Fn(usize) -> f32) -> Vec<f32> {
+        (0..ACROSS).map(f).collect()
+    }
+
+    #[test]
+    fn one_clean_edge_has_a_crossing_and_a_grout_line_does_not() {
+        let edge = profile(|j| if j < 24 { 200.0 } else { 40.0 });
+        let at = crossing(&edge).expect("single edge");
+        assert!(at.abs() < 0.1, "edge at the centre, got {at}");
+        // The same edge plus a dark line 10 samples away: two crossings.
+        let grout = profile(|j| match j {
+            24.. if j < 28 => 40.0,
+            14 | 15 => 0.0,
+            _ if j < 24 => 200.0,
+            _ => 40.0,
+        });
+        assert_eq!(crossing(&grout), None);
+    }
 }

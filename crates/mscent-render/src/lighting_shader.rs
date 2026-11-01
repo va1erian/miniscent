@@ -39,12 +39,13 @@ const MAX_PX: usize = SPAN_LEN as usize;
 /// sample, so it is sampled sparsely and stepped linearly in between (the
 /// colour is fetched per pixel).
 const MAX_SEG_SHIFT: u32 = 4;
-/// Shortest interval, as a shift: every second pixel.
-const MIN_SEG_SHIFT: u32 = 1;
+/// Shortest interval, as a shift: every eighth pixel (a knot costs two
+/// normalisations; every second pixel cost about a millisecond a frame).
+const MIN_SEG_SHIFT: u32 = 3;
 /// Intervals of the longest span (`MAX_PX >> MIN_SEG_SHIFT`).
-const MAX_SEGS: usize = 8;
+const MAX_SEGS: usize = MAX_PX >> MIN_SEG_SHIFT;
 /// Largest distance, in luxels, between two direction samples on screen.
-const MAX_KNOT_LUXELS: f32 = 3.0;
+const MAX_KNOT_LUXELS: f32 = 8.0;
 
 /// Texels per pixel up to which bump mapping keeps full strength, and the
 /// rate at which it has faded out (the normal map aliases beyond that).
@@ -170,7 +171,7 @@ impl<'a, const SPEC: bool> LightingShader<'a, SPEC> {
 
     /// Whether anything downstream reads the baked light direction.
     fn wants_dir(&self) -> bool {
-        self.face.bump || self.spec.is_some()
+        (self.normals.is_some() && self.bump_scale > 0.0) || self.spec.is_some()
     }
 
     /// Unit direction from a point on the face (luxel coordinates) to the eye.
