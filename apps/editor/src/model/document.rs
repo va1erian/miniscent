@@ -212,6 +212,12 @@ impl Document {
         }
     }
 
+    /// Lets tests build a corrupt document that the model itself refuses.
+    #[cfg(test)]
+    pub fn replace_brush_for_test(&mut self, def: &BrushDef) {
+        self.replace_brush(def);
+    }
+
     pub(super) fn move_brush(&mut self, id: Id, to: usize) {
         if let Some(from) = self.brush_index(id) {
             let b = self.brushes.remove(from);

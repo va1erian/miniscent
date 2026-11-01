@@ -57,7 +57,7 @@ fn render_session(theme: Theme, scripted: bool) -> (Image, Rc<Cell<u32>>) {
         move |ui| {
             let app = Editor::build(ui, Document::from_level(&mscent_world::showcase_level()))?;
             *p2.borrow_mut() = Some(Probe {
-                state: app.state(),
+                state: app.probe().state(),
                 top: app.viewports[0].get(),
                 min_x: app.panel.min_x(),
             });
@@ -135,15 +135,9 @@ fn render_session(theme: Theme, scripted: bool) -> (Image, Rc<Cell<u32>>) {
                 Some(Selection::Entity(_))
             ));
             stage.emit(Msg::Tool(0));
-            // Stub commands only report.
-            stage.emit(Msg::Menu(cmd::PLAY));
-            assert!(
-                probe
-                    .state
-                    .borrow()
-                    .message
-                    .starts_with("Play: not implemented yet")
-            );
+            // Build starts on a worker thread and says so.
+            stage.emit(Msg::Menu(cmd::BUILD));
+            assert_eq!(probe.state.borrow().message, "Building...");
             // Re-select the brush for the panel in the picture.
             let (cx, cy) = at(61.0, 27.0);
             mouse(stage, 0, cx, cy);
@@ -208,7 +202,7 @@ fn light_selection_fills_the_panel_and_the_3d_pane_shows_an_image() {
     let image = render_with(
         Snapshot::new(Dip(1280.0), Dip(800.0)).theme(Theme::light()),
         |ui| {
-            let app = Editor::build(ui, Document::from_level(&mscent_world::showcase_level()))?;
+            let mut app = Editor::build(ui, Document::from_level(&mscent_world::showcase_level()))?;
             // Left half green, right half blue, as the renderer would hand over.
             let (w, h) = (64u32, 40u32);
             let px: Vec<u32> = (0..w * h)
@@ -220,10 +214,10 @@ fn light_selection_fills_the_panel_and_the_3d_pane_shows_an_image() {
                     }
                 })
                 .collect();
-            app.view3d().set_image(&px, w, h);
-            app.view3d().set_image(&px[..10], w, h); // wrong length: ignored
+            app.probe().view3d().set_image(&px, w, h);
+            app.probe().view3d().set_image(&px[..10], w, h); // wrong length: ignored
             {
-                let state = app.state();
+                let state = app.probe().state();
                 let mut st = state.borrow_mut();
                 let light = st
                     .doc

@@ -1,55 +1,97 @@
-//! The fourth pane: reserved for the 3D view. It shows a placeholder until
-//! `set_image` supplies a rendered frame.
+//! The 3D pane (and the full-area Play pane): one custom-painted xui node
+//! that shows the newest frame given to [`View3d::set_image`] and turns the
+//! input it receives into [`mscent_platform::Event`]s, the same vocabulary the
+//! game uses. xui has no pointer lock, so looking is "hold the right mouse
+//! button and drag" (relative motion computed from successive positions) or
+//! the arrow keys; the left button fires in Play.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use xui::Color;
-use xui::Image;
+use mscent_platform::{Event as PEvent, Key as PKey, MouseButton as PButton};
 use xui::app::Ui;
-use xui::backend::{NodeKind, NodeSpec, Result, TextAlign, TextStyle, TextVAlign, WidgetId};
+use xui::backend::{Event, NodeKind, NodeSpec, Result, TextAlign, TextStyle, TextVAlign, WidgetId};
 use xui::geometry::{Rect, Size};
 use xui::layout::Constraints;
 use xui::units::Dip;
 use xui::widget::{Control, Placeable};
+use xui::{Color, Image, Key, MouseButton};
 
-/// A pane that draws the newest frame given to [`View3d::set_image`].
+/// The platform key for a Windows virtual-key code.
+pub fn platform_key(k: Key) -> Option<PKey> {
+    let c = k.code();
+    Some(match c {
+        0x1B => PKey::Escape,
+        0x0D => PKey::Enter,
+        0x20 => PKey::Space,
+        0x09 => PKey::Tab,
+        0x08 => PKey::Backspace,
+        0x2E => PKey::Delete,
+        0x10 => PKey::Shift,
+        0x11 => PKey::Ctrl,
+        0x12 => PKey::Alt,
+        0x26 => PKey::Up,
+        0x28 => PKey::Down,
+        0x25 => PKey::Left,
+        0x27 => PKey::Right,
+        0x30..=0x39 | 0x41..=0x5A => PKey::Char(u8::try_from(c).ok()? as char),
+        0x70..=0x7B => PKey::F((c - 0x6F) as u8),
+        _ => return None,
+    })
+}
+
+#[derive(Default)]
+struct Shared {
+    image: RefCell<Option<Image>>,
+    events: RefCell<Vec<PEvent>>,
+    placeholder: RefCell<String>,
+}
+
+/// A pane that draws a frame and collects input.
 pub struct View3d<M: 'static> {
     control: Control<M>,
-    #[allow(dead_code, reason = "written by set_image, which Play will call")]
-    image: Rc<RefCell<Option<Image>>>,
+    shared: Rc<Shared>,
 }
 
 impl<M: 'static> View3d<M> {
     pub fn new(ui: &Ui<M>) -> Result<View3d<M>> {
         let control = Control::new(
             ui,
-            &NodeSpec::new(NodeKind::Custom, Rect::new(0, 0, 10, 10)),
+            &NodeSpec::new(NodeKind::Custom, Rect::new(0, 0, 10, 10)).tab_stop(),
         )?;
-        let image: Rc<RefCell<Option<Image>>> = Rc::new(RefCell::new(None));
-        let shown = image.clone();
-        let theme = ui.theme_handle();
-        control.set_painter(Rc::new(move |canvas| {
-            let theme = theme.get();
-            let b = canvas.bounds();
-            canvas.clear(theme.input_background.lerp(Color::rgb(0, 0, 0), 0.35));
-            if let Some(img) = shown.borrow().as_ref() {
-                canvas.draw_image(img, fit(b, img.width(), img.height()));
-            } else {
-                let mut style = TextStyle::new(theme.text_secondary, Dip(12.0));
-                style.align = TextAlign::Center;
-                style.valign = TextVAlign::Middle;
-                canvas.draw_text("3D view\n(Play renders here)", b, &style);
-            }
-            canvas.stroke_rect(b, theme.border, 1.0);
-        }));
-        Ok(View3d { control, image })
+        let shared = Rc::new(Shared::default());
+        *shared.placeholder.borrow_mut() = "3D view".into();
+        {
+            let shared = shared.clone();
+            let theme = ui.theme_handle();
+            control.set_painter(Rc::new(move |canvas| {
+                let theme = theme.get();
+                let b = canvas.bounds();
+                canvas.clear(theme.input_background.lerp(Color::rgb(0, 0, 0), 0.35));
+                if let Some(img) = shared.image.borrow().as_ref() {
+                    canvas.draw_image(img, fit(b, img.width(), img.height()));
+                } else {
+                    let mut style = TextStyle::new(theme.text_secondary, Dip(12.0));
+                    style.align = TextAlign::Center;
+                    style.valign = TextVAlign::Middle;
+                    canvas.draw_text(shared.placeholder.borrow().as_str(), b, &style);
+                }
+                canvas.stroke_rect(b, theme.border, 1.0);
+            }));
+        }
+        {
+            let ui = ui.clone();
+            let id = control.id();
+            let shared = shared.clone();
+            let look: Cell<Option<(i32, i32)>> = Cell::new(None);
+            control.on_events(move |event| {
+                handle(&ui, id, &shared, &look, event);
+                None
+            });
+        }
+        Ok(View3d { control, shared })
     }
 
-    #[allow(
-        dead_code,
-        reason = "Play will call this each frame; exercised in tests"
-    )]
     /// Shows a `0xAARRGGBB` frame of `w` by `h` pixels. Ignored if the slice
     /// is not exactly `w * h` long.
     pub fn set_image(&self, pixels: &[u32], w: u32, h: u32) {
@@ -61,9 +103,108 @@ impl<M: 'static> View3d<M> {
             bytes.extend_from_slice(&[(p >> 16) as u8, (p >> 8) as u8, *p as u8, 255]);
         }
         if let Ok(img) = Image::from_rgba(w, h, bytes) {
-            *self.image.borrow_mut() = Some(img);
+            *self.shared.image.borrow_mut() = Some(img);
             self.control.invalidate();
         }
+    }
+
+    /// Replaces the frame with a text prompt.
+    pub fn show_text(&self, text: &str) {
+        *self.shared.image.borrow_mut() = None;
+        *self.shared.placeholder.borrow_mut() = text.to_string();
+        self.control.invalidate();
+    }
+
+    /// The input that arrived since the last call.
+    pub fn take_events(&self) -> Vec<PEvent> {
+        std::mem::take(&mut *self.shared.events.borrow_mut())
+    }
+
+    pub fn set_visible(&self, visible: bool) {
+        self.control.set_visible(visible);
+    }
+
+    pub fn focus(&self) {
+        self.control.focus();
+    }
+
+    /// Pixel size of the pane.
+    pub fn size(&self) -> (u32, u32) {
+        let b = self.control.bounds();
+        (b.width().max(0) as u32, b.height().max(0) as u32)
+    }
+
+    /// Queues an event as if it came from the user (scripted runs).
+    #[allow(dead_code, reason = "used by the self-test and unit tests")]
+    pub fn push_event(&self, e: PEvent) {
+        self.shared.events.borrow_mut().push(e);
+    }
+}
+
+fn handle<M: 'static>(
+    ui: &Ui<M>,
+    id: WidgetId,
+    shared: &Shared,
+    look: &Cell<Option<(i32, i32)>>,
+    event: &Event,
+) {
+    let push = |e| shared.events.borrow_mut().push(e);
+    match *event {
+        Event::MouseDown { x, y, button, .. } => {
+            ui.focus(id);
+            match button {
+                MouseButton::Right => {
+                    ui.set_capture(id);
+                    look.set(Some((x, y)));
+                }
+                MouseButton::Left => push(PEvent::MouseButton {
+                    button: PButton::Left,
+                    pressed: true,
+                }),
+                _ => {}
+            }
+        }
+        Event::MouseUp { button, .. } => match button {
+            MouseButton::Right => {
+                look.set(None);
+                ui.release_capture();
+            }
+            MouseButton::Left => push(PEvent::MouseButton {
+                button: PButton::Left,
+                pressed: false,
+            }),
+            _ => {}
+        },
+        Event::MouseMove { x, y, .. } => {
+            if let Some((lx, ly)) = look.get() {
+                look.set(Some((x, y)));
+                push(PEvent::MouseMotion {
+                    dx: (x - lx) as f32,
+                    dy: (y - ly) as f32,
+                });
+            }
+        }
+        Event::KeyDown { key, repeat, .. } if repeat <= 1 => {
+            if let Some(code) = platform_key(key) {
+                push(PEvent::Key {
+                    code,
+                    pressed: true,
+                });
+            }
+        }
+        Event::KeyUp { key, .. } => {
+            if let Some(code) = platform_key(key) {
+                push(PEvent::Key {
+                    code,
+                    pressed: false,
+                });
+            }
+        }
+        Event::KillFocus | Event::CaptureChanged => {
+            look.set(None);
+            push(PEvent::FocusLost);
+        }
+        _ => {}
     }
 }
 
@@ -84,5 +225,19 @@ impl<M: 'static> Placeable<M> for View3d<M> {
 
     fn measure(&self, _ui: &Ui<M>, _constraints: Constraints) -> Size {
         Size::new(0, 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn virtual_keys_map_to_platform_keys() {
+        assert_eq!(platform_key(Key::W), Some(PKey::Char('W')));
+        assert_eq!(platform_key(Key::ESCAPE), Some(PKey::Escape));
+        assert_eq!(platform_key(Key::F5), Some(PKey::F(5)));
+        assert_eq!(platform_key(Key::LEFT), Some(PKey::Left));
+        assert_eq!(platform_key(Key::from_code(0xFF)), None);
     }
 }

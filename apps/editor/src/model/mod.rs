@@ -3,6 +3,7 @@
 pub mod command;
 pub mod document;
 pub mod entity;
+pub mod fly;
 pub mod pointer;
 pub mod state;
 pub mod view;
@@ -12,6 +13,7 @@ mod tests;
 
 pub use document::{Document, Shape};
 pub use entity::EntityKind;
+pub use fly::FlyCam;
 pub use pointer::Pointer;
 pub use state::{EditorState, Selection, Tool};
 pub use view::{Camera2D, View};

@@ -955,7 +955,11 @@ dependencies = [
 name = "mscent-editor"
 version = "0.1.0"
 dependencies = [
+ "miniscent-game",
+ "mscent-game",
  "mscent-math",
+ "mscent-platform",
+ "mscent-render",
  "mscent-world",
  "xui",
 ]
