@@ -8,7 +8,7 @@ use super::icons::Glyph;
 use crate::model::{EntityKind, Tool};
 
 /// The palette: tooltip name, shortcut key, icon and tool.
-pub(super) const TOOLS: [(&str, Key, Glyph, Tool); 8] = [
+pub(super) const TOOLS: [(&str, Key, Glyph, Tool); 10] = [
     (
         "Select / move",
         Key::Q,
@@ -42,6 +42,18 @@ pub(super) const TOOLS: [(&str, Key, Glyph, Tool); 8] = [
         Glyph::Lucide(Lucide::Image),
         Tool::Face,
     ),
+    (
+        "Slice brush (Enter cuts, K picks the side)",
+        Key::C,
+        Glyph::Lucide(Lucide::Scissors),
+        Tool::Slice,
+    ),
+    (
+        "Move corners",
+        Key::V,
+        Glyph::Lucide(Lucide::CircleDot),
+        Tool::Vertex,
+    ),
 ];
 
 /// The new-brush operation buttons: tooltip and icon (index 0 is Subtract).
@@ -73,6 +85,9 @@ pub(super) fn shortcut(key: Key, mods: Modifiers) -> Option<Msg> {
             Key::Z if !mods.shift => guarded(Msg::Menu(cmd::UNDO)),
             Key::Y => guarded(Msg::Menu(cmd::REDO)),
             Key::Z => guarded(Msg::Menu(cmd::REDO)),
+            Key::C if mods.shift => guarded(Msg::Menu(cmd::CARVE)),
+            Key::E if mods.shift => guarded(Msg::Menu(cmd::EXTRUDE_IN)),
+            Key::E => guarded(Msg::Menu(cmd::EXTRUDE)),
             _ => None,
         };
     }
@@ -83,6 +98,8 @@ pub(super) fn shortcut(key: Key, mods: Modifiers) -> Option<Msg> {
         Key::F5 => Some(Msg::Menu(cmd::PLAY)),
         Key::ESCAPE => Some(Msg::Escape),
         Key::DELETE => guarded(Msg::Menu(cmd::DELETE)),
+        Key::RETURN => guarded(Msg::Menu(cmd::SLICE)),
+        Key::K => guarded(Msg::Menu(cmd::SLICE_SIDE)),
         _ => TOOLS
             .iter()
             .position(|t| t.1 == key && !mods.shift)

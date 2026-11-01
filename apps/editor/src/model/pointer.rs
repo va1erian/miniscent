@@ -1,6 +1,8 @@
 //! Pointer tools: create, pick, move and resize, driven in world units so the
 //! GUI and the tests use the same code.
 
+use mscent_math::Vec3d;
+
 use super::command::Command;
 use super::document::{BrushDef, EntityDef, Shape};
 use super::entity::{pos, with_pos};
@@ -73,6 +75,20 @@ pub enum Drag {
         view: View,
         handle: Handle,
         before: BrushDef,
+    },
+    /// The slice tool's line.
+    Line {
+        view: View,
+        start: [f64; 2],
+        cur: [f64; 2],
+    },
+    /// The vertex tool: the corners in `group` (indices into `points`, the
+    /// brush's corners before the drag) follow the pointer.
+    Vertex {
+        view: View,
+        group: Vec<usize>,
+        before: BrushDef,
+        points: Vec<Vec3d>,
     },
 }
 
@@ -158,6 +174,8 @@ impl EditorState {
                 self.place_entity(k, at);
                 true
             }
+            Tool::Slice => self.slice_down(p, snapped),
+            Tool::Vertex => self.vertex_down(p),
             Tool::Select | Tool::Face => {
                 if let Some(handle) = self.handle_at(p)
                     && let Some(before) = self.selected_brush().cloned()
@@ -202,6 +220,23 @@ impl EditorState {
                     start,
                     cur: snapped,
                 });
+                true
+            }
+            Some(Drag::Line { view, start, .. }) => {
+                self.drag = Some(Drag::Line {
+                    view,
+                    start,
+                    cur: snapped,
+                });
+                true
+            }
+            Some(Drag::Vertex {
+                view,
+                group,
+                before,
+                points,
+            }) => {
+                self.vertex_drag(view, (&group, &before, &points), snapped);
                 true
             }
             Some(Drag::Move {
@@ -307,6 +342,19 @@ impl EditorState {
                 }
                 _ => false,
             },
+            Some(Drag::Line { view, start, cur }) => self.finish_line(super::tools::Cut {
+                view,
+                a: start,
+                b: cur,
+            }),
+            Some(Drag::Vertex { before, .. }) => match self.doc.brush(before.id).cloned() {
+                Some(after) if after != before => {
+                    self.history.record(Command::EditBrush { before, after });
+                    self.message = "Moved corner".into();
+                    true
+                }
+                _ => false,
+            },
         }
     }
 
@@ -317,8 +365,11 @@ impl EditorState {
                 Original::Brush(b) => self.doc.replace_brush(&b),
                 Original::Entity(e) => self.doc.replace_entity(&e),
             },
-            Some(Drag::Resize { before, .. }) => self.doc.replace_brush(&before),
+            Some(Drag::Resize { before, .. }) | Some(Drag::Vertex { before, .. }) => {
+                self.doc.replace_brush(&before)
+            }
             _ => {}
         }
+        self.cut = None;
     }
 }

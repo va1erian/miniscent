@@ -20,6 +20,10 @@ pub enum Tool {
     Place(EntityKind),
     /// Pick faces in the 3D view and edit their texture mapping.
     Face,
+    /// Drag a line across the selected brush to cut it in two.
+    Slice,
+    /// Drag the selected brush's corners.
+    Vertex,
 }
 
 /// The one selected item.
@@ -50,6 +54,10 @@ pub struct EditorState {
     /// Coordinate along the hidden axis for new entities, per world axis.
     pub depth: [f64; 3],
     pub drag: Option<Drag>,
+    /// The slice line waiting for Enter.
+    pub cut: Option<super::tools::Cut>,
+    /// What the next slice keeps.
+    pub keep: super::tools::Keep,
     /// The faces picked in the 3D view (see `facetex.rs`).
     pub faces: Vec<FaceRef>,
     pub(super) face_clip: Option<super::facetex::FaceClip>,
@@ -79,6 +87,8 @@ impl EditorState {
             extent: (0.0, 4.0),
             depth: [0.0, 0.0, 1.5],
             drag: None,
+            cut: None,
+            keep: super::tools::Keep::Both,
             faces: Vec::new(),
             face_clip: None,
             face_key: None,
@@ -96,6 +106,7 @@ impl EditorState {
         self.face_clip = None;
         self.face_key = None;
         self.drag = None;
+        self.cut = None;
     }
 
     pub fn snap(&self, v: f64) -> f64 {

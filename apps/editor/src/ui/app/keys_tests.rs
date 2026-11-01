@@ -89,6 +89,8 @@ fn shortcuts_play_edit_and_select_tools_wherever_focus_is() {
             for (key, want) in [
                 (Key::B, Tool::Box),
                 (Key::E, Tool::Place(EntityKind::Enemy)),
+                (Key::C, Tool::Slice),
+                (Key::V, Tool::Vertex),
                 (Key::Q, Tool::Select),
             ] {
                 press(stage, key, Modifiers::NONE);

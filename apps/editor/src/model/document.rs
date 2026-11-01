@@ -120,7 +120,7 @@ impl BrushDef {
         }
     }
 
-    fn from_brush(id: Id, b: &Brush) -> BrushDef {
+    pub(super) fn from_brush(id: Id, b: &Brush) -> BrushDef {
         let shape = shape_of(b);
         BrushDef {
             id,
