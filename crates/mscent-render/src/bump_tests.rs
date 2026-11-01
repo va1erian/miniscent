@@ -29,3 +29,19 @@ fn gain_is_bounded_and_nonnegative() {
     assert_eq!(bump_gain(Vec3::new(-1.0, 0.0, 0.0), grazing), MIN_GAIN);
     assert!(bump_gain(grazing, grazing) <= MAX_GAIN);
 }
+
+#[test]
+fn magnified_normals_interpolate_between_texel_centres() {
+    // 2x2 map: left column tilts -x, right column tilts +x.
+    let (l, r) = (0xff00_80c0u32, 0xffff_80c0u32);
+    let tex = crate::texture::Texture::new(2, 2, vec![0xff00_0000; 4])
+        .unwrap()
+        .with_normals(vec![l, r, l, r])
+        .unwrap();
+    let at = |fu: i32| texel_normal(&tex, fu, 0x8000).x;
+    // Texel centres sit at half-integers: 0.5 is the left texel, 1.5 the right.
+    assert!(at(0x8000) < -0.9 && at(0x18000) > 0.9);
+    let (a, b, c) = (at(0xc000), at(0x10000), at(0x14000));
+    assert!(a < b && b < c, "{a} {b} {c}");
+    assert!(b.abs() < 0.05);
+}

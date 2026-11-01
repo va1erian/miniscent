@@ -19,11 +19,11 @@ const MIN_FLAT: f32 = 0.2;
 const MIN_GAIN: f32 = 0.12;
 
 /// Largest brightening the bump term may apply.
-const MAX_GAIN: f32 = 2.5;
+const MAX_GAIN: f32 = 1.9;
 
 /// Exaggeration of the normal map's tilt: the generated maps are subtle
 /// next to the baked light, so the relief is scaled up (1.0 flat stays flat).
-const RELIEF: f32 = 1.8;
+const RELIEF: f32 = 1.4;
 
 /// Decode a packed normal texel (`n * 0.5 + 0.5` per channel). Not
 /// renormalized: the generated maps are unit length to 8-bit precision, and a
@@ -33,9 +33,26 @@ pub fn decode_normal(packed: u32) -> Vec3 {
     Vec3::new(c(16), c(8), c(0))
 }
 
-/// Tangent-space normal at a texel, or the flat normal without a map.
-pub fn texel_normal(tex: &Texture, tx: i32, ty: i32) -> Vec3 {
-    tex.normal_texel(tx, ty).map_or(FLAT_NORMAL, decode_normal)
+/// Tangent-space normal at 16.16 fixed-point texel coordinates, bilinearly
+/// filtered (texel centres at half-integers) so magnified bump maps show
+/// smooth relief instead of texel stair-steps. The flat normal without a map.
+pub fn texel_normal(tex: &Texture, fu: i32, fv: i32) -> Vec3 {
+    let (u, v) = (fu.wrapping_sub(0x8000), fv.wrapping_sub(0x8000));
+    let (x0, y0) = (u >> 16, v >> 16);
+    let (tx, ty) = (
+        ((u >> 8) & 0xff) as f32 / 256.0,
+        ((v >> 8) & 0xff) as f32 / 256.0,
+    );
+    let at = |x: i32, y: i32| tex.normal_texel(x, y).map(decode_normal);
+    let (Some(a), Some(b), Some(c), Some(d)) = (
+        at(x0, y0),
+        at(x0.wrapping_add(1), y0),
+        at(x0, y0.wrapping_add(1)),
+        at(x0.wrapping_add(1), y0.wrapping_add(1)),
+    ) else {
+        return FLAT_NORMAL;
+    };
+    a.lerp(b, tx).lerp(c.lerp(d, tx), ty)
 }
 
 /// The normal of an unperturbed surface in tangent space.

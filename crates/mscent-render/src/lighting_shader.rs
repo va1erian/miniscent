@@ -235,12 +235,12 @@ impl<const SPEC: bool> SpanShader for LightingShader<'_, SPEC> {
         }
     }
 
-    fn shade(&self, i: u32, texel: u32, tx: i32, ty: i32) -> u32 {
+    fn shade(&self, i: u32, texel: u32, fu: i32, fv: i32) -> u32 {
         let f = i as f32;
         let mut k = self.col0 + self.dcol * f;
         let mut n = FLAT_NORMAL;
         if self.face.bump {
-            n = texel_normal(self.face.texture, tx, ty);
+            n = texel_normal(self.face.texture, fu, fv);
             k = k * bump_gain(n, self.dir0 + self.ddir * f);
         }
         let mut out = mul_rgb3(texel, k);

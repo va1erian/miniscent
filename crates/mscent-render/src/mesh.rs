@@ -271,7 +271,7 @@ impl SpanShader for GouraudShader {
         }
     }
 
-    fn shade(&self, i: u32, _texel: u32, _tx: i32, _ty: i32) -> u32 {
+    fn shade(&self, i: u32, _texel: u32, _fu: i32, _fv: i32) -> u32 {
         let i = i as f32;
         let k = (self.light0 + self.light_step * i).clamp(0.0, MAX_LIGHT * 256.0);
         let lit = mul_rgb(self.color, k as u32);

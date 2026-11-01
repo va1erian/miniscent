@@ -30,8 +30,9 @@ pub trait SpanShader {
     fn begin_span(&mut self, start: &SpanEnd, end: &SpanEnd, len: u32);
 
     /// Final `0xAARRGGBB` colour of pixel `i` of the current span, given its
-    /// albedo `texel` and wrapped texel coordinates `(tx, ty)`.
-    fn shade(&self, i: u32, texel: u32, tx: i32, ty: i32) -> u32;
+    /// albedo `texel` and its unwrapped texel coordinates `(fu, fv)` in 16.16
+    /// fixed point (texel `n` starts at `n << 16`).
+    fn shade(&self, i: u32, texel: u32, fu: i32, fv: i32) -> u32;
 }
 
 /// Linear fog between two view depths.
@@ -85,7 +86,7 @@ impl SpanShader for FlatShader {
         }
     }
 
-    fn shade(&self, i: u32, texel: u32, _tx: i32, _ty: i32) -> u32 {
+    fn shade(&self, i: u32, texel: u32, _fu: i32, _fv: i32) -> u32 {
         let lit = mul_rgb(texel, self.light);
         match self.fog {
             Some(fog) => {

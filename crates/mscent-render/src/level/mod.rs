@@ -71,13 +71,13 @@ pub struct BuildConfig {
 impl Default for BuildConfig {
     fn default() -> Self {
         Self {
-            luxel_size: 1.0,
+            luxel_size: 0.5,
             ambient: Vec3::new(0.12, 0.12, 0.16),
             light_gain: 1.8,
-            sky_top: 0xff20_3a78,
-            sky_bottom: 0xff7a_8cb8,
-            fog_start: 10.0,
-            fog_end: 55.0,
+            sky_top: 0xff10_2048,
+            sky_bottom: 0xff3a_4a78,
+            fog_start: 3.0,
+            fog_end: 38.0,
             fov_y: 1.3,
         }
     }

@@ -19,11 +19,11 @@ impl SpanShader for FaceShader<'_> {
         }
     }
 
-    fn shade(&self, i: u32, texel: u32, tx: i32, ty: i32) -> u32 {
+    fn shade(&self, i: u32, texel: u32, fu: i32, fv: i32) -> u32 {
         match self {
-            Self::Lit(s) => s.shade(i, texel, tx, ty),
-            Self::Spec(s) => s.shade(i, texel, tx, ty),
-            Self::Flat(s) => s.shade(i, texel, tx, ty),
+            Self::Lit(s) => s.shade(i, texel, fu, fv),
+            Self::Spec(s) => s.shade(i, texel, fu, fv),
+            Self::Flat(s) => s.shade(i, texel, fu, fv),
         }
     }
 }

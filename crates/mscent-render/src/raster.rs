@@ -351,7 +351,7 @@ fn span_pixels<S: SpanShader>(
             } else {
                 tex.texel_lod(tx, ty, s.level)
             };
-            color[slot] = shader.shade(i as u32, texel, tx, ty);
+            color[slot] = shader.shade(i as u32, texel, fu, fv);
             written += 1;
         }
         fu = fu.wrapping_add(du);
