@@ -281,7 +281,8 @@ Design in `docs/scripting.md`. Nothing a script can do exists yet.
 |---|---|---|
 | M9.1 | Done | `tools/check_size.py`, a Windows CI job. Run by hand: the real binary passes at 1,222,144 bytes, a lowered limit and a 1.7 MB file both fail. The CI job has not run yet |
 | M9.2 | Done | `labels.rs`, `format_labels.rs`, format version 3; `labels_tests.rs` (round trip, every validation error, truncation, 200,000 bit flips, shipped version 1 levels load); `game_tests::a_mover_brush_stays_out_of_the_world_bsp`; the editor keeps labels through load, delete, undo and save (`model/label_tests.rs`). Markers and zones draw in the 2D views but have no placing tool until M9.9, and that drawing was not looked at. A mover brush is simply absent from the world until M9.3 and M9.7. The release binary grew 37,888 bytes to 1,260,032, more than this much code should cost, and the cause was not found |
-| M9.3 to M9.9 | Not done | |
+| M9.3 | Done | `mscent-collide`: `mover.rs`, `push.rs`, `Solids`; `mscent-game/src/mover.rs` drives poses, eased motion and hold, reverse and crush. Shots and sight stop at movers. Evidence: `tests/fuzz_movers.rs` with an independent oracle (49,964 pushes and 1,595 blocked steps in a long run, no violations), `mover_tests.rs` in both crates, and six deliberate bugs each failing those tests. Levels with no movers replay bit-exact: 60,000-step hashes over 4 seeded runs on the showcase and corridor match before and after. Frame cost is unchanged: ten runs each of `frame_bench` average a ratio of 8.447 on `main` and 8.431 here, at 1.40 ms per frame. `tools/check_frame_cost.py` fails on this machine on both, against a stored baseline of 7.61, so that baseline needs looking at. Movers still cannot be seen (M9.7) or driven by a script (M9.5), only by Rust |
+| M9.4 to M9.9 | Not done | |
 
 ## Deviations from the plan
 

@@ -30,3 +30,6 @@ pub const MIN_POLYGON_AREA: f64 = 1.0e-8;
 /// Largest allowed deviation of a unit quaternion's squared norm from one
 /// before tests consider it unnormalized.
 pub const UNIT_NORM_TOLERANCE: f32 = 1.0e-4;
+
+/// Above this cosine two rotations are close enough to blend linearly.
+pub const SLERP_LINEAR_COS: f32 = 0.9995;

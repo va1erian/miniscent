@@ -14,6 +14,8 @@
 //! * [`Enemy`], [`AiState`] (`enemy.rs`): patrol, chase, attack.
 //! * [`hitscan`], [`line_of_sight`], [`ray`] (`combat.rs`): traces shared by
 //!   weapon, enemy sight and enemy fire. [`Weapon`] (`weapon.rs`).
+//! * [`Mover`], [`WhenBlocked`] (`mover.rs`): named poses, eased motion and what
+//!   happens when a body is in the way; driven through `Game`.
 //! * [`HudModel`], [`draw_hud`], [`draw_menu`] (`hud.rs`); [`Menu`]
 //!   (`menu.rs`).
 //!
@@ -27,16 +29,18 @@ pub mod game;
 pub mod hud;
 pub mod input;
 pub mod menu;
+pub mod mover;
 pub mod player;
 pub mod weapon;
 
-pub use arena::{Arena, EnemySpawn, Goal, LightSpec, LoadError};
+pub use arena::{Arena, EnemySpawn, Goal, LightSpec, LoadError, MoverSpec};
 pub use combat::{Hitscan, Sphere, hitscan, line_of_sight, ray};
 pub use enemy::{AiState, Enemy, EnemyStats, stats_for};
 pub use game::{Event, Game, Phase};
 pub use hud::{HudModel, draw_hud, draw_menu};
 pub use input::Input;
 pub use menu::{Menu, MenuAction, MenuCommand, Screen};
+pub use mover::{Mover, MoverError, WhenBlocked};
 pub use player::Player;
 pub use weapon::{Shot, Weapon};
 
@@ -48,6 +52,8 @@ mod enemy_tests;
 mod game_tests;
 #[cfg(test)]
 mod hud_tests;
+#[cfg(test)]
+mod mover_tests;
 #[cfg(test)]
 mod player_tests;
 #[cfg(test)]

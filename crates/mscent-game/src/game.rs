@@ -1,15 +1,16 @@
 //! Level flow (M6.4) and the per-step game update.
 //!
-//! `Game::step` is the whole simulation tick: player, weapon, enemies, then
-//! the win and lose checks. It reads no clock and no global state, so a
+//! `Game::step` is the whole simulation tick: player, weapon, enemies, movers,
+//! then the win and lose checks. It reads no clock and no global state, so a
 //! recorded input trace replays to the same result.
 
 use crate::arena::Arena;
 use crate::enemy::Enemy;
 use crate::input::Input;
+use crate::mover::{Mover, spawn_movers};
 use crate::player::{PLAYER_RADIUS, Player};
 use crate::weapon::Weapon;
-use mscent_collide::{FixedStepper, STEP_HZ};
+use mscent_collide::{FixedStepper, MoverSolid, STEP_HZ, Solids};
 
 /// Steps the hurt flash stays on after the player is hit.
 pub const HURT_FLASH_STEPS: u32 = (STEP_HZ / 4) as u32;
@@ -33,6 +34,12 @@ pub enum Event {
     PlayerDied,
     GoalReached,
     Restarted,
+    /// Mover `i` reached the pose it was sent to.
+    MoverArrived(usize),
+    /// Mover `i` met a body with nowhere to go. Fires once per stoppage.
+    MoverBlocked(usize),
+    /// The player's shot struck mover `i`.
+    MoverHit(usize),
 }
 
 #[derive(Clone, Debug)]
@@ -46,13 +53,17 @@ pub struct Game {
     pub ticks: u64,
     /// Steps of hurt flash remaining, for the HUD.
     pub hurt_steps: u32,
-    events: Vec<Event>,
+    pub movers: Vec<Mover>,
+    /// Parallel to `movers`: what they collide as, at their current poses.
+    pub solids: Vec<MoverSolid>,
+    pub(crate) events: Vec<Event>,
     stepper: FixedStepper,
 }
 
 impl Game {
     pub fn new(arena: Arena) -> Self {
         let (player, enemies) = spawn(&arena);
+        let (movers, solids) = spawn_movers(&arena);
         Self {
             arena,
             player,
@@ -61,6 +72,8 @@ impl Game {
             phase: Phase::Playing,
             ticks: 0,
             hurt_steps: 0,
+            movers,
+            solids,
             events: Vec::new(),
             stepper: FixedStepper::new(),
         }
@@ -71,6 +84,7 @@ impl Game {
         let (player, enemies) = spawn(&self.arena);
         self.player = player;
         self.enemies = enemies;
+        (self.movers, self.solids) = spawn_movers(&self.arena);
         self.weapon = Weapon::default();
         self.phase = Phase::Playing;
         self.ticks = 0;
@@ -111,9 +125,11 @@ impl Game {
         }
         self.ticks = self.ticks.saturating_add(1);
         self.hurt_steps = self.hurt_steps.saturating_sub(1);
-        self.player.step(&self.arena.bsp, input);
+        let solids = Solids::new(&self.arena.bsp, &self.solids);
+        self.player.step(solids, input);
         self.fire(input);
         self.run_enemies();
+        self.run_movers();
         self.check_end();
     }
 
@@ -123,11 +139,13 @@ impl Game {
             return;
         }
         let (origin, dir) = (self.player.pos(), self.player.forward());
-        let shot = self
-            .weapon
-            .fire(&self.arena.bsp, origin, dir, &mut self.enemies);
+        let solids = Solids::new(&self.arena.bsp, &self.solids);
+        let shot = self.weapon.fire(solids, origin, dir, &mut self.enemies);
         let Some(shot) = shot else { return };
         self.events.push(Event::PlayerFired);
+        if let Some(i) = shot.mover {
+            self.events.push(Event::MoverHit(i));
+        }
         if let Some(i) = shot.hit {
             self.events.push(Event::EnemyHit(i));
             if shot.killed {
@@ -141,8 +159,9 @@ impl Game {
             centre: self.player.pos(),
             radius: PLAYER_RADIUS,
         };
+        let solids = Solids::new(&self.arena.bsp, &self.solids);
         for (i, e) in self.enemies.iter_mut().enumerate() {
-            let dmg = e.step(&self.arena.bsp, &target);
+            let dmg = e.step(solids, &target);
             if e.fired {
                 self.events.push(Event::EnemyFired(i));
             }

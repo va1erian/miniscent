@@ -7,10 +7,9 @@
 //! Randomness comes from a per-enemy seeded generator, so replays match.
 
 use crate::combat::{Sphere, hitscan, line_of_sight};
-use mscent_collide::{Body, STEP_HZ, sweep_sphere};
+use mscent_collide::{Body, STEP_HZ, Solids, sweep_sphere};
 use mscent_math::Vec3;
 use mscent_math::rng::Rng;
-use mscent_world::Bsp;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AiState {
@@ -138,7 +137,8 @@ impl Enemy {
     }
 
     /// One fixed step. Returns the damage dealt to the player this step.
-    pub fn step(&mut self, bsp: &Bsp, player: &Sphere) -> Option<i32> {
+    pub fn step<'a>(&mut self, solids: impl Into<Solids<'a>>, player: &Sphere) -> Option<i32> {
+        let bsp = solids.into();
         if !self.alive() {
             return None;
         }
@@ -184,7 +184,7 @@ impl Enemy {
         };
     }
 
-    fn patrol(&mut self, bsp: &Bsp) {
+    fn patrol(&mut self, bsp: Solids) {
         let r = self.body.radius;
         let ahead = self.body.pos + self.patrol_dir * LOOKAHEAD;
         if sweep_sphere(bsp, self.body.pos, ahead, r).hit {
@@ -197,7 +197,7 @@ impl Enemy {
     }
 
     /// A random heading with room ahead, or straight back if none is found.
-    fn pick_clear_dir(&mut self, bsp: &Bsp) -> Vec3 {
+    fn pick_clear_dir(&mut self, bsp: Solids) -> Vec3 {
         for _ in 0..TURN_TRIES {
             let d = random_dir(&mut self.rng);
             let end = self.body.pos + d * LOOKAHEAD;
@@ -208,7 +208,7 @@ impl Enemy {
         -self.patrol_dir
     }
 
-    fn chase(&mut self, bsp: &Bsp) {
+    fn chase(&mut self, bsp: Solids) {
         let Some(goal) = self.last_seen else { return };
         let to = goal - self.body.pos;
         let vel = match to.normalized() {
@@ -219,7 +219,7 @@ impl Enemy {
     }
 
     /// Stands and shoots; the shot is a ray, so cover works both ways.
-    fn attack(&mut self, bsp: &Bsp, player: &Sphere) -> Option<i32> {
+    fn attack(&mut self, bsp: Solids, player: &Sphere) -> Option<i32> {
         self.glide(Vec3::ZERO, bsp);
         if self.cooldown > 0 {
             return None;
@@ -233,7 +233,7 @@ impl Enemy {
     }
 
     /// Moves with the collision slide at the given velocity.
-    fn glide(&mut self, vel: Vec3, bsp: &Bsp) {
+    fn glide(&mut self, vel: Vec3, bsp: Solids) {
         self.body.vel = vel;
         self.body.step(bsp, Vec3::ZERO);
     }

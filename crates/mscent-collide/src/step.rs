@@ -6,6 +6,7 @@
 //! replaying the same inputs reproduces the same positions bit for bit.
 
 use crate::slide::slide_move;
+use crate::sweep::Solids;
 use mscent_math::Vec3;
 use mscent_world::Bsp;
 
@@ -72,10 +73,10 @@ impl Body {
     }
 
     /// One physics step under constant acceleration `accel`.
-    pub fn step(&mut self, bsp: &Bsp, accel: Vec3) {
+    pub fn step<'a>(&mut self, solids: impl Into<Solids<'a>>, accel: Vec3) {
         self.prev_pos = self.pos;
         let vel = self.vel + accel * STEP_DT;
-        let r = slide_move(bsp, self.pos, vel, STEP_DT, self.radius);
+        let r = slide_move(solids, self.pos, vel, STEP_DT, self.radius);
         self.pos = r.pos;
         self.vel = r.vel;
     }

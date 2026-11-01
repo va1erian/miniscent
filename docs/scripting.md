@@ -223,30 +223,33 @@ set, including rounded edges and vertices. Movers reuse it:
 
 ### Pushing
 
-Movers advance at the start of each fixed step, before the player:
+Movers advance after the player and enemies in each fixed step. A body's previous position is set when
+it moves, so a push lands between its two interpolated positions and draws smoothly:
 
 1. Compute the trial pose for this step.
 2. For each body near the swept bounds, transform its position into the mover's frame at the old and
    new poses. The line between them is the body's path relative to the mover. Sweep it against the
    cells.
 3. On contact, push the body the rest of the way with `slide_move` against everything except this
-   mover. Its velocity is not changed.
-4. If a body cannot go the whole distance it is squeezed, and the mover's policy applies: `hold` stops
-   at the last clear pose, `reverse` goes back, and `crush` holds and deals damage per second until the
-   body dies. `reverse` is the default. Bodies that have been pushed are restored, so a blocked step
-   leaves nothing half done.
+   mover. Its velocity is not changed. A body wedged at an angle, between a wall and a sloped mover, gets
+   a few more rounds of this, so it slides out instead of stopping the mover.
+4. If it still overlaps the mover it is squeezed, and the mover's policy applies: `hold` stops at the last
+   clear pose, `reverse` goes back, and `crush` holds and deals damage per second until the body dies.
+   `reverse` is the default. Bodies that have been pushed are restored, so a blocked step leaves nothing
+   half done.
 
-A step is a chord, so a rotating mover's path is slightly wrong. At 120 Hz and one turn per second, a
-point 5 units out has about 0.002 units of chord error. Pose speed is capped at load, and the fuzz test
-decides whether that cap is right.
+A step is checked along a straight chord, even when the mover turns. The ends of that chord are exact, so
+no body ends up inside a mover however fast it spins. The fuzz test holds at 1.5 radians per step, and a
+first version's speed cap had no test that could show a need for it, so there is none. Only the path
+between the ends is approximate, which at worst lets a blade's tip pass a body without touching it.
 
-If a body somehow starts inside a mover, the sweep ignores that mover rather than reporting
-`start_solid`. Otherwise a single bug would freeze the player forever. The BSP stays strict.
+If a body's centre is inside a mover, the sweep ignores that brush rather than reporting `start_solid`, so
+a bad spawn cannot freeze the player forever. A body only slightly overlapping is still pushed out, or a
+rotating door could sink through it. The BSP stays strict.
 
-The existing guarantee extends to movers: `tests/fuzz.rs` gains random movers on random paths and still
-asserts that no sphere ends inside solid and none crosses a wall. This is the riskiest test in the plan.
-If it cannot be made to pass with rotation, ship translation-only movers first: doors and lifts need
-nothing else, and hinged movers can follow.
+`tests/fuzz_movers.rs` extends the existing guarantee, with oracles that share no code with the collision:
+no sphere ends inside the world or a mover, and none crosses either in flight. Each of six deliberate bugs
+in the collision code fails the mover tests, so they can fail.
 
 ### Rendering and light
 
@@ -307,7 +310,7 @@ without it. A missing capability is usually a new game function.
 ### Where it runs in a step
 
 ```
-movers -> player -> fire -> enemies -> zones
+player -> fire -> enemies -> movers -> zones
     -> start handlers for this step's events -> run due tasks -> apply commands -> win and lose checks
 ```
 

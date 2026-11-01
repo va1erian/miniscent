@@ -2,8 +2,10 @@
 //! game runs on. Dynamic state (player, enemies) is created from it by
 //! [`crate::Game`], so a restart never has to reload the level.
 
+use mscent_collide::MoverShape;
 use mscent_math::Vec3;
 use mscent_world::{Bsp, CsgError, Entity, LabelError, Level, compile};
+use std::sync::Arc;
 
 /// A placed point light, handed to the renderer.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -25,6 +27,13 @@ pub struct Goal {
 pub struct EnemySpawn {
     pub pos: Vec3,
     pub kind: u8,
+}
+
+/// A named group of brushes that moves, as authored.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MoverSpec {
+    pub name: String,
+    pub shape: Arc<MoverShape>,
 }
 
 /// Why a level cannot be played.
@@ -50,6 +59,7 @@ pub struct Arena {
     pub goals: Vec<Goal>,
     pub lights: Vec<LightSpec>,
     pub enemies: Vec<EnemySpawn>,
+    pub movers: Vec<MoverSpec>,
 }
 
 impl Arena {
@@ -102,8 +112,22 @@ impl Arena {
             goals,
             lights,
             enemies,
+            movers: movers_of(level),
         })
     }
+}
+
+/// `check_labels` has already vouched for the indices.
+fn movers_of(level: &Level) -> Vec<MoverSpec> {
+    let spec = |g: &mscent_world::MoverGroup| {
+        let brushes = g.brushes.iter();
+        let brushes = brushes.filter_map(|&b| level.brushes.get(b as usize));
+        MoverSpec {
+            name: g.name.clone(),
+            shape: Arc::new(MoverShape::from_brushes(brushes)),
+        }
+    };
+    level.mover_groups.iter().map(spec).collect()
 }
 
 fn check_open(bsp: &Bsp, pos: Vec3, index: usize) -> Result<(), LoadError> {

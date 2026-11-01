@@ -47,6 +47,44 @@ impl Quat {
         }
     }
 
+    pub fn dot(self, o: Self) -> f32 {
+        self.x * o.x + self.y * o.y + self.z * o.z + self.w * o.w
+    }
+
+    /// Constant-speed rotation a fraction `t` of the way to `o`, taking the
+    /// shorter way round. Nearly equal rotations fall back to a linear blend,
+    /// where the sine of the angle between them is too small to divide by.
+    pub fn slerp(self, o: Self, t: f32) -> Self {
+        let dot = self.dot(o);
+        let (o, dot) = if dot < 0.0 {
+            (
+                Self {
+                    x: -o.x,
+                    y: -o.y,
+                    z: -o.z,
+                    w: -o.w,
+                },
+                -dot,
+            )
+        } else {
+            (o, dot)
+        };
+        let (a, b) = if dot > epsilon::SLERP_LINEAR_COS {
+            (1.0 - t, t)
+        } else {
+            let angle = dot.min(1.0).acos();
+            let s = angle.sin();
+            (((1.0 - t) * angle).sin() / s, (t * angle).sin() / s)
+        };
+        Self {
+            x: self.x * a + o.x * b,
+            y: self.y * a + o.y * b,
+            z: self.z * a + o.z * b,
+            w: self.w * a + o.w * b,
+        }
+        .normalized()
+    }
+
     pub fn norm_squared(self) -> f32 {
         self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w
     }

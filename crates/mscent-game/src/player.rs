@@ -7,9 +7,8 @@
 //! is called once per `STEP_DT` and nothing here reads a clock.
 
 use crate::input::Input;
-use mscent_collide::{Body, STEP_DT};
+use mscent_collide::{Body, STEP_DT, Solids};
 use mscent_math::{Quat, Vec3};
-use mscent_world::Bsp;
 
 /// Collision sphere radius.
 pub const PLAYER_RADIUS: f32 = 0.5;
@@ -84,7 +83,7 @@ impl Player {
     }
 
     /// One fixed step of rotation then translation under `input`.
-    pub fn step(&mut self, bsp: &Bsp, input: &Input) {
+    pub fn step<'a>(&mut self, solids: impl Into<Solids<'a>>, input: &Input) {
         let i = input.sanitized();
         self.turn(Vec3::new(i.pitch, i.yaw, i.roll));
         // Forward on the stick is -Z in the body frame.
@@ -99,7 +98,7 @@ impl Player {
             let dir = dir * (1.0 / dir.length().max(1e-6));
             drag = drag + (vel - dir * vel.dot(dir)) * STEER;
         }
-        self.body.step(bsp, thrust - drag);
+        self.body.step(solids, thrust - drag);
         if let (0.0, Some(up)) = (i.roll, self.up_ref) {
             self.level(up);
         }
