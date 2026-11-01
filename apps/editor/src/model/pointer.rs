@@ -130,7 +130,7 @@ impl EditorState {
             let (lo, hi) = br.bounds();
             let inside =
                 p.pos[0] >= lo[a] && p.pos[0] <= hi[a] && p.pos[1] >= lo[b] && p.pos[1] <= hi[b];
-            if !inside {
+            if !inside || !br.covers(a, b, p.pos) {
                 continue;
             }
             let area = (hi[a] - lo[a]) * (hi[b] - lo[b]);

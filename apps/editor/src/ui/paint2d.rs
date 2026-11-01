@@ -1,6 +1,8 @@
 //! Drawing of one orthographic view: grid, brush outlines, entities and
 //! selection handles.
 
+use std::cell::RefCell;
+
 use mscent_world::{Entity, Op};
 use xui::Color;
 use xui::backend::{Canvas, Rgba, TextStyle};
@@ -10,6 +12,7 @@ use xui::units::Dip;
 
 use crate::model::document::BrushDef;
 use crate::model::entity::pos;
+use crate::model::outline::OutlineCache;
 use crate::model::pointer::handles;
 use crate::model::{Camera2D, EditorState, Selection, Shape, View};
 
@@ -24,6 +27,8 @@ pub struct Scene<'a> {
     pub view: View,
     pub cam: Camera2D,
     pub theme: Theme,
+    /// Silhouettes of convex brushes, kept between paints.
+    pub outlines: &'a RefCell<OutlineCache>,
 }
 
 fn clamp(v: f64) -> i32 {
@@ -132,16 +137,82 @@ fn grid(pen: &mut Pen, scene: &Scene) {
     }
 }
 
-/// The brush's silhouette in screen points.
-fn outline_points(pen: &Pen, br: &BrushDef, a: usize, b: usize) -> Vec<Point> {
-    br.outline(a, b).into_iter().map(|p| pen.pt(p)).collect()
+/// A brush as drawn: its rectangle, or for a convex brush its silhouette.
+enum Outline {
+    Rect(Rect),
+    Poly(Vec<Point>),
 }
 
-/// Draws the closed loop through `pts`.
-fn stroke_loop(pen: &mut Pen, pts: &[Point], color: Color, width: f32) {
-    for (i, &p) in pts.iter().enumerate() {
-        pen.canvas
-            .draw_line(p, pts[(i + 1) % pts.len()], color, width);
+impl Outline {
+    fn of(pen: &Pen, scene: &Scene, br: &BrushDef) -> Outline {
+        let (a, b) = scene.view.axes();
+        if br.is_box() {
+            let (lo, hi) = br.bounds();
+            return Outline::Rect(pen.rect([lo[a], lo[b]], [hi[a], hi[b]]));
+        }
+        let mut cache = scene.outlines.borrow_mut();
+        let pts = cache.get(br, a, b, scene.state.doc.brushes().len());
+        Outline::Poly(pts.iter().map(|&p| pen.pt(p)).collect())
+    }
+
+    /// Fills with a translucent colour, so the grid and brushes below show.
+    fn fill(&self, pen: &mut Pen, color: Rgba) {
+        match self {
+            Outline::Rect(r) => pen.canvas.fill_rect_rgba(*r, color),
+            Outline::Poly(pts) => fill_convex(pen, pts, color),
+        }
+    }
+
+    fn stroke(&self, pen: &mut Pen, color: Color, width: f32) {
+        match self {
+            Outline::Rect(r) => pen.canvas.stroke_rect(*r, color, width),
+            Outline::Poly(pts) => {
+                for (i, &p) in pts.iter().enumerate() {
+                    pen.canvas
+                        .draw_line(p, pts[(i + 1) % pts.len()], color, width);
+                }
+            }
+        }
+    }
+
+    /// The white edge that sets a selection off from what is behind it.
+    fn halo(&self, pen: &mut Pen) {
+        let white = Color::rgb(255, 255, 255);
+        match self {
+            Outline::Rect(r) => pen.canvas.stroke_rect(r.shrink(-1), white, 1.0),
+            Outline::Poly(_) => self.stroke(pen, white, 3.0 * pen.s),
+        }
+    }
+}
+
+/// Fills a convex polygon one pixel row at a time: the canvas has no
+/// translucent polygon fill.
+fn fill_convex(pen: &mut Pen, pts: &[Point], color: Rgba) {
+    let top = pts.iter().map(|p| p.y).min().unwrap_or(0).max(0);
+    let bottom = pts.iter().map(|p| p.y).max().unwrap_or(0);
+    let bottom = bottom.min(pen.origin.1 as i32 + pen.size.1 as i32);
+    for y in top..=bottom {
+        let (mut lo, mut hi) = (i32::MAX, i32::MIN);
+        for (i, &p) in pts.iter().enumerate() {
+            let q = pts[(i + 1) % pts.len()];
+            if !(p.y.min(q.y)..=p.y.max(q.y)).contains(&y) {
+                continue;
+            }
+            // A level edge covers its whole run; any other crosses once.
+            let (x0, x1) = if p.y == q.y {
+                (p.x.min(q.x), p.x.max(q.x))
+            } else {
+                let t = f64::from(y - p.y) / f64::from(q.y - p.y);
+                let x = (f64::from(p.x) + t * f64::from(q.x - p.x)).round() as i32;
+                (x, x)
+            };
+            lo = lo.min(x0);
+            hi = hi.max(x1);
+        }
+        if lo <= hi {
+            pen.canvas
+                .fill_rect_rgba(Rect::new(lo, y, hi + 1, y + 1), color);
+        }
     }
 }
 
@@ -157,38 +228,19 @@ fn brushes(pen: &mut Pen, scene: &Scene) {
             Op::Subtract => SUBTRACT,
         };
         let alpha = if br.op == Op::Add { 70 } else { 28 };
-        if br.is_box() {
-            let (lo, hi) = br.bounds();
-            let r = pen.rect([lo[a], lo[b]], [hi[a], hi[b]]);
-            pen.canvas.fill_rect_rgba(r, rgba(color, alpha));
-            pen.canvas.stroke_rect(r, color, pen.s);
-        } else {
-            let pts = outline_points(pen, br, a, b);
-            // Polygons have no alpha fill, so blend against the background.
-            let bg = scene.theme.input_background;
-            let fill = bg.lerp(color, f32::from(alpha) / 255.0);
-            pen.canvas.fill_polygon(&pts, fill);
-            stroke_loop(pen, &pts, color, pen.s);
-        }
+        let outline = Outline::of(pen, scene, br);
+        outline.fill(pen, rgba(color, alpha));
+        outline.stroke(pen, color, pen.s);
     }
     let Some(br) = selected.and_then(|id| scene.state.doc.brush(id)) else {
         return;
     };
     let (lo, hi) = br.bounds();
     let accent = scene.theme.accent;
-    if br.is_box() {
-        let r = pen.rect([lo[a], lo[b]], [hi[a], hi[b]]);
-        pen.canvas.fill_rect_rgba(r, rgba(accent, 90));
-        pen.canvas
-            .stroke_rect(r.shrink(-1), Color::rgb(255, 255, 255), 1.0);
-        pen.canvas.stroke_rect(r, accent, 2.0 * pen.s);
-    } else {
-        let pts = outline_points(pen, br, a, b);
-        let bg = scene.theme.input_background;
-        pen.canvas.fill_polygon(&pts, bg.lerp(accent, 90.0 / 255.0));
-        stroke_loop(pen, &pts, Color::rgb(255, 255, 255), 3.0 * pen.s);
-        stroke_loop(pen, &pts, accent, 2.0 * pen.s);
-    }
+    let outline = Outline::of(pen, scene, br);
+    outline.fill(pen, rgba(accent, 90));
+    outline.halo(pen);
+    outline.stroke(pen, accent, 2.0 * pen.s);
     if matches!(br.shape, Shape::Box { .. }) {
         let h = (3.5 * pen.s) as i32;
         for (_, p) in handles([lo[a], lo[b]], [hi[a], hi[b]]) {

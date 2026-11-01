@@ -39,6 +39,15 @@ impl EntityKind {
     }
 }
 
+/// The world entity for a fog range, at the origin.
+pub fn fog_entity(fog_start: f32, fog_end: f32) -> Entity {
+    Entity::World {
+        pos: Vec3::new(0.0, 0.0, 0.0),
+        fog_start,
+        fog_end,
+    }
+}
+
 /// What the properties panel calls `e`. The world entity is not placeable:
 /// the level settings dialog creates it.
 pub fn entity_name(e: &Entity) -> &'static str {

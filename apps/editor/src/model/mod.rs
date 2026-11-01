@@ -18,6 +18,8 @@ mod facetex_tests;
 #[cfg(test)]
 mod hostile_tests;
 #[cfg(test)]
+mod outline_tests;
+#[cfg(test)]
 mod review_tests;
 #[cfg(test)]
 mod tests;

@@ -5,7 +5,7 @@ use mscent_world::{Entity, Op};
 
 use super::command::{Command, History};
 use super::document::{BrushDef, Document, EntityDef, Id, Shape};
-use super::entity::EntityKind;
+use super::entity::{EntityKind, fog_entity};
 use super::pick::FaceRef;
 use super::pointer::Drag;
 
@@ -190,11 +190,7 @@ impl EditorState {
     /// Sets the level's fog through its world entity, creating the entity if
     /// the level has none; rejected if the range is invalid.
     pub fn set_fog(&mut self, fog_start: f32, fog_end: f32) -> bool {
-        let world = Entity::World {
-            pos: mscent_math::Vec3::new(0.0, 0.0, 0.0),
-            fog_start,
-            fog_end,
-        };
+        let world = fog_entity(fog_start, fog_end);
         if !world.is_valid() {
             self.message = "Fog needs 0 <= start < end <= the maximum depth".into();
             return false;

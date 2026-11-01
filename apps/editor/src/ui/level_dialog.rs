@@ -6,8 +6,10 @@ use mscent_world::entity::MAX_FOG_DEPTH;
 use xui::Dip;
 use xui::backend::PlatformSpec;
 use xui::prelude::*;
+use xui::widget::HasText;
 
 use super::app::Msg;
+use crate::model::entity::fog_entity;
 
 #[derive(Clone)]
 enum DialogMsg {
@@ -18,6 +20,7 @@ enum DialogMsg {
 struct LevelDialog {
     start: Handle<NumberField<DialogMsg>>,
     end: Handle<NumberField<DialogMsg>>,
+    problem: Handle<Label<DialogMsg>>,
 }
 
 impl App for LevelDialog {
@@ -30,7 +33,14 @@ impl App for LevelDialog {
                     self.start.get().value() as f32,
                     self.end.get().value() as f32,
                 );
-                ui.close_with_result(fog);
+                // Stay open on a bad range so the typed values are not lost.
+                if fog_entity(fog.0, fog.1).is_valid() {
+                    ui.close_with_result(fog);
+                } else {
+                    self.problem.get().set_text(&format!(
+                        "Start must be below end, and end at most {MAX_FOG_DEPTH}."
+                    ));
+                }
             }
             DialogMsg::Cancel => ui.close(),
         }
@@ -48,6 +58,7 @@ pub fn ask_fog(ui: &Ui<Msg>, current: (f32, f32)) -> Option<(f32, f32)> {
         let dialog = LevelDialog {
             start: Handle::new(),
             end: Handle::new(),
+            problem: Handle::new(),
         };
         let fields = grid([Track::Auto, Track::Fill(1)])
             .gap(6)
@@ -59,10 +70,11 @@ pub fn ask_fog(ui: &Ui<Msg>, current: (f32, f32)) -> Option<(f32, f32)> {
             button("OK").on_click(DialogMsg::Ok),
             button("Cancel").on_click(DialogMsg::Cancel),
         ));
-        let root = column()
-            .padding(12)
-            .gap(10)
-            .children((group("Fog", column().padding(6).child(fields)), buttons));
+        let root = column().padding(12).gap(10).children((
+            group("Fog", column().padding(6).child(fields)),
+            label("").bind(&dialog.problem),
+            buttons,
+        ));
         if ui.root(root).is_err() {
             ui.close();
         }
