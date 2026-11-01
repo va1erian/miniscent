@@ -220,6 +220,16 @@ fn entities(pen: &mut Pen, scene: &Scene) {
                     1.0,
                 );
             }
+            Entity::World { .. } => {
+                let col = Color::rgb(90, 150, 210);
+                pen.canvas.stroke_ellipse(c, r, r, col, 2.0 * pen.s);
+                pen.canvas.draw_line(
+                    Point::new(c.x - r as i32, c.y),
+                    Point::new(c.x + r as i32, c.y),
+                    col,
+                    1.0,
+                );
+            }
             Entity::Goal { radius, .. } => {
                 let i = (r * 1.3) as i32;
                 let diamond = [

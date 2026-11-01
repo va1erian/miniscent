@@ -121,6 +121,7 @@ fn write_entities(entities: &[Entity]) -> Vec<u8> {
             Entity::Light { .. } => 1,
             Entity::Enemy { .. } => 2,
             Entity::Goal { .. } => 3,
+            Entity::World { .. } => 4,
         });
         put_vec3(&mut out, e.pos());
         match *e {
@@ -137,6 +138,12 @@ fn write_entities(entities: &[Entity]) -> Vec<u8> {
             }
             Entity::Enemy { kind, .. } => out.push(kind),
             Entity::Goal { radius, .. } => put_f32(&mut out, radius),
+            Entity::World {
+                fog_start, fog_end, ..
+            } => {
+                put_f32(&mut out, fog_start);
+                put_f32(&mut out, fog_end);
+            }
         }
     }
     out
@@ -283,6 +290,11 @@ fn read_entity(c: &mut Cursor) -> Result<Entity, FormatError> {
         3 => Entity::Goal {
             pos,
             radius: c.f32()?,
+        },
+        4 => Entity::World {
+            pos,
+            fog_start: c.f32()?,
+            fog_end: c.f32()?,
         },
         other => return Err(FormatError::BadEntityTag(other)),
     })

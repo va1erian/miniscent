@@ -10,6 +10,7 @@ pub enum EntityKind {
     Light,
     Enemy,
     Goal,
+    World,
 }
 
 impl EntityKind {
@@ -19,6 +20,7 @@ impl EntityKind {
             EntityKind::Light => "Light",
             EntityKind::Enemy => "Enemy",
             EntityKind::Goal => "Goal",
+            EntityKind::World => "World",
         }
     }
 
@@ -35,6 +37,11 @@ impl EntityKind {
             },
             EntityKind::Enemy => Entity::Enemy { pos, kind: 0 },
             EntityKind::Goal => Entity::Goal { pos, radius: 1.5 },
+            EntityKind::World => Entity::World {
+                pos,
+                fog_start: 4.0,
+                fog_end: 26.0,
+            },
         }
     }
 }
@@ -45,6 +52,7 @@ pub fn kind(e: &Entity) -> EntityKind {
         Entity::Light { .. } => EntityKind::Light,
         Entity::Enemy { .. } => EntityKind::Enemy,
         Entity::Goal { .. } => EntityKind::Goal,
+        Entity::World { .. } => EntityKind::World,
     }
 }
 
@@ -66,7 +74,8 @@ pub fn with_pos(e: &Entity, p: [f64; 3]) -> Entity {
         Entity::PlayerStart { pos, .. }
         | Entity::Light { pos, .. }
         | Entity::Enemy { pos, .. }
-        | Entity::Goal { pos, .. } => *pos = np,
+        | Entity::Goal { pos, .. }
+        | Entity::World { pos, .. } => *pos = np,
     }
     out
 }
@@ -87,6 +96,9 @@ pub fn params(e: &Entity) -> Vec<(&'static str, f64)> {
             ("Intensity", short(intensity)),
         ],
         Entity::Goal { radius, .. } => vec![("Radius", short(radius))],
+        Entity::World {
+            fog_start, fog_end, ..
+        } => vec![("Fog start", short(fog_start)), ("Fog end", short(fog_end))],
         Entity::Enemy { kind, .. } => vec![("Kind", kind as f64)],
         Entity::PlayerStart { yaw, .. } => vec![("Yaw (deg)", short(yaw.to_degrees()))],
     }
@@ -109,6 +121,8 @@ pub fn set_param(e: &mut Entity, i: usize, v: f64) {
             _ => {}
         },
         Entity::Goal { radius, .. } if i == 0 => *radius = v as f32,
+        Entity::World { fog_start, .. } if i == 0 => *fog_start = v as f32,
+        Entity::World { fog_end, .. } if i == 1 => *fog_end = v as f32,
         Entity::Enemy { kind, .. } if i == 0 => *kind = v.clamp(0.0, 255.0) as u8,
         Entity::PlayerStart { yaw, .. } if i == 0 => *yaw = (v as f32).to_radians(),
         _ => {}

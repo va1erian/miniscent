@@ -174,7 +174,8 @@ impl EditorState {
             entity: k.make(p),
         };
         let mut cmds = Vec::new();
-        if k == EntityKind::PlayerStart {
+        // There is one player start and one world entity.
+        if matches!(k, EntityKind::PlayerStart | EntityKind::World) {
             for old in self.doc.entities().iter().filter(|e| kind(&e.entity) == k) {
                 // Each removal sees the list after the earlier ones.
                 let index = self
