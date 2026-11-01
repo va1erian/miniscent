@@ -160,6 +160,14 @@ face does not split it. Evidence: `crates/mscent-render/tests/texinfo_render.rs`
 `texinfo_bump_frame.rs`, `crates/mscent-world/tests/texinfo_fuzz.rs`, `model/facetex_tests.rs`, and
 PNGs in `target/shots/texinfo/` and `target/shots/editor-final/`.
 
+Brush tools (`model/shape_ops.rs`, `model/tools.rs`, Hammer-style): Slice (C: drag a line in a 2D
+view, K picks the kept side, Enter cuts), Carve (Ctrl+Shift+C: the selected brush is removed from
+every brush it overlaps, leaving convex pieces), Vertex (V: drag corners; the brush becomes the
+convex hull of its corners and a move that loses a corner is refused) and face extrusion (Ctrl+E
+out, Ctrl+Shift+E in, by one grid step, on the faces picked with the Face tool; out adds a prism
+brush, in moves the face). Each is one undo step. Evidence: `model/tools_tests.rs`. Not run: the
+GUI itself was not driven by hand, only the model through the pointer API and the key-table test.
+
 ## M0 Foundations
 
 | ID | Status | Evidence |

@@ -11,6 +11,7 @@ use mscent_world::Op;
 use xui::prelude::*;
 use xui::widget::{FileDialog, HasText, MenuId};
 
+use super::commands::menus;
 use super::keys::{OPS, TOOLS, key_name, shortcut};
 use super::layouts::{self, Arrangement, Disposition};
 use super::probe::Probe;
@@ -72,10 +73,15 @@ pub mod cmd {
     pub const FLIP: MenuId = MenuId::new(13);
     pub const FORWARD: MenuId = MenuId::new(14);
     pub const BACK: MenuId = MenuId::new(15);
+    pub const SLICE: MenuId = MenuId::new(16);
+    pub const SLICE_SIDE: MenuId = MenuId::new(17);
+    pub const CARVE: MenuId = MenuId::new(18);
+    pub const EXTRUDE: MenuId = MenuId::new(19);
+    pub const EXTRUDE_IN: MenuId = MenuId::new(22);
     pub const FIT: MenuId = MenuId::new(20);
     pub const RESET_CAMERA: MenuId = MenuId::new(21);
-    pub const LAYOUT_CLASSIC: MenuId = MenuId::new(22);
-    pub const LAYOUT_QUAD: MenuId = MenuId::new(23);
+    pub const LAYOUT_CLASSIC: MenuId = MenuId::new(23);
+    pub const LAYOUT_QUAD: MenuId = MenuId::new(24);
 }
 
 pub struct Editor {
@@ -100,35 +106,6 @@ pub struct Editor {
     pub(super) save_dialog: FileDialog<Msg>,
     /// Shared with scripted runs through [`Probe`].
     preview: Rc<Cell<Preview>>,
-}
-
-fn menus(m: &mut xui::widget::MenuScope<'_>) {
-    m.submenu(MenuId::new(100), "&File", |f| {
-        f.item(cmd::NEW, "&New   Ctrl+N");
-        f.item(cmd::OPEN, "&Open...   Ctrl+O");
-        f.item(cmd::SHOWCASE, "Open &showcase level");
-        f.item(cmd::SAVE, "&Save   Ctrl+S");
-        f.item(cmd::SAVE_AS, "Save &as...");
-    });
-    m.submenu(MenuId::new(101), "&Edit", |e| {
-        e.item(cmd::UNDO, "&Undo   Ctrl+Z");
-        e.item(cmd::REDO, "&Redo   Ctrl+Y");
-        e.separator();
-        e.item(cmd::DELETE, "&Delete   Del");
-        e.item(cmd::FLIP, "&Flip add/subtract");
-        e.item(cmd::FORWARD, "Move &later in order");
-        e.item(cmd::BACK, "Move &earlier in order");
-    });
-    m.submenu(MenuId::new(102), "&View", |v| {
-        v.item(cmd::FIT, "&Fit views to level");
-        v.item(cmd::RESET_CAMERA, "&Reset 3D camera");
-        v.separator();
-        v.item(cmd::LAYOUT_CLASSIC, "&Classic layout");
-        v.item(cmd::LAYOUT_QUAD, "&Quad layout (2 x 2)");
-    });
-    m.submenu(MenuId::new(103), "&Play", |p| {
-        p.item(cmd::PLAY, "&Play   F5");
-    });
 }
 
 impl Editor {
@@ -201,7 +178,9 @@ impl Editor {
             row()
                 .gap(2)
                 .children((tool_button(3), tool_button(4), tool_button(5))),
-            row().gap(2).children((tool_button(6),)),
+            row()
+                .gap(2)
+                .children((tool_button(6), tool_button(7), tool_button(8))),
         ));
         let op_button = |i: usize| {
             let (tip, glyph) = OPS[i];
@@ -281,8 +260,13 @@ impl Editor {
         let any = st.selection.is_some();
         let brush = st.selected_brush().is_some();
         menu.set_enabled(cmd::DELETE, any);
-        for id in [cmd::FLIP, cmd::FORWARD, cmd::BACK] {
+        for id in [cmd::FLIP, cmd::FORWARD, cmd::BACK, cmd::CARVE] {
             menu.set_enabled(id, brush);
+        }
+        menu.set_enabled(cmd::SLICE, brush && st.cut.is_some());
+        menu.set_enabled(cmd::SLICE_SIDE, true);
+        for id in [cmd::EXTRUDE, cmd::EXTRUDE_IN] {
+            menu.set_enabled(id, !st.faces.is_empty());
         }
         for (i, t) in TOOLS.iter().enumerate() {
             self.tools[i].get().set_checked(t.3 == st.tool);
@@ -455,7 +439,10 @@ impl App for Editor {
     fn update(&mut self, msg: Msg, ui: &mut Ui<Msg>) {
         match msg {
             Msg::Menu(id) => self.menu_command(id),
-            Msg::Tool(i) => self.state.borrow_mut().tool = TOOLS[i.min(TOOLS.len() - 1)].3,
+            Msg::Tool(i) => self
+                .state
+                .borrow_mut()
+                .set_tool(TOOLS[i.min(TOOLS.len() - 1)].3),
             Msg::NewOp(i) => {
                 self.state.borrow_mut().new_op = if i == 0 { Op::Subtract } else { Op::Add };
             }

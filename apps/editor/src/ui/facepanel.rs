@@ -9,6 +9,7 @@ use xui::prelude::*;
 use xui::widget::{CheckBox, GroupBox, HasText};
 
 use super::Msg;
+use super::app::cmd;
 use super::toolbar::IconButton;
 use crate::model::EditorState;
 use crate::model::facetex::FaceEdit;
@@ -179,6 +180,14 @@ impl FacePanel {
             .child(small("Align world", edit(FaceEdit::AlignWorld)))
             .child(small("Flip U", edit(FaceEdit::FlipU)))
             .child(small("Flip V", edit(FaceEdit::FlipV)))
+            .child(
+                small("Extrude out", Msg::Menu(cmd::EXTRUDE))
+                    .tooltip("Push the picked faces out by one grid step (Ctrl+E)"),
+            )
+            .child(
+                small("Extrude in", Msg::Menu(cmd::EXTRUDE_IN))
+                    .tooltip("Pull the picked faces in by one grid step (Ctrl+Shift+E)"),
+            )
             .child(
                 small("Copy", Msg::Face(FaceMsg::Copy))
                     .tooltip("Copy this face's texture (Alt + click)"),
