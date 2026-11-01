@@ -10,7 +10,6 @@ pub enum EntityKind {
     Light,
     Enemy,
     Goal,
-    World,
 }
 
 impl EntityKind {
@@ -20,7 +19,6 @@ impl EntityKind {
             EntityKind::Light => "Light",
             EntityKind::Enemy => "Enemy",
             EntityKind::Goal => "Goal",
-            EntityKind::World => "World",
         }
     }
 
@@ -37,22 +35,28 @@ impl EntityKind {
             },
             EntityKind::Enemy => Entity::Enemy { pos, kind: 0 },
             EntityKind::Goal => Entity::Goal { pos, radius: 1.5 },
-            EntityKind::World => Entity::World {
-                pos,
-                fog_start: 4.0,
-                fog_end: 26.0,
-            },
         }
     }
 }
 
-pub fn kind(e: &Entity) -> EntityKind {
+/// The world entity for a fog range, at the origin.
+pub fn fog_entity(fog_start: f32, fog_end: f32) -> Entity {
+    Entity::World {
+        pos: Vec3::new(0.0, 0.0, 0.0),
+        fog_start,
+        fog_end,
+    }
+}
+
+/// What the properties panel calls `e`. The world entity is not placeable:
+/// the level settings dialog creates it.
+pub fn entity_name(e: &Entity) -> &'static str {
     match e {
-        Entity::PlayerStart { .. } => EntityKind::PlayerStart,
-        Entity::Light { .. } => EntityKind::Light,
-        Entity::Enemy { .. } => EntityKind::Enemy,
-        Entity::Goal { .. } => EntityKind::Goal,
-        Entity::World { .. } => EntityKind::World,
+        Entity::PlayerStart { .. } => EntityKind::PlayerStart.name(),
+        Entity::Light { .. } => EntityKind::Light.name(),
+        Entity::Enemy { .. } => EntityKind::Enemy.name(),
+        Entity::Goal { .. } => EntityKind::Goal.name(),
+        Entity::World { .. } => "World",
     }
 }
 

@@ -10,7 +10,7 @@ use xui::{Dip, Theme};
 use super::*;
 use crate::model::Selection;
 
-fn shoot(name: &str, theme: Theme, (w, h): (f32, f32), tool: usize, quad: bool) {
+fn shoot(name: &str, theme: Theme, (w, h): (f32, f32), tool: usize, classic: bool) {
     let report: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
     let probe: Rc<RefCell<Option<super::super::Probe>>> = Rc::new(RefCell::new(None));
     let (r2, p2) = (report.clone(), probe.clone());
@@ -35,8 +35,8 @@ fn shoot(name: &str, theme: Theme, (w, h): (f32, f32), tool: usize, quad: bool) 
             let id = state.borrow().doc.brushes()[0].id;
             state.borrow_mut().selection = Some(Selection::Brush(id));
             stage.emit(Msg::Tool(tool));
-            if quad {
-                stage.emit(Msg::Menu(cmd::LAYOUT_QUAD));
+            if classic {
+                stage.emit(Msg::Menu(cmd::LAYOUT_CLASSIC));
             }
             *r2.borrow_mut() = stage.ui().layout_report();
         },
@@ -68,6 +68,12 @@ fn laptop_and_wide_windows_lay_out_without_warnings() {
 }
 
 #[test]
-fn quad_layout_lays_out_without_warnings() {
-    shoot("1280-light-quad", Theme::light(), (1280.0, 800.0), 0, true);
+fn classic_layout_lays_out_without_warnings() {
+    shoot(
+        "1280-light-classic",
+        Theme::light(),
+        (1280.0, 800.0),
+        0,
+        true,
+    );
 }
