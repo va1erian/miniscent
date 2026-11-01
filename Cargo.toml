@@ -26,8 +26,8 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"
 
-# xui-canvas at the pinned rev panics ("RefCell already borrowed") when a window
-# moves between monitors of different DPI. Use the fixed copy until the fix is
-# upstream; see docs/xui-patches/README.md.
+# xui-canvas maps only F1 to F4 from winit, so F5 to F12 never arrive (xui#316).
+# Use the vendored copy with the keymap fix until it is upstream; see
+# docs/xui-patches/README.md.
 [patch."https://github.com/va1erian/xui"]
 xui-canvas = { path = "vendor/xui-canvas" }

@@ -68,6 +68,9 @@ pub struct OffscreenBackend {
     next_widget: std::cell::Cell<u64>,
     /// The node the pointer is captured by, if any.
     captured: RefCell<Option<WidgetId>>,
+    /// The node that locked the pointer, if any; recorded for tests, since
+    /// there is no cursor to hide.
+    pointer_lock: RefCell<Option<WidgetId>>,
     /// The node with keyboard focus, which receives injected key and character
     /// events as it would from a real backend.
     focused: RefCell<Option<WidgetId>>,
@@ -92,6 +95,11 @@ impl Default for OffscreenBackend {
 }
 
 impl OffscreenBackend {
+    /// The node that currently holds the pointer lock, if any.
+    pub fn pointer_lock(&self) -> Option<WidgetId> {
+        *self.pointer_lock.borrow()
+    }
+
     /// A backend with no windows.
     pub fn new() -> OffscreenBackend {
         OffscreenBackend {
@@ -100,6 +108,7 @@ impl OffscreenBackend {
             next_window: std::cell::Cell::new(1),
             next_widget: std::cell::Cell::new(1),
             captured: RefCell::new(None),
+            pointer_lock: RefCell::new(None),
             focused: RefCell::new(None),
             rendering: RefCell::new(HashSet::new()),
             text: OnceCell::new(),

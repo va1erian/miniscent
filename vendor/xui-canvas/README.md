@@ -1,6 +1,6 @@
 # xui-canvas
 
-The cross-platform, software-rendered backend for [xui](https://github.com/va1erian/xui/tree/71dc3b5903ac94dba00466a6d6a00d69251beeab/crates/xui). It draws the
+The cross-platform, software-rendered backend for [xui](https://github.com/va1erian/xui/tree/b3c8cd4c0f005914a143c730719cd5d0e830cdfa/crates/xui). It draws the
 portable widgets with [tiny-skia](https://github.com/linebender/tiny-skia) into
 an RGBA buffer, so it runs (and can be snapshot-tested) without a platform UI
 toolkit.
@@ -85,5 +85,5 @@ so a backend can present a frame without `to_image`'s whole-surface clone.
 `cargo run -p xui-canvas --example gl` opens a window with an animated,
 GPU-rendered triangle; set `XUI_DEMO_AUTOCLOSE_MS` to have it quit itself.
 
-See the [workspace README](https://github.com/va1erian/xui/blob/71dc3b5903ac94dba00466a6d6a00d69251beeab/README.md) and the
+See the [workspace README](https://github.com/va1erian/xui/blob/b3c8cd4c0f005914a143c730719cd5d0e830cdfa/README.md) and the
 [epic](https://github.com/va1erian/xui/issues/1).

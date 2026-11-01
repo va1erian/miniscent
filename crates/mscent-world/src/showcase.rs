@@ -141,7 +141,7 @@ fn entities() -> Vec<Entity> {
             kind: 0,
         },
         Entity::Enemy {
-            pos: at(15.0, 12.0, 1.0),
+            pos: at(17.0, 5.0, 1.0),
             kind: 0,
         },
         Entity::Goal {

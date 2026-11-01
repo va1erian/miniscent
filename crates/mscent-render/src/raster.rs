@@ -340,19 +340,17 @@ fn span_pixels<S: SpanShader>(
     let step = 1.0 / s.n as f32;
     let (mut fu, mut fv) = (fix(s.ea.u), fix(s.ea.v));
     let (du, dv) = (fix((s.eb.u - s.ea.u) * step), fix((s.eb.v - s.ea.v) * step));
-    let (mx, my) = (tex.mask_x(), tex.mask_y());
+    let lod = tex.lod_sampler(s.level);
     let mut written = 0;
     for i in 0..s.n {
         let iz = s.iz0 + s.diz * i as f32;
         let slot = s.x + i;
         if iz > depth[slot] {
-            let (tx, ty) = ((fu >> 16) as u32 & mx, (fv >> 16) as u32 & my);
-            let (tx, ty) = (tx as i32, ty as i32);
             depth[slot] = iz;
             let texel = if s.smooth {
-                tex.sample_bilinear_lod(fu, fv, s.level)
+                lod.bilinear(fu, fv)
             } else {
-                tex.texel_lod(tx, ty, s.level)
+                lod.nearest(fu >> 16, fv >> 16)
             };
             color[slot] = shader.shade(i as u32, texel, fu, fv);
             written += 1;

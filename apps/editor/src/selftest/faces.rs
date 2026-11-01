@@ -36,6 +36,55 @@ fn edit(stage: &Stage<'_, Msg>, e: FaceEdit) {
     stage.emit(Msg::Face(FaceMsg::Edit(e)));
 }
 
+/// A change of a parameter must move the face's region by at least this
+/// much, in mean absolute difference per byte (0..255).
+const MIN_CHANGE: f64 = 6.0;
+/// After undo the region may differ by at most this much.
+const UNDO_TOLERANCE: f64 = 0.5;
+
+type Pixels = Option<(u32, u32, Vec<u8>)>;
+
+/// Waits for the texture refresh and lets the new frame show.
+fn settle(stage: &Stage<'_, Msg>, probe: &Probe) {
+    wait_for_refresh(stage, probe);
+    pump(stage, 20);
+}
+
+/// Mean absolute byte difference over the middle of the picture, where the
+/// face is framed and highlighted; `None` if either picture is missing or
+/// their sizes differ.
+fn centre_diff(a: &Pixels, b: &Pixels) -> Option<f64> {
+    let ((w, h, pa), (w2, h2, pb)) = (a.as_ref()?, b.as_ref()?);
+    if (w, h) != (w2, h2) || pa.len() != pb.len() {
+        return None;
+    }
+    let (w, h) = (*w as usize, *h as usize);
+    let (x0, x1, y0, y1) = (w * 3 / 10, w * 7 / 10, h * 3 / 10, h * 7 / 10);
+    let (mut sum, mut n) = (0u64, 0u64);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let i = (y * w + x) * 4;
+            for c in 0..3 {
+                sum += u64::from(pa[i + c].abs_diff(pb[i + c]));
+                n += 1;
+            }
+        }
+    }
+    (n > 0).then(|| sum as f64 / n as f64)
+}
+
+/// Checks that the picture now differs visibly from `before` in the face's
+/// region (unless the adaptive size changed, which cannot be compared).
+fn parameter_changed(run: &mut Run, before: &Pixels, now: &Pixels, what: &str) {
+    match centre_diff(before, now) {
+        Some(d) => run.check(
+            d >= MIN_CHANGE,
+            &format!("{what} visibly changes the face (mean diff {d:.2})"),
+        ),
+        None => println!("skip {what}: picture size changed"),
+    }
+}
+
 /// Half the vertical field of view's tangent (the renderer's 1.3 rad).
 const HALF_TAN: f64 = 0.7602;
 /// The narrowest picture the face must fit into, width over height.
@@ -174,8 +223,34 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     pump(stage, 20);
     run.shot(stage, "08-face-picked.png");
     let picture_before = pane.frame_checksum();
+    let pixels_before = pane.frame_pixels();
     let original = state.borrow().face_texinfo(face);
     let depth = state.borrow().history.depth();
+    let Some(orig) = original else {
+        run.check(false, "the picked face has a mapping");
+        return;
+    };
+
+    // Each parameter alone, so its own effect is visible in a picture.
+    edit(stage, FaceEdit::Rotation(45.0));
+    settle(stage, probe);
+    run.shot(stage, "09a-face-rotated-only.png");
+    parameter_changed(run, &pixels_before, &pane.frame_pixels(), "rotation");
+    edit(stage, FaceEdit::Rotation(orig.rotation_deg));
+    edit(stage, FaceEdit::ShiftU(24.0));
+    edit(stage, FaceEdit::ShiftV(8.0));
+    settle(stage, probe);
+    run.shot(stage, "09b-face-shifted-only.png");
+    parameter_changed(run, &pixels_before, &pane.frame_pixels(), "shift");
+    edit(stage, FaceEdit::ShiftU(orig.u_shift));
+    edit(stage, FaceEdit::ShiftV(orig.v_shift));
+    edit(stage, FaceEdit::ScaleU(0.125));
+    edit(stage, FaceEdit::ScaleV(0.125));
+    settle(stage, probe);
+    run.shot(stage, "09c-face-scaled-only.png");
+    parameter_changed(run, &pixels_before, &pane.frame_pixels(), "scale");
+    edit(stage, FaceEdit::ScaleU(orig.u_scale));
+    edit(stage, FaceEdit::ScaleV(orig.v_scale));
 
     apply_mapping(stage);
     let status = wait_for_refresh(stage, probe);
@@ -190,6 +265,12 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         "the 3D picture changed with the mapping",
     );
     run.shot(stage, "09-face-edited.png");
+    parameter_changed(
+        run,
+        &pixels_before,
+        &pane.frame_pixels(),
+        "combined mapping",
+    );
     let edited = state.borrow().face_texinfo(face);
     run.check(
         edited.is_some_and(|t| t.rotation_deg == 45.0 && t.u_scale == 0.125 && t.v_shift == 8.0),
@@ -200,8 +281,7 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     while state.borrow().history.depth() > depth {
         stage.emit(Msg::Menu(cmd::UNDO));
     }
-    wait_for_refresh(stage, probe);
-    pump(stage, 20);
+    settle(stage, probe);
     run.check(
         state.borrow().face_texinfo(face) == original,
         "undo restored the original mapping",
@@ -215,6 +295,15 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         !comparable || picture_before == picture_undone,
         "the picture after undo equals the picture before the edit",
     );
+    if let (Some(d), true) = (
+        centre_diff(&pixels_before, &pane.frame_pixels()),
+        comparable,
+    ) {
+        run.check(
+            d <= UNDO_TOLERANCE,
+            &format!("after undo the face region equals the before (mean diff {d:.3})"),
+        );
+    }
     run.shot(stage, "10-face-undone.png");
 
     // Ctrl + click on another spot changes the picked set.

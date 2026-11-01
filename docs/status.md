@@ -38,17 +38,23 @@ editor selftest (`--selftest target/shots/editor-final`) passes in a dark window
 one. Reported by the user from a real Windows session, and what was done:
 
 - **Monitor move crash (RefCell already borrowed).** Root cause was in `xui-canvas`
-  `backend/app/mod.rs`: the `ScaleFactorChanged` handler kept a `windows.borrow()` guard alive in an
-  if-let chain while calling `borrow_mut()`. Fixed in a vendored copy, `vendor/xui-canvas`, selected
-  by a `[patch]` section in the root `Cargo.toml`. The same pattern in `input.rs` `cursor_moved` and
-  `Shared::request_redraw` is fixed too. Upstream patch: `docs/xui-patches/0001-fix-scale-factor-borrow.patch`
-  (explained in `docs/xui-patches/README.md`, which also says how to drop the vendored copy once
-  upstream has it). Verified by three unit tests in the vendored crate, one of which panics with the
-  original message if the old code is restored. Not verified: a real window moved between monitors
-  of different DPI (cannot be done here).
+  (`ScaleFactorChanged` and `cursor_moved` held a `RefCell` guard across a `borrow_mut()`). Fixed
+  upstream (xui#313); the editor now builds against xui `b3c8cd4` and the vendored copy of that fix
+  is gone. Not verified: a real window moved between monitors of different DPI (cannot be done here).
+- **Pointer lock.** xui#314 added `Ui::set_pointer_lock` and `Event::PointerDelta`. The editor's 3D
+  pane (`ui/view3d.rs`) locks the pointer while the right button is held (fly-look) and Play keeps it
+  locked (`View3d::set_grab`, from `begin_play`/`end_play`); `PointerDelta` becomes the look motion.
+  A backend that cannot lock never sends deltas, so the old position-difference look and the arrow
+  keys remain as the fallback. The lock is released on button release, capture or focus loss, leaving
+  Play, and by the backend on Esc, focus loss and node removal; the backend swallows Esc while
+  locked, so a `PointerLockLost` in Play ends Play (alt-tab ends it too). Verified headlessly by
+  `ui/app/lock_tests.rs` (real editor on the offscreen backend, which records the lock: lock on
+  right-down and on F5, camera yaw/pitch change from injected deltas, released on button-up, Esc and
+  lock loss). Not verified: a real mouse and cursor on screen (the OS grab path in `xui-canvas`).
 - **F5 and F7.** Root cause: xui's winit keymap only produced `Key::F1` to `F4`, so a real window
   never raised F5 to F12 (offscreen tests inject events and hid it).
-  `docs/xui-patches/0002-map-f5-to-f12.patch` adds the arms (vendored copy, with a unit test). The
+  `docs/xui-patches/0002-map-f5-to-f12.patch` adds the arms (vendored copy, with a unit test; xui#316
+  is still open upstream, so `vendor/xui-canvas` stays until it is fixed). The
   editor also binds Ctrl+B (build) and Ctrl+R (play) as a fallback. `selftest/keys.rs` injects
   `KeyDown` F7, F5 and Esc events through the UI and checks the build, the play and the return;
   `ui/app/keys_tests.rs` does the same. Not verified: a physical keyboard.
@@ -192,7 +198,7 @@ PNGs in `target/shots/texinfo/` and `target/shots/editor-final/`.
 
 | ID | Status | Evidence |
 |---|---|---|
-| M7.1 | Done | `apps/editor` (xui, git dependency pinned to rev 71dc3b5): menus, tool palette, grid-size, properties and build-log panels; seen in `--selftest` snapshots. Only built and run on Windows |
+| M7.1 | Done | `apps/editor` (xui, git dependency pinned to rev b3c8cd4): menus, tool palette, grid-size, properties and build-log panels; seen in `--selftest` snapshots. Only built and run on Windows |
 | M7.2 | Done | `ui/paint2d.rs`, `ui/viewport.rs`; top, front and side views with grid, pan, zoom (editor unit tests, selftest `02-four-views.png`) |
 | M7.3 | Done | `ui/view3d.rs` calls the game renderer; the lit, textured, shadowed view is visible in the four-view snapshot. "Same pixels as the game" is not asserted by a test |
 | M7.4 | Done | `model/command.rs`, `pointer.rs`; create, move, resize, add/subtract toggle with undo and redo (`model/tests.rs`, `review_tests.rs`). Undo coverage is as far as those tests go, not exhaustive |
@@ -219,5 +225,5 @@ PNGs in `target/shots/texinfo/` and `target/shots/editor-final/`.
 - Core crates are not declared `no_std`; they use `std` only. `mscent-platform` (winit, softbuffer, optional) and the editor (xui) are the only crates with external dependencies.
 - Textures are decoded at load time by an in-repo PNG decoder, not at build time.
 - The "fuzz target" for the level format is a seeded in-process test.
-- The editor builds against a vendored `xui-canvas` (`vendor/xui-canvas`, `[patch]` in the root `Cargo.toml`) with two fixes not yet upstream; patches are in `docs/xui-patches/`.
+- The editor builds against a vendored `xui-canvas` (`vendor/xui-canvas`, `[patch]` in the root `Cargo.toml`) with one fix not yet upstream (F5 to F12 keymap, xui#316); the patch is in `docs/xui-patches/`.
 - Still open: `_s` gloss textures (M5.7), perf numbers on the i3-7100U, all LazyOS work (M1.3, M1.4, M8.x).

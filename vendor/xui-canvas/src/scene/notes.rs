@@ -247,6 +247,7 @@ pub(crate) fn event_marks_target(event: &xui_core::backend::Event) -> bool {
             | Event::MouseWheel { .. }
             | Event::MouseLeave
             | Event::CaptureChanged
+            | Event::PointerLockLost
             | Event::KeyDown { .. }
             | Event::KeyUp { .. }
             | Event::Char(_)

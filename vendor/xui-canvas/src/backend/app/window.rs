@@ -4,8 +4,6 @@
 //! windows into `winit` windows, and keeping their size and node bounds in step
 //! with the monitor's scale factor.
 
-use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use winit::dpi::LogicalSize;
@@ -106,19 +104,6 @@ impl App<'_> {
         }
     }
 
-    /// Adopts the real window's current backing size (see [`adopt_inner_size`]).
-    pub(super) fn adopt_inner_size(&self, raw: u64) {
-        adopt_inner_size(
-            &self.shared.windows,
-            raw,
-            |state| state.window.clone(),
-            |window| {
-                let size = window.inner_size();
-                (size.width, size.height)
-            },
-        );
-    }
-
     /// Records `raw`'s dots-per-inch, lifting the node bounds the app laid out
     /// at the old value to the new scale so the window stays filled.
     ///
@@ -144,30 +129,6 @@ impl App<'_> {
         if old != dpi {
             rescale_nodes(&self.shared, raw, dpi as f32 / old as f32);
         }
-    }
-}
-
-/// Adopts the backing size of `raw`'s real window as its recorded size.
-///
-/// `handle` picks what is needed out of the window state and `measure` turns it
-/// into a size. The `windows` guard is released before `measure` runs and a
-/// fresh one is taken to store the result: holding the first across the second
-/// is a `RefCell` double borrow, which panicked when a window was dragged to a
-/// monitor with another scale factor. `measure` may itself touch `windows`.
-pub(super) fn adopt_inner_size<H>(
-    windows: &RefCell<HashMap<u64, WindowState>>,
-    raw: u64,
-    handle: impl FnOnce(&WindowState) -> Option<H>,
-    measure: impl FnOnce(H) -> (u32, u32),
-) {
-    // Its own statement, so the shared guard is dropped at the semicolon.
-    let handle = windows.borrow().get(&raw).and_then(handle);
-    let Some(handle) = handle else {
-        return;
-    };
-    let size = measure(handle);
-    if let Some(state) = windows.borrow_mut().get_mut(&raw) {
-        state.size = (size.0.max(1), size.1.max(1));
     }
 }
 
@@ -240,48 +201,6 @@ fn rescale_nodes(shared: &Shared, raw: u64, ratio: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn windows_with(raw: u64) -> RefCell<HashMap<u64, WindowState>> {
-        let mut state = WindowState::new(&xui_core::backend::PlatformSpec::new("t"));
-        state.size = (800, 600);
-        RefCell::new(HashMap::from([(raw, state)]))
-    }
-
-    #[test]
-    fn adopting_the_inner_size_survives_a_measure_that_reenters() {
-        // Regression: the `ScaleFactorChanged` handler kept a shared guard
-        // alive while taking the mutable one ("RefCell already borrowed").
-        // `measure` borrows mutably itself, which fails if any guard is live.
-        let windows = windows_with(1);
-        adopt_inner_size(
-            &windows,
-            1,
-            |_| Some(()),
-            |()| {
-                windows.borrow_mut().get_mut(&1).expect("window").dpi = 144;
-                (1920, 1080)
-            },
-        );
-        let windows = windows.borrow();
-        let state = windows.get(&1).expect("window");
-        assert_eq!(state.size, (1920, 1080));
-        assert_eq!(state.dpi, 144, "the re-entrant write was kept");
-    }
-
-    #[test]
-    fn adopted_sizes_are_never_zero() {
-        let windows = windows_with(1);
-        adopt_inner_size(&windows, 1, |_| Some(()), |()| (0, 0));
-        assert_eq!(windows.borrow().get(&1).expect("window").size, (1, 1));
-    }
-
-    #[test]
-    fn a_window_without_a_handle_or_state_is_left_alone() {
-        let windows = windows_with(1);
-        adopt_inner_size(&windows, 1, |_| None::<()>, |()| unreachable!("no handle"));
-        adopt_inner_size(&windows, 9, |_| Some(()), |()| unreachable!("no window"));
-        assert_eq!(windows.borrow().get(&1).expect("window").size, (800, 600));
-    }
 
     #[test]
     fn scale_factor_maps_to_a_dots_per_inch() {

@@ -332,6 +332,11 @@ Press F7 to build, F5 to play.
     /// One UI tick: forwards the active pane's input to the render thread
     /// and shows the newest frame it finished. Nothing here waits.
     fn advance(&mut self) {
+        // Esc or focus loss ended the pointer lock: the cursor is back, so
+        // Play ends rather than running with a free cursor.
+        if self.studio.mode == Mode::Play && self.play.get().take_lock_lost() {
+            self.end_play(Some("Back in the editor"));
+        }
         let pane = if self.studio.mode == Mode::Play {
             self.play.get()
         } else {
@@ -374,6 +379,8 @@ Press F7 to build, F5 to play.
             Ok(()) => {
                 let play = self.play.get();
                 play.set_visible(true);
+                self.view3d.get().set_grab(false);
+                play.set_grab(true);
                 play.focus();
                 // Focus changes from the editor are not the player's input.
                 play.take_events();
@@ -391,6 +398,7 @@ Press F7 to build, F5 to play.
     /// Back to the editor; the document is exactly as it was.
     pub(super) fn end_play(&mut self, message: Option<&str>) {
         self.studio.leave_play();
+        self.play.get().set_grab(false);
         self.play.get().set_visible(false);
         self.view3d.get().focus();
         if let Some(m) = message {
@@ -419,6 +427,8 @@ Press F7 to build, F5 to play.
 mod keys_tests;
 #[cfg(test)]
 mod layout_tests;
+#[cfg(test)]
+mod lock_tests;
 #[cfg(test)]
 mod tests;
 

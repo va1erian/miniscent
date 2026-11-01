@@ -189,6 +189,29 @@ impl Texture {
         bilinear(&self.mips[l], w, h, fu >> shift, fv >> shift)
     }
 
+    /// A bilinear sampler over mip `level` (clamped to the chain), for
+    /// callers that fetch many texels from one level: it does the level
+    /// lookup once.
+    pub fn lod_sampler(&self, level: u32) -> LodSampler<'_> {
+        match (level as usize).min(self.mips.len()).checked_sub(1) {
+            None => LodSampler {
+                px: &self.albedo,
+                w: self.width,
+                h: self.height,
+                shift: 0,
+            },
+            Some(l) => {
+                let shift = l as u32 + 1;
+                LodSampler {
+                    px: &self.mips[l],
+                    w: (self.width >> shift).max(1),
+                    h: (self.height >> shift).max(1),
+                    shift,
+                }
+            }
+        }
+    }
+
     /// Unit normal at a texel, if a normal map is attached.
     pub fn normal(&self, x: i32, y: i32) -> Option<Vec3> {
         let p = self.normals.as_ref()?[self.index(x, y)];
@@ -203,6 +226,16 @@ impl Texture {
         Some(self.normals.as_ref()?[self.index(x, y)])
     }
 
+    /// The normal map as a cheap view for per-pixel fetches, if attached.
+    pub fn normal_view(&self) -> Option<NormalView<'_>> {
+        Some(NormalView {
+            px: self.normals.as_deref()?,
+            w: self.width as usize,
+            mx: self.mask_x(),
+            my: self.mask_y(),
+        })
+    }
+
     /// Height at a texel, if a height map is attached.
     pub fn height_at(&self, x: i32, y: i32) -> Option<u8> {
         Some(self.heights.as_ref()?[self.index(x, y)])
@@ -214,6 +247,55 @@ impl Texture {
 
     pub fn has_heights(&self) -> bool {
         self.heights.is_some()
+    }
+}
+
+/// A texture's packed normal map, borrowed for the duration of a draw.
+#[derive(Clone, Copy)]
+pub struct NormalView<'a> {
+    px: &'a [u32],
+    w: usize,
+    mx: u32,
+    my: u32,
+}
+
+impl NormalView<'_> {
+    /// Packed normal texel with wrap-around addressing; a short map reads as
+    /// the flat normal.
+    #[inline]
+    pub fn texel(&self, x: i32, y: i32) -> u32 {
+        let i = (y as u32 & self.my) as usize * self.w + (x as u32 & self.mx) as usize;
+        self.px.get(i).copied().unwrap_or(0xff80_80ff)
+    }
+}
+
+/// One mip level of a texture, sampled at full-resolution 16.16 coordinates.
+#[derive(Clone, Copy)]
+pub struct LodSampler<'a> {
+    px: &'a [u32],
+    w: u32,
+    h: u32,
+    shift: u32,
+}
+
+impl LodSampler<'_> {
+    /// Same result as [`Texture::sample_bilinear_lod`] for this level.
+    #[inline]
+    pub fn bilinear(&self, fu: i32, fv: i32) -> u32 {
+        bilinear(self.px, self.w, self.h, fu >> self.shift, fv >> self.shift)
+    }
+
+    /// Same result as [`Texture::texel_lod`] for this level.
+    #[inline]
+    pub fn nearest(&self, x: i32, y: i32) -> u32 {
+        let (xm, ym) = (
+            (x as u32 >> self.shift) & (self.w - 1),
+            (y as u32 >> self.shift) & (self.h - 1),
+        );
+        self.px
+            .get(ym as usize * self.w as usize + xm as usize)
+            .copied()
+            .unwrap_or(0)
     }
 }
 

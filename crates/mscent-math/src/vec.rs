@@ -13,10 +13,12 @@ pub struct Vec2 {
 }
 
 impl Vec2 {
+    #[inline]
     pub const fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
 
+    #[inline]
     pub fn dot(self, o: Self) -> f32 {
         self.x * o.x + self.y * o.y
     }
@@ -24,6 +26,7 @@ impl Vec2 {
 
 impl Add for Vec2 {
     type Output = Self;
+    #[inline]
     fn add(self, o: Self) -> Self {
         Self::new(self.x + o.x, self.y + o.y)
     }
@@ -31,6 +34,7 @@ impl Add for Vec2 {
 
 impl Sub for Vec2 {
     type Output = Self;
+    #[inline]
     fn sub(self, o: Self) -> Self {
         Self::new(self.x - o.x, self.y - o.y)
     }
@@ -38,6 +42,7 @@ impl Sub for Vec2 {
 
 impl Mul<f32> for Vec2 {
     type Output = Self;
+    #[inline]
     fn mul(self, s: f32) -> Self {
         Self::new(self.x * s, self.y * s)
     }
@@ -53,18 +58,22 @@ pub struct Vec4 {
 }
 
 impl Vec4 {
+    #[inline]
     pub const fn new(x: f32, y: f32, z: f32, w: f32) -> Self {
         Self { x, y, z, w }
     }
 
+    #[inline]
     pub fn from_vec3(v: Vec3, w: f32) -> Self {
         Self::new(v.x, v.y, v.z, w)
     }
 
+    #[inline]
     pub fn xyz(self) -> Vec3 {
         Vec3::new(self.x, self.y, self.z)
     }
 
+    #[inline]
     pub fn dot(self, o: Self) -> f32 {
         self.x * o.x + self.y * o.y + self.z * o.z + self.w * o.w
     }
@@ -85,14 +94,17 @@ macro_rules! vec3_type {
         impl $name {
             pub const ZERO: Self = Self::new(0.0, 0.0, 0.0);
 
+            #[inline]
             pub const fn new(x: $t, y: $t, z: $t) -> Self {
                 Self { x, y, z }
             }
 
+            #[inline]
             pub fn dot(self, o: Self) -> $t {
                 self.x * o.x + self.y * o.y + self.z * o.z
             }
 
+            #[inline]
             pub fn cross(self, o: Self) -> Self {
                 Self::new(
                     self.y * o.z - self.z * o.y,
@@ -101,16 +113,19 @@ macro_rules! vec3_type {
                 )
             }
 
+            #[inline]
             pub fn length_squared(self) -> $t {
                 self.dot(self)
             }
 
+            #[inline]
             pub fn length(self) -> $t {
                 self.length_squared().sqrt()
             }
 
             /// Unit vector, or `None` when the length is too small to
             /// normalize safely, or not finite.
+            #[inline]
             pub fn normalized(self) -> Option<Self> {
                 let len = self.length();
                 if len.is_finite() && len > $min_len {
@@ -120,20 +135,24 @@ macro_rules! vec3_type {
                 }
             }
 
+            #[inline]
             pub fn lerp(self, o: Self, t: $t) -> Self {
                 self + (o - self) * t
             }
 
+            #[inline]
             pub fn is_finite(self) -> bool {
                 self.x.is_finite() && self.y.is_finite() && self.z.is_finite()
             }
 
             /// Component-wise minimum.
+            #[inline]
             pub fn min(self, o: Self) -> Self {
                 Self::new(self.x.min(o.x), self.y.min(o.y), self.z.min(o.z))
             }
 
             /// Component-wise maximum.
+            #[inline]
             pub fn max(self, o: Self) -> Self {
                 Self::new(self.x.max(o.x), self.y.max(o.y), self.z.max(o.z))
             }
@@ -141,6 +160,7 @@ macro_rules! vec3_type {
 
         impl Add for $name {
             type Output = Self;
+            #[inline]
             fn add(self, o: Self) -> Self {
                 Self::new(self.x + o.x, self.y + o.y, self.z + o.z)
             }
@@ -148,6 +168,7 @@ macro_rules! vec3_type {
 
         impl Sub for $name {
             type Output = Self;
+            #[inline]
             fn sub(self, o: Self) -> Self {
                 Self::new(self.x - o.x, self.y - o.y, self.z - o.z)
             }
@@ -155,6 +176,7 @@ macro_rules! vec3_type {
 
         impl Neg for $name {
             type Output = Self;
+            #[inline]
             fn neg(self) -> Self {
                 Self::new(-self.x, -self.y, -self.z)
             }
@@ -162,6 +184,7 @@ macro_rules! vec3_type {
 
         impl Mul<$t> for $name {
             type Output = Self;
+            #[inline]
             fn mul(self, s: $t) -> Self {
                 Self::new(self.x * s, self.y * s, self.z * s)
             }

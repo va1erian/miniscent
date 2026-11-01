@@ -127,14 +127,15 @@ impl App<'_> {
 
     pub(super) fn cursor_moved(&mut self, raw: u64, x: f64, y: f64) {
         self.cursor = (x, y);
+        // A locked pointer reports relative motion instead of positions.
+        if self.shared.pointer_lock.borrow().is_some() {
+            return;
+        }
         let window = Self::window_id(raw);
         let (x, y) = (x as i32, y as i32);
         // A captured node keeps receiving moves (and the cursor) even outside
         // its bounds, so a drag survives leaving it.
-        // Copy the id out in its own statement: a guard held by an `if let`
-        // scrutinee lives for the whole body, and delivering to the node can
-        // re-enter the backend (`set_capture`, `release_capture`) and need
-        // `borrow_mut` on the same cell.
+        // Copied out first: the handler may take or release capture.
         let captured = *self.shared.captured.borrow();
         if let Some(captured) = captured {
             if let Some((lx, ly)) = self.shared.local_point(captured, x, y) {
@@ -178,7 +179,10 @@ impl App<'_> {
     pub(super) fn mouse_input(&mut self, raw: u64, state: ElementState, button: WinitButton) {
         let window = Self::window_id(raw);
         let (x, y) = (self.cursor.0 as i32, self.cursor.1 as i32);
+        // A locked pointer's hidden cursor may drift, so buttons go to the
+        // node that holds the lock, as under a capture.
         let captured = *self.shared.captured.borrow();
+        let captured = captured.or(*self.shared.pointer_lock.borrow());
         let Some(button) = mouse_button(button) else {
             return;
         };
@@ -240,7 +244,15 @@ impl App<'_> {
     pub(super) fn mouse_wheel(&mut self, raw: u64, delta: MouseScrollDelta) {
         let window = Self::window_id(raw);
         let (x, y) = (self.cursor.0 as i32, self.cursor.1 as i32);
-        let Some((id, lx, ly)) = self.shared.hit_test(window, x, y) else {
+        let locked = *self.shared.pointer_lock.borrow();
+        let hit = match locked {
+            Some(id) => self
+                .shared
+                .local_point(id, x, y)
+                .map(|(lx, ly)| (id, lx, ly)),
+            None => self.shared.hit_test(window, x, y),
+        };
+        let Some((id, lx, ly)) = hit else {
             return;
         };
         // A line is one wheel notch; `winit` reports fractions, so scale.

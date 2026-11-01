@@ -75,6 +75,10 @@ impl Backend for WinitBackend {
     }
 
     fn close_window(&self, window: WindowId) {
+        let locked = *self.shared.pointer_lock.borrow();
+        if locked.is_some_and(|id| self.window_of(id) == Some(window)) {
+            self.shared.unlock_pointer(false);
+        }
         self.teardown_window_gl(window);
         self.shared.windows.borrow_mut().remove(&window.raw());
         self.shared.nodes.borrow_mut().remove_window(window);
@@ -160,6 +164,9 @@ impl Backend for WinitBackend {
     }
 
     fn destroy(&self, id: WidgetId) {
+        if *self.shared.pointer_lock.borrow() == Some(id) {
+            self.shared.unlock_pointer(false);
+        }
         let window = self.window_of(id);
         self.shared.nodes.borrow_mut().remove(id);
         if let Some(window) = window {
@@ -233,6 +240,14 @@ impl Backend for WinitBackend {
         {
             self.shared
                 .deliver(window, id, &xui_core::backend::Event::CaptureChanged);
+        }
+    }
+
+    fn set_pointer_lock(&self, id: WidgetId, locked: bool) {
+        if locked {
+            self.shared.lock_pointer(id);
+        } else if *self.shared.pointer_lock.borrow() == Some(id) {
+            self.shared.unlock_pointer(false);
         }
     }
 

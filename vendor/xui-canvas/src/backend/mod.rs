@@ -14,6 +14,7 @@
 mod app;
 mod contract;
 mod gl;
+mod pointer_lock;
 mod render;
 mod software;
 #[cfg(test)]
@@ -148,6 +149,9 @@ pub(crate) struct Shared {
     /// The node the pointer is captured by, if any: pointer moves and releases
     /// go to it even outside its bounds.
     pub(crate) captured: RefCell<Option<WidgetId>>,
+    /// The node that locked the pointer, if any: the cursor is hidden and
+    /// grabbed, and the node receives raw motion.
+    pub(crate) pointer_lock: RefCell<Option<WidgetId>>,
     /// Repeating timers: window, next due instant and period. A timer fires,
     /// is rescheduled one period on, and lives until killed.
     pub(crate) timers: RefCell<HashMap<usize, (WindowId, Instant, Duration)>>,
@@ -228,13 +232,9 @@ impl Shared {
 
     /// Requests a repaint of `window`.
     pub(crate) fn request_redraw(&self, window: WindowId) {
-        // Clone the handle out so no guard is live while `winit` is called.
-        let handle = self
-            .windows
-            .borrow()
-            .get(&window.raw())
-            .and_then(|state| state.window.clone());
-        if let Some(handle) = handle {
+        if let Some(state) = self.windows.borrow().get(&window.raw())
+            && let Some(handle) = &state.window
+        {
             handle.request_redraw();
         }
     }
@@ -268,6 +268,7 @@ impl WinitBackend {
                 nodes: RefCell::new(Scene::new()),
                 cursors: RefCell::new(HashMap::new()),
                 captured: RefCell::new(None),
+                pointer_lock: RefCell::new(None),
                 timers: RefCell::new(HashMap::new()),
                 next_window: Cell::new(1),
                 next_widget: Cell::new(1),

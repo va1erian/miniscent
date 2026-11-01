@@ -2672,7 +2672,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 [[package]]
 name = "xui"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=71dc3b5903ac94dba00466a6d6a00d69251beeab#71dc3b5903ac94dba00466a6d6a00d69251beeab"
+source = "git+https://github.com/va1erian/xui?rev=b3c8cd4c0f005914a143c730719cd5d0e830cdfa#b3c8cd4c0f005914a143c730719cd5d0e830cdfa"
 dependencies = [
  "embed-resource",
  "xui-canvas",
@@ -2698,7 +2698,7 @@ dependencies = [
 [[package]]
 name = "xui-core"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=71dc3b5903ac94dba00466a6d6a00d69251beeab#71dc3b5903ac94dba00466a6d6a00d69251beeab"
+source = "git+https://github.com/va1erian/xui?rev=b3c8cd4c0f005914a143c730719cd5d0e830cdfa#b3c8cd4c0f005914a143c730719cd5d0e830cdfa"
 dependencies = [
  "png",
  "zune-jpeg",
@@ -2707,7 +2707,7 @@ dependencies = [
 [[package]]
 name = "xui-gpu"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=71dc3b5903ac94dba00466a6d6a00d69251beeab#71dc3b5903ac94dba00466a6d6a00d69251beeab"
+source = "git+https://github.com/va1erian/xui?rev=b3c8cd4c0f005914a143c730719cd5d0e830cdfa#b3c8cd4c0f005914a143c730719cd5d0e830cdfa"
 dependencies = [
  "glow",
  "xui-core",

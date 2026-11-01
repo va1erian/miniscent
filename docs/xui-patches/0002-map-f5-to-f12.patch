@@ -1,7 +1,8 @@
 diff --git a/crates/xui-canvas/src/backend/app/keymap.rs b/crates/xui-canvas/src/backend/app/keymap.rs
---- a/crates/xui-canvas/src/backend/app/keymap.rs	2026-11-01 14:09:54.972781000 +0100
-+++ b/crates/xui-canvas/src/backend/app/keymap.rs	2026-11-01 14:10:01.061054300 +0100
-@@ -162,6 +162,14 @@
+index 885d70f..8d83691 100644
+--- a/crates/xui-canvas/src/backend/app/keymap.rs
++++ b/crates/xui-canvas/src/backend/app/keymap.rs
+@@ -162,6 +162,14 @@ pub(super) fn virtual_key(key: &WinitKey) -> Option<Key> {
              NamedKey::F2 => Key::F2,
              NamedKey::F3 => Key::F3,
              NamedKey::F4 => Key::F4,
@@ -16,7 +17,7 @@ diff --git a/crates/xui-canvas/src/backend/app/keymap.rs b/crates/xui-canvas/src
              _ => return None,
          },
          WinitKey::Character(text) => {
-@@ -197,6 +205,9 @@
+@@ -197,6 +205,9 @@ mod tests {
              Some(Key::ESCAPE)
          );
          assert_eq!(virtual_key(&WinitKey::Named(NamedKey::F1)), Some(Key::F1));

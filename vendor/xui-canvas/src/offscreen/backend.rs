@@ -140,6 +140,15 @@ impl Backend for OffscreenBackend {
         *self.captured.borrow_mut() = Some(id);
     }
 
+    fn set_pointer_lock(&self, id: WidgetId, locked: bool) {
+        let mut lock = self.pointer_lock.borrow_mut();
+        if locked {
+            *lock = Some(id);
+        } else if *lock == Some(id) {
+            *lock = None;
+        }
+    }
+
     fn release_capture(&self) {
         let previous = self.captured.borrow_mut().take();
         let Some(id) = previous else {

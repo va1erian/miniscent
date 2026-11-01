@@ -107,3 +107,23 @@ fn a_mouse_up_reaches_the_captured_node_outside_it() {
         Some((target, Event::MouseUp { .. })) if *target == node
     ));
 }
+
+#[test]
+fn the_pointer_lock_is_recorded_and_only_its_owner_releases_it() {
+    let backend = OffscreenBackend::new();
+    let window = backend.open_window(&PlatformSpec::new("lock")).unwrap();
+    let spec = NodeSpec::new(NodeKind::Container, Rect::new(0, 0, 60, 50));
+    let a = backend.create(ParentRef::Window(window), &spec).unwrap();
+    let b = backend.create(ParentRef::Window(window), &spec).unwrap();
+
+    backend.set_pointer_lock(a, true);
+    assert_eq!(backend.pointer_lock(), Some(a));
+    backend.set_pointer_lock(b, false);
+    assert_eq!(
+        backend.pointer_lock(),
+        Some(a),
+        "another node cannot unlock"
+    );
+    backend.set_pointer_lock(a, false);
+    assert_eq!(backend.pointer_lock(), None);
+}

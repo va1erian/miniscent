@@ -127,6 +127,7 @@ impl FaceGrid<'_> {
 
     /// Luxel `(x, y)` with both clamped into the face's own grid, so
     /// filtering never reads a neighbour's luxels.
+    #[inline]
     pub fn at_clamped(&self, x: u32, y: u32) -> Luxel {
         let x = x.min(self.w.saturating_sub(1)) as usize;
         let y = y.min(self.h.saturating_sub(1)) as usize;

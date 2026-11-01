@@ -8,7 +8,7 @@
 
 use mscent_math::Vec3;
 
-use crate::texture::Texture;
+use crate::texture::{NormalView, Texture};
 
 /// Lower bound on the flat response in the ratio, so grazing light (where the
 /// baked colour is already small) cannot blow the ratio up.
@@ -37,18 +37,21 @@ pub fn decode_normal(packed: u32) -> Vec3 {
 /// filtered (texel centres at half-integers) so magnified bump maps show
 /// smooth relief instead of texel stair-steps. The flat normal without a map.
 pub fn texel_normal(tex: &Texture, fu: i32, fv: i32) -> Vec3 {
+    tex.normal_view()
+        .map_or(FLAT_NORMAL, |map| view_normal(&map, fu, fv))
+}
+
+/// [`texel_normal`] on a map already looked up, for the per-pixel loop.
+#[inline]
+pub fn view_normal(map: &NormalView, fu: i32, fv: i32) -> Vec3 {
     let (u, v) = (fu.wrapping_sub(0x8000), fv.wrapping_sub(0x8000));
     let (x0, y0) = (u >> 16, v >> 16);
     let (tx, ty) = (((u >> 8) & 0xff) as u32, ((v >> 8) & 0xff) as u32);
-    let at = |x: i32, y: i32| tex.normal_texel(x, y);
-    let (Some(a), Some(b), Some(c), Some(d)) = (
-        at(x0, y0),
-        at(x0.wrapping_add(1), y0),
-        at(x0, y0.wrapping_add(1)),
-        at(x0.wrapping_add(1), y0.wrapping_add(1)),
-    ) else {
-        return FLAT_NORMAL;
-    };
+    let (a, b) = (map.texel(x0, y0), map.texel(x0.wrapping_add(1), y0));
+    let (c, d) = (
+        map.texel(x0, y0.wrapping_add(1)),
+        map.texel(x0.wrapping_add(1), y0.wrapping_add(1)),
+    );
     // Blend the bytes with exact integer weights (summing to 1 << 16) and
     // convert once per channel, instead of decoding four texels to floats.
     let (wa, wb) = ((256 - tx) * (256 - ty), tx * (256 - ty));

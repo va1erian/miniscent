@@ -1,9 +1,12 @@
 //! The 3D pane (and the full-area Play pane): one custom-painted xui node
 //! that shows the newest frame given to [`View3d::set_rgba`] and turns the
 //! input it receives into [`mscent_platform::Event`]s, the same vocabulary the
-//! game uses. xui has no pointer lock, so looking is "hold the right mouse
-//! button and drag" (relative motion computed from successive positions) or
-//! the arrow keys; the left button fires in Play.
+//! game uses. Looking uses xui's pointer lock: the right mouse button locks
+//! the pointer while held (Edit), and Play keeps it locked ([`View3d::set_grab`]);
+//! the backend's [`Event::PointerDelta`] then drives the look. A backend that
+//! cannot lock never sends deltas, so the right-button drag falls back to
+//! motion computed from successive positions, and the arrow keys always
+//! look. The left button fires in Play.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -53,18 +56,27 @@ pub struct Click {
     pub alt: bool,
 }
 
+/// Look state shared between the node's event handler and its owner.
 #[derive(Default)]
 struct Shared {
     image: RefCell<Option<Image>>,
     events: RefCell<Vec<PEvent>>,
     placeholder: RefCell<String>,
     clicks: RefCell<Vec<Click>>,
+    /// Play wants the pointer locked for as long as the pane is up.
+    grab: Cell<bool>,
+    /// A `PointerDelta` arrived for this lock, so the backend really locks and
+    /// position-difference look must not be added on top.
+    delta_seen: Cell<bool>,
+    /// The backend ended a grab the pane asked for (Esc or focus loss).
+    lock_lost: Cell<bool>,
 }
 
 /// A pane that draws a frame and collects input.
 pub struct View3d<M: 'static> {
     control: Control<M>,
     shared: Rc<Shared>,
+    ui: Ui<M>,
 }
 
 impl<M: 'static> View3d<M> {
@@ -103,7 +115,31 @@ impl<M: 'static> View3d<M> {
                 None
             });
         }
-        Ok(View3d { control, shared })
+        Ok(View3d {
+            control,
+            shared,
+            ui: ui.clone(),
+        })
+    }
+
+    /// Keeps the pointer locked (hidden, relative motion) while `on`, as Play
+    /// does; off releases it and any look in progress. Safe to repeat.
+    pub fn set_grab(&self, on: bool) {
+        self.shared.grab.set(on);
+        self.shared.lock_lost.set(false);
+        self.shared.delta_seen.set(false);
+        let id = self.control.id();
+        if on {
+            self.ui.set_pointer_lock(id, true);
+        } else {
+            self.ui.set_pointer_lock(id, false);
+        }
+    }
+
+    /// Whether the backend ended the grab on its own (Esc, focus loss) since
+    /// the last call.
+    pub fn take_lock_lost(&self) -> bool {
+        self.shared.lock_lost.replace(false)
     }
 
     /// Shows a frame of `w` by `h` RGBA pixels built off the UI thread; the
@@ -151,6 +187,15 @@ impl<M: 'static> View3d<M> {
                 (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
             });
         Some((img.width(), img.height(), sum))
+    }
+
+    /// The pixels shown (width, height, RGBA bytes), `None` before the first
+    /// frame (scripted runs measure how much a picture changed).
+    #[allow(dead_code, reason = "used by the self-test")]
+    pub fn frame_pixels(&self) -> Option<(u32, u32, Vec<u8>)> {
+        let img = self.shared.image.borrow();
+        let img = img.as_ref()?;
+        Some((img.width(), img.height(), img.pixels().to_vec()))
     }
 
     pub fn set_visible(&self, visible: bool) {
@@ -219,8 +264,16 @@ fn handle<M: 'static>(
                 MouseButton::Right => {
                     ui.set_capture(id);
                     look.set(Some((x, y)));
+                    if !shared.grab.get() {
+                        shared.delta_seen.set(false);
+                    }
+                    ui.set_pointer_lock(id, true);
                 }
                 MouseButton::Left => {
+                    if shared.grab.get() {
+                        // Click to take the pointer back if the lock did not start.
+                        ui.set_pointer_lock(id, true);
+                    }
                     if let Some(c) = picks(false) {
                         shared.clicks.borrow_mut().push(c);
                     }
@@ -236,6 +289,9 @@ fn handle<M: 'static>(
             MouseButton::Right => {
                 look.set(None);
                 ui.release_capture();
+                if !shared.grab.get() {
+                    ui.set_pointer_lock(id, false);
+                }
             }
             MouseButton::Left => push(PEvent::MouseButton {
                 button: PButton::Left,
@@ -246,10 +302,27 @@ fn handle<M: 'static>(
         Event::MouseMove { x, y, .. } => {
             if let Some((lx, ly)) = look.get() {
                 look.set(Some((x, y)));
-                push(PEvent::MouseMotion {
-                    dx: (x - lx) as f32,
-                    dy: (y - ly) as f32,
-                });
+                if !shared.delta_seen.get() {
+                    push(PEvent::MouseMotion {
+                        dx: (x - lx) as f32,
+                        dy: (y - ly) as f32,
+                    });
+                }
+            }
+        }
+        Event::PointerDelta { dx, dy } => {
+            shared.delta_seen.set(true);
+            push(PEvent::MouseMotion {
+                dx: dx as f32,
+                dy: dy as f32,
+            });
+        }
+        Event::PointerLockLost => {
+            if look.take().is_some() {
+                ui.release_capture();
+            }
+            if shared.grab.get() {
+                shared.lock_lost.set(true);
             }
         }
         Event::KeyDown { key, repeat, .. } if repeat <= 1 => {
@@ -270,6 +343,9 @@ fn handle<M: 'static>(
         }
         Event::KillFocus | Event::CaptureChanged => {
             look.set(None);
+            if !shared.grab.get() {
+                ui.set_pointer_lock(id, false);
+            }
             push(PEvent::FocusLost);
         }
         _ => {}

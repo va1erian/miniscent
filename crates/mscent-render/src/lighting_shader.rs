@@ -11,11 +11,11 @@
 use mscent_math::Vec3;
 use mscent_world::lightmap::{FaceGrid, FaceProjection, Lightmap, Luxel};
 
-use crate::bump::{FLAT_NORMAL, bump_gain, texel_normal};
+use crate::bump::{FLAT_NORMAL, bump_gain, view_normal};
 use crate::raster::Vertex;
 use crate::shade::{Fog, SpanEnd, SpanShader, lerp_rgb};
 use crate::specular::{SpecTable, half_vector};
-use crate::texture::Texture;
+use crate::texture::{NormalView, Texture};
 
 /// Highlight strength: the table peaks at gloss/255 of the light colour,
 /// which on dim baked light would be invisible.
@@ -128,6 +128,8 @@ struct SpecInput<'a> {
 pub struct LightingShader<'a, const SPEC: bool> {
     face: FaceLight<'a>,
     grid: FaceGrid<'a>,
+    /// The normal map to apply, when bump mapping is on and the texture has one.
+    normals: Option<NormalView<'a>>,
     proj: FaceProjection,
     spec: Option<SpecInput<'a>>,
     // Per-span state. The lightmap is sampled every `1 << shift` pixels and
@@ -141,6 +143,9 @@ pub struct LightingShader<'a, const SPEC: bool> {
     y0: i32,
     fog0: f32,
     fog_step: f32,
+    /// The knot at the end of the previous span and its luxel position: the
+    /// next span on the row starts exactly there, so it is not sampled twice.
+    carry: Option<(f32, f32, Knot)>,
 }
 
 /// Longest lightmap sampling interval, in pixels (a power of two).
@@ -211,6 +216,7 @@ impl<'a, const SPEC: bool> LightingShader<'a, SPEC> {
         Some(Self {
             face,
             grid,
+            normals: face.texture.normal_view().filter(|_| face.bump),
             proj,
             spec,
             segs: [EMPTY_SEG; MAX_SEGS],
@@ -220,6 +226,7 @@ impl<'a, const SPEC: bool> LightingShader<'a, SPEC> {
             y0: 0,
             fog0: 0.0,
             fog_step: 0.0,
+            carry: None,
         })
     }
 
@@ -308,10 +315,25 @@ impl<'a, const SPEC: bool> LightingShader<'a, SPEC> {
         let seg_len = 1u32 << self.shift;
         let t_per_px = 1.0 / len.max(1) as f32;
         let inv = 1.0 / seg_len as f32;
-        let mut a = self.knot(ax, ay);
+        let carried = self
+            .carry
+            .filter(|&(cx, cy, _)| cx.to_bits() == ax.to_bits() && cy.to_bits() == ay.to_bits());
+        let mut a = carried.map_or_else(|| self.knot(ax, ay), |(_, _, k)| k);
+        self.carry = None;
         for k in 0..len.div_ceil(seg_len) {
             let t = ((k + 1) * seg_len) as f32 * t_per_px;
-            let b = self.knot(ax + (bx - ax) * t, ay + (by - ay) * t);
+            // A span that ends on a knot samples exactly at its end, which
+            // is where the next span begins.
+            let at_end = (k + 1) * seg_len == len;
+            let (kx, ky) = if at_end {
+                (bx, by)
+            } else {
+                (ax + (bx - ax) * t, ay + (by - ay) * t)
+            };
+            let b = self.knot(kx, ky);
+            if at_end {
+                self.carry = Some((kx, ky, b));
+            }
             self.segs[k as usize & (MAX_SEGS - 1)] = Seg {
                 col0: a.col,
                 dcol: (b.col - a.col) * inv,
@@ -389,9 +411,9 @@ impl<const SPEC: bool> SpanShader for LightingShader<'_, SPEC> {
         let mut n = FLAT_NORMAL;
         // Past BUMP_GONE the relief has faded to flat, whose gain is exactly
         // 1, so the normal fetch is skipped.
-        if self.face.bump && self.bump_scale > 0.0 {
+        if let Some(map) = self.normals.filter(|_| self.bump_scale > 0.0) {
             // Fade the normal towards flat as the map is minified.
-            n = texel_normal(self.face.texture, fu, fv);
+            n = view_normal(&map, fu, fv);
             if self.bump_scale < 1.0 {
                 n = FLAT_NORMAL + (n - FLAT_NORMAL) * self.bump_scale;
             }
@@ -417,8 +439,13 @@ impl<const SPEC: bool> SpanShader for LightingShader<'_, SPEC> {
         }
         match self.face.fog {
             Some(fog) => {
-                let amount = (self.fog0 + self.fog_step * i as f32).clamp(0.0, 256.0);
-                lerp_rgb(out, fog.color, amount as u32)
+                let amount = (self.fog0 + self.fog_step * i as f32).clamp(0.0, 256.0) as u32;
+                // Zero fog leaves the colour exactly as it is.
+                if amount == 0 {
+                    out
+                } else {
+                    lerp_rgb(out, fog.color, amount)
+                }
             }
             None => out,
         }
