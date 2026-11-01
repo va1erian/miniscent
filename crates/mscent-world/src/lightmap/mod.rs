@@ -17,6 +17,8 @@ pub mod ray;
 pub mod uv;
 
 #[cfg(test)]
+mod review_tests;
+#[cfg(test)]
 mod tests;
 
 pub use atlas::{Atlas, AtlasError, PADDING, Rect};
@@ -50,7 +52,7 @@ pub struct PointLight {
     /// Linear RGB, already multiplied by intensity.
     pub color: Vec3,
     /// Distance at which the light reaches zero. Attenuation is
-    /// `(1 - d / radius)^2`.
+    /// `(1 - d / radius)^3`, times the cosine of the incidence angle.
     pub radius: f32,
 }
 

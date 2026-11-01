@@ -87,12 +87,13 @@ fn grooved(tilt: (f32, f32)) -> Texture {
         .unwrap()
 }
 
-/// Tangent-space direction of the light at the luxel under pixel `(x, y)`.
+/// Direction of the light at the luxel under pixel `(x, y)`, in the texture
+/// frame the normal maps are authored in.
 fn dir_at_pixel(lm: &Lightmap, tex: &Texture, x: u32, y: u32) -> Vec3 {
     let map = UvToLuxel::from_vertices(&lm.projections()[0], &wall(), tex).unwrap();
     let (u, v) = (x as f32 / 8.0, y as f32 / 8.0);
     let (lx, ly) = map.apply(u, v);
-    lm.face_luxel(0, lx as u32, ly as u32).unwrap().dir
+    map.to_texture_frame(lm.face_luxel(0, lx as u32, ly as u32).unwrap().dir)
 }
 
 fn face<'a>(lm: &'a Lightmap, tex: &'a Texture, bump: bool) -> FaceLight<'a> {
@@ -347,4 +348,50 @@ fn soft_limit_is_monotonic_continuous_and_bounded() {
     }
     // Two very bright inputs stay distinguishable (no flat clipping).
     assert!(soft_limit(900.0) > soft_limit(500.0) + 5.0);
+}
+
+/// A texture whose every texel has the normal `tilt` (texture-space x along
+/// +u, y towards the top of the image, as the generated maps are authored).
+fn uniformly_tilted(tilt: (f32, f32)) -> Texture {
+    let n = pack(Vec3::new(tilt.0, tilt.1, 1.0).normalized().unwrap());
+    Texture::new(8, 8, vec![WHITE; 64])
+        .unwrap()
+        .with_normals(vec![n; 64])
+        .unwrap()
+}
+
+fn bumped_red(tilt: (f32, f32), x: u32, y: u32) -> u32 {
+    let lm = baked();
+    let tex = uniformly_tilted(tilt);
+    let img = render(
+        &tex,
+        &mut LightingShader::new(face(&lm, &tex, true)).unwrap(),
+    );
+    red(px(&img, x, y))
+}
+
+#[test]
+fn bump_light_direction_follows_the_texture_axes_not_the_lightmap_axes() {
+    // The lamp is at world x = -1.5, y = 0: left of pixel column 24 and level
+    // with pixel row 32. Normals tilted towards -u (left) face the lamp.
+    let (toward, away, flat) = (
+        bumped_red((-0.6, 0.0), 24, 32),
+        bumped_red((0.6, 0.0), 24, 32),
+        bumped_red((0.0, 0.0), 24, 32),
+    );
+    assert!(toward > flat + 8, "toward {toward} flat {flat}");
+    assert!(away + 8 < flat, "away {away} flat {flat}");
+}
+
+#[test]
+fn bump_light_direction_has_the_right_vertical_sense() {
+    // Pixel row 44 is below the lamp (y = -0.75 vs 0): the lamp is towards the
+    // top of the image, which is +y in the normal map.
+    let (up, down, flat) = (
+        bumped_red((0.0, 0.6), 16, 44),
+        bumped_red((0.0, -0.6), 16, 44),
+        bumped_red((0.0, 0.0), 16, 44),
+    );
+    assert!(up > flat + 8, "up {up} flat {flat}");
+    assert!(down + 8 < flat, "down {down} flat {flat}");
 }

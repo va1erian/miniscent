@@ -87,17 +87,15 @@ where
 
     /// False only when all eight corners lie outside one frustum plane.
     fn box_in_view(&self, b: &Aabb) -> bool {
-        let corners: Vec<Vec3> = (0..8)
-            .map(|i| {
-                let pick = |bit: u32, lo: f32, hi: f32| if i & bit == 0 { lo } else { hi };
-                let p = Vec3::new(
-                    pick(1, b.min.x, b.max.x),
-                    pick(2, b.min.y, b.max.y),
-                    pick(4, b.min.z, b.max.z),
-                );
-                self.cam.world_to_camera(p)
-            })
-            .collect();
+        let corners: [Vec3; 8] = std::array::from_fn(|i| {
+            let pick = |bit: usize, lo: f32, hi: f32| if i & bit == 0 { lo } else { hi };
+            let p = Vec3::new(
+                pick(1, b.min.x, b.max.x),
+                pick(2, b.min.y, b.max.y),
+                pick(4, b.min.z, b.max.z),
+            );
+            self.cam.world_to_camera(p)
+        });
         (0..6).all(|plane| {
             corners
                 .iter()

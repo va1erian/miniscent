@@ -81,7 +81,7 @@ fn gather_row(s: &Scene, patches: &[Patch], face: usize, row: u32) -> Vec<Luxel>
     let p = &s.proj[face];
     (0..p.width)
         .map(|x| {
-            let point = p.luxel_center(x, row);
+            let point = p.luxel_sample(&s.faces[face].vertices, x, row);
             let mut acc = Luxel {
                 color: Vec3::ZERO,
                 dir: Vec3::ZERO,

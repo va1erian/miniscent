@@ -91,7 +91,9 @@ fn entities(
         });
         if i == 0 {
             out.push(Entity::PlayerStart {
-                pos: Vec3::new(x - 4.0, y - 4.0, 2.0),
+                // Pillars stand at least 3 units from the centre on both
+                // axes, so 2 units off-centre is always clear of them.
+                pos: Vec3::new(x - 2.0, y - 2.0, 2.0),
                 yaw: -0.8,
             });
         } else if i + 1 == centres.len() {

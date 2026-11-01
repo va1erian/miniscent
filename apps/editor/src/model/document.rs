@@ -218,6 +218,11 @@ impl Document {
         self.replace_brush(def);
     }
 
+    #[cfg(test)]
+    pub fn insert_entity_for_test(&mut self, id: Id, entity: Entity) {
+        self.insert_entity(self.entities.len(), EntityDef { id, entity });
+    }
+
     pub(super) fn move_brush(&mut self, id: Id, to: usize) {
         if let Some(from) = self.brush_index(id) {
             let b = self.brushes.remove(from);

@@ -117,10 +117,17 @@ pub fn run(platform: &mut dyn Platform, session: &mut GameSession, opts: &RunOpt
         }
         let total_ms = frame_start.elapsed().as_secs_f32() * 1000.0;
         smooth_ms += (total_ms - smooth_ms) * 0.1;
-        session.set_stats(FrameStats {
-            fps: 1000.0 / smooth_ms.max(0.01),
-            frame_ms: ms as f32,
-        });
+        // Wall-clock timings in the HUD would make unpaced (scripted,
+        // headless) runs differ pixel for pixel, so only paced runs show them.
+        if target.is_some() {
+            session.set_stats(FrameStats {
+                fps: 1000.0 / smooth_ms.max(0.01),
+                frame_ms: ms as f32,
+            });
+        }
+    }
+    if captured {
+        platform.set_mouse_captured(false);
     }
     summarize(
         costs,

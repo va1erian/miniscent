@@ -33,6 +33,26 @@ impl FaceProjection {
         self.origin + self.tangent * u + self.bitangent * v
     }
 
+    /// Where to light luxel `(x, y)`: its centre, or, when the centre falls
+    /// outside the (convex) face polygon `verts`, the nearest point of the
+    /// polygon nudged inwards. A grid that is not a whole number of luxels
+    /// across hangs over the face edge, and a centre past the edge sits inside
+    /// the neighbouring wall, which would shadow the whole edge row black.
+    pub fn luxel_sample(&self, verts: &[Vec3], x: u32, y: u32) -> Vec3 {
+        let flat = |i: usize| {
+            let d = verts[i % verts.len()] - self.origin;
+            [d.dot(self.tangent), d.dot(self.bitangent)]
+        };
+        let q = [
+            self.u_min + (x as f32 + 0.5) * self.luxel_size,
+            self.v_min + (y as f32 + 0.5) * self.luxel_size,
+        ];
+        match nearest_inside(verts.len(), flat, q, self.luxel_size * 0.02) {
+            Some([u, v]) => self.origin + self.tangent * u + self.bitangent * v,
+            None => self.luxel_center(x, y),
+        }
+    }
+
     /// Luxel containing the world point's projection, clamped to the grid.
     pub fn nearest_luxel(&self, p: Vec3) -> (u32, u32) {
         let d = p - self.origin;
@@ -55,6 +75,56 @@ impl FaceProjection {
             w.dot(self.normal),
         )
     }
+}
+
+/// `None` if `q` is inside the convex polygon of `n` corners given by `pt`
+/// (or the polygon cannot hold a point), else the closest boundary point
+/// moved `inset` towards the polygon's centroid.
+fn nearest_inside(
+    n: usize,
+    pt: impl Fn(usize) -> [f32; 2],
+    q: [f32; 2],
+    inset: f32,
+) -> Option<[f32; 2]> {
+    if n < 3 {
+        return None;
+    }
+    let (mut all_pos, mut all_neg) = (true, true);
+    let mut best: Option<(f32, [f32; 2])> = None;
+    let mut sum = [0.0f32; 2];
+    for i in 0..n {
+        let (a, b) = (pt(i), pt(i + 1));
+        let ab = [b[0] - a[0], b[1] - a[1]];
+        let side = ab[0] * (q[1] - a[1]) - ab[1] * (q[0] - a[0]);
+        all_pos &= side >= 0.0;
+        all_neg &= side <= 0.0;
+        let len2 = ab[0] * ab[0] + ab[1] * ab[1];
+        let t = if len2 > 0.0 {
+            (((q[0] - a[0]) * ab[0] + (q[1] - a[1]) * ab[1]) / len2).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let p = [a[0] + ab[0] * t, a[1] + ab[1] * t];
+        let d = (p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2);
+        if best.is_none_or(|(bd, _)| d < bd) {
+            best = Some((d, p));
+        }
+        sum = [sum[0] + a[0], sum[1] + a[1]];
+    }
+    if all_pos || all_neg {
+        return None;
+    }
+    let (_, p) = best?;
+    let c = [sum[0] / n as f32, sum[1] / n as f32];
+    let (dx, dy) = (c[0] - p[0], c[1] - p[1]);
+    let dist = dx.hypot(dy);
+    let step = inset.min(dist);
+    let moved = if dist > 0.0 {
+        [p[0] + dx / dist * step, p[1] + dy / dist * step]
+    } else {
+        p
+    };
+    moved.iter().all(|v| v.is_finite()).then_some(moved)
 }
 
 /// Picks a tangent perpendicular to `n`, built from the world axis least

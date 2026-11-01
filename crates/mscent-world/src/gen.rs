@@ -201,6 +201,11 @@ fn all_edges(cols: usize, rows: usize) -> Vec<Link> {
 fn add_extra_links(rng: &mut Rng, cols: usize, rows: usize, count: u32, links: &mut Vec<Link>) {
     let edges = all_edges(cols, rows);
     for _ in 0..count {
+        // Every grid edge is already a corridor; further picks cannot add
+        // one, and `count` is caller-controlled (up to u32::MAX).
+        if links.len() >= edges.len() {
+            return;
+        }
         let pick = rng.below(u32::try_from(edges.len()).unwrap_or(1));
         let Some(&e) = edges.get(pick as usize) else {
             return;

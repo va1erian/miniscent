@@ -219,8 +219,8 @@ impl EditorState {
                         self.doc.replace_brush(&moved);
                     }
                     Original::Entity(orig) => {
-                        let q = pos(&orig.entity);
-                        let np = [q[0] + d[0], q[1] + d[1], q[2] + d[2]];
+                        let q = orig.entity.pos();
+                        let np = [q.x as f64 + d[0], q.y as f64 + d[1], q.z as f64 + d[2]];
                         let moved = EntityDef {
                             id: orig.id,
                             entity: with_pos(&orig.entity, np),

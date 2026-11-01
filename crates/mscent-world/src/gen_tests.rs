@@ -90,3 +90,44 @@ fn larger_level_connects() {
     let (_, portals) = check_level(5, &p);
     assert!(!portals.portals().is_empty());
 }
+
+#[test]
+fn every_generated_entity_is_in_empty_space_for_many_seeds() {
+    use crate::{LeafKind, compile, generate_level};
+    let params = GenParams {
+        cols: 2,
+        rows: 2,
+        extra_links: 1,
+        pillar_percent: 100,
+    };
+    let mut bad = Vec::new();
+    for seed in 0..150u64 {
+        let level = generate_level(seed, &params);
+        let bsp = compile(&level.brushes).expect("compiles");
+        for e in &level.entities {
+            let leaf = bsp.leaf_at_f32(e.pos());
+            if !e.is_valid() || bsp.leaf_kind(leaf) != LeafKind::Empty {
+                bad.push((seed, *e));
+            }
+        }
+    }
+    assert!(bad.is_empty(), "entities in solid: {bad:?}");
+}
+
+#[test]
+fn absurd_link_counts_finish_quickly() {
+    let params = GenParams {
+        cols: 3,
+        rows: 3,
+        extra_links: u32::MAX,
+        pillar_percent: u32::MAX,
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(generate(1, &params).len());
+    });
+    let n = rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("generate must not spin on u32::MAX extra links");
+    assert!(n > 9);
+}

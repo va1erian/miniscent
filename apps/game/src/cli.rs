@@ -114,7 +114,12 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
             }
             "--shots-at" => {
                 for t in value("--shots-at")?.split(',') {
-                    let t: f64 = t.trim().parse().map_err(|_| "bad --shots-at time")?;
+                    let t: f64 = t
+                        .trim()
+                        .parse()
+                        .ok()
+                        .filter(|t: &f64| t.is_finite() && *t >= 0.0)
+                        .ok_or("--shots-at times must be finite and >= 0")?;
                     o.shots_at.push(t);
                 }
             }
@@ -183,6 +188,9 @@ mod tests {
             &["--frames"],
             &["--bogus"],
             &["--frames", "x"],
+            &["--shots-at", "nan"],
+            &["--shots-at", "-1"],
+            &["--shots-at", "inf"],
         ] {
             assert!(p(args).is_err(), "{args:?}");
         }

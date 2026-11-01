@@ -85,17 +85,51 @@ pub(super) fn draw_overlay(fb: &mut Framebuffer, o: &Overlay) {
     let (w, h) = (fb.width() as i32, fb.height() as i32);
     let max = o.max_health.max(1);
     let hp = o.health.clamp(0, max);
-    let color = match hp * 4 / max {
+    let color = match i64::from(hp) * 4 / i64::from(max) {
         0 => 0xffe0_3030,
         1 => 0xffe0_c030,
         _ => 0xff30_d060,
     };
     let (bx, by, bw, bh) = (6, h - 14, 60u32, 7u32);
     fill_rect(fb, bx, by, bw, bh, 0xff20_2020);
-    fill_rect(fb, bx, by, bw * hp as u32 / max as u32, bh, color);
+    fill_rect(
+        fb,
+        bx,
+        by,
+        (u64::from(bw) * hp as u64 / max as u64) as u32,
+        bh,
+        color,
+    );
     stroke_rect(fb, bx - 1, by - 1, bw + 2, bh + 2, 1, 0xffc0_c0c0);
     label(fb, bx + bw as i32 + 6, by, &format!("HP {hp}"), WHITE);
     let fps = format!("{:.0} FPS", o.fps);
     let (tw, _) = crate::draw2d::text_size(&fps, 1);
     label(fb, w - tw as i32 - 6, 5, &fps, WHITE);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn huge_health_values_do_not_overflow_the_bar() {
+        let mut fb = Framebuffer::new(160, 90).unwrap();
+        for (health, max_health) in [(i32::MAX, i32::MAX), (i32::MAX / 2, i32::MAX), (5, 0)] {
+            let o = Overlay {
+                health,
+                max_health,
+                fps: f32::NAN,
+            };
+            draw_overlay(&mut fb, &o);
+        }
+        // A full bar fills its whole width.
+        let o = Overlay {
+            health: i32::MAX,
+            max_health: i32::MAX,
+            fps: 60.0,
+        };
+        draw_overlay(&mut fb, &o);
+        let full = fb.pixels()[(fb.height() as usize - 11) * fb.width() as usize + 6 + 59];
+        assert_eq!(full, 0xff30_d060);
+    }
 }

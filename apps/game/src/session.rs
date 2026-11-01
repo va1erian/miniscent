@@ -227,15 +227,21 @@ impl GameSession {
 
     /// Returns true when the event asks to quit.
     fn on_event(&mut self, e: &Event) -> bool {
+        // A click that resumes from pause is consumed: it must not also fire.
+        if matches!(
+            *e,
+            Event::MouseButton {
+                button: MouseButton::Left,
+                pressed: true
+            }
+        ) && self.menu.screen() == Screen::Paused
+        {
+            self.menu.press(MenuCommand::Back);
+            return false;
+        }
         match *e {
             Event::Quit => return true,
             Event::FocusLost if self.playing() => {
-                self.menu.press(MenuCommand::Back);
-            }
-            Event::MouseButton {
-                button: MouseButton::Left,
-                pressed: true,
-            } if self.menu.screen() == Screen::Paused => {
                 self.menu.press(MenuCommand::Back);
             }
             _ => {}

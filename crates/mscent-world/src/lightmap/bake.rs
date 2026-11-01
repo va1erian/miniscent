@@ -170,7 +170,7 @@ pub(super) fn luminance(c: Vec3) -> f32 {
 fn direct_row(s: &Scene, face: usize, row: u32) -> Vec<Luxel> {
     let p = &s.proj[face];
     (0..p.width)
-        .map(|x| direct_at(s, p, p.luxel_center(x, row)))
+        .map(|x| direct_at(s, p, p.luxel_sample(&s.faces[face].vertices, x, row)))
         .collect()
 }
 

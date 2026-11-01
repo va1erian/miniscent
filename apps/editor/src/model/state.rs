@@ -112,7 +112,7 @@ impl EditorState {
     }
 
     pub fn undo(&mut self) -> bool {
-        self.drag = None;
+        self.cancel_drag();
         let ok = self.history.undo(&mut self.doc);
         self.drop_stale_selection();
         self.message = if ok { "Undo" } else { "Nothing to undo" }.into();
@@ -120,7 +120,7 @@ impl EditorState {
     }
 
     pub fn redo(&mut self) -> bool {
-        self.drag = None;
+        self.cancel_drag();
         let ok = self.history.redo(&mut self.doc);
         self.drop_stale_selection();
         self.message = if ok { "Redo" } else { "Nothing to redo" }.into();
@@ -159,7 +159,12 @@ impl EditorState {
         let mut cmds = Vec::new();
         if k == EntityKind::PlayerStart {
             for old in self.doc.entities().iter().filter(|e| kind(&e.entity) == k) {
-                let index = self.doc.entity_index(old.id).unwrap_or(0);
+                // Each removal sees the list after the earlier ones.
+                let index = self
+                    .doc
+                    .entity_index(old.id)
+                    .unwrap_or(0)
+                    .saturating_sub(cmds.len());
                 cmds.push(Command::RemoveEntity {
                     index,
                     entity: *old,

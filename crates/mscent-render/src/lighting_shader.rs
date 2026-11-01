@@ -29,6 +29,9 @@ type Pair = [f32; 4];
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UvToLuxel {
     m: [f32; 6],
+    /// Unit vectors, in the tangent frame's xy plane, of the texture's +u
+    /// axis and of its up axis (-v, the normal map's +y).
+    frame: [f32; 4],
 }
 
 impl UvToLuxel {
@@ -58,7 +61,22 @@ impl UvToLuxel {
         let (a, b, c) = solve(2);
         let (d, e, f) = solve(3);
         let m = [a, b, c, d, e, f];
-        m.iter().all(|x| x.is_finite()).then_some(Self { m })
+        let unit = |x: f32, y: f32| {
+            let len = x.hypot(y);
+            (len > 0.0).then(|| [x / len, y / len])
+        };
+        let (eu, ev) = (unit(a, d)?, unit(-b, -e)?);
+        let frame = [eu[0], eu[1], ev[0], ev[1]];
+        (m.iter().chain(&frame).all(|x| x.is_finite())).then_some(Self { m, frame })
+    }
+
+    /// Re-express a unit vector given in the lightmap's tangent frame in the
+    /// texture's frame (x along +u, y towards the top of the image), which is
+    /// the frame the normal maps are authored in. The two frames differ by a
+    /// rotation (and possibly a mirror) that depends on the face orientation.
+    pub fn to_texture_frame(&self, v: Vec3) -> Vec3 {
+        let f = &self.frame;
+        Vec3::new(v.x * f[0] + v.y * f[1], v.x * f[2] + v.y * f[3], v.z)
     }
 
     /// Luxel coordinates of texel coordinates `(u, v)`.
@@ -188,11 +206,15 @@ impl<'a, const SPEC: bool> LightingShader<'a, SPEC> {
         let (a, b) = (self.sample(ax, ay), self.sample(bx, by));
         self.col0 = a.color * 256.0;
         self.dcol = (b.color - a.color) * (256.0 * inv);
-        self.dir0 = a.dir;
-        self.ddir = (b.dir - a.dir) * inv;
+        // Bump normals live in the texture frame; the baked directions and
+        // the view vector are in the lightmap's tangent frame.
+        let to_tex = |v: Vec3| self.face.map.to_texture_frame(v);
+        let (da, db) = (to_tex(a.dir), to_tex(b.dir));
+        self.dir0 = da;
+        self.ddir = (db - da) * inv;
         if let Some(spec) = self.spec {
-            let ha = half_vector(a.dir, self.view_dir(&spec, ax, ay));
-            let hb = half_vector(b.dir, self.view_dir(&spec, bx, by));
+            let ha = to_tex(half_vector(a.dir, self.view_dir(&spec, ax, ay)));
+            let hb = to_tex(half_vector(b.dir, self.view_dir(&spec, bx, by)));
             self.half0 = ha;
             self.dhalf = (hb - ha) * inv;
         }

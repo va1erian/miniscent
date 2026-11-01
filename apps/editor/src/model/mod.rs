@@ -9,6 +9,8 @@ pub mod state;
 pub mod view;
 
 #[cfg(test)]
+mod review_tests;
+#[cfg(test)]
 mod tests;
 
 pub use document::{Document, Shape};

@@ -24,6 +24,9 @@ const TAP_SECONDS: f64 = 0.05;
 const FIRE_SECONDS: f64 = 0.1;
 /// Most pieces one `over` command may expand to.
 const MAX_SLICES: usize = 10_000;
+/// Most actions a whole script may expand to (a hostile file of `over`
+/// lines would otherwise allocate without bound).
+const MAX_ACTIONS: usize = 500_000;
 
 /// A parse failure with the 1-based line it happened on.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -74,6 +77,12 @@ impl Script {
                 line: i + 1,
                 message,
             })?;
+            if actions.len() > MAX_ACTIONS {
+                return Err(ScriptError {
+                    line: i + 1,
+                    message: format!("script expands to more than {MAX_ACTIONS} actions"),
+                });
+            }
         }
         // Stable: commands at the same time keep their written order.
         actions.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -210,6 +219,15 @@ mod tests {
             }
         }
         assert!((sx - 120.0).abs() < 0.01 && (sy + 30.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_script_cannot_expand_without_bound() {
+        let text = "at 0s mouse 1 1 over 86400s
+"
+        .repeat(100);
+        let e = Script::parse(&text).unwrap_err();
+        assert!(e.line <= 51 && e.message.contains("more than"), "{e}");
     }
 
     #[test]
