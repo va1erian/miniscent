@@ -45,7 +45,7 @@ hardware (`lazyos/docs/compat/kabylake/hw-survey/03-cpuinfo.txt`).
 | World | Ordered add/subtract convex brushes compiled to a solid/empty-leaf BSP with portals | The original Unreal model |
 | Collision | Swept sphere against the BSP, analytic sphere-sphere for entities | Tunnel-proof; a sphere suits 6DoF |
 | Lighting | Offline bake: colour plus a dominant light direction per luxel | Enables bump mapping at no per-pixel lightmap cost |
-| Bump mapping | Tangent-space normal map against the baked direction, evaluated per 16 px span | Measured at about 15% cheaper than a per-pixel bilinear lightmap (`examples/bump_bench.rs`) |
+| Bump mapping | Tangent-space normal map against the baked direction, evaluated per 16 px span | Measured in `examples/bump_bench.rs` at 640x360: bump roughly doubles span-stepped shading (0.47 to 0.94 ms per frame on the dev machine, an estimated 4 to 5 ms on the i3-7100U at overdraw 1); evaluating the light per pixel instead of per span costs about twice that again |
 | Specular | High-detail option only, from the same baked direction and a per-material gloss | No extra lightmap data; zero cost when off |
 
 ## Architecture
@@ -96,9 +96,13 @@ platform allows. A headless benchmark with a frame-time budget guards 60 fps.
 ### Collision
 
 The player and enemies are spheres. Movement is a sweep, then slide along the
-hit plane, repeated a bounded number of times. Brush planes are pushed out by
-the sphere radius, as in Quake's `trace`. The physics step is fixed
-(120 Hz) and deterministic. Tests include a property-based fuzzer that fires
+hit plane, repeated a bounded number of times. The sweep is a ray against each
+convex solid cell expanded by the sphere radius. Face contacts use the planes
+pushed out by the radius. Edge and vertex contacts are tested exactly (ray
+against the cylinder around each edge and the sphere around each vertex), because
+pushed-out planes alone leave square corners and stop the sphere early at convex
+edges, an invisible wall. Quake's precomputed fixed-size hulls do not cover an
+arbitrary radius. The physics step is fixed (120 Hz) and deterministic. Tests include a property-based fuzzer that fires
 random sweeps into random levels and asserts the sphere never ends inside
 solid and never skips a wall.
 
@@ -136,7 +140,7 @@ section of its `README.md`):
   -- -D warnings -D clippy::undocumented_unsafe_blocks`, `cargo test`, the
   file-length check, and the docs check.
 - **Pre-PR review is required** after the CI basics pass and the branch is
-  committed.
+  committed. Findings are fixed or answered in the PR before merge.
 
 On LazyOS the game also follows its app conventions: launchable from
 `run_demo.py` and the GUI launcher with a build switch and a core package, a
@@ -153,7 +157,10 @@ trace channel instead of printed markers, and paths from `libs/fhs`.
   sprites, the upscale and the present. The numbers in `bump_bench` show
   feasibility only; M1.4 measures on the real machine.
 - **Present cost on LazyOS.** The display grant copies a damage rectangle per
-  frame, and it must fit in the frame budget.
+  frame through the kernel. A full 2560x1440 RGBA frame is 14.7 MB, about
+  880 MB/s at 60 fps, and the upscale to the window comes on top. The
+  benchmark excludes both, so M1.3 measures them on the box before the
+  renderer is designed around an internal resolution.
 
 ## Open questions
 

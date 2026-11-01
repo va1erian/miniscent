@@ -22,9 +22,9 @@ Sizes: S is under a day, M a few days, L a week or more.
 |---|---|---|---|---|
 | M1.1 | `mscent-platform`: xui window presenting an RGBA framebuffer on Windows, with a timing readout | M0.1 | M | A spinning textured triangle at a steady rate; a screenshot test reads the pixels |
 | M1.2 | Keyboard and relative mouse input through xui on Windows | M1.1 | S | Look and move input reach a test scene; the cursor is captured and released with `Esc` |
-| M1.3 | LazyOS feasibility spike: build the M1.1 app for LazyOS, answer threads, SMP kernel, AVX, mouse capture and `std` support | M1.1 | M | A short report in `docs/` with a yes or no and a fallback for each; an app that boots under `run_demo.py` |
-| M1.4 | Run `examples/bump_bench.rs` on the i3-7100U (Windows) and under LazyOS, record results | M1.1 | S | Numbers in `docs/perf/` for variants A, B, C and the specular variant D |
-| M1.5 | Extend `bump_bench` with variant D (bump plus specular per span) | M0.1 | S | D reports ms per frame next to A, B and C |
+| M1.3 | LazyOS feasibility spike: build the M1.1 app for LazyOS, answer threads, SMP kernel, AVX, mouse capture and `std` support; measure the present path and the upscale (full-screen RGBA at the box's resolution, ms per frame) | M1.1 | M | A short report in `docs/` with a yes or no and a fallback for each, and the present and upscale cost in ms; an app that boots under `run_demo.py` |
+| M1.4 | Run `examples/bump_bench.rs` on the i3-7100U (Windows) and under LazyOS, record results | M1.1 | S | Numbers in `docs/perf/` for variants A, B, S, C and the specular variant D |
+| M1.5 | Extend `bump_bench` with variant D (bump plus specular per span) | M0.1 | S | D reports ms per frame next to A, B, S and C; D is compared with C |
 
 ## M2 CSG to BSP (`mscent-world`)
 
@@ -48,18 +48,19 @@ Sizes: S is under a day, M a few days, L a week or more.
 | M3.5 | Fog, sky and flat-lit fallback | M3.3 | S | Snapshot tests |
 | M3.6 | Tile-parallel rendering with a worker count of 1 as a valid setting; SSE2 baseline and an AVX2 path | M3.3 | L | Identical pixels at 1 and N workers; scaling measured; no syscalls in the frame loop |
 | M3.7 | Adaptive internal resolution and the upscale to the window | M3.3, M1.1 | M | Scale drops when the frame cost exceeds budget and recovers |
-| M3.8 | Frame-time benchmark with a budget, run in CI | M3.4 | M | The benchmark fails a PR that exceeds the budget on the reference scene |
+| M3.8 | Frame-cost benchmark on a fixed reference scene, headless. CI gates a machine-independent figure (the ratio to a calibration loop run in the same process); the absolute 16.6 ms budget is checked on the reference box (L5) | M3.4 | M | A PR that makes the reference scene 10% costlier relative to the calibration loop fails CI; repeated runs on the CI runner vary by less than the gate |
 | M3.9 | Mesh drawing for enemies and the goal, vertex-lit | M3.3 | M | Snapshot tests of a mesh from several angles |
 
 ## M4 Collision (`mscent-collide`)
 
 | ID | Item | Deps | Size | Done when |
 |---|---|---|---|---|
-| M4.1 | Sweep a sphere against the BSP with planes pushed out by the radius | M2.3 | L | Unit tests on walls, corners, edges and slopes |
-| M4.2 | Slide response with a bounded iteration count and crease handling | M4.1 | M | Tests in two-plane and three-plane corners; no jitter |
+| M4.1 | Sweep a sphere against the BSP's solid cells: face contacts with planes pushed out by the radius | M2.3 | L | Unit tests on walls and slopes, including grazing and glancing hits |
+| M4.2 | Slide response with a bounded iteration count and crease handling | M4.1, M4.6 | M | Tests in two-plane and three-plane corners; no jitter |
 | M4.3 | Sphere against sphere sweeps for entities | M0.4 | S | Analytic tests, including grazing and at rest |
 | M4.4 | Property-based fuzzer: random levels, random sweeps | M4.2 | M | The sphere is never inside solid and never passes through a wall, over a large run in CI |
 | M4.5 | Fixed 120 Hz physics step with interpolation for rendering | M4.2 | S | Replaying inputs reproduces the same positions |
+| M4.6 | Exact edge and vertex contacts: ray against the cylinder around each edge and the sphere around each vertex | M4.1 | M | A sphere swept at a convex edge and a convex corner stops at the true rounded distance, not the square-corner distance; it rounds the corner instead of catching on it |
 
 ## M5 Lighting and materials
 
