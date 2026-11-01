@@ -39,8 +39,7 @@ one. Reported by the user from a real Windows session, and what was done:
 
 - **Monitor move crash (RefCell already borrowed).** Root cause was in `xui-canvas`
   (`ScaleFactorChanged` and `cursor_moved` held a `RefCell` guard across a `borrow_mut()`). Fixed
-  upstream (xui#313); the editor now builds against xui `b3c8cd4` and the vendored copy of that fix
-  is gone. Not verified: a real window moved between monitors of different DPI (cannot be done here).
+  upstream (xui#313); the editor now builds against stock xui. Not verified: a real window moved between monitors of different DPI (cannot be done here).
 - **Pointer lock.** xui#314 added `Ui::set_pointer_lock` and `Event::PointerDelta`. The editor's 3D
   pane (`ui/view3d.rs`) locks the pointer while the right button is held (fly-look) and Play keeps it
   locked (`View3d::set_grab`, from `begin_play`/`end_play`); `PointerDelta` becomes the look motion.
@@ -53,8 +52,8 @@ one. Reported by the user from a real Windows session, and what was done:
   lock loss). Not verified: a real mouse and cursor on screen (the OS grab path in `xui-canvas`).
 - **F5 and F7.** Root cause: xui's winit keymap only produced `Key::F1` to `F4`, so a real window
   never raised F5 to F12 (offscreen tests inject events and hid it).
-  `docs/xui-patches/0002-map-f5-to-f12.patch` adds the arms (vendored copy, with a unit test; xui#316
-  is still open upstream, so `vendor/xui-canvas` stays until it is fixed). The
+  Fixed upstream (xui#316, #317); the editor builds against stock xui `0b1b7ef` and the vendored
+  copy is gone. The
   editor also binds Ctrl+B (build) and Ctrl+R (play) as a fallback. `selftest/keys.rs` injects
   `KeyDown` F7, F5 and Esc events through the UI and checks the build, the play and the return;
   `ui/app/keys_tests.rs` does the same. Not verified: a physical keyboard.
@@ -262,5 +261,4 @@ PNGs in `target/shots/texinfo/` and `target/shots/editor-final/`.
 - Core crates are not declared `no_std`; they use `std` only. `mscent-platform` (winit, softbuffer, optional) and the editor (xui) are the only crates with external dependencies.
 - Textures are decoded at load time by an in-repo PNG decoder, not at build time.
 - The "fuzz target" for the level format is a seeded in-process test.
-- The editor builds against a vendored `xui-canvas` (`vendor/xui-canvas`, `[patch]` in the root `Cargo.toml`) with one fix not yet upstream (F5 to F12 keymap, xui#316); the patch is in `docs/xui-patches/`.
 - Still open: `_s` gloss textures (M5.7), perf numbers on the i3-7100U, all LazyOS work (M1.3, M1.4, M8.x).

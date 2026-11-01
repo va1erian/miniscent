@@ -15,7 +15,7 @@ mscent-render.workspace = true
 mscent-game.workspace = true
 mscent-platform = { workspace = true }
 miniscent-game = { path = "../game", default-features = false }
-xui = { git = "https://github.com/va1erian/xui", rev = "b3c8cd4c0f005914a143c730719cd5d0e830cdfa" }
+xui = { git = "https://github.com/va1erian/xui", rev = "0b1b7efd29035cf6e6ac0cbcbea1c58e2e4faa91" }
 
 [lints]
 workspace = true

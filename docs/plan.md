@@ -55,9 +55,7 @@ hardware (`lazyos/docs/compat/kabylake/hw-survey/03-cpuinfo.txt`).
 
 - **TexInfo.** Faces map textures with a Hammer-style per-plane `TexInfo` (axes, shift, scale,
   rotation, flips, fit, justify), not a fixed planar projection; level format version 2 stores it.
-- **Vendored xui-canvas.** The editor builds against `vendor/xui-canvas` (a `[patch]` on the pinned
-  xui rev) with two fixes (RefCell re-borrow on monitor change, F5 to F12 key mapping), kept as
-  patches in `docs/xui-patches/` for upstreaming. The game still has no xui dependency.
+- **Stock xui.** The editor builds against upstream xui (rev `0b1b7ef`, which has the monitor-change fix, pointer lock and F5 to F12 keys); nothing is vendored. The game has no xui dependency.
 - **Threaded play.** Instant Play runs the game on a render thread with a one-slot frame mailbox,
   not on the UI thread, so a slow scene never slows the UI.
 - **Bake cache and soft shadows.** The lightmap is baked once per distinct set of inputs
