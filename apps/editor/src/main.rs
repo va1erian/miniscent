@@ -4,8 +4,8 @@
 //!   MSCENT_EDITOR_SHOWCASE=1) starts with the demo level.
 //! * `--slow-play-ms <n>` (hidden) makes each rendered frame take n ms longer.
 //! * `XUI_SNAPSHOT=<dir>` renders the window headlessly to PNGs.
-//! * `--selftest <dir>` runs a scripted session (load the showcase, build,
-//!   snapshot, play 120 frames, return, edit, snapshot) and exits 0 on success.
+//! * `--selftest <dir>` runs a scripted session (load the showcase, snapshot,
+//!   play 120 frames, return, edit, snapshot) and exits 0 on success.
 
 mod build;
 mod files;

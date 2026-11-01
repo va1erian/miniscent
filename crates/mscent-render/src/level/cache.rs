@@ -9,7 +9,12 @@
 //! missing, stale, damaged or hostile file is ignored (with a reason in the
 //! [`BakeReport`]) and the level is baked again. Files are written through a
 //! temporary file and renamed, so they are never half written.
+//!
+//! A slow bake need not hold the cache: [`super::Compiled`] asks it for a
+//! stored lightmap, bakes with no reference to it and hands the result back,
+//! so a shared cache stays usable for the whole bake.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -73,6 +78,16 @@ pub struct BakeCache {
     bakes: u32,
     last: Option<BakeReport>,
     rebake: bool,
+    /// Why the last lookup refused the file, for the report of the bake it
+    /// caused.
+    miss_note: Option<String>,
+}
+
+/// A lightmap baked outside the cache, ready for [`BakeCache::store`].
+pub struct BakedLight {
+    pub(super) key: u64,
+    pub(super) map: Lightmap,
+    pub(super) ms: f64,
 }
 
 /// Why a cache file cannot be used, in words.
@@ -178,37 +193,53 @@ impl BakeCache {
         cfg: &BakeConfig,
     ) -> Result<Arc<Lightmap>, LightmapError> {
         let key = input_key(faces, lights, cfg);
-        let rebake = std::mem::take(&mut self.rebake);
-        let mut report = BakeReport {
-            source: Source::Memory,
-            ms: 0.0,
-            path: self.path.clone(),
-            written: false,
-            note: None,
-        };
-        if !rebake && let Some((_, map)) = self.slot.as_ref().filter(|(k, _)| *k == key) {
-            self.last = Some(report);
-            return Ok(Arc::clone(map));
-        }
-        if !rebake {
-            let t = Instant::now();
-            match self.read_file(key, faces.len()) {
-                Ok(Some(map)) => {
-                    let map = Arc::new(map);
-                    report.source = Source::File;
-                    report.ms = ms_since(t);
-                    self.last = Some(report);
-                    self.slot = Some((key, Arc::clone(&map)));
-                    return Ok(map);
-                }
-                Ok(None) => {}
-                Err(e) => report.note = Some(format!("cache file ignored: {e}")),
-            }
+        self.miss_note = None;
+        if !std::mem::take(&mut self.rebake)
+            && let Some(map) = self.lookup(key, faces.len())
+        {
+            return Ok(map);
         }
         let t = Instant::now();
-        let map = Arc::new(bake(bsp, faces, lights, cfg)?);
+        let map = bake(bsp, faces, lights, cfg)?;
+        let ms = ms_since(t);
+        Ok(self.store(BakedLight { key, map, ms }))
+    }
+
+    /// The lightmap for `key` from memory or the file, without baking.
+    pub(super) fn lookup(&mut self, key: u64, face_count: usize) -> Option<Arc<Lightmap>> {
+        let mut report = self.new_report();
+        if let Some((_, map)) = self.slot.as_ref().filter(|(k, _)| *k == key) {
+            let map = Arc::clone(map);
+            self.last = Some(report);
+            return Some(map);
+        }
+        let t = Instant::now();
+        match self.read_file(key, face_count) {
+            Ok(Some(map)) => {
+                let map = Arc::new(map);
+                report.source = Source::File;
+                report.ms = ms_since(t);
+                self.last = Some(report);
+                self.slot = Some((key, Arc::clone(&map)));
+                Some(map)
+            }
+            Ok(None) => None,
+            Err(e) => {
+                self.miss_note = Some(format!("cache file ignored: {e}"));
+                None
+            }
+        }
+    }
+
+    /// Takes in a finished bake: it becomes the held lightmap and is mirrored
+    /// to the file.
+    pub fn store(&mut self, baked: BakedLight) -> Arc<Lightmap> {
+        let BakedLight { key, map, ms } = baked;
+        let map = Arc::new(map);
+        let mut report = self.new_report();
         report.source = Source::Baked;
-        report.ms = ms_since(t);
+        report.ms = ms;
+        report.note = self.miss_note.take();
         self.bakes += 1;
         if let Some(path) = &self.path {
             // A cache that cannot be written is only a slower next start.
@@ -219,7 +250,17 @@ impl BakeCache {
         }
         self.last = Some(report);
         self.slot = Some((key, Arc::clone(&map)));
-        Ok(map)
+        map
+    }
+
+    fn new_report(&self) -> BakeReport {
+        BakeReport {
+            source: Source::Memory,
+            ms: 0.0,
+            path: self.path.clone(),
+            written: false,
+            note: None,
+        }
     }
 
     /// `Ok(None)`: no file. `Err`: a file that must not be used, and why.
@@ -233,6 +274,14 @@ impl BakeCache {
         if meta.len() > store::MAX_BYTES as u64 {
             return Err(why(StoreError::TooLarge));
         }
+        // The key comes first: a stale file costs one small read, which is
+        // what lets the editor look it up on every edit.
+        let mut head = [0; store::HEADER_BYTES];
+        let opened = std::fs::File::open(path).map_err(|e| format!("unreadable: {e}"))?;
+        if (&opened).read_exact(&mut head).is_ok() {
+            store::check_header(&head, key).map_err(why)?;
+        }
+        drop(opened);
         let bytes = std::fs::read(path).map_err(|e| format!("unreadable: {e}"))?;
         let map = Lightmap::from_bytes(&bytes, key).map_err(why)?;
         if map.projections().len() != face_count {

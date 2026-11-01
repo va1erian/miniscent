@@ -316,6 +316,11 @@ impl Document {
         Some((i, self.entities.remove(i)))
     }
 
+    /// Moves an entity the way a drag does, for tests outside the model.
+    #[cfg(test)]
+    pub fn replace_entity_for_test(&mut self, def: &EntityDef) {
+        self.replace_entity(def);
+    }
     pub(super) fn replace_entity(&mut self, def: &EntityDef) {
         if let Some(slot) = self.entities.iter_mut().find(|e| e.id == def.id) {
             *slot = *def;

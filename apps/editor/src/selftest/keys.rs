@@ -1,11 +1,12 @@
-//! The shortcut part of the self-test: real `KeyDown` events for F7 and F5,
+//! The shortcut part of the self-test: real `KeyDown` events for F5 and Esc,
 //! injected into the running editor as the window system delivers them.
 
 use xui::backend::Event;
 use xui::xui_canvas::snapshot::Stage;
 use xui::{Key, Modifiers};
 
-use super::{Run, pump, wait_for_build};
+use super::{Run, pump, wait_for_preview};
+use crate::studio::Preview;
 use crate::ui::{Msg, Probe};
 
 fn press(stage: &Stage<'_, Msg>, key: Key) {
@@ -24,11 +25,10 @@ fn press(stage: &Stage<'_, Msg>, key: Key) {
 }
 
 pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
-    press(stage, Key::F7);
-    let m = wait_for_build(stage, probe);
+    let p = wait_for_preview(stage, probe);
     run.check(
-        m.starts_with("Build finished"),
-        &format!("injected F7 KeyDown built the level: {m}"),
+        p == Preview::Full,
+        &format!("the picture is current: {p:?}"),
     );
     press(stage, Key::F5);
     pump(stage, 5);

@@ -1,5 +1,5 @@
-//! Texture edits reuse the cached lightmap: the baker does not run again,
-//! and the new mapping shows without a manual build.
+//! Texture edits reuse the cached lightmap: the baker does not run again, and
+//! the lightmap file follows the level through Save and the next session.
 
 use std::time::{Duration, Instant};
 
@@ -7,7 +7,7 @@ use mscent_render::Source;
 use mscent_world::Op;
 
 use super::*;
-use crate::build::{SharedCache, Update, start_cached};
+use crate::build::{SharedCache, start_bake, start_preview};
 use crate::model::facetex::FaceEdit;
 use crate::model::{EditorState, Selection};
 
@@ -26,118 +26,79 @@ fn remapped(doc: &Document) -> Document {
     st.doc
 }
 
-fn finish(job: &mut crate::build::BuildJob) -> crate::build::Built {
+fn finish<T>(job: &Job<T>) -> T {
     loop {
-        for u in job.poll() {
-            if let Update::Finished(r) = u {
-                return r.expect("builds");
-            }
+        if let Some(r) = job.poll() {
+            return r.expect("builds");
         }
         std::thread::sleep(Duration::from_millis(5));
     }
 }
 
-#[test]
-fn a_new_mapping_does_not_bake_again_but_geometry_does() {
-    let doc = showcase();
-    let cache = SharedCache::default();
-    let first = finish(&mut start_cached(&doc, false, &cache).expect("starts"));
-    assert_eq!(first.bake, Some(Source::Baked));
-    let before: Vec<_> = first
+fn preview_of(doc: &Document, cache: &SharedCache) -> Built {
+    finish(&start_preview(doc, cache).expect("starts"))
+}
+
+fn uvs(built: &Built) -> Vec<mscent_world::TexInfo> {
+    built
         .renderer()
         .scene()
         .faces()
         .iter()
         .map(|f| f.texinfo)
-        .collect();
+        .collect()
+}
+
+#[test]
+fn a_new_mapping_finds_the_bake_but_new_geometry_does_not() {
+    let doc = showcase();
+    let cache = SharedCache::default();
+    let draft = preview_of(&doc, &cache);
+    assert_eq!(draft.light, Light::Draft);
+    let baked = start_bake(&doc, draft.light_key, &cache).expect("starts");
+    let report = finish(&baked.job).expect("not cancelled");
+    assert_eq!(report.source, Source::Baked);
+    let first = preview_of(&doc, &cache);
+    assert_eq!(first.light, Light::Full);
 
     let edited = remapped(&doc);
     assert!(edited.same_geometry(&doc) && edited != doc);
-    let second = finish(&mut start_cached(&edited, false, &cache).expect("starts"));
-    assert_eq!(second.bake, Some(Source::Memory), "lightmap kept");
+    let second = preview_of(&edited, &cache);
+    assert_eq!(second.light, Light::Full, "lightmap kept");
+    assert_eq!(second.report.expect("found").source, Source::Memory);
     assert_eq!(
         cache.lock().expect("cache").bakes(),
         1,
         "the baker ran once"
     );
-    let after: Vec<_> = second
-        .renderer()
-        .scene()
-        .faces()
-        .iter()
-        .map(|f| f.texinfo)
-        .collect();
-    assert_ne!(before, after, "the UVs were refreshed");
+    let second = preview_of(&edited, &cache);
+    assert_ne!(uvs(&first), uvs(&second), "the UVs were refreshed");
     assert_eq!(
         first.renderer().lightmap().to_bytes(0),
         second.renderer().lightmap().to_bytes(0),
         "identical lightmap data"
     );
 
-    // Moving a brush is geometry: that one has to bake.
+    // Moving a brush is geometry: that one falls back to a draft.
     let mut st = EditorState::new(doc.clone());
     st.selection = Some(Selection::Brush(doc.brushes()[0].id));
     st.new_op = Op::Add;
     st.add_box([40.0, 40.0, 0.0], [42.0, 42.0, 2.0])
         .expect("added");
     assert!(!st.doc.same_geometry(&doc));
-    let third = finish(&mut start_cached(&st.doc, false, &cache).expect("starts"));
-    assert_eq!(third.bake, Some(Source::Baked));
-    assert_eq!(cache.lock().expect("cache").bakes(), 2);
-}
-
-#[test]
-fn the_studio_refreshes_a_texture_edit_in_the_background_without_baking() {
-    let doc = showcase();
-    let mut studio = Studio::new(&doc);
-    studio.start_build(&doc, false).expect("starts");
-    while studio.building() {
-        studio.tick(&[], PANE, &doc);
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    let cache = studio.cache();
+    let third = preview_of(&st.doc, &cache);
+    assert_eq!(third.light, Light::Draft);
+    assert_ne!(third.light_key, first.light_key);
     assert_eq!(cache.lock().expect("cache").bakes(), 1);
-
-    let edited = remapped(&doc);
-    assert!(studio.stale(&edited));
-    studio.note_edit();
-    let end = Instant::now() + Duration::from_secs(60);
-    let mut log = Vec::new();
-    let mut status = None;
-    while studio.stale(&edited) || studio.building() || status.is_none() {
-        let t = studio.tick(&[], PANE, &edited);
-        log.extend(t.log);
-        status = status.or(t.status);
-        assert!(Instant::now() < end, "never refreshed");
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    assert!(log.is_empty(), "a refresh is quiet: {log:?}");
-    let status = status.expect("status");
-    assert!(
-        status.starts_with("Texture mapping updated") && status.contains("lightmap kept"),
-        "{status}"
-    );
-    assert_eq!(cache.lock().expect("cache").bakes(), 1, "no bake ran");
-
-    // A geometry edit is left for the user to build.
-    let mut st = EditorState::new(edited.clone());
-    st.new_op = Op::Add;
-    st.add_box([40.0, 40.0, 0.0], [42.0, 42.0, 2.0])
-        .expect("added");
-    studio.note_edit();
-    for _ in 0..20 {
-        studio.tick(&[], PANE, &st.doc);
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    assert!(!studio.building() && studio.stale(&st.doc));
 }
 
-/// Runs a build to its end and returns the log lines it produced.
-fn build_log(studio: &mut Studio, doc: &Document, then_play: bool) -> Vec<String> {
-    studio.start_build(doc, then_play).expect("starts");
+/// Ticks until `doc` is fully lit and returns the log lines that produced.
+fn settle_log(studio: &mut Studio, doc: &Document) -> Vec<String> {
     let mut log = Vec::new();
-    while studio.building() {
+    let end = Instant::now() + Duration::from_secs(60);
+    while studio.preview(doc) != Preview::Full {
         log.extend(studio.tick(&[], PANE, doc).log);
+        assert!(Instant::now() < end, "never settled");
         std::thread::sleep(Duration::from_millis(5));
     }
     log
@@ -161,10 +122,11 @@ fn a_saved_level_reopens_from_its_cache_and_play_never_bakes() {
     let level = temp_lit("level.msl");
     let lit = temp_lit("level.msl.lit");
 
-    // First session: Build bakes and writes the file next to the level.
+    // First session: the bake happens by itself and writes the file next to
+    // the level.
     let mut studio = Studio::new(&doc);
     studio.set_cache_level(Some(&level));
-    let log = build_log(&mut studio, &doc, false);
+    let log = settle_log(&mut studio, &doc);
     let last = log.last().expect("log");
     assert!(
         last.starts_with("Lightmap baked in") && last.contains("written to"),
@@ -174,7 +136,7 @@ fn a_saved_level_reopens_from_its_cache_and_play_never_bakes() {
     let bakes = studio.cache().lock().expect("cache").bakes();
     assert_eq!(bakes, 1);
 
-    // Instant Play uses the build on screen: no bake, no build.
+    // Instant Play uses the picture on screen: no bake.
     studio.enter_play().expect("plays");
     assert_eq!(studio.cache().lock().expect("cache").bakes(), 1);
     studio.leave_play();
@@ -186,20 +148,19 @@ fn a_saved_level_reopens_from_its_cache_and_play_never_bakes() {
     assert!(note.starts_with("lightmap cached in"), "{note}");
     assert!(temp_lit_path_exists(&moved));
 
-    // Second session, same level: loaded from the cache, zero bakes.
+    // Second session, same level: loaded from the cache, zero bakes, and the
+    // very first picture is already fully lit.
     let mut again = Studio::new(&doc);
     again.set_cache_level(Some(&level));
-    let log = build_log(&mut again, &doc, false);
+    let log = settle_log(&mut again, &doc);
     let last = log.last().expect("log");
     assert!(last.starts_with("Lightmap loaded from cache"), "{last}");
     assert_eq!(again.cache().lock().expect("cache").bakes(), 0);
 
     // Editing a texture still does not bake; editing a light does.
-    let log = build_log(&mut again, &edited, false);
-    assert!(
-        log.last().expect("log").starts_with("Lightmap reused"),
-        "{log:?}"
-    );
+    let log = settle_log(&mut again, &edited);
+    assert!(log.is_empty(), "{log:?}");
+    assert_eq!(again.cache().lock().expect("cache").bakes(), 0);
     let mut lit_doc = showcase();
     let id = lit_doc.alloc_id();
     lit_doc.insert_entity_for_test(
@@ -211,11 +172,29 @@ fn a_saved_level_reopens_from_its_cache_and_play_never_bakes() {
             intensity: 1.0,
         },
     );
-    let log = build_log(&mut again, &lit_doc, false);
+    let log = settle_log(&mut again, &lit_doc);
     let last = log.last().expect("log");
     assert!(
         last.starts_with("Lightmap baked in") && last.contains("stale"),
         "{last}"
     );
     assert_eq!(again.cache().lock().expect("cache").bakes(), 1);
+}
+
+#[test]
+fn saving_on_draft_light_writes_no_file_and_the_coming_bake_goes_to_the_new_place() {
+    let doc = showcase();
+    let mut studio = Studio::new(&doc);
+    let end = Instant::now() + Duration::from_secs(60);
+    while !studio.is_current(&doc) {
+        studio.tick(&[], PANE, &doc);
+        assert!(Instant::now() < end, "no preview");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(studio.light, Light::Draft);
+    let level = temp_lit("draft.msl");
+    let lit = temp_lit("draft.msl.lit");
+    assert!(studio.save_lightmap(&level, &doc).is_none());
+    settle_log(&mut studio, &doc);
+    assert!(lit.is_file(), "the bake wrote next to the saved level");
 }

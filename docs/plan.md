@@ -125,10 +125,11 @@ solid and never skips a wall.
 
 An xui app with three orthographic views and a 3D view that uses the same
 rasterizer. Tools create and resize brushes, toggle add/subtract, and place the
-player start, lights, enemies and the goal. Build runs CSG, portals and the
-bake. Instant Play starts the game in-process, on its own thread, on the freshly built level,
-and `Esc` returns to the editor. The tool palette is icon buttons; F7 builds and F5 plays (Ctrl+B
-and Ctrl+R as a fallback). Clicking a face in the 3D view edits its Hammer-style texture mapping.
+player start, lights, enemies and the goal. There is no build command: the 3D view follows every
+edit, on draft lighting at once and on the full bake when the edits stop, all off the UI thread.
+Instant Play starts the game in-process, on its own thread, on the level in the 3D view, and `Esc`
+returns to the editor. The tool palette is icon buttons; F5 plays (Ctrl+R as a fallback). Clicking a
+face in the 3D view edits its Hammer-style texture mapping.
 
 ## Code standards
 

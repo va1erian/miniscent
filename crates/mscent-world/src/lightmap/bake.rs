@@ -9,6 +9,7 @@ use super::uv::{FaceProjection, project_face};
 use super::{BakeConfig, LightFace, LightmapError, Luxel, PointLight};
 use crate::bsp::Bsp;
 use mscent_math::Vec3;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Cap on shadow rays per luxel and light, so a config cannot make a bake
 /// run for hours.
@@ -21,6 +22,15 @@ pub(super) struct Scene<'a> {
     pub proj: &'a [FaceProjection],
     pub lights: &'a [PointLight],
     pub cfg: &'a BakeConfig,
+    /// Set from outside to abandon the bake.
+    pub cancel: &'a AtomicBool,
+}
+
+impl Scene<'_> {
+    /// Whether the bake was abandoned; workers then skip their remaining rows.
+    pub(super) fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
+    }
 }
 
 /// A baked atlas of luxels plus the per-face frames needed to use it.
@@ -146,6 +156,19 @@ pub fn bake(
     lights: &[PointLight],
     cfg: &BakeConfig,
 ) -> Result<Lightmap, LightmapError> {
+    bake_cancellable(bsp, faces, lights, cfg, &AtomicBool::new(false))
+}
+
+/// Like [`bake`], but setting `cancel` makes it return
+/// [`LightmapError::Cancelled`] within one luxel row per worker, so an editor
+/// can drop a bake whose level has changed.
+pub fn bake_cancellable(
+    bsp: &Bsp,
+    faces: &[LightFace],
+    lights: &[PointLight],
+    cfg: &BakeConfig,
+    cancel: &AtomicBool,
+) -> Result<Lightmap, LightmapError> {
     validate(lights, cfg)?;
     let proj = faces
         .iter()
@@ -160,11 +183,18 @@ pub fn bake(
         proj: &proj,
         lights,
         cfg,
+        cancel,
     };
     let rows = row_index(&proj);
     let direct = par_map(cfg.workers, rows.len(), |i| {
+        if scene.cancelled() {
+            return Vec::new();
+        }
         direct_row(&scene, rows[i].0, rows[i].1)
     });
+    if scene.cancelled() {
+        return Err(LightmapError::Cancelled);
+    }
     let mut grids = rows_to_grids(&proj, direct);
     // Hard shadows (one ray, no lamp radius) stay exact; soft ones are smoothed.
     if cfg.light_radius > 0.0 && cfg.shadow_samples > 1 {
@@ -173,6 +203,9 @@ pub fn bake(
         }
     }
     bounce::add_bounce(&scene, &rows, &mut grids);
+    if scene.cancelled() {
+        return Err(LightmapError::Cancelled);
+    }
     for grid in &mut grids {
         for l in grid {
             *l = finalize(*l, cfg.ambient);

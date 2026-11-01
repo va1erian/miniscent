@@ -68,6 +68,13 @@ impl Session<'_> {
     fn wait_message(&self, prefix: &str) {
         self.wait(prefix, |e| e.state.borrow().message.starts_with(prefix));
     }
+
+    /// Waits for the picture that needs no command to appear.
+    fn wait_preview(&self) {
+        self.wait("the preview", |e| {
+            e.studio.preview(&e.state.borrow().doc) == Preview::Full
+        });
+    }
 }
 
 /// The UI handle and editor, handed from the build closure to the script.
@@ -132,8 +139,7 @@ fn fly_look_locks_the_pointer_and_turns_the_camera_from_relative_motion() {
             modifiers: NONE,
         };
 
-        s.press(Key::F7);
-        s.wait_message("Build finished");
+        s.wait_preview();
 
         // The right button locks the pointer; the left one does not.
         s.inject(down(MouseButton::Left));
@@ -190,8 +196,7 @@ fn play_locks_the_pointer_and_releases_it_on_esc_and_when_the_backend_ends_it() 
         let play = probe.play_pane();
         let id = xui::widget::Placeable::id(&*play);
 
-        s.press(Key::F7);
-        s.wait_message("Build finished");
+        s.wait_preview();
         assert_eq!(s.backend.pointer_lock(), None);
 
         // Entering Play locks the pointer and mouse-look reads the deltas.

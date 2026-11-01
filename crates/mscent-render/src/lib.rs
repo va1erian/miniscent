@@ -33,8 +33,8 @@ pub use camera::{Camera, Frustum, ScreenPoint};
 pub use draw2d::{Sprite, blit, draw_text, fill_rect, stroke_rect, text_size};
 pub use framebuffer::Framebuffer;
 pub use level::{
-    Actor, ActorKind, BakeCache, BakeReport, BuildConfig, BuildError, LevelRenderer, Overlay,
-    Quality, Source, View,
+    Actor, ActorKind, BakeCache, BakeReport, BakedLight, BuildConfig, BuildError, Compiled,
+    LevelRenderer, Overlay, Quality, Source, View,
 };
 pub use lighting_shader::{FaceLight, LightingShader, UvToLuxel};
 pub use lightmap_mips::LightMips;

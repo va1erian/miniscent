@@ -1,8 +1,9 @@
 //! The editor application: menus, tool palette, viewports and the status
-//! bar, wired to the shared [`EditorState`]. File, Build and Play commands
-//! live in `commands.rs`.
+//! bar, wired to the shared [`EditorState`]. File and Play commands live in
+//! `commands.rs`. The 3D pane follows the document by itself: see
+//! `studio/preview.rs`.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -19,7 +20,7 @@ use super::viewport::{ViewEvent, Viewport};
 use super::wrap::{LOG_COLS, LOG_ROWS, wrap};
 use crate::files;
 use crate::model::{Document, EditorState, View, state::GRIDS};
-use crate::studio::{HELP, Mode, Studio};
+use crate::studio::{HELP, Mode, Preview, Studio};
 
 #[derive(Clone)]
 pub enum Msg {
@@ -46,10 +47,10 @@ pub enum Msg {
     Camera(Box<crate::model::FlyCam>),
 }
 
-/// Width of the right-hand column (properties and build log), in dip.
+/// Width of the right-hand column (properties and log), in dip.
 const SIDE_WIDTH: i32 = 340;
 
-/// Height of the build log box, in dip.
+/// Height of the log box, in dip.
 const LOG_HEIGHT: i32 = 110;
 
 /// Menu command ids.
@@ -58,7 +59,6 @@ pub mod cmd {
     pub const NEW: MenuId = MenuId::new(1);
     pub const OPEN: MenuId = MenuId::new(2);
     pub const SAVE: MenuId = MenuId::new(3);
-    pub const BUILD: MenuId = MenuId::new(4);
     pub const PLAY: MenuId = MenuId::new(5);
     pub const SHOWCASE: MenuId = MenuId::new(6);
     pub const SAVE_AS: MenuId = MenuId::new(7);
@@ -91,7 +91,8 @@ pub struct Editor {
     pub(super) saved: Document,
     pub(super) open_dialog: FileDialog<Msg>,
     pub(super) save_dialog: FileDialog<Msg>,
-    last_stale: bool,
+    /// Shared with scripted runs through [`Probe`].
+    preview: Rc<Cell<Preview>>,
 }
 
 fn menus(m: &mut xui::widget::MenuScope<'_>) {
@@ -116,7 +117,6 @@ fn menus(m: &mut xui::widget::MenuScope<'_>) {
         v.item(cmd::RESET_CAMERA, "&Reset 3D camera");
     });
     m.submenu(MenuId::new(103), "&Play", |p| {
-        p.item(cmd::BUILD, "&Build   F7");
         p.item(cmd::PLAY, "&Play   F5");
     });
 }
@@ -169,7 +169,7 @@ impl Editor {
             saved,
             open_dialog,
             save_dialog,
-            last_stale: false,
+            preview: Rc::new(Cell::new(Preview::Updating)),
         };
         app.panel.attach(ui);
         state.borrow_mut().texture_sizes = app.panel.face.load_previews();
@@ -223,7 +223,7 @@ impl Editor {
         let side = column().gap(4).children((
             scroll(column().child(app.panel.layout())).fill(1),
             group(
-                "Build log",
+                "Lighting log",
                 column().child(multiline_edit().bind(&app.log_view).height(LOG_HEIGHT)),
             ),
         ));
@@ -234,7 +234,7 @@ impl Editor {
                 stack()
                     .children((work, build(View3d::new).bind(&app.play)))
                     .fill(1),
-                status_bar(&["Ready", "", ""]).bind(&app.status),
+                status_bar(&["Ready", "", "", ""]).bind(&app.status),
             )),
         )?;
         ui.on_key(shortcut);
@@ -253,13 +253,7 @@ impl Editor {
         }
         let st = self.state.borrow();
         self.panel.sync(&st);
-        self.studio.note_edit();
         self.studio.set_highlights(st.highlighted_faces());
-        let stale = self.studio.stale(&st.doc);
-        if stale != self.last_stale {
-            self.last_stale = stale;
-            self.studio.set_stale(stale);
-        }
         let dirty = st.doc != self.saved;
         let bar = self.status.get();
         bar.set_text(0, &st.message);
@@ -290,7 +284,6 @@ impl Editor {
         }
     }
 
-    /// The 3D pane's text before the first build.
     /// Whether a text box has the keyboard focus, so letters and Delete are
     /// text there and not shortcuts.
     fn text_has_focus(&self, ui: &Ui<Msg>) -> bool {
@@ -298,17 +291,18 @@ impl Editor {
             .is_some_and(|id| self.panel.owns(id) || id == self.log_view.get().id())
     }
 
+    /// The 3D pane's text until the first picture of a level arrives.
     pub(super) fn show_prompt(&self) {
         let text = format!(
-            "No build yet.
-Press F7 to build, F5 to play.
+            "Preparing the level...
+F5 plays it.
 
 {HELP}"
         );
         self.view3d.get().show_text(&text);
     }
 
-    /// Adds lines to the build log panel.
+    /// Adds lines to the log panel.
     pub(super) fn push_log(&mut self, lines: &[String]) {
         if lines.is_empty() {
             return;
@@ -353,6 +347,10 @@ Press F7 to build, F5 to play.
             self.state.borrow_mut().message = s.clone();
             self.set_status(s);
         }
+        if let Some(text) = &tick.blank {
+            self.view3d.get().show_text(text);
+        }
+        self.show_preview(self.studio.preview(&state.borrow().doc));
         if tick.play_now {
             self.begin_play();
         }
@@ -371,6 +369,13 @@ Press F7 to build, F5 to play.
                 self.pick_click(click);
             }
             self.refresh();
+        }
+    }
+
+    /// Says on the status bar how far the picture has caught up.
+    fn show_preview(&self, preview: Preview) {
+        if self.preview.replace(preview) != preview {
+            self.status.get().set_text(3, preview.label());
         }
     }
 
@@ -420,6 +425,7 @@ Press F7 to build, F5 to play.
             state: self.state.clone(),
             view3d: self.view3d.get(),
             play: self.play.get(),
+            preview: self.preview.clone(),
         }
     }
 }

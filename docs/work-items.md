@@ -97,7 +97,7 @@ Sizes: S is under a day, M a few days, L a week or more.
 | M7.3 | 3D view using the game rasterizer | M7.1, M3.4 | M | Same pixels as the game for the same camera |
 | M7.4 | Brush tools: create, move, resize, flip add and subtract | M7.2, M2.1 | L | Undo and redo cover every tool |
 | M7.5 | Entity placement: player start, lights, enemies, goal | M7.2, M6.2 | S | Placed entities appear in all views and survive save |
-| M7.6 | Build: CSG, portals and bake, with progress and errors | M2.6, M5.2 | M | Errors are shown, not panics |
+| M7.6 | Live preview: CSG, portals and bake follow every edit in the background, with errors shown | M2.6, M5.2 | M | Errors are shown, not panics |
 | M7.7 | Save and load of level source (brushes and entities) | M7.4 | M | Round-trip tests; hostile files return errors |
 | M7.8 | Instant Play: run the game in-process on the freshly built level, `Esc` returns | M7.6, M6.4 | M | Edit, play, return, edit again without leaving the app |
 

@@ -143,13 +143,20 @@ impl GameSession {
         let arena = Arena::from_level(level).map_err(SessionError::Load)?;
         let renderer = LevelRenderer::from_level_cached(level, materials, &cfg.build, cache)
             .map_err(SessionError::Build)?;
+        Ok(Self::with_renderer(arena, renderer, cfg))
+    }
+
+    /// Starts a level that is already compiled and lit (the editor prepares
+    /// its renderer in stages). The first menu is skipped, as in
+    /// [`GameSession::new`].
+    pub fn with_renderer(arena: Arena, renderer: LevelRenderer, cfg: &SessionConfig) -> Self {
         let mut game = Game::new(arena);
         game.player.orientation = spawn_orientation(game.arena.player_yaw);
         game.player.up_ref = Some(Vec3::new(0.0, 0.0, 1.0));
         let mut menu = Menu::new();
         // Item 0 of the main menu is "Start".
         menu.press(MenuCommand::Select);
-        Ok(Self {
+        Self {
             prev_orientation: game.player.orientation,
             game,
             renderer,
@@ -164,7 +171,18 @@ impl GameSession {
             hit: 0,
             kill: 0,
             feedback: Feedback::default(),
-        })
+        }
+    }
+
+    /// Replaces what the level is drawn with and keeps the running game: new
+    /// lighting for the same level arrives while it is being played.
+    pub fn set_renderer(&mut self, renderer: LevelRenderer) {
+        self.renderer = renderer;
+    }
+
+    /// The renderer, once the game is over with.
+    pub fn into_renderer(self) -> LevelRenderer {
+        self.renderer
     }
 
     pub fn game(&self) -> &Game {

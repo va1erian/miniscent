@@ -2,35 +2,20 @@
 //! on the 3D pane, change its mapping through the panel's messages,
 //! snapshot before and after, and undo.
 
-use std::time::Duration;
-
 use xui::xui_canvas::snapshot::Stage;
 
 use mscent_math::Vec3d;
 
-use super::{Run, pump};
+use super::{Run, pump, wait_for_preview};
 use crate::model::facetex::FaceEdit;
 use crate::model::pick::{FaceRef, Ray, build_all, face_polygon, pick_face};
 use crate::model::{Document, FlyCam};
+use crate::studio::Preview;
 use crate::ui::facepanel::FaceMsg;
 use crate::ui::{Msg, Probe, cmd};
 
 /// The Face tool's index in the palette.
 const FACE_TOOL: usize = 6;
-
-/// Emits steps until the background texture refresh reports; returns its
-/// status.
-fn wait_for_refresh(stage: &Stage<'_, Msg>, probe: &Probe) -> String {
-    for _ in 0..6_000 {
-        stage.emit(Msg::Step);
-        let m = probe.message();
-        if m.starts_with("Texture mapping updated") {
-            return m;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    "timed out waiting for the texture refresh".into()
-}
 
 fn edit(stage: &Stage<'_, Msg>, e: FaceEdit) {
     stage.emit(Msg::Face(FaceMsg::Edit(e)));
@@ -44,9 +29,9 @@ const UNDO_TOLERANCE: f64 = 0.5;
 
 type Pixels = Option<(u32, u32, Vec<u8>)>;
 
-/// Waits for the texture refresh and lets the new frame show.
+/// Waits for the picture to catch up and lets the new frame show.
 fn settle(stage: &Stage<'_, Msg>, probe: &Probe) {
-    wait_for_refresh(stage, probe);
+    wait_for_preview(stage, probe);
     pump(stage, 20);
 }
 
@@ -198,10 +183,10 @@ pub(super) fn apply_mapping(stage: &Stage<'_, Msg>) {
 /// The wide window's before/after pair of the picked face.
 pub(super) fn wide_edit(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     apply_mapping(stage);
-    let status = wait_for_refresh(stage, probe);
+    let p = wait_for_preview(stage, probe);
     run.check(
-        status.contains("lightmap kept"),
-        &format!("wide: new mapping reused the lightmap: {status}"),
+        p == Preview::Full,
+        &format!("wide: new mapping shown: {p:?}"),
     );
     pump(stage, 20);
     run.shot(stage, "wide-03-face-edited.png");
@@ -219,8 +204,7 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     // Brick has clear horizontal courses: the scale, rotation and shift of
     // the edit are unmistakable on it, unlike on a noisy rock texture.
     edit(stage, FaceEdit::Material(mscent_world::materials::BRICK));
-    wait_for_refresh(stage, probe);
-    pump(stage, 20);
+    settle(stage, probe);
     run.shot(stage, "08-face-picked.png");
     let picture_before = pane.frame_checksum();
     let pixels_before = pane.frame_pixels();
@@ -253,10 +237,10 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     edit(stage, FaceEdit::ScaleV(orig.v_scale));
 
     apply_mapping(stage);
-    let status = wait_for_refresh(stage, probe);
+    let p = wait_for_preview(stage, probe);
     run.check(
-        status.contains("lightmap kept"),
-        &format!("the new mapping reused the cached lightmap: {status}"),
+        p == Preview::Full,
+        &format!("the new mapping is shown: {p:?}"),
     );
     pump(stage, 20);
     let picture_after = pane.frame_checksum();

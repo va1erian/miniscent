@@ -54,8 +54,8 @@ pub(super) fn key_name(key: Key) -> String {
 /// text (tool letters) or that a text field handles itself (Delete, Ctrl+Z)
 /// are wrapped in [`Msg::Guarded`].
 ///
-/// F5 and F7 need xui 0b1b7ef or later, whose winit backend reports F5 to F12.
-/// Ctrl+R and Ctrl+B are the same commands as a fallback.
+/// F5 needs xui 0b1b7ef or later, whose winit backend reports F5 to F12.
+/// Ctrl+R is the same command as a fallback.
 pub(super) fn shortcut(key: Key, mods: Modifiers) -> Option<Msg> {
     let guarded = |m: Msg| Some(Msg::Guarded(Box::new(m)));
     if mods.ctrl {
@@ -63,7 +63,6 @@ pub(super) fn shortcut(key: Key, mods: Modifiers) -> Option<Msg> {
             Key::S => Some(Msg::Menu(cmd::SAVE)),
             Key::O => Some(Msg::Menu(cmd::OPEN)),
             Key::N => Some(Msg::Menu(cmd::NEW)),
-            Key::B => Some(Msg::Menu(cmd::BUILD)),
             Key::R => Some(Msg::Menu(cmd::PLAY)),
             Key::Z if !mods.shift => guarded(Msg::Menu(cmd::UNDO)),
             Key::Y => guarded(Msg::Menu(cmd::REDO)),
@@ -76,7 +75,6 @@ pub(super) fn shortcut(key: Key, mods: Modifiers) -> Option<Msg> {
     }
     match key {
         Key::F5 => Some(Msg::Menu(cmd::PLAY)),
-        Key::F7 => Some(Msg::Menu(cmd::BUILD)),
         Key::ESCAPE => Some(Msg::Escape),
         Key::DELETE => guarded(Msg::Menu(cmd::DELETE)),
         _ => TOOLS

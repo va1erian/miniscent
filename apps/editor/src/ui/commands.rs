@@ -1,4 +1,4 @@
-//! Menu commands: files, build, play and the edit operations.
+//! Menu commands: files, play and the edit operations.
 
 use std::path::{Path, PathBuf};
 
@@ -33,7 +33,6 @@ impl Editor {
                 None => self.save_dialog.open(),
             },
             cmd::SAVE_AS => self.save_dialog.open(),
-            cmd::BUILD => self.start_build(false),
             cmd::PLAY => self.play_command(),
             cmd::RESET_CAMERA => {
                 self.studio.reset_camera(&self.state.borrow().doc);
@@ -118,33 +117,18 @@ impl Editor {
         self.state.borrow_mut().message = message;
     }
 
-    /// Starts a build on the worker thread (F7); `then_play` is F5's path.
-    pub(super) fn start_build(&mut self, then_play: bool) {
-        let doc = self.state.borrow().doc.clone();
-        match self.studio.start_build(&doc, then_play) {
-            Ok(()) => {
-                self.push_log(&["--- build started ---".into()]);
-                self.state.borrow_mut().message = "Building...".into();
-            }
-            Err(e) => {
-                self.push_log(&[format!("ERROR: {e}")]);
-                self.state.borrow_mut().message = format!("Build failed: {e}");
-            }
-        }
-    }
-
-    /// F5: play the level, building first when it changed.
+    /// F5: play the level as it is, as soon as the preview has caught up.
+    /// Lighting still being baked arrives during the game.
     fn play_command(&mut self) {
-        if self.studio.building() {
-            self.state.borrow_mut().message =
-                "Still building; press F5 again when it finishes".into();
+        let doc = self.state.borrow().doc.clone();
+        if self.studio.is_current(&doc) {
+            self.begin_play();
             return;
         }
-        let fresh = self.studio.has_build() && !self.studio.stale(&self.state.borrow().doc);
-        if fresh {
-            self.begin_play();
-        } else {
-            self.start_build(true);
-        }
+        let message = match self.studio.play_when_ready(&doc) {
+            Ok(()) => "Preparing the level...".to_string(),
+            Err(e) => e,
+        };
+        self.state.borrow_mut().message = message;
     }
 }

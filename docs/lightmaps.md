@@ -60,12 +60,32 @@ tools/write_levels.py` rewrites `assets/levels/*.msl` and bakes their
 ## Editor
 
 Open sets the cache file next to the level; a new or unsaved document uses the
-cache directory. The build log states `Lightmap baked in ...` or `Lightmap
-loaded from cache ...` or `Lightmap reused from the last bake (no bake ran)`.
-Build refreshes the file, Save writes the current bake next to the saved level
-(when the build has the document's geometry), and Instant Play (F5 on a current
-build) plays the build that is on screen with no bake at all. A texture or
-mapping edit keeps the lightmap; moving a brush or a light bakes again.
+cache directory. Nobody asks for a bake: `apps/editor/src/studio/preview.rs`
+keeps the 3D pane in step with the document, in two stages on their own threads.
+
+A **preview** runs for every edit, one at a time, always on the newest document.
+It compiles the level (`mscent_render::Compiled`) and uses the full lightmap if
+memory or the file holds one with the same key; otherwise it bakes a **draft**
+(luxels of at least 1 unit, hard shadows, no bounce). A texture or mapping edit,
+or moving an enemy, finds the full lightmap and never shows a draft.
+
+A **full bake** starts once the picture is current on a draft and the document
+has been still for 150 ms. It uses all cores but one and holds no lock on the
+cache, so previews, Save and Open carry on. A preview whose key differs cancels
+it within one luxel row per worker; a bake that fails (`Atlas(TooTall)` on a very
+large level) leaves the draft up, says so once and is not retried for that key.
+When a bake ends, the next preview finds the result and swaps it in.
+
+The picture and the status bar say which stage it is in (`BAKING LIGHT`, `Baking
+lighting...`, `Lighting up to date`), and the lighting log states `Lightmap
+baked in ...` or `Lightmap loaded from cache ...`. Save writes the current bake
+next to the saved level when the picture is fully lit with the document's
+geometry; a bake still to come writes there by itself. Instant Play (F5) needs
+only the preview: a full lightmap that finishes during the game replaces the
+draft under it and the game carries on.
+
+A cache file is checked by its header first, so a stale one costs one small read
+per preview instead of a read of the whole atlas.
 
 ## Measured (this machine, release, showcase)
 
