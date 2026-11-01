@@ -133,7 +133,8 @@ impl EditorState {
                     },
                 ])
             }
-            (Keep::Left, Some(after), _) | (Keep::Right, _, Some(after)) => {
+            // The discarded side must exist too, or the line missed the brush.
+            (Keep::Left, Some(after), Some(_)) | (Keep::Right, Some(_), Some(after)) => {
                 Command::EditBrush { before: def, after }
             }
             _ => {

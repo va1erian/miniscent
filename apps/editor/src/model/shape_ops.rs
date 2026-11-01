@@ -9,7 +9,7 @@ use mscent_world::{Brush, TexInfo};
 use super::document::{BrushDef, Id};
 use super::state::LIMIT;
 
-/// Most vertices the vertex tool handles: its hull search is cubic in the
+/// Most vertices the vertex tool handles: its hull search is quartic in the
 /// vertex count per drag step.
 pub const MAX_VERTS: usize = 48;
 
@@ -50,7 +50,10 @@ pub fn parts(def: &BrushDef) -> Option<Parts> {
 /// `None` when the planes enclose no volume or leave the editor's range.
 pub fn rebuild(id: Id, like: &BrushDef, parts: &Parts) -> Option<BrushDef> {
     let b = Brush::new_textured(&parts.planes, &parts.infos, like.op, 0).ok()?;
-    let def = BrushDef::from_brush(id, &b.with_material(like.material));
+    // The planes carry their own materials (a face may be painted
+    // differently); only the brush-level default is inherited.
+    let mut def = BrushDef::from_brush(id, &b);
+    def.material = like.material;
     let (lo, hi) = def.bounds();
     let inside = lo.iter().chain(hi.iter()).all(|v| v.abs() <= LIMIT);
     inside.then_some(def)

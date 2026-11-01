@@ -272,3 +272,45 @@ fn switching_tools_drops_a_pending_slice() {
     s.set_tool(Tool::Select);
     assert!(s.slice_line().is_none());
 }
+
+#[test]
+fn one_sided_slice_that_misses_is_refused() {
+    for keep in [Keep::Left, Keep::Right] {
+        let (mut s, _) = one_box();
+        s.set_tool(Tool::Slice);
+        s.keep = keep;
+        // Entirely to the right of the box, drawn along +y.
+        drag(&mut s, View::Top, [9.0, -1.0], [9.0, 5.0]);
+        assert!(!s.apply_slice(), "{keep:?}");
+        assert_eq!(s.history.depth(), 1);
+    }
+}
+
+#[test]
+fn tools_keep_each_faces_own_material() {
+    let (mut s, id) = one_box();
+    let mut def = s.doc.brush(id).unwrap().clone();
+    let mut infos = def.full_texinfos();
+    // The floor survives both halves of a cut.
+    let floor = def
+        .to_brush(0)
+        .unwrap()
+        .plane_facing(mscent_math::Vec3d::new(0.0, 0.0, -1.0))
+        .unwrap();
+    infos[floor].material = 3;
+    def.texinfos = infos;
+    s.doc.replace_brush_for_test(&def);
+    let painted = |b: &BrushDef| b.full_texinfos().iter().any(|t| t.material == 3);
+    s.set_tool(Tool::Slice);
+    drag(&mut s, View::Top, [2.0, -1.0], [2.0, 5.0]);
+    s.keep = Keep::Both;
+    assert!(s.apply_slice());
+    assert!(s.doc.brushes().iter().any(painted), "slice lost the paint");
+    s.set_tool(Tool::Vertex);
+    s.selection = Some(Selection::Brush(id));
+    drag(&mut s, View::Top, [0.0, 0.0], [-1.0, 0.0]);
+    assert!(
+        painted(s.doc.brush(id).unwrap()),
+        "vertex move lost the paint"
+    );
+}
