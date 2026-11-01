@@ -15,6 +15,7 @@
 
 use std::sync::{Mutex, PoisonError};
 
+use crate::camera::MAX_SIDE;
 use crate::framebuffer::Framebuffer;
 use crate::jobs::JobPool;
 
@@ -39,8 +40,12 @@ pub struct TileRenderer {
 
 /// The bands of a target, or `None` when the size is invalid.
 fn bands(width: u32, height: u32, tile_rows: u32) -> Option<Vec<Framebuffer>> {
-    // Validates the size up front so the band loop cannot fail midway.
-    Framebuffer::new(width, height)?;
+    // Validates the size up front so the band loop cannot fail midway. This
+    // runs on every resolution change, so it does not build a frame to find out.
+    let side_ok = |s: u32| (1..=MAX_SIDE).contains(&s);
+    if !side_ok(width) || !side_ok(height) {
+        return None;
+    }
     let mut tiles = Vec::new();
     let mut y0 = 0;
     while y0 < height {

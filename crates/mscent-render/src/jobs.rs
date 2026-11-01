@@ -101,7 +101,13 @@ impl JobPool {
                 }
                 if let Err(p) = panic::catch_unwind(AssertUnwindSafe(|| f(i))) {
                     let mut first = panicked.lock().unwrap_or_else(PoisonError::into_inner);
-                    first.get_or_insert(p);
+                    if first.is_none() {
+                        *first = Some(p);
+                    } else {
+                        // Dropping a payload runs its code, which may panic,
+                        // and nothing may unwind out of `work`.
+                        core::mem::forget(p);
+                    }
                     next.store(jobs, Ordering::Relaxed);
                 }
             }

@@ -68,6 +68,34 @@ fn a_panic_reaches_the_caller_and_the_pool_still_works() {
     }
 }
 
+/// A panic payload that panics again when dropped.
+struct DropBomb;
+
+impl Drop for DropBomb {
+    fn drop(&mut self) {
+        panic!("payload dropped");
+    }
+}
+
+#[test]
+fn a_payload_that_panics_when_dropped_cannot_break_out_of_the_work() {
+    let mut pool = JobPool::new(4);
+    // The barrier makes all four jobs panic, so all but one payload is spare.
+    let barrier = Barrier::new(4);
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        pool.run(4, &|_| {
+            barrier.wait();
+            panic::panic_any(DropBomb);
+        });
+    }));
+    core::mem::forget(result.expect_err("the panic must surface"));
+    let ran = AtomicU32::new(0);
+    pool.run(8, &|_| {
+        ran.fetch_add(1, Ordering::Relaxed);
+    });
+    assert_eq!(ran.load(Ordering::Relaxed), 8);
+}
+
 #[test]
 fn a_panic_on_one_worker_also_reaches_the_caller() {
     let mut pool = JobPool::new(1);

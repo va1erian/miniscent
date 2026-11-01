@@ -113,8 +113,17 @@ pub fn draw_polygon<S: SpanShader>(
     shader: &mut S,
 ) -> DrawStats {
     let mut stats = DrawStats::default();
+    if let Some(pts) = clip_and_project(cam, verts, tex) {
+        fill_polygon(fb, &pts, tex, shader, &mut stats);
+    }
+    stats
+}
+
+/// The screen polygon of `verts`: camera space, frustum clip, projection.
+/// `None` when it has too many vertices or cannot be projected.
+fn clip_and_project(cam: &Camera, verts: &[Vertex], tex: &Texture) -> Option<Vec<ScreenVert>> {
     if verts.len() > MAX_POLYGON_VERTICES {
-        return stats;
+        return None;
     }
     let cam_verts: Vec<ClipVertex> = verts
         .iter()
@@ -124,11 +133,7 @@ pub fn draw_polygon<S: SpanShader>(
         })
         .collect();
     let clipped = clip_polygon(&cam.frustum(), &cam_verts);
-    let Some(pts) = project_all(cam, tex, &clipped) else {
-        return stats;
-    };
-    fill_polygon(fb, &pts, tex, shader, &mut stats);
-    stats
+    project_all(cam, tex, &clipped)
 }
 
 /// Draw with a constant light (256 = full) and optional fog: the flat-lit
@@ -189,18 +194,7 @@ impl PolyList {
 
     /// Clips and projects a polygon; one that cannot be seen is not listed.
     pub(crate) fn push(&mut self, cam: &Camera, verts: &[Vertex], tex: &Texture, tag: u32) {
-        if verts.len() > MAX_POLYGON_VERTICES {
-            return;
-        }
-        let cam_verts: Vec<ClipVertex> = verts
-            .iter()
-            .map(|v| ClipVertex {
-                pos: cam.world_to_camera(v.pos),
-                uv: v.uv,
-            })
-            .collect();
-        let clipped = clip_polygon(&cam.frustum(), &cam_verts);
-        let Some(pts) = project_all(cam, tex, &clipped) else {
+        let Some(pts) = clip_and_project(cam, verts, tex) else {
             return;
         };
         let (first, last) = row_span(&pts);
