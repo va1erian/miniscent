@@ -21,3 +21,17 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"
+
+# Tests render frames and fuzz collision in software; unoptimized they take
+# minutes. Optimize the hot crates but keep debug assertions and overflow
+# checks, which the hostile-input tests rely on.
+[profile.dev.package.mscent-math]
+opt-level = 2
+[profile.dev.package.mscent-world]
+opt-level = 2
+[profile.dev.package.mscent-collide]
+opt-level = 2
+[profile.dev.package.mscent-render]
+opt-level = 2
+[profile.dev.package.mscent-game]
+opt-level = 2
