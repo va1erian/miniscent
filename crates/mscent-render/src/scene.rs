@@ -104,6 +104,11 @@ impl Scene {
         &self.faces
     }
 
+    /// Rasterizer polygons (with planar texture coordinates), one per face.
+    pub fn polys(&self) -> &[Vec<Vertex>] {
+        &self.polys
+    }
+
     pub fn portals(&self) -> &Portals {
         &self.portals
     }
@@ -142,7 +147,8 @@ impl Scene {
         w.finish()
     }
 
-    fn texture_of(&self, material: u16) -> &Texture {
+    /// Albedo texture of a material id, or the grey fallback.
+    pub fn texture_of(&self, material: u16) -> &Texture {
         self.materials
             .get(MaterialId(material))
             .map_or(&self.fallback, |m| &m.texture)

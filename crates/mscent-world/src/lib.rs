@@ -43,9 +43,13 @@ pub mod faces;
 pub mod format;
 mod format_wire;
 pub mod r#gen;
+pub mod gen_level;
+pub mod level_builder;
 pub mod lightmap;
+pub mod materials;
 pub mod polytope;
 pub mod portals;
+pub mod showcase;
 
 pub use brush::{Brush, BrushError, Op};
 pub use bsp::{Bsp, BspError, Child, Leaf, LeafId, LeafKind, Node, NodeId, Region};
@@ -54,7 +58,10 @@ pub use entity::{Entity, Level};
 pub use faces::{Face, extract_faces};
 pub use format::FormatError;
 pub use r#gen::{GenParams, generate, room_centers};
+pub use gen_level::generate_level;
+pub use level_builder::LevelBuilder;
 pub use portals::{Portal, Portals};
+pub use showcase::showcase_level;
 
 #[cfg(test)]
 mod brush_tests;
