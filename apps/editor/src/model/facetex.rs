@@ -204,6 +204,14 @@ impl EditorState {
         hit
     }
 
+    /// Selects the brush whose visible surface is under `ray`, as the Select
+    /// tool does from the 3D view. Hitting nothing clears the selection.
+    pub fn select_brush_at(&mut self, ray: &Ray) -> Option<FaceHit> {
+        let hit = pick::pick_face(&self.doc, ray);
+        self.selection = hit.map(|h| Selection::Brush(h.face.brush));
+        hit
+    }
+
     /// Applies `edit` to every target face as one undo step (merged with the
     /// previous one for a repeated value edit). Whether anything changed.
     pub fn apply_face_edit(&mut self, edit: FaceEdit) -> bool {
