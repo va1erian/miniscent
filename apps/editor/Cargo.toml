@@ -1,0 +1,21 @@
+[package]
+name = "mscent-editor"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "mscent-editor"
+path = "src/main.rs"
+
+[dependencies]
+mscent-math.workspace = true
+mscent-world.workspace = true
+mscent-render.workspace = true
+mscent-game.workspace = true
+mscent-platform = { workspace = true }
+miniscent-game = { path = "../game", default-features = false }
+xui = { git = "https://github.com/va1erian/xui", rev = "0b1b7efd29035cf6e6ac0cbcbea1c58e2e4faa91" }
+
+[lints]
+workspace = true

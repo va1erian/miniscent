@@ -1,0 +1,27 @@
+[package]
+name = "miniscent-game"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "miniscent"
+path = "src/main.rs"
+
+[features]
+default = ["desktop"]
+desktop = ["mscent-platform/desktop"]
+
+[dependencies]
+mscent-math.workspace = true
+mscent-world.workspace = true
+mscent-collide.workspace = true
+mscent-render.workspace = true
+mscent-game.workspace = true
+mscent-platform.workspace = true
+
+[lints]
+workspace = true

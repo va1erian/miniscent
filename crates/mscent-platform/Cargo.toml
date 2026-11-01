@@ -1,0 +1,16 @@
+[package]
+name = "mscent-platform"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[features]
+# Window, keyboard, mouse and presentation through winit and softbuffer.
+desktop = ["dep:winit", "dep:softbuffer"]
+
+[dependencies]
+winit = { version = "0.30", optional = true }
+softbuffer = { version = "0.4", optional = true }
+
+[lints]
+workspace = true

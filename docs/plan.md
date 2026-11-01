@@ -44,12 +44,23 @@ hardware (`lazyos/docs/compat/kabylake/hw-survey/03-cpuinfo.txt`).
 |---|---|---|
 | Language | Rust workspace, `no_std + alloc` in core crates where practical | xui and LazyOS are Rust; keeps the LazyOS port cheap |
 | Renderer | Software only | LazyOS has a framebuffer and no GPU driver for rendering |
-| Platform layer | An xui canvas widget presenting a framebuffer | One path on Windows and LazyOS, reused by the editor |
+| Platform layer | A small `mscent-platform` trait (present a framebuffer, poll input with relative mouse, time, quit); desktop backend on winit + softbuffer, headless scripted backend, LazyOS backend later. The game does not use xui; only the editor does | Keeps the game small and portable between Windows and LazyOS |
 | World | Ordered add/subtract convex brushes compiled to a solid/empty-leaf BSP with portals | The original Unreal model |
 | Collision | Swept sphere against the BSP, analytic sphere-sphere for entities | Tunnel-proof; a sphere suits 6DoF |
 | Lighting | Offline bake: colour plus a dominant light direction per luxel | Enables bump mapping at no per-pixel lightmap cost |
-| Bump mapping | Tangent-space normal map against the baked direction, evaluated per 16 px span | Measured in `examples/bump_bench.rs` at 640x360: bump roughly doubles span-stepped shading (0.47 to 0.94 ms per frame on the dev machine, an estimated 4 to 5 ms on the i3-7100U at overdraw 1); evaluating the light per pixel instead of per span costs about twice that again |
+| Bump mapping | Tangent-space normal map against the baked direction; the light itself is sampled per pixel (was per 16 px span) | Measured in `examples/bump_bench.rs` at 640x360: bump roughly doubles span-stepped shading (0.47 to 0.94 ms per frame on the dev machine, an estimated 4 to 5 ms on the i3-7100U at overdraw 1); evaluating the light per pixel instead of per span costs about twice that again |
 | Specular | High-detail option only, from the same baked direction and a per-material gloss | No extra lightmap data; zero cost when off |
+
+## Deviations since the first plan
+
+- **TexInfo.** Faces map textures with a Hammer-style per-plane `TexInfo` (axes, shift, scale,
+  rotation, flips, fit, justify), not a fixed planar projection; level format version 2 stores it.
+- **Stock xui.** The editor builds against upstream xui (rev `0b1b7ef`, which has the monitor-change fix, pointer lock and F5 to F12 keys); nothing is vendored. The game has no xui dependency.
+- **Threaded play.** Instant Play runs the game on a render thread with a one-slot frame mailbox,
+  not on the UI thread, so a slow scene never slows the UI.
+- **Bake cache and soft shadows.** The lightmap is baked once per distinct set of inputs
+  (`BakeCache`, optional file mirror) and frames never touch it; lamps are discs so shadow edges are
+  smooth, and albedo is mipmapped, to stop shimmer at a distance.
 
 ## Architecture
 
@@ -60,9 +71,9 @@ crates/
   mscent-collide   trace and sweep against the BSP and entities
   mscent-render    software rasterizer
   mscent-game      6DoF player, enemies, goal, fixed-timestep loop
-  mscent-platform  xui framebuffer and input glue (Windows, LazyOS)
+  mscent-platform  Platform trait, desktop (winit) and headless backends; LazyOS backend later
 apps/
-  game/            runtime
+  game/            runtime, no xui
   editor/          xui level editor with instant play
 ```
 
@@ -81,8 +92,9 @@ Each face gets a planar UV projection and a place in a lightmap atlas. The
 baker traces shadow rays through the BSP and stores, per luxel, a light colour
 and the dominant light direction in the face's tangent space. Faces are planar,
 so the tangent frame is constant per face. At draw time the light colour and
-direction are evaluated at the ends of each 16-pixel span and stepped
-linearly. Per pixel the renderer fetches the texel and its normal, then does
+direction are sampled per pixel with bilinear filtering from a lightmap mip
+chain (deviation: the first design evaluated them at 16-pixel span ends, which crawled
+with the camera). The baked atlas is persisted next to the level (`.msl.lit`). Per pixel the renderer fetches the texel and its normal, then does
 one dot product. Specular, when enabled, uses the half-vector of that
 direction and the view, a small power lookup table and a per-material gloss.
 
@@ -114,8 +126,9 @@ solid and never skips a wall.
 An xui app with three orthographic views and a 3D view that uses the same
 rasterizer. Tools create and resize brushes, toggle add/subtract, and place the
 player start, lights, enemies and the goal. Build runs CSG, portals and the
-bake. Instant Play starts the game in-process on the freshly built level, and
-`Esc` returns to the editor.
+bake. Instant Play starts the game in-process, on its own thread, on the freshly built level,
+and `Esc` returns to the editor. The tool palette is icon buttons; F7 builds and F5 plays (Ctrl+B
+and Ctrl+R as a fallback). Clicking a face in the 3D view edits its Hammer-style texture mapping.
 
 ## Code standards
 

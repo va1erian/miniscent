@@ -1,0 +1,9 @@
+# Fly into the corridor, wait for the drone to come down it and park, shoot
+# it, then fly on to the goal.
+at 0.2s hold W
+at 2.0s release W
+at 6.1s mouse 12 -11
+at 6.2s fire for 1.5s
+at 7.8s mouse -12 11
+at 7.9s hold W
+at 20s quit
