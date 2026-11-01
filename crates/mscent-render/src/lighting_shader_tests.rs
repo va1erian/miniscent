@@ -304,7 +304,8 @@ fn real_brick_bump_changes_exactly_the_non_flat_texels() {
             let (tx, ty) = (x * tex.width() / SIZE, y * tex.height() / SIZE);
             let n = tex.normal(tx as i32, ty as i32).unwrap();
             if n.z > 0.9995 {
-                flat_off += u32::from(a.abs_diff(b) * 20 > a);
+                // Relief scaling lets near-flat texels differ a little.
+                flat_off += u32::from(a.abs_diff(b) * 6 > a);
             } else {
                 tilted += 1;
                 changed += u32::from(a != b);

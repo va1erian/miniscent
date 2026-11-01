@@ -175,11 +175,59 @@ fn fill_polygon<S: SpanShader>(
     let (row_lo, row_hi) = fb.row_range();
     let first = ((ymin - 0.5).ceil().max(0.0) as i32).max(row_lo);
     let end = ((ymax - 0.5).ceil() as i32).min(row_hi);
+    let gy = vertical_gradient(pts);
     for y in first..end {
         if let Some((l, r)) = row_extent(pts, y as f32 + 0.5) {
-            draw_row(fb, y, (l, r), tex, shader, stats);
+            draw_row(fb, y, (l, r), gy, tex, shader, stats);
         }
     }
+}
+
+/// Change of the screen-linear attributes per pixel row, from the plane
+/// through the three most spread-out vertices. `None` for a degenerate polygon.
+fn vertical_gradient(pts: &[ScreenVert]) -> Option<Attr> {
+    let p0 = *pts.first()?;
+    let cross =
+        |a: &ScreenVert, b: &ScreenVert| (a.x - p0.x) * (b.y - p0.y) - (b.x - p0.x) * (a.y - p0.y);
+    let (mut best, mut pair) = (0.0f32, None);
+    for (i, a) in pts.iter().enumerate() {
+        for b in pts.iter().skip(i + 1) {
+            let area = cross(a, b).abs();
+            if area > best {
+                (best, pair) = (area, Some((*a, *b)));
+            }
+        }
+    }
+    let (p1, p2) = pair?;
+    let det = cross(&p1, &p2);
+    let ay =
+        |a0: f32, a1: f32, a2: f32| ((a2 - a0) * (p1.x - p0.x) - (a1 - a0) * (p2.x - p0.x)) / det;
+    Some(Attr {
+        iz: ay(p0.iz, p1.iz, p2.iz),
+        uz: ay(p0.uz, p1.uz, p2.uz),
+        vz: ay(p0.vz, p1.vz, p2.vz),
+    })
+}
+
+/// Mip level for a span: the largest texel step per pixel along x or y at
+/// the span centre, with level 0 kept up to 1.5 texels per pixel so nearby
+/// surfaces stay sharp.
+fn mip_level(tex: &Texture, centre: Attr, gx: Attr, gy: Option<Attr>) -> u32 {
+    if tex.mip_count() == 0 {
+        return 0;
+    }
+    let inv = 1.0 / centre.iz.max(1e-12);
+    let (u, v) = (centre.uz * inv, centre.vz * inv);
+    let step = |g: Attr| {
+        let du = (g.uz - u * g.iz) * inv;
+        let dv = (g.vz - v * g.iz) * inv;
+        du.abs().max(dv.abs())
+    };
+    let rate = step(gx).max(gy.map_or(0.0, step));
+    if rate.is_nan() || rate <= 1.5 {
+        return 0;
+    }
+    ((rate / 1.5).log2().ceil() as u32).min(tex.mip_count())
 }
 
 /// Left and right edge crossings of a convex polygon at scanline `yc`.
@@ -213,6 +261,7 @@ fn draw_row<S: SpanShader>(
     fb: &mut Framebuffer,
     y: i32,
     (l, r): (ScreenVert, ScreenVert),
+    gy: Option<Attr>,
     tex: &Texture,
     shader: &mut S,
     stats: &mut DrawStats,
@@ -246,6 +295,7 @@ fn draw_row<S: SpanShader>(
         let (ea, eb) = (a.at(x, y), b.at(x + n, y));
         shader.begin_span(&ea, &eb, n as u32);
         stats.spans += 1;
+        let level = mip_level(tex, a.advance(grad, n as f32 * 0.5), grad, gy);
         let span = Span {
             x: x as usize,
             n: n as usize,
@@ -253,6 +303,8 @@ fn draw_row<S: SpanShader>(
             eb,
             iz0: a.iz,
             diz: grad.iz,
+            level,
+            smooth: level == 0 && tex.is_filtered(),
         };
         stats.pixels += span_pixels(color, depth, &span, tex, shader);
         a = b;
@@ -267,6 +319,10 @@ struct Span {
     eb: SpanEnd,
     iz0: f32,
     diz: f32,
+    level: u32,
+    /// Magnified filtered texture: sample bilinearly (minified ones use
+    /// the mip level instead).
+    smooth: bool,
 }
 
 /// Inner loop: texel fetch, depth test and shade for one span. Returns the
@@ -290,7 +346,12 @@ fn span_pixels<S: SpanShader>(
             let (tx, ty) = ((fu >> 16) as u32 & mx, (fv >> 16) as u32 & my);
             let (tx, ty) = (tx as i32, ty as i32);
             depth[slot] = iz;
-            color[slot] = shader.shade(i as u32, tex.texel(tx, ty), tx, ty);
+            let texel = if s.smooth {
+                tex.sample_bilinear(fu, fv)
+            } else {
+                tex.texel_lod(tx, ty, s.level)
+            };
+            color[slot] = shader.shade(i as u32, texel, tx, ty);
             written += 1;
         }
         fu = fu.wrapping_add(du);

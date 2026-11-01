@@ -14,6 +14,7 @@ pub mod inflate;
 pub mod level;
 pub mod lighting_shader;
 pub mod mesh;
+pub mod mips;
 pub mod png;
 pub mod png_encode;
 pub mod raster;

@@ -14,8 +14,16 @@ use crate::texture::Texture;
 /// baked colour is already small) cannot blow the ratio up.
 const MIN_FLAT: f32 = 0.2;
 
+/// Darkest the bump term may make a texel: a pit still catches ambient light,
+/// so mortar never goes pure black.
+const MIN_GAIN: f32 = 0.12;
+
 /// Largest brightening the bump term may apply.
-const MAX_GAIN: f32 = 2.0;
+const MAX_GAIN: f32 = 2.5;
+
+/// Exaggeration of the normal map's tilt: the generated maps are subtle
+/// next to the baked light, so the relief is scaled up (1.0 flat stays flat).
+const RELIEF: f32 = 1.8;
 
 /// Decode a packed normal texel (`n * 0.5 + 0.5` per channel). Not
 /// renormalized: the generated maps are unit length to 8-bit precision, and a
@@ -34,11 +42,12 @@ pub fn texel_normal(tex: &Texture, tx: i32, ty: i32) -> Vec3 {
 pub const FLAT_NORMAL: Vec3 = Vec3::new(0.0, 0.0, 1.0);
 
 /// Light scale of normal `n` relative to the flat surface, for a unit light
-/// direction `l` in tangent space. 1.0 for the flat normal, 0 when the
-/// perturbed surface faces away from the light.
+/// direction `l` in tangent space. 1.0 for the flat normal, [`MIN_GAIN`] when
+/// the perturbed surface faces away from the light.
 pub fn bump_gain(n: Vec3, l: Vec3) -> f32 {
     let flat = l.z.max(MIN_FLAT);
-    (n.dot(l) / flat).clamp(0.0, MAX_GAIN)
+    let tilted = Vec3::new(n.x * RELIEF, n.y * RELIEF, n.z);
+    (tilted.dot(l) / flat).clamp(MIN_GAIN, MAX_GAIN)
 }
 
 #[cfg(test)]

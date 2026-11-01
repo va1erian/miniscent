@@ -23,6 +23,9 @@ pub struct Actor {
     pub yaw: f32,
 }
 
+/// Meshes are modelled about a unit wide; this makes them read at a distance.
+const ACTOR_SCALE: f32 = 1.5;
+
 /// Meshes for the actor kinds, built once.
 pub(super) struct ActorMeshes {
     enemy: Mesh,
@@ -53,7 +56,7 @@ impl ActorMeshes {
             let pose = Pose {
                 pos: a.pos,
                 yaw: a.yaw,
-                scale: 1.0,
+                scale: ACTOR_SCALE,
             };
             draw_mesh(fb, cam, mesh, &pose, lighting, fog);
         }

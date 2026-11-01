@@ -2,7 +2,7 @@
 //!
 //! `cargo run --release -p mscent-render --example render_level -- <out_dir>`
 //! writes `showcase_*.png`, a low/high quality pair of the same view, a
-//! rolled view and `generated_seed7.png`.
+//! rolled view, pillar shadow views and `generated_seed7.png`.
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -96,8 +96,14 @@ fn main() {
     shots.take("showcase_7_quality_low", &showcase, &wall, Quality::Low);
     shots.take("showcase_8_quality_high", &showcase, &wall, high);
 
-    let shadow = View::from_angles(at(3.0, 17.0, 3.0), -1.5, -0.1, 0.0);
+    // The lamp is at (6, 6) and the pillar at (11..13, 11..13): its shadow
+    // falls on the floor and walls to the north east of it.
+    let shadow = View::from_angles(at(17.0, 4.0, 5.0), 0.165, -0.39, 0.0);
     shots.take("showcase_9_pillar_shadow", &showcase, &shadow, high);
+    let behind = View::from_angles(at(7.5, 7.5, 4.5), -pi / 4.0, -0.25, 0.0);
+    shots.take("showcase_9b_shadow_from_lamp", &showcase, &behind, high);
+    let across = View::from_angles(at(18.5, 18.5, 4.0), 3.0 * pi / 4.0, -0.2, 0.0);
+    shots.take("showcase_9c_shadow_across", &showcase, &across, high);
     let goal = View::from_angles(at(53.0, 38.0, 2.0), 0.0, 0.1, 0.0);
     shots.take("showcase_10_goal", &showcase, &goal, high);
 

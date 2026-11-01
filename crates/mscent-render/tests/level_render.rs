@@ -100,3 +100,70 @@ fn pillar_casts_a_shadow_on_the_floor() {
         "shadow {shadowed:?} vs lit {lit:?}"
     );
 }
+
+fn mean_abs_diff(a: &[u32], b: &[u32]) -> f32 {
+    let sum: u32 = a
+        .iter()
+        .zip(b)
+        .map(|(x, y)| {
+            (0..3)
+                .map(|c| ((x >> (8 * c)) & 0xff).abs_diff((y >> (8 * c)) & 0xff))
+                .sum::<u32>()
+        })
+        .sum();
+    sum as f32 / (a.len() * 3) as f32
+}
+
+#[test]
+fn bump_and_specular_are_clearly_visible_not_just_nonzero() {
+    let r = renderer();
+    // The steel hall: glossy metal walls lit by the blue lamp.
+    let view = View::from_angles(Vec3::new(34.0, 2.0, 3.5), -0.7, -0.15, 0.0);
+    let (low, med, high) = (
+        frame(&r, &view, Quality::Low),
+        frame(&r, &view, Quality::Medium),
+        frame(&r, &view, Quality::High),
+    );
+    let (bump, spec) = (mean_abs_diff(&low, &med), mean_abs_diff(&med, &high));
+    assert!(
+        bump > 2.0,
+        "bump mapping changes the picture by only {bump}"
+    );
+    assert!(spec > 0.8, "specular changes the picture by only {spec}");
+    let bright = |p: &[u32]| mean_rgb(p).iter().sum::<f32>();
+    assert!(bright(&high) > bright(&med), "specular only adds light");
+}
+
+#[test]
+fn distance_fog_pulls_far_walls_toward_the_fog_colour() {
+    let r = renderer();
+    let cfg = r.config();
+    // Looking down the long A-B corridor: the far wall is 45 units away.
+    let view = View::from_angles(
+        Vec3::new(3.0, 10.0, 2.0),
+        -core::f32::consts::FRAC_PI_2,
+        0.0,
+        0.0,
+    );
+    let px = frame(&r, &view, Quality::High);
+    let centre: Vec<u32> = (70..90).map(|x| px[45 * 160 + x]).collect();
+    let fog = cfg.sky_bottom;
+    let dist = |c: &[u32]| -> f32 {
+        let m = mean_rgb(c);
+        (0..3)
+            .map(|k| (m[k] - ((fog >> (16 - 8 * k)) & 0xff) as f32).abs())
+            .sum()
+    };
+    let near_view = View::from_angles(
+        Vec3::new(18.0, 10.0, 2.0),
+        -core::f32::consts::FRAC_PI_2,
+        0.0,
+        0.0,
+    );
+    let near = frame(&r, &near_view, Quality::High);
+    let near_row: Vec<u32> = (70..90).map(|x| near[45 * 160 + x]).collect();
+    assert!(
+        dist(&centre) < dist(&near_row),
+        "far row is not closer to the fog colour"
+    );
+}

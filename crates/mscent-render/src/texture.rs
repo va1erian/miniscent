@@ -9,6 +9,7 @@ use std::path::Path;
 
 use mscent_math::Vec3;
 
+use crate::mips;
 use crate::png::{self, Image, PngError};
 
 /// Why a texture could not be built or loaded.
@@ -44,6 +45,9 @@ pub struct Texture {
     width: u32,
     height: u32,
     albedo: Vec<u32>,
+    /// Half-size, quarter-size... copies of `albedo` (see [`crate::mips`]).
+    mips: Vec<Vec<u32>>,
+    filtered: bool,
     normals: Option<Vec<u32>>,
     heights: Option<Vec<u8>>,
 }
@@ -59,6 +63,8 @@ impl Texture {
         Ok(Self {
             width,
             height,
+            mips: Vec::new(),
+            filtered: false,
             albedo,
             normals: None,
             heights: None,
@@ -71,9 +77,26 @@ impl Texture {
             width: 1,
             height: 1,
             albedo: vec![color],
+            mips: Vec::new(),
+            filtered: false,
             normals: None,
             heights: None,
         }
+    }
+
+    /// Turn on smooth sampling: bilinear magnification and a mip chain for
+    /// minification. Plain textures sample the nearest texel, which keeps
+    /// exact-texel tests and pixel-art uses simple; loaded materials are
+    /// filtered.
+    pub fn filtered(mut self) -> Self {
+        self.mips = mips::build(self.width, self.height, &self.albedo);
+        self.filtered = true;
+        self
+    }
+
+    /// Whether [`Self::filtered`] was applied.
+    pub fn is_filtered(&self) -> bool {
+        self.filtered
     }
 
     /// Attach a normal map (`0xAARRGGBB`, xyz packed as `n * 0.5 + 0.5`).
@@ -123,6 +146,51 @@ impl Texture {
         self.albedo[self.index(x, y)]
     }
 
+    /// Number of mip levels above the base one.
+    pub fn mip_count(&self) -> u32 {
+        self.mips.len() as u32
+    }
+
+    /// Albedo texel at full-resolution coordinates `(x, y)`, read from mip
+    /// `level` (0 is the base, larger values are blurrier and are clamped).
+    pub fn texel_lod(&self, x: i32, y: i32, level: u32) -> u32 {
+        let Some(l) = (level as usize).min(self.mips.len()).checked_sub(1) else {
+            return self.texel(x, y);
+        };
+        let (w, h) = (
+            (self.width >> (l + 1)).max(1),
+            (self.height >> (l + 1)).max(1),
+        );
+        let (xm, ym) = (
+            (x as u32 >> (l + 1)) & (w - 1),
+            (y as u32 >> (l + 1)) & (h - 1),
+        );
+        self.mips[l]
+            .get(ym as usize * w as usize + xm as usize)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// Bilinearly filtered base-level albedo at 16.16 fixed-point texel
+    /// coordinates. Texel centres sit at half-integers, so an exact texel
+    /// centre returns that texel unchanged. Wraps like [`Self::texel`].
+    pub fn sample_bilinear(&self, fu: i32, fv: i32) -> u32 {
+        let (u, v) = (fu.wrapping_sub(0x8000), fv.wrapping_sub(0x8000));
+        let (x0, y0) = ((u >> 16) as u32, (v >> 16) as u32);
+        let (mx, my) = (self.mask_x(), self.mask_y());
+        let w = self.width as usize;
+        let (xa, xb) = ((x0 & mx) as usize, (x0.wrapping_add(1) & mx) as usize);
+        let (ra, rb) = (
+            (y0 & my) as usize * w,
+            (y0.wrapping_add(1) & my) as usize * w,
+        );
+        let px = &self.albedo;
+        let (tx, ty) = (((u >> 8) & 0xff) as u32, ((v >> 8) & 0xff) as u32);
+        let top = lerp_texel(px[ra + xa], px[ra + xb], tx);
+        let bottom = lerp_texel(px[rb + xa], px[rb + xb], tx);
+        lerp_texel(top, bottom, ty)
+    }
+
     /// Unit normal at a texel, if a normal map is attached.
     pub fn normal(&self, x: i32, y: i32) -> Option<Vec3> {
         let p = self.normals.as_ref()?[self.index(x, y)];
@@ -149,6 +217,16 @@ impl Texture {
     pub fn has_heights(&self) -> bool {
         self.heights.is_some()
     }
+}
+
+/// Blend two opaque texels by `t / 256`, two channels at a time.
+fn lerp_texel(a: u32, b: u32, t: u32) -> u32 {
+    let mix = |a: u32, b: u32| {
+        (a.wrapping_mul(256 - t).wrapping_add(b.wrapping_mul(t)) >> 8) & 0x00ff_00ff
+    };
+    let rb = mix(a & 0x00ff_00ff, b & 0x00ff_00ff);
+    let g = mix((a >> 8) & 0x00ff_00ff, (b >> 8) & 0x00ff_00ff);
+    0xff00_0000 | rb | g << 8
 }
 
 fn read_png(path: &Path) -> Result<Image, TextureError> {
@@ -231,6 +309,16 @@ impl MaterialTable {
     pub fn find(&self, name: &str) -> Option<MaterialId> {
         let i = self.materials.iter().position(|m| m.name == name)?;
         u16::try_from(i).ok().map(MaterialId)
+    }
+
+    /// The same materials with smooth sampling on (see
+    /// [`Texture::filtered`]). Costs memory for the mip chains and some
+    /// time per pixel, which is why it is a choice and not the default.
+    pub fn filtered(mut self) -> Self {
+        for m in &mut self.materials {
+            m.texture = std::mem::replace(&mut m.texture, Texture::solid(0)).filtered();
+        }
+        self
     }
 
     pub fn len(&self) -> usize {

@@ -17,6 +17,10 @@ use crate::shade::{Fog, SpanEnd, SpanShader, lerp_rgb};
 use crate::specular::{SpecTable, half_vector};
 use crate::texture::Texture;
 
+/// Highlight strength: the table peaks at gloss/255 of the light colour,
+/// which on dim baked light would be invisible.
+const SPEC_GAIN: f32 = 1.6;
+
 /// One fitting sample: texel `(u, v)` paired with luxel `(lx, ly)`.
 type Pair = [f32; 4];
 
@@ -246,7 +250,7 @@ impl<const SPEC: bool> SpanShader for LightingShader<'_, SPEC> {
             // would flatten the peak; one Newton step of 1/|h| restores it.
             let n_dot_h = n.dot(h) * (1.5 - 0.5 * h.dot(h));
             let s = spec.table.response(n_dot_h);
-            out = add_spec(out, k, s);
+            out = add_spec(out, k, s * SPEC_GAIN);
         }
         match self.face.fog {
             Some(fog) => {

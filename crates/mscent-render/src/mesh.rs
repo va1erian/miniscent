@@ -144,14 +144,73 @@ impl Mesh {
         Self::new(verts, tris)
     }
 
-    /// The enemy: a squat red five-sided double pyramid, about 1.4 units tall.
-    pub fn enemy() -> Self {
-        Self::bipyramid(5, 0.6, 0.8, 0.6, 0xffc0_3030).unwrap_or_else(Self::empty)
+    /// Several meshes in one, each moved by an offset. `None` if the result
+    /// would have too many vertices.
+    pub fn combine(parts: &[(Mesh, Vec3)]) -> Option<Self> {
+        let mut verts = Vec::new();
+        let mut tris = Vec::new();
+        for (mesh, offset) in parts {
+            let base = u16::try_from(verts.len()).ok()?;
+            verts.extend(mesh.verts.iter().map(|v| MeshVertex {
+                pos: v.pos + *offset,
+                normal: v.normal,
+            }));
+            for t in &mesh.tris {
+                let [a, b, c] = t.indices.map(|i| base.checked_add(i));
+                tris.push(Triangle {
+                    indices: [a?, b?, c?],
+                    color: t.color,
+                });
+            }
+        }
+        Self::new(verts, tris)
     }
 
-    /// The goal: a tall gold octahedron, about 2 units tall.
+    /// The enemy: a red six-sided body with two bone horns and a glowing
+    /// yellow eye on its +X side, about 1.5 units tall.
+    pub fn enemy() -> Self {
+        let part = |s, r, t, b, c| Self::bipyramid(s, r, t, b, c);
+        let parts: Option<Vec<(Mesh, Vec3)>> = [
+            (part(6, 0.6, 0.8, 0.6, 0xffc0_2828), Vec3::ZERO),
+            (
+                part(3, 0.12, 0.6, 0.05, 0xffe8_e0c0),
+                Vec3::new(0.0, 0.4, 0.6),
+            ),
+            (
+                part(3, 0.12, 0.6, 0.05, 0xffe8_e0c0),
+                Vec3::new(0.0, -0.4, 0.6),
+            ),
+            (
+                part(4, 0.2, 0.22, 0.22, 0xfff8_e840),
+                Vec3::new(0.55, 0.0, 0.1),
+            ),
+            (
+                part(4, 0.5, 0.12, 0.12, 0xff58_1010),
+                Vec3::new(0.0, 0.0, -0.5),
+            ),
+        ]
+        .into_iter()
+        .map(|(m, o)| Some((m?, o)))
+        .collect();
+        parts
+            .and_then(|p| Self::combine(&p))
+            .unwrap_or_else(Self::empty)
+    }
+
+    /// The goal: a tall gold octahedron wearing a ring of six cyan gems,
+    /// about 2.2 units tall.
     pub fn goal() -> Self {
-        Self::bipyramid(4, 0.5, 1.0, 1.0, 0xffe0_b020).unwrap_or_else(Self::empty)
+        let mut parts = vec![(Self::bipyramid(4, 0.5, 1.1, 1.1, 0xfff0_c030), Vec3::ZERO)];
+        for i in 0u8..6 {
+            let a = f32::from(i) * core::f32::consts::TAU / 6.0;
+            let gem = Self::bipyramid(4, 0.14, 0.3, 0.3, 0xff50_e0f0);
+            parts.push((gem, Vec3::new(a.cos() * 0.95, a.sin() * 0.95, 0.0)));
+        }
+        let parts: Option<Vec<(Mesh, Vec3)>> =
+            parts.into_iter().map(|(m, o)| Some((m?, o))).collect();
+        parts
+            .and_then(|p| Self::combine(&p))
+            .unwrap_or_else(Self::empty)
     }
 
     fn empty() -> Self {

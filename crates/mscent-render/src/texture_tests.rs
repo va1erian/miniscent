@@ -78,3 +78,39 @@ fn missing_directory_is_an_error_not_a_panic() {
         Err(TextureError::Io(_))
     ));
 }
+
+fn stripes() -> Texture {
+    // 4x4 vertical stripes, one texel wide, black and white.
+    let px: Vec<u32> = (0..16)
+        .map(|i| if i % 2 == 0 { 0xff00_0000 } else { 0xffff_ffff })
+        .collect();
+    Texture::new(4, 4, px).unwrap()
+}
+
+#[test]
+fn plain_textures_are_nearest_and_filtered_ones_have_mips() {
+    let t = stripes();
+    assert!(!t.is_filtered() && t.mip_count() == 0);
+    let f = t.clone().filtered();
+    assert!(f.is_filtered());
+    assert_eq!(f.mip_count(), 2);
+    // The stripes average to mid grey one level down.
+    let g = f.texel_lod(0, 0, 1);
+    assert!((0x70..=0x8f).contains(&(g & 0xff)), "{g:#x}");
+    assert_eq!(f.texel_lod(0, 0, 0), 0xff00_0000);
+    // Levels beyond the chain clamp to the last one.
+    assert_eq!(f.texel_lod(1, 3, 9), f.texel_lod(0, 0, 2));
+}
+
+#[test]
+fn bilinear_returns_texel_centres_and_blends_between_them() {
+    let f = stripes().filtered();
+    let centre = |t: i32| (t << 16) + 0x8000;
+    assert_eq!(f.sample_bilinear(centre(0), centre(0)), 0xff00_0000);
+    assert_eq!(f.sample_bilinear(centre(1), centre(0)), 0xffff_ffff);
+    let mid = f.sample_bilinear(1 << 16, centre(0));
+    assert!((0x78..=0x88).contains(&(mid & 0xff)), "{mid:#x}");
+    // Wraps around the edge instead of reading out of bounds.
+    let _ = f.sample_bilinear(-1, -1);
+    let _ = f.sample_bilinear(i32::MAX, i32::MIN);
+}

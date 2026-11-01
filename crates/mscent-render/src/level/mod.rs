@@ -55,6 +55,9 @@ pub struct BuildConfig {
     /// World units per luxel.
     pub luxel_size: f32,
     pub ambient: Vec3,
+    /// Multiplier on every point light's colour (the baked light then
+    /// saturates the texture, which is what makes bright pools).
+    pub light_gain: f32,
     /// Colours of the sky gradient; the bottom one is also the fog colour.
     pub sky_top: u32,
     pub sky_bottom: u32,
@@ -69,11 +72,12 @@ impl Default for BuildConfig {
     fn default() -> Self {
         Self {
             luxel_size: 1.0,
-            ambient: Vec3::new(0.05, 0.05, 0.07),
-            sky_top: 0xff10_1830,
-            sky_bottom: 0xff30_3a58,
-            fog_start: 20.0,
-            fog_end: 110.0,
+            ambient: Vec3::new(0.12, 0.12, 0.16),
+            light_gain: 1.8,
+            sky_top: 0xff20_3a78,
+            sky_bottom: 0xff7a_8cb8,
+            fog_start: 10.0,
+            fog_end: 55.0,
             fov_y: 1.3,
         }
     }
@@ -110,7 +114,7 @@ fn check_materials(table: &MaterialTable) -> Result<(), BuildError> {
     Ok(())
 }
 
-fn lights_of(level: &Level) -> Vec<PointLight> {
+fn lights_of(level: &Level, gain: f32) -> Vec<PointLight> {
     level
         .entities
         .iter()
@@ -122,7 +126,7 @@ fn lights_of(level: &Level) -> Vec<PointLight> {
                 intensity,
             } => Some(PointLight {
                 position: pos,
-                color: color * intensity,
+                color: color * (intensity * gain),
                 radius,
             }),
             _ => None,
@@ -151,9 +155,11 @@ fn actors_of(level: &Level) -> Vec<Actor> {
 /// the same point lights without shadows plus a little ambient.
 fn mesh_lighting(lights: &[PointLight], ambient: Vec3) -> MeshLighting {
     MeshLighting {
-        ambient: 0.25 + (ambient.x + ambient.y + ambient.z) / 3.0,
-        sun_dir: Vec3::new(0.0, 0.0, 1.0),
-        sun: 0.15,
+        ambient: 0.3 + (ambient.x + ambient.y + ambient.z) / 3.0,
+        sun_dir: Vec3::new(0.3, -0.4, 0.85)
+            .normalized()
+            .unwrap_or(Vec3::ZERO),
+        sun: 0.55,
         points: lights
             .iter()
             .map(|l| MeshLight {
@@ -187,7 +193,7 @@ impl LevelRenderer {
         let bsp = compile(&level.brushes).map_err(BuildError::Csg)?;
         let faces = extract_faces(&bsp, &level.brushes);
         let portals = Portals::build(&bsp);
-        let lights = lights_of(level);
+        let lights = lights_of(level, cfg.light_gain);
         let light_faces: Vec<LightFace> = faces.iter().map(LightFace::from).collect();
         let bake_cfg = BakeConfig {
             luxel_size: cfg.luxel_size,
@@ -197,7 +203,9 @@ impl LevelRenderer {
         let lightmap = mscent_world::lightmap::bake(&bsp, &light_faces, &lights, &bake_cfg)
             .map_err(BuildError::Bake)?;
         let spec = spec_tables(&materials);
-        let scene = Scene::new(bsp, faces, portals, materials);
+        // The game path pays for smooth texture sampling; the raw
+        // rasterizer benchmark does not.
+        let scene = Scene::new(bsp, faces, portals, materials.filtered());
         let uv_maps = (0..scene.faces().len())
             .map(|i| {
                 let proj = lightmap.projections().get(i)?;

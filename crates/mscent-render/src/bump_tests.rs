@@ -26,6 +26,6 @@ fn tilting_toward_light_brightens_and_away_darkens() {
 #[test]
 fn gain_is_bounded_and_nonnegative() {
     let grazing = Vec3::new(1.0, 0.0, 0.0);
-    assert_eq!(bump_gain(Vec3::new(-1.0, 0.0, 0.0), grazing), 0.0);
+    assert_eq!(bump_gain(Vec3::new(-1.0, 0.0, 0.0), grazing), MIN_GAIN);
     assert!(bump_gain(grazing, grazing) <= MAX_GAIN);
 }
