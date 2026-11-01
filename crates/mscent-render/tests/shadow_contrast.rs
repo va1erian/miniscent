@@ -45,5 +45,5 @@ fn pillar_shadow_is_clearly_darker_than_the_lit_floor() {
         luma(lm.sample_world(face_at(p), p).expect("luxel").color)
     };
     let (shadow, lit) = (at(15.5, 15.5), at(18.0, 6.0));
-    assert!(lit > 4.0 * shadow, "shadow {shadow} vs lit {lit}");
+    assert!(lit > 6.0 * shadow, "shadow {shadow} vs lit {lit}");
 }

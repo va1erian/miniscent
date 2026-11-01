@@ -97,16 +97,23 @@ impl Panel {
                     .on_select(|i| Msg::Prop(Prop::Material(i)))
                     .bind(&self.material),
             );
+        // Min and Max take one row each (X, Y, Z side by side) so the
+        // Face section below stays on screen.
+        let mut bounds = grid([Track::Auto, Track::Fill(1), Track::Fill(1), Track::Fill(1)]).gap(4);
+        bounds = bounds
+            .child(label(""))
+            .child(label("X"))
+            .child(label("Y"))
+            .child(label("Z"));
+        bounds = bounds.child(label("Min"));
         for a in 0..3 {
-            brush = brush
-                .child(label(format!("Min {}", AXES[a])))
-                .child(field(&self.min[a], move |v| Prop::Min(a, v)));
+            bounds = bounds.child(field(&self.min[a], move |v| Prop::Min(a, v)));
         }
+        bounds = bounds.child(label("Max"));
         for a in 0..3 {
-            brush = brush
-                .child(label(format!("Max {}", AXES[a])))
-                .child(field(&self.max[a], move |v| Prop::Max(a, v)));
+            bounds = bounds.child(field(&self.max[a], move |v| Prop::Max(a, v)));
         }
+        let brush = column().gap(6).child(brush).child(bounds);
         let mut ent = grid([Track::Auto, Track::Fill(1)]).gap(6);
         for a in 0..3 {
             ent = ent

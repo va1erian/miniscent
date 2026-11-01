@@ -397,7 +397,10 @@ impl<const SPEC: bool> SpanShader for LightingShader<'_, SPEC> {
             }
             k = k * bump_gain(n, seg.dir0 + seg.ddir * f);
         }
-        k = Vec3::new(soft_limit(k.x), soft_limit(k.y), soft_limit(k.z));
+        // Below the knee the roll-off is the identity: skip its divisions.
+        if k.x.max(k.y).max(k.z) > KNEE {
+            k = Vec3::new(soft_limit(k.x), soft_limit(k.y), soft_limit(k.z));
+        }
         let dither = dither_of(self.x0 + i as i32, self.y0);
         let mut out = mul_rgb3(texel, k, dither);
         if let Some(spec) = self.spec.filter(|_| SPEC) {

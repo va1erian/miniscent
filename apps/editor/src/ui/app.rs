@@ -50,7 +50,7 @@ pub enum Msg {
 const SIDE_WIDTH: i32 = 340;
 
 /// Height of the build log box, in dip.
-const LOG_HEIGHT: i32 = 170;
+const LOG_HEIGHT: i32 = 110;
 
 /// Menu command ids.
 pub mod cmd {
