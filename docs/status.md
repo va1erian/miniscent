@@ -58,10 +58,19 @@ one. Reported by the user from a real Windows session, and what was done:
   (`studio/preview_tests.rs`) and 29 to 60 ms through the whole UI (selftest), full light 285 to 490
   ms after the edit, worst UI tick in that span 113 microseconds. On a generated 348-brush level the
   first picture takes 706 ms with a worst UI tick of 207 microseconds. Cancelling a 928 ms bake
-  ended it in 1 ms. Known limit: that 348-brush level overflows the atlas at the full luxel size
-  (`Atlas(TooTall)`), as it did before; it now stays on draft lighting instead of failing to show.
-  Not verified: a real window, and a level whose full bake takes many seconds with real editing
-  during it.
+  ended it in 1 ms. Not verified: a real window, and a level whose full bake takes many seconds
+  with real editing during it.
+- **Large levels bake in full.** The 348-brush generated level no longer overflows the atlas: the
+  height limit went from 4096 to 8192 rows and a level past that coarsens its luxels automatically
+  instead of failing (`lightmap/layout.rs`, reasoning and table in `docs/lightmaps.md`). That level
+  stays at 0.125 units per luxel: 1024 x 6472, 152 MiB, 19.8 s cold on 24 threads, 250 ms from its
+  file, 9.8 ms per frame. In the editor it reaches full light 20.5 s after the first picture (717
+  ms) with a worst UI tick of 6 ms. The showcase is bit for bit unchanged. The editor test for this
+  runs only under `cargo test --release`: unoptimised, the bake takes minutes even with hard
+  shadows, so the debug run covers the layout and a lamp-free bake of that atlas with its file round
+  trip. Not verified: bake time on a machine with few cores (it scales with threads, and the 19.8 s
+  are on 24), and the coarsened path at the shipped limit end to end: the generator stops at 8 by 8,
+  so that path is tested with the limit brought down to 4096.
 - **F5 and F7.** Root cause: xui's winit keymap only produced `Key::F1` to `F4`, so a real window
   never raised F5 to F12 (offscreen tests inject events and hid it).
   Fixed upstream (xui#316, #317); the editor builds against stock xui `0b1b7ef` and the vendored

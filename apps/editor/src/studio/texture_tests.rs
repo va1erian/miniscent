@@ -36,7 +36,7 @@ fn finish<T>(job: &Job<T>) -> T {
 }
 
 fn preview_of(doc: &Document, cache: &SharedCache) -> Built {
-    finish(&start_preview(doc, cache).expect("starts"))
+    finish(&start_preview(doc, cache, &SessionConfig::default()).expect("starts"))
 }
 
 fn uvs(built: &Built) -> Vec<mscent_world::TexInfo> {
@@ -55,7 +55,8 @@ fn a_new_mapping_finds_the_bake_but_new_geometry_does_not() {
     let cache = SharedCache::default();
     let draft = preview_of(&doc, &cache);
     assert_eq!(draft.light, Light::Draft);
-    let baked = start_bake(&doc, draft.light_key, &cache).expect("starts");
+    let baked =
+        start_bake(&doc, draft.light_key, &cache, &SessionConfig::default()).expect("starts");
     let report = finish(&baked.job).expect("not cancelled");
     assert_eq!(report.source, Source::Baked);
     let first = preview_of(&doc, &cache);

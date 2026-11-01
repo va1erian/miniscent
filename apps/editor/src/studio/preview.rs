@@ -134,7 +134,7 @@ impl Studio {
         self.refresh = false;
         self.flush_cache_path();
         self.wanted = Some(doc.clone());
-        match build::start_preview(doc, &self.cache) {
+        match build::start_preview(doc, &self.cache, &self.settings) {
             Ok(job) => self.preview_job = Some(job),
             Err(e) => self.preview_failed(e, doc, doc, out),
         }
@@ -152,7 +152,7 @@ impl Studio {
         if waiting {
             return;
         }
-        match build::start_bake(doc, self.light_key, &self.cache) {
+        match build::start_bake(doc, self.light_key, &self.cache, &self.settings) {
             Ok(job) => self.bake_job = Some(job),
             Err(e) => self.bake_failed(e, out),
         }

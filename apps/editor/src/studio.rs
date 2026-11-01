@@ -12,7 +12,7 @@ use std::sync::TryLockError;
 use std::thread::JoinHandle;
 use std::time::Instant;
 
-use miniscent_game::lightcache;
+use miniscent_game::{SessionConfig, lightcache};
 use mscent_platform::Event;
 
 use crate::build::{BakeJob, Built, Job, Light, SharedCache};
@@ -92,6 +92,8 @@ pub struct Studio {
     /// file), applied by the next tick.
     pending_path: Option<Option<PathBuf>>,
     highlights: Highlights,
+    /// How previews and bakes light the level.
+    settings: SessionConfig,
 }
 
 /// The internal render size for a pane of `pane` pixels: the pane divided by
@@ -127,6 +129,7 @@ impl Studio {
             cache: SharedCache::default(),
             pending_path: None,
             highlights: Highlights::default(),
+            settings: SessionConfig::default(),
         }
     }
 
@@ -416,6 +419,8 @@ Q/E: roll   Shift: fast";
 
 #[cfg(test)]
 mod cache_lock_tests;
+#[cfg(test)]
+mod large_level_tests;
 #[cfg(test)]
 mod preview_tests;
 #[cfg(test)]
