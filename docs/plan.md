@@ -48,7 +48,7 @@ hardware (`lazyos/docs/compat/kabylake/hw-survey/03-cpuinfo.txt`).
 | World | Ordered add/subtract convex brushes compiled to a solid/empty-leaf BSP with portals | The original Unreal model |
 | Collision | Swept sphere against the BSP, analytic sphere-sphere for entities | Tunnel-proof; a sphere suits 6DoF |
 | Lighting | Offline bake: colour plus a dominant light direction per luxel | Enables bump mapping at no per-pixel lightmap cost |
-| Bump mapping | Tangent-space normal map against the baked direction, evaluated per 16 px span | Measured in `examples/bump_bench.rs` at 640x360: bump roughly doubles span-stepped shading (0.47 to 0.94 ms per frame on the dev machine, an estimated 4 to 5 ms on the i3-7100U at overdraw 1); evaluating the light per pixel instead of per span costs about twice that again |
+| Bump mapping | Tangent-space normal map against the baked direction; the light itself is sampled per pixel (was per 16 px span) | Measured in `examples/bump_bench.rs` at 640x360: bump roughly doubles span-stepped shading (0.47 to 0.94 ms per frame on the dev machine, an estimated 4 to 5 ms on the i3-7100U at overdraw 1); evaluating the light per pixel instead of per span costs about twice that again |
 | Specular | High-detail option only, from the same baked direction and a per-material gloss | No extra lightmap data; zero cost when off |
 
 ## Deviations since the first plan
@@ -94,8 +94,9 @@ Each face gets a planar UV projection and a place in a lightmap atlas. The
 baker traces shadow rays through the BSP and stores, per luxel, a light colour
 and the dominant light direction in the face's tangent space. Faces are planar,
 so the tangent frame is constant per face. At draw time the light colour and
-direction are evaluated at the ends of each 16-pixel span and stepped
-linearly. Per pixel the renderer fetches the texel and its normal, then does
+direction are sampled per pixel with bilinear filtering from a lightmap mip
+chain (deviation: the first design evaluated them at 16-pixel span ends, which crawled
+with the camera). The baked atlas is persisted next to the level (`.msl.lit`). Per pixel the renderer fetches the texel and its normal, then does
 one dot product. Specular, when enabled, uses the half-vector of that
 direction and the view, a small power lookup table and a per-material gloss.
 

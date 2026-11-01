@@ -6,8 +6,8 @@
 //! frame without ever waiting. The whole edit, build, play, return loop is
 //! testable headless.
 
-use std::path::Path;
-use std::sync::PoisonError;
+use std::path::{Path, PathBuf};
+use std::sync::TryLockError;
 use std::thread::JoinHandle;
 
 use miniscent_game::lightcache;
@@ -63,6 +63,9 @@ pub struct Studio {
     check_stale: bool,
     /// The last lightmap, so a rebuild after a pure texture edit skips the bake.
     cache: SharedCache,
+    /// A cache file path set while a bake held the cache (`Some(None)`: no
+    /// file), applied by the next tick or build.
+    pending_path: Option<Option<PathBuf>>,
     highlights: Highlights,
     /// The document changed since texture-only edits were last looked for.
     recheck: bool,
@@ -90,6 +93,7 @@ impl Studio {
             progress: 0,
             check_stale: false,
             cache: SharedCache::default(),
+            pending_path: None,
             highlights: Highlights::default(),
             recheck: false,
         }
@@ -169,25 +173,46 @@ impl Studio {
     }
 
     /// Points the lightmap cache at the file for `level`: `<level>.msl.lit`
-    /// beside a saved level, else the per-user cache directory.
+    /// beside a saved level, else the per-user cache directory. Never waits
+    /// for a running bake: the path is applied once the cache is free.
     pub fn set_cache_level(&mut self, level: Option<&Path>) {
-        let path = lightcache::path_for(level, "untitled");
-        self.cache
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .set_path(path);
+        self.point_cache_at(lightcache::path_for(level, "untitled"));
+    }
+
+    fn point_cache_at(&mut self, path: Option<PathBuf>) {
+        match self.cache.try_lock() {
+            Ok(mut cache) => cache.set_path(path),
+            Err(TryLockError::Poisoned(p)) => p.into_inner().set_path(path),
+            Err(TryLockError::WouldBlock) => self.pending_path = Some(path),
+        }
+    }
+
+    /// Applies a path that had to wait for a bake to finish.
+    fn flush_cache_path(&mut self) {
+        if let Some(path) = self.pending_path.take() {
+            self.point_cache_at(path);
+        }
     }
 
     /// Save: moves the cache file next to `level` and, when the build still
     /// has the geometry of `doc`, writes the current bake there. Returns a
-    /// note for the status bar when a file was written.
+    /// note for the status bar when a file was written. A bake in progress
+    /// holds the cache, and the editor must not freeze behind it: the file
+    /// then moves after the bake and a second Save writes it.
     pub fn save_lightmap(&mut self, level: &Path, doc: &Document) -> Option<String> {
         let path = lightcache::path_for(Some(level), "untitled")?;
         let current = self
             .built_doc
             .as_ref()
             .is_some_and(|d| d.same_geometry(doc));
-        let mut cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut cache = match self.cache.try_lock() {
+            Ok(c) => c,
+            Err(TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(TryLockError::WouldBlock) => {
+                self.pending_path = Some(Some(path));
+                return current.then(|| "lightmap not cached yet: a build is running".to_string());
+            }
+        };
         if !current {
             cache.set_path(Some(path));
             return None;
@@ -211,6 +236,7 @@ impl Studio {
     /// lightmap is reused, so the new mapping shows within a fraction of a
     /// second and the log stays quiet.
     fn refresh_textures(&mut self, doc: &Document) {
+        self.flush_cache_path();
         if let Ok(mut job) = build::start_cached(doc, false, &self.cache) {
             job.quiet = true;
             self.job = Some(job);
@@ -231,6 +257,7 @@ impl Studio {
         if self.job.is_some() {
             return Err("a build is already running".into());
         }
+        self.flush_cache_path();
         self.job = Some(build::start_cached(doc, then_play, &self.cache)?);
         self.progress = 0;
         Ok(())
@@ -307,6 +334,7 @@ impl Studio {
     /// (zero when hidden); `doc` the current document. Never blocks.
     pub fn tick(&mut self, events: &[Event], pane: (u32, u32), doc: &Document) -> Tick {
         let mut out = Tick::default();
+        self.flush_cache_path();
         self.poll_build(&mut out);
         self.retired.retain(|h| !h.is_finished());
         if self.recheck && self.job.is_none() && self.mode == Mode::Edit && self.worker.is_some() {
@@ -435,6 +463,8 @@ pub const HELP: &str = "RMB drag or arrows: look
 W/A/S/D: move   R/F: up/down
 Q/E: roll   Shift: fast";
 
+#[cfg(test)]
+mod cache_lock_tests;
 #[cfg(test)]
 mod race_tests;
 #[cfg(test)]

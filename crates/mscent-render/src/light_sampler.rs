@@ -109,7 +109,8 @@ impl<'a> FaceSampler<'a> {
     /// `(lx, ly)`; a weighted sum of unit vectors, not normalised.
     pub fn dir(&self, lx: f32, ly: f32) -> Vec3 {
         let g = &self.base;
-        let clamp = |c: f32, n: u32| (c - 0.5).clamp(0.0, n.saturating_sub(1) as f32);
+        // NaN lands on luxel 0 (`max` ignores it; `clamp` would not).
+        let clamp = |c: f32, n: u32| (c - 0.5).max(0.0).min(n.saturating_sub(1) as f32);
         let (fx, fy) = (clamp(lx, g.width()), clamp(ly, g.height()));
         let (x0, y0) = (fx as u32, fy as u32);
         let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
@@ -148,8 +149,14 @@ impl Pass<'_> {
         out: &mut [Rgbx],
     ) {
         for (i, o) in out.iter_mut().enumerate() {
-            let fx = ((lx + dlx * i as f32) * self.scale - 0.5).clamp(0.0, self.max_x);
-            let fy = ((ly + dly * i as f32) * self.scale - 0.5).clamp(0.0, self.max_y);
+            // `max` before `min` so a NaN coordinate lands on the first luxel
+            // (`clamp` would pass it through and poison the colour).
+            let fx = ((lx + dlx * i as f32) * self.scale - 0.5)
+                .max(0.0)
+                .min(self.max_x);
+            let fy = ((ly + dly * i as f32) * self.scale - 0.5)
+                .max(0.0)
+                .min(self.max_y);
             let (x0, y0) = (fx as u32, fy as u32);
             self.fill(x0, y0, cell);
             let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
@@ -184,3 +191,7 @@ impl Plan<'_> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "light_sampler_tests.rs"]
+mod light_sampler_tests;

@@ -12,6 +12,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;
 
 use mscent_world::Bsp;
@@ -86,6 +87,8 @@ fn why(e: StoreError) -> String {
     }
 }
 
+static WRITES: AtomicU32 = AtomicU32::new(0);
+
 /// Writes `bytes` to `path` through a temporary file in the same directory,
 /// so a crash or a second process never leaves a half-written cache.
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -93,9 +96,15 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
     let mut tmp = path.as_os_str().to_owned();
-    tmp.push(format!(".{}.tmp", std::process::id()));
+    // Process id plus a counter: two writers of one process (a build and a
+    // Save) must not share a temporary file either.
+    let n = WRITES.fetch_add(1, Ordering::Relaxed);
+    tmp.push(format!(".{}.{n}.tmp", std::process::id()));
     let tmp = PathBuf::from(tmp);
-    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
+    if let Err(e) = std::fs::write(&tmp, bytes) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
     std::fs::rename(&tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         e.to_string()

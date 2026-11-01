@@ -234,3 +234,45 @@ fn a_warm_start_beats_a_cold_one_on_the_showcase() {
     assert_eq!(warm.last_source(), Some(Source::File));
     assert!(warm_ms < cold_ms, "{warm_ms} vs {cold_ms}");
 }
+
+/// Two caches of one process (an editor build and a Save, two tests) writing
+/// the same file must neither fail nor leave a damaged file.
+#[test]
+fn concurrent_writers_in_one_process_leave_a_valid_file() {
+    let a = showcase_level();
+    let mut b = showcase_level();
+    nudge_first_light(&mut b);
+    let (mut ca, mut cb) = (BakeCache::new(), BakeCache::new());
+    build(&a, &mut ca);
+    build(&b, &mut cb);
+    let path = temp_file("race.msl.lit");
+    let failures = std::sync::atomic::AtomicUsize::new(0);
+    std::thread::scope(|s| {
+        for cache in [&mut ca, &mut cb] {
+            let (path, failures) = (&path, &failures);
+            s.spawn(move || {
+                for _ in 0..40 {
+                    if cache.save_to(path.clone()).is_err() {
+                        failures.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }
+            });
+        }
+    });
+    assert_eq!(failures.into_inner(), 0, "a concurrent write failed");
+    let mut hit = false;
+    for level in [&a, &b] {
+        let mut cache = BakeCache::with_file(path.clone());
+        build(level, &mut cache);
+        println!("{:?}", cache.last_report());
+        hit |= cache.last_source() == Some(Source::File);
+    }
+    assert!(hit, "the racing writers left an unusable file");
+    let dir = path.parent().expect("dir");
+    let leftovers = std::fs::read_dir(dir)
+        .expect("dir")
+        .filter_map(Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+        .count();
+    assert_eq!(leftovers, 0, "temporary files left behind");
+}

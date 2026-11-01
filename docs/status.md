@@ -98,6 +98,39 @@ one. Reported by the user from a real Windows session, and what was done:
 Not verified: any real window, keyboard or multi-monitor use, the AVX2 paths on the i3-7100U, any
 LazyOS run, and `tools/check_frame_cost.py` was not rerun.
 
+## Shadow stability and persistent bake (feedback round 3)
+
+The user reported shadows that still crawl and jag the way shadow maps do, and that they look
+generated at runtime. Findings and changes:
+
+- **Cause of the crawl.** The old shader sampled the lightmap bilinearly only at the two ends of each
+  16-pixel span and stepped colour and light direction linearly between them, so a pixel's light
+  depended on where the screen-aligned span ends fell. It also had no minification filter. The light
+  is now sampled per pixel with bilinear filtering (`light_sampler.rs`, `lighting_shader.rs`) from a
+  lightmap mip chain (`lightmap_mips.rs`), so a world point gets the same value from any camera.
+- **Why the old metric passed.** `examples/stability.rs` measures second differences of luminance on
+  surface interiors, which averages over mostly flat areas. The new `examples/crawl.rs` follows fixed
+  world points on a shadow edge (luminance noise, contour crawl and stair-step of the contour, at
+  full, 750 and 500 permille internal size, 1/16 and 1/4 px camera steps).
+- **Numbers now (release, this machine).** Flat Low, floor shadow edge, room_mid: luminance noise
+  0.10 to 0.23 levels, contour crawl 0.005 to 0.010 px, stair-step 0.03 to 0.06 px rms (peak 0.14 to
+  0.25 px). room_near is the worst: stair-step 0.10 to 0.20 px rms (peak up to 0.86 px). Real High
+  (textures, bump, specular): edge luminance noise 0.14 to 2.46 levels (worst: room_far at 500
+  permille and 1/4 px steps), contour crawl 0.01 to 0.10 px. `examples/stability.rs` interior shimmer:
+  Flat High 0.03 to 0.05 mean, Real High 0.14 (near) to 0.49 (far, strafe); over 3 levels 0.01 to
+  1.24%. I did not keep a before-run of `crawl` (it did not exist), so there is no before/after
+  figure for the contour metrics; the before is the argument above.
+- **Persistent bake.** Both apps use the on-disk cache; first run bakes, later runs load
+  (showcase release: cold 49 ms, warm 8 ms). See `docs/lightmaps.md`. The bake itself was always
+  offline-style, once per input set; what the user saw as "generated at runtime" was the per-launch
+  re-bake, which is gone.
+- **Upscale.** Unchanged: `upscale_nearest`. The blur in the screenshot is the adaptive internal
+  resolution; no smoother upscale was added, so that part of the report is not addressed.
+- **Not verified:** the user's scene on a real machine; whether remaining stair-steps at room_near are
+  visible at the real window size; the AVX2 paths on the i3-7100U.
+- `cargo test --workspace` passes (one run saw `bake_cache::concurrent_writers_in_one_process_leave_a_valid_file`
+  fail under full-workspace load; it passed alone and on rerun, so it is timing sensitive).
+
 ## Per-face texture mapping (TexInfo)
 
 Each brush plane has a Hammer-style `TexInfo` (`crates/mscent-world/src/texinfo.rs`, `texinfo/align.rs`):
