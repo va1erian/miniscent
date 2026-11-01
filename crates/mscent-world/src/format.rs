@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! magic   "MSLV"           4 bytes
-//! version u16              currently 2 (1 is still read)
+//! version u16              currently 3 (1 and 2 are still read)
 //! flags   u16              reserved, must be 0
 //! count   u32              number of sections (<= MAX_SECTIONS)
 //! section*: id u32, len u32, payload[len]
@@ -12,7 +12,8 @@
 //!
 //! Sections: `1` brushes (required), `2` entities (required); `3` is
 //! reserved for compiled data, which the loader skips because it recompiles
-//! from brushes. Unknown section ids are skipped for forward compatibility.
+//! from brushes; `4` labels (`format_labels.rs`, version 3, written only when
+//! there are any). Unknown section ids are skipped for forward compatibility.
 //! Brushes are stored as raw planes and rebuilt through [`Brush::new`], so a
 //! hostile file cannot smuggle in an invalid brush. Version 2 follows each
 //! brush's planes with one TexInfo record per plane (`texinfo.rs`, 47 bytes);
@@ -22,14 +23,16 @@
 
 use crate::brush::{Brush, BrushError, MAX_PLANES, Op};
 use crate::entity::{Entity, Level};
+use crate::format_labels::{read_labels, write_labels};
 use crate::format_wire::{
     Cursor, TEXINFO_BYTES, len_u32, put_f32, put_f64, put_texinfo, put_u16, put_u32, put_vec3,
 };
+use crate::labels::LabelError;
 use crate::texinfo::TexInfo;
 use mscent_math::{DPlane, Vec3d};
 
 pub const MAGIC: [u8; 4] = *b"MSLV";
-pub const VERSION: u16 = 2;
+pub const VERSION: u16 = 3;
 /// Oldest version [`read`] still accepts.
 const MIN_VERSION: u16 = 1;
 pub const MAX_FILE_BYTES: usize = 64 << 20;
@@ -39,6 +42,9 @@ pub const MAX_SECTIONS: u32 = 16;
 
 const SEC_BRUSHES: u32 = 1;
 const SEC_ENTITIES: u32 = 2;
+const SEC_LABELS: u32 = 4;
+/// First version whose labels section the reader understands.
+const LABELS_VERSION: u16 = 3;
 
 /// Smallest brush record: op, order, material, plane count.
 const BRUSH_HEAD: usize = 1 + 4 + 2 + 4;
@@ -70,18 +76,25 @@ pub enum FormatError {
     Brush(BrushError),
     /// A texture mapping field is non-finite or out of range.
     BadTexInfo,
+    /// Names, tags or mover groups are inconsistent.
+    Labels(LabelError),
 }
 
 /// Serialises a level (source data only).
 pub fn write(level: &Level) -> Vec<u8> {
     let brushes = write_brushes(&level.brushes);
     let entities = write_entities(&level.entities);
-    let mut out = Vec::with_capacity(32 + brushes.len() + entities.len());
+    let mut sections = vec![(SEC_BRUSHES, brushes), (SEC_ENTITIES, entities)];
+    if !level.labels.is_empty() || !level.mover_groups.is_empty() {
+        sections.push((SEC_LABELS, write_labels(&level.labels, &level.mover_groups)));
+    }
+    let bodies: usize = sections.iter().map(|(_, body)| body.len()).sum();
+    let mut out = Vec::with_capacity(32 + bodies);
     out.extend_from_slice(&MAGIC);
     put_u16(&mut out, VERSION);
     put_u16(&mut out, 0);
-    put_u32(&mut out, 2);
-    for (id, body) in [(SEC_BRUSHES, brushes), (SEC_ENTITIES, entities)] {
+    put_u32(&mut out, len_u32(sections.len()));
+    for (id, body) in sections {
         put_u32(&mut out, id);
         put_u32(&mut out, len_u32(body.len()));
         out.extend_from_slice(&body);
@@ -122,10 +135,13 @@ fn write_entities(entities: &[Entity]) -> Vec<u8> {
             Entity::Enemy { .. } => 2,
             Entity::Goal { .. } => 3,
             Entity::World { .. } => 4,
+            Entity::Marker { .. } => 5,
+            Entity::Zone { .. } => 6,
         });
         put_vec3(&mut out, e.pos());
         match *e {
-            Entity::PlayerStart { yaw, .. } => put_f32(&mut out, yaw),
+            Entity::PlayerStart { yaw, .. } | Entity::Marker { yaw, .. } => put_f32(&mut out, yaw),
+            Entity::Zone { half, .. } => put_vec3(&mut out, half),
             Entity::Light {
                 color,
                 radius,
@@ -169,7 +185,7 @@ pub fn read(data: &[u8]) -> Result<Level, FormatError> {
     if count > MAX_SECTIONS {
         return Err(FormatError::TooMany);
     }
-    let (mut brushes, mut entities) = (None, None);
+    let (mut brushes, mut entities, mut labels) = (None, None, None);
     for _ in 0..count {
         let id = c.u32()?;
         let len = usize::try_from(c.u32()?).map_err(|_| FormatError::TooLarge)?;
@@ -177,16 +193,23 @@ pub fn read(data: &[u8]) -> Result<Level, FormatError> {
         match id {
             SEC_BRUSHES => store(&mut brushes, id, read_brushes(body, version))?,
             SEC_ENTITIES => store(&mut entities, id, read_entities(body))?,
+            SEC_LABELS if version >= LABELS_VERSION => store(&mut labels, id, read_labels(body))?,
             _ => {}
         }
     }
     if c.remaining() != 0 {
         return Err(FormatError::Trailing);
     }
-    Ok(Level {
+    let (labels, mover_groups) = labels.unwrap_or_default();
+    let level = Level {
         brushes: brushes.ok_or(FormatError::MissingSection(SEC_BRUSHES))?,
         entities: entities.ok_or(FormatError::MissingSection(SEC_ENTITIES))?,
-    })
+        labels,
+        mover_groups,
+    };
+    // Labels refer to brushes and entities, so this waits until all are read.
+    level.check_labels().map_err(FormatError::Labels)?;
+    Ok(level)
 }
 
 fn store<T>(
@@ -201,7 +224,11 @@ fn store<T>(
     Ok(())
 }
 
-fn read_count(c: &mut Cursor, cap: usize, min_record: usize) -> Result<usize, FormatError> {
+pub(crate) fn read_count(
+    c: &mut Cursor,
+    cap: usize,
+    min_record: usize,
+) -> Result<usize, FormatError> {
     let n = usize::try_from(c.u32()?).map_err(|_| FormatError::TooMany)?;
     // Reject counts the remaining bytes cannot possibly hold, before
     // allocating for them.
@@ -295,6 +322,11 @@ fn read_entity(c: &mut Cursor) -> Result<Entity, FormatError> {
             pos,
             fog_start: c.f32()?,
             fog_end: c.f32()?,
+        },
+        5 => Entity::Marker { pos, yaw: c.f32()? },
+        6 => Entity::Zone {
+            pos,
+            half: c.vec3()?,
         },
         other => return Err(FormatError::BadEntityTag(other)),
     })

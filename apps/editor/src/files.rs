@@ -93,6 +93,7 @@ mod tests {
         assert!(msg.contains("Saved"), "{msg}");
         let back = load(&path).expect("load");
         assert_eq!(back.brushes().len(), doc.brushes().len());
+        assert_eq!(back.groups(), doc.groups());
         assert_eq!(back.entities().len(), doc.entities().len());
         for (a, b) in doc.brushes().iter().zip(back.brushes()) {
             assert_eq!(

@@ -2,9 +2,12 @@
 //!
 //! Brushes keep their CSG order as their position in the list, so reordering is
 //! a list move. Entities are the game's own [`Entity`] values plus an id.
+//! Names and mover groups refer to those ids, not to list positions, so
+//! reordering and deleting cannot point them at the wrong thing.
 
 use mscent_math::{DPlane, Vec3d};
-use mscent_world::{Brush, BrushError, Entity, Level, Op, TexInfo};
+use mscent_world::{Brush, BrushError, Entity, EntityLabel, Level, MoverGroup, Op, TexInfo};
+use std::collections::BTreeMap;
 
 /// A stable identity that survives reordering, deletion and undo.
 pub type Id = u32;
@@ -37,6 +40,21 @@ pub struct BrushDef {
 pub struct EntityDef {
     pub id: Id,
     pub entity: Entity,
+}
+
+/// The name and tags of one entity.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LabelDef {
+    pub name: Option<String>,
+    pub tags: Vec<String>,
+}
+
+/// Brushes that move together, by id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroupDef {
+    pub name: String,
+    pub tags: Vec<String>,
+    pub brushes: Vec<Id>,
 }
 
 impl BrushDef {
@@ -192,6 +210,8 @@ fn shape_of(b: &Brush) -> Shape {
 pub struct Document {
     brushes: Vec<BrushDef>,
     entities: Vec<EntityDef>,
+    labels: BTreeMap<Id, LabelDef>,
+    groups: Vec<GroupDef>,
     next_id: Id,
 }
 
@@ -203,17 +223,78 @@ impl Document {
     /// Imports a level (brush order is list order).
     pub fn from_level(level: &Level) -> Document {
         let mut doc = Document::new();
-        let mut brushes: Vec<&Brush> = level.brushes.iter().collect();
-        brushes.sort_by_key(|b| b.order());
-        for b in brushes {
+        let mut brushes: Vec<(usize, &Brush)> = level.brushes.iter().enumerate().collect();
+        brushes.sort_by_key(|(_, b)| b.order());
+        let mut brush_ids = vec![0; level.brushes.len()];
+        for (index, b) in brushes {
             let id = doc.alloc_id();
+            brush_ids[index] = id;
             doc.brushes.push(BrushDef::from_brush(id, b));
         }
         for e in &level.entities {
             let id = doc.alloc_id();
             doc.entities.push(EntityDef { id, entity: *e });
         }
+        doc.import_labels(level, &brush_ids);
         doc
+    }
+
+    /// Turns the level's indices into ids; an index out of range is dropped.
+    fn import_labels(&mut self, level: &Level, brush_ids: &[Id]) {
+        for label in &level.labels {
+            if let Some(e) = self.entities.get(label.entity as usize) {
+                let def = LabelDef {
+                    name: label.name.clone(),
+                    tags: label.tags.clone(),
+                };
+                self.labels.insert(e.id, def);
+            }
+        }
+        for group in &level.mover_groups {
+            let ids = group.brushes.iter();
+            self.groups.push(GroupDef {
+                name: group.name.clone(),
+                tags: group.tags.clone(),
+                brushes: ids
+                    .filter_map(|&b| brush_ids.get(b as usize).copied())
+                    .collect(),
+            });
+        }
+    }
+
+    /// Labels of the entities still in the document, in list order.
+    pub fn export_labels(&self) -> Vec<EntityLabel> {
+        let labelled = self.entities.iter().enumerate();
+        labelled
+            .filter_map(|(index, e)| {
+                let label = self.labels.get(&e.id)?;
+                Some(EntityLabel {
+                    entity: index as u32,
+                    name: label.name.clone(),
+                    tags: label.tags.clone(),
+                })
+            })
+            .collect()
+    }
+
+    /// Mover groups as indices. A brush that was deleted or made subtractive
+    /// leaves its group, and a group left empty is not exported.
+    pub fn export_groups(&self) -> Vec<MoverGroup> {
+        let index_of = |id: &Id| {
+            let index = self.brush_index(*id)?;
+            (self.brushes[index].op == Op::Add).then_some(index as u32)
+        };
+        self.groups
+            .iter()
+            .filter_map(|g| {
+                let brushes: Vec<u32> = g.brushes.iter().filter_map(index_of).collect();
+                (!brushes.is_empty()).then(|| MoverGroup {
+                    name: g.name.clone(),
+                    tags: g.tags.clone(),
+                    brushes,
+                })
+            })
+            .collect()
     }
 
     /// Exports to the game's level type; fails on the first invalid brush.
@@ -227,14 +308,18 @@ impl Document {
         Ok(Level {
             brushes,
             entities: self.entities.iter().map(|e| e.entity).collect(),
+            labels: self.export_labels(),
+            mover_groups: self.export_groups(),
         })
     }
 
     /// Whether `other` has the same shapes, operations and entities, in the
     /// same order; only materials and texture mappings may differ. The
-    /// lightmap depends on nothing else.
+    /// lightmap depends on nothing else. A mover group counts, because it takes
+    /// its brushes out of the CSG.
     pub fn same_geometry(&self, other: &Document) -> bool {
         self.entities == other.entities
+            && self.groups == other.groups
             && self.brushes.len() == other.brushes.len()
             && self
                 .brushes
@@ -254,6 +339,11 @@ impl Document {
 
     pub fn entities(&self) -> &[EntityDef] {
         &self.entities
+    }
+
+    #[cfg(test)]
+    pub fn groups(&self) -> &[GroupDef] {
+        &self.groups
     }
 
     pub fn brush(&self, id: Id) -> Option<&BrushDef> {

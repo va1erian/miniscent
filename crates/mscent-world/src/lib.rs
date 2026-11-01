@@ -45,9 +45,11 @@ pub mod csg;
 pub mod entity;
 pub mod faces;
 pub mod format;
+mod format_labels;
 mod format_wire;
 pub mod r#gen;
 pub mod gen_level;
+pub mod labels;
 pub mod level_builder;
 pub mod lightmap;
 pub mod materials;
@@ -64,6 +66,7 @@ pub use faces::{Face, extract_faces};
 pub use format::FormatError;
 pub use r#gen::{GenParams, generate, room_centers};
 pub use gen_level::generate_level;
+pub use labels::{EntityLabel, LabelError, MoverGroup};
 pub use level_builder::LevelBuilder;
 pub use portals::{Portal, Portals};
 pub use showcase::showcase_level;
@@ -79,6 +82,8 @@ mod csg_tests;
 mod format_tests;
 #[cfg(test)]
 mod gen_tests;
+#[cfg(test)]
+mod labels_tests;
 #[cfg(test)]
 mod portals_tests;
 #[cfg(test)]

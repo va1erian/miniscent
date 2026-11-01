@@ -185,14 +185,15 @@ it is kit. If it is a decision about this level or this mechanic, it is logic.
 Entity is `Copy` and stays so: names live in a side table, not on the entity.
 
 - `Entity::Marker { pos, yaw }`: a named point.
-- `Entity::Zone { min, max }`: a box the player enters and leaves.
-- `Level.names`: `{ target: Entity(u32) | Group(u32), name, tags }`.
-- `Level.mover_groups`: named lists of brush indices. `Level::static_brushes()` is what `compile` and
-  `extract_faces` receive, so a mover never reaches the CSG.
+- `Entity::Zone { pos, half }`: a box the player enters and leaves.
+- `Level.labels`: `{ entity, name, tags }`, with an optional name, since a marker may only need a tag.
+- `Level.mover_groups`: `{ name, tags, brushes }`, indices into the brush list. `Level::static_brushes()`
+  is what `compile` and `extract_faces` receive, so a mover never reaches the CSG.
 
-These go in a new format section under version 3. The reader validates them like everything else:
-identifiers only (`[a-z0-9_]`, at most 32 bytes), capped counts, no duplicate names, no brush in two
-groups, mover brushes must be `Op::Add`, and indices in range.
+These go in a new format section under version 3 (`format_labels.rs`, `labels.rs`). The reader validates
+them like everything else: identifiers only (`[a-z0-9_]`, at most 32 bytes), capped counts, no duplicate
+names, no brush in two groups, mover brushes must be `Op::Add`, and indices in range. The editor holds
+them by stable id, so reordering and deleting cannot point a name at the wrong thing.
 
 Props, pickups and waves are spawned from markers by the script. So an agent can add a keycard without
 touching the level file, and the entity list stays nearly the same size as today.

@@ -135,7 +135,16 @@ pub fn validate(doc: &Document) -> Result<Level, String> {
     if let Some(i) = entities.iter().position(|e| !e.is_valid()) {
         return Err(format!("entity {} has an out-of-range value", i + 1));
     }
-    Ok(Level { brushes, entities })
+    let level = Level {
+        brushes,
+        entities,
+        labels: doc.export_labels(),
+        mover_groups: doc.export_groups(),
+    };
+    level
+        .check_labels()
+        .map_err(|e| format!("names or mover groups are inconsistent: {e:?}"))?;
+    Ok(level)
 }
 
 /// Runs `work` on `doc` on a new thread; a panic becomes an error text.
@@ -341,6 +350,7 @@ mod tests {
         let doc = Document::from_level(&Level {
             brushes: vec![room],
             entities: vec![],
+            ..Default::default()
         });
         let job = start_preview(&doc, &SharedCache::default()).expect("starts");
         let built = wait(&job).expect("builds");

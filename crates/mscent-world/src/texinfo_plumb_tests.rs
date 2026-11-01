@@ -82,6 +82,7 @@ fn level_of(brushes: Vec<Brush>) -> Level {
     Level {
         brushes,
         entities: Vec::new(),
+        ..Default::default()
     }
 }
 
@@ -139,7 +140,7 @@ fn marked_level() -> Level {
 fn texinfo_round_trips_through_the_level_file() {
     let level = marked_level();
     let bytes = format::write(&level);
-    assert_eq!(&bytes[4..6], &2u16.to_le_bytes());
+    assert_eq!(&bytes[4..6], &format::VERSION.to_le_bytes());
     let back = format::read(&bytes).expect("reads");
     assert_eq!(back, level);
     assert_eq!(format::write(&back), bytes);
@@ -179,10 +180,11 @@ fn version_one_files_load_with_default_mappings() {
     assert_eq!(read, level);
     assert!(read.brushes[0].texinfos().iter().all(|t| t.material == 2));
     let mut future = file.clone();
-    future[4..6].copy_from_slice(&3u16.to_le_bytes());
+    let newer = format::VERSION + 1;
+    future[4..6].copy_from_slice(&newer.to_le_bytes());
     assert_eq!(
         format::read(&future),
-        Err(FormatError::UnsupportedVersion(3))
+        Err(FormatError::UnsupportedVersion(newer))
     );
 }
 

@@ -3,7 +3,7 @@
 //! [`crate::Game`], so a restart never has to reload the level.
 
 use mscent_math::Vec3;
-use mscent_world::{Bsp, CsgError, Entity, Level, compile};
+use mscent_world::{Bsp, CsgError, Entity, LabelError, Level, compile};
 
 /// A placed point light, handed to the renderer.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -37,6 +37,8 @@ pub enum LoadError {
     InvalidEntity(usize),
     /// Player start or enemy at this entity index is inside solid rock.
     SpawnInSolid(usize),
+    /// Names, tags or mover groups are inconsistent.
+    Labels(LabelError),
 }
 
 /// Immutable per-level game data.
@@ -54,7 +56,8 @@ impl Arena {
     /// Compiles the brushes and places every entity. The first `PlayerStart`
     /// wins; at least one goal is required. Never panics on hostile levels.
     pub fn from_level(level: &Level) -> Result<Self, LoadError> {
-        let bsp = compile(&level.brushes).map_err(LoadError::Csg)?;
+        level.check_labels().map_err(LoadError::Labels)?;
+        let bsp = compile(&level.static_brushes()).map_err(LoadError::Csg)?;
         let mut start = None;
         let (mut goals, mut lights, mut enemies) = (Vec::new(), Vec::new(), Vec::new());
         for (i, e) in level.entities.iter().enumerate() {
@@ -84,6 +87,8 @@ impl Arena {
                 Entity::Goal { pos, radius } => goals.push(Goal { pos, radius }),
                 // Look settings only; the renderer reads them.
                 Entity::World { .. } => {}
+                // Places for scripts; nothing happens at them until M9.5.
+                Entity::Marker { .. } | Entity::Zone { .. } => {}
             }
         }
         let (player_start, player_yaw) = start.ok_or(LoadError::NoPlayerStart)?;

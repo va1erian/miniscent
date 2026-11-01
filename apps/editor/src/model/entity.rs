@@ -11,6 +11,8 @@ pub enum EntityKind {
     Enemy,
     Goal,
     World,
+    Marker,
+    Zone,
 }
 
 impl EntityKind {
@@ -21,6 +23,8 @@ impl EntityKind {
             EntityKind::Enemy => "Enemy",
             EntityKind::Goal => "Goal",
             EntityKind::World => "World",
+            EntityKind::Marker => "Marker",
+            EntityKind::Zone => "Zone",
         }
     }
 
@@ -42,6 +46,11 @@ impl EntityKind {
                 fog_start: 4.0,
                 fog_end: 26.0,
             },
+            EntityKind::Marker => Entity::Marker { pos, yaw: 0.0 },
+            EntityKind::Zone => Entity::Zone {
+                pos,
+                half: Vec3::new(2.0, 2.0, 2.0),
+            },
         }
     }
 }
@@ -53,6 +62,8 @@ pub fn kind(e: &Entity) -> EntityKind {
         Entity::Enemy { .. } => EntityKind::Enemy,
         Entity::Goal { .. } => EntityKind::Goal,
         Entity::World { .. } => EntityKind::World,
+        Entity::Marker { .. } => EntityKind::Marker,
+        Entity::Zone { .. } => EntityKind::Zone,
     }
 }
 
@@ -75,7 +86,9 @@ pub fn with_pos(e: &Entity, p: [f64; 3]) -> Entity {
         | Entity::Light { pos, .. }
         | Entity::Enemy { pos, .. }
         | Entity::Goal { pos, .. }
-        | Entity::World { pos, .. } => *pos = np,
+        | Entity::World { pos, .. }
+        | Entity::Marker { pos, .. }
+        | Entity::Zone { pos, .. } => *pos = np,
     }
     out
 }
@@ -100,7 +113,14 @@ pub fn params(e: &Entity) -> Vec<(&'static str, f64)> {
             fog_start, fog_end, ..
         } => vec![("Fog start", short(fog_start)), ("Fog end", short(fog_end))],
         Entity::Enemy { kind, .. } => vec![("Kind", kind as f64)],
-        Entity::PlayerStart { yaw, .. } => vec![("Yaw (deg)", short(yaw.to_degrees()))],
+        Entity::PlayerStart { yaw, .. } | Entity::Marker { yaw, .. } => {
+            vec![("Yaw (deg)", short(yaw.to_degrees()))]
+        }
+        Entity::Zone { half, .. } => vec![
+            ("Half X", short(half.x)),
+            ("Half Y", short(half.y)),
+            ("Half Z", short(half.z)),
+        ],
     }
 }
 
@@ -124,7 +144,15 @@ pub fn set_param(e: &mut Entity, i: usize, v: f64) {
         Entity::World { fog_start, .. } if i == 0 => *fog_start = v as f32,
         Entity::World { fog_end, .. } if i == 1 => *fog_end = v as f32,
         Entity::Enemy { kind, .. } if i == 0 => *kind = v.clamp(0.0, 255.0) as u8,
-        Entity::PlayerStart { yaw, .. } if i == 0 => *yaw = (v as f32).to_radians(),
+        Entity::PlayerStart { yaw, .. } | Entity::Marker { yaw, .. } if i == 0 => {
+            *yaw = (v as f32).to_radians()
+        }
+        Entity::Zone { half, .. } => match i {
+            0 => half.x = v as f32,
+            1 => half.y = v as f32,
+            2 => half.z = v as f32,
+            _ => {}
+        },
         _ => {}
     }
 }

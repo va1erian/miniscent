@@ -30,3 +30,5 @@ pub use pointer::Pointer;
 pub use state::{EditorState, Selection, Tool};
 pub use tools::Keep;
 pub use view::{Camera2D, View};
+#[cfg(test)]
+mod label_tests;

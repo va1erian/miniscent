@@ -44,8 +44,9 @@ pub struct Compiled {
 impl Compiled {
     /// Runs CSG, face extraction and portals. No light is traced.
     pub fn new(level: &Level, cfg: &BuildConfig) -> Result<Self, BuildError> {
-        let bsp = compile(&level.brushes).map_err(BuildError::Csg)?;
-        let faces = extract_faces(&bsp, &level.brushes);
+        let brushes = level.static_brushes();
+        let bsp = compile(&brushes).map_err(BuildError::Csg)?;
+        let faces = extract_faces(&bsp, &brushes);
         let portals = Portals::build(&bsp);
         let light_faces = faces.iter().map(LightFace::from).collect();
         let bake_cfg = BakeConfig {

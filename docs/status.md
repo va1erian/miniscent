@@ -273,6 +273,16 @@ GUI itself was not driven by hand, only the model through the pointer API and th
 | M8.5 | Not done | Needs the real Kaby Lake box |
 | M8.6 | Not done | Needs M8.5, M7.8 and a clean Windows machine |
 
+## M9 Level scripting
+
+Design in `docs/scripting.md`. Nothing a script can do exists yet.
+
+| ID | Status | Evidence |
+|---|---|---|
+| M9.1 | Done | `tools/check_size.py`, a Windows CI job. Run by hand: the real binary passes at 1,222,144 bytes, a lowered limit and a 1.7 MB file both fail. The CI job has not run yet |
+| M9.2 | Done | `labels.rs`, `format_labels.rs`, format version 3; `labels_tests.rs` (round trip, every validation error, truncation, 200,000 bit flips, shipped version 1 levels load); `game_tests::a_mover_brush_stays_out_of_the_world_bsp`; the editor keeps labels through load, delete, undo and save (`model/label_tests.rs`). Markers and zones draw in the 2D views but have no placing tool until M9.9, and that drawing was not looked at. A mover brush is simply absent from the world until M9.3 and M9.7. The release binary grew 37,888 bytes to 1,260,032, more than this much code should cost, and the cause was not found |
+| M9.3 to M9.9 | Not done | |
+
 ## Deviations from the plan
 
 - Platform layer: the game does not use xui. `mscent-platform` is a small trait with a desktop (winit + softbuffer) and a headless backend; xui is used only by `apps/editor`. A LazyOS backend is not written.
