@@ -152,7 +152,7 @@ const MAX_SEGS: usize = 8;
 /// Largest distance, in luxels, between two lightmap samples on screen.
 /// Beyond one luxel the linear step between knots would skip over the
 /// penumbra of a shadow edge, and the edge would crawl with the span grid.
-const MAX_KNOT_LUXELS: f32 = 2.0;
+const MAX_KNOT_LUXELS: f32 = 3.0;
 /// Texels per pixel up to which bump mapping keeps full strength, and the
 /// rate at which it has faded out (the normal map aliases beyond that).
 const BUMP_FULL: f32 = 1.0;

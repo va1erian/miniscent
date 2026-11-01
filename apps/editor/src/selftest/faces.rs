@@ -167,6 +167,10 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     let (w, h) = pane.size();
     let wall = face_polygon(&state.borrow().doc, face).is_some_and(|(_, n)| n.z.abs() < 0.5);
     run.check(wall, "the picked face is a wall");
+    // Brick has clear horizontal courses: the scale, rotation and shift of
+    // the edit are unmistakable on it, unlike on a noisy rock texture.
+    edit(stage, FaceEdit::Material(mscent_world::materials::BRICK));
+    wait_for_refresh(stage, probe);
     pump(stage, 20);
     run.shot(stage, "08-face-picked.png");
     let picture_before = pane.frame_checksum();
