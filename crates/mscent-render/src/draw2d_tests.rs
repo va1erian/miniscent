@@ -154,3 +154,27 @@ fn text_clips_at_the_screen_edge() {
     draw_text(&mut f, i32::MAX - 3, i32::MAX - 3, "x", RED, u32::MAX);
     draw_text(&mut f, 0, 0, "zero scale", RED, 0);
 }
+
+#[test]
+fn text_size_with_huge_scale_saturates() {
+    assert_eq!(text_size("ab\ncd", u32::MAX), (u32::MAX, u32::MAX));
+}
+
+#[test]
+fn drawing_into_a_band_uses_screen_rows() {
+    let mut full = fb(8, 8);
+    fill_rect(&mut full, 1, 5, 3, 2, RED);
+    let mut band = Framebuffer::new_band(8, 4, 4, 8).unwrap();
+    band.clear(0xff00_0000);
+    fill_rect(&mut band, 1, 5, 3, 2, RED);
+    for y in 4..8 {
+        for x in 0..8 {
+            assert_eq!(band.pixel(x, y), full.pixel(x, y), "({x},{y})");
+        }
+    }
+    // Nothing above the band's first row may leak into it.
+    let mut band = Framebuffer::new_band(8, 4, 4, 8).unwrap();
+    band.clear(0xff00_0000);
+    fill_rect(&mut band, 0, 0, 8, 4, RED);
+    assert_eq!(band.pixels().iter().filter(|&&p| p == RED).count(), 0);
+}

@@ -54,17 +54,32 @@ impl Quat {
     /// Renormalizes to unit length, to cancel drift after many `mul`s. A
     /// degenerate or non-finite quaternion becomes the identity.
     pub fn normalized(self) -> Self {
-        let n = self.norm_squared().sqrt();
-        if n.is_finite() && n > epsilon::MIN_LENGTH_F32 {
-            let inv = 1.0 / n;
-            Self {
-                x: self.x * inv,
-                y: self.y * inv,
-                z: self.z * inv,
-                w: self.w * inv,
-            }
-        } else {
-            Self::IDENTITY
+        // Pre-scale by the largest component so squaring cannot overflow.
+        let m = self
+            .x
+            .abs()
+            .max(self.y.abs())
+            .max(self.z.abs())
+            .max(self.w.abs());
+        // `max` ignores NaN, so finiteness is checked per component.
+        let finite = [self.x, self.y, self.z, self.w]
+            .iter()
+            .all(|c| c.is_finite());
+        if !(finite && m > epsilon::MIN_LENGTH_F32) {
+            return Self::IDENTITY;
+        }
+        let s = Self {
+            x: self.x / m,
+            y: self.y / m,
+            z: self.z / m,
+            w: self.w / m,
+        };
+        let inv = 1.0 / s.norm_squared().sqrt();
+        Self {
+            x: s.x * inv,
+            y: s.y * inv,
+            z: s.z * inv,
+            w: s.w * inv,
         }
     }
 
@@ -179,5 +194,33 @@ mod tests {
         let m = q.to_mat3();
         assert!(m.cols[0].dot(m.cols[1]).abs() < 1e-5);
         assert!((m.cols[2].length() - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn normalizing_survives_extreme_magnitudes() {
+        // Squaring 1e30 overflows in f32, but the direction is well defined.
+        let q = Quat {
+            x: 0.0,
+            y: 1.0e30,
+            z: 0.0,
+            w: 1.0e30,
+        }
+        .normalized();
+        assert!((q.norm_squared() - 1.0).abs() < epsilon::UNIT_NORM_TOLERANCE);
+        assert!(q.y > 0.5, "direction lost: {q:?}");
+        let tiny = Quat {
+            x: 0.0,
+            y: 1.0e-30,
+            z: 0.0,
+            w: 1.0e-30,
+        };
+        assert_eq!(tiny.normalized(), Quat::IDENTITY);
+        let nan = Quat {
+            x: f32::NAN,
+            y: 0.0,
+            z: 0.0,
+            w: 1.0,
+        };
+        assert_eq!(nan.normalized(), Quat::IDENTITY);
     }
 }

@@ -35,6 +35,8 @@ pub use step::{
 pub use sweep::{Trace, sweep_sphere};
 
 #[cfg(test)]
+mod adv_tests;
+#[cfg(test)]
 mod slide_tests;
 #[cfg(test)]
 mod step_tests;

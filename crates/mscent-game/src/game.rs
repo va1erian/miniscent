@@ -73,6 +73,9 @@ impl Game {
         self.phase = Phase::Playing;
         self.ticks = 0;
         self.hurt_steps = 0;
+        // Banked frame time belongs to the old run; keeping it would make a
+        // restarted run step differently from a fresh one.
+        self.stepper = FixedStepper::new();
         self.events.clear();
         self.events.push(Event::Restarted);
     }

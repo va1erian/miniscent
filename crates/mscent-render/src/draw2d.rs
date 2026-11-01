@@ -9,7 +9,9 @@ use crate::font::{GLYPH_SIZE, glyph};
 use crate::framebuffer::Framebuffer;
 
 /// Intersection of a rectangle with the framebuffer as half-open pixel
-/// ranges `(x0, y0, x1, y1)`, or `None` when nothing is visible.
+/// ranges `(x0, y0, x1, y1)`, or `None` when nothing is visible. `(x, y)` are
+/// screen coordinates; the returned rows index the buffer, which for a band
+/// of a tiled target starts at a later screen row.
 fn clip_rect(
     fb: &Framebuffer,
     x: i32,
@@ -17,11 +19,18 @@ fn clip_rect(
     w: u32,
     h: u32,
 ) -> Option<(usize, usize, usize, usize)> {
+    let (top, bottom) = fb.row_range();
     let x0 = i64::from(x).max(0);
-    let y0 = i64::from(y).max(0);
+    let y0 = i64::from(y).max(i64::from(top));
     let x1 = (i64::from(x) + i64::from(w)).min(i64::from(fb.width()));
-    let y1 = (i64::from(y) + i64::from(h)).min(i64::from(fb.height()));
-    (x0 < x1 && y0 < y1).then_some((x0 as usize, y0 as usize, x1 as usize, y1 as usize))
+    let y1 = (i64::from(y) + i64::from(h)).min(i64::from(bottom));
+    let top = i64::from(top);
+    (x0 < x1 && y0 < y1).then_some((
+        x0 as usize,
+        (y0 - top) as usize,
+        x1 as usize,
+        (y1 - top) as usize,
+    ))
 }
 
 /// Blend `src` over `dst` using the alpha in `src`'s top byte.
@@ -122,7 +131,7 @@ pub fn blit(fb: &mut Framebuffer, sprite: &Sprite, x: i32, y: i32) {
     // Offsets of the visible part inside the sprite; non-negative by clipping.
     let (ox, oy) = (
         (x0 as i64 - i64::from(x)) as usize,
-        (y0 as i64 - i64::from(y)) as usize,
+        (y0 as i64 + i64::from(fb.row_range().0) - i64::from(y)) as usize,
     );
     let px = fb.pixels_mut();
     for row in y0..y1 {
@@ -135,10 +144,12 @@ pub fn blit(fb: &mut Framebuffer, sprite: &Sprite, x: i32, y: i32) {
 
 /// Size in pixels of `text` at integer `scale` (newline starts a new line).
 pub fn text_size(text: &str, scale: u32) -> (u32, u32) {
-    let cell = GLYPH_SIZE as u32 * scale;
+    let cell = (GLYPH_SIZE as u32).saturating_mul(scale);
     let lines = text.split('\n');
-    let height = lines.clone().count() as u32 * cell;
-    let width = lines.map(|l| l.chars().count() as u32).max().unwrap_or(0) * cell;
+    let to_u32 = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
+    let height = to_u32(lines.clone().count()).saturating_mul(cell);
+    let widest = lines.map(|l| to_u32(l.chars().count())).max().unwrap_or(0);
+    let width = widest.saturating_mul(cell);
     (width, height)
 }
 

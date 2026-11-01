@@ -216,7 +216,8 @@ fn mul_rgb3(c: u32, k: Vec3) -> u32 {
 /// Add a white highlight of strength `s` scaled by the light colour `k`,
 /// saturating per channel.
 fn add_spec(c: u32, k: Vec3, s: f32) -> u32 {
-    let ch = |shift: u32, k: f32| (((c >> shift) & 0xff) + (k * s) as u32).min(255);
+    // The float cast saturates at u32::MAX, so the add must saturate too.
+    let ch = |shift: u32, k: f32| (((c >> shift) & 0xff).saturating_add((k * s) as u32)).min(255);
     0xff00_0000 | ch(16, k.x) << 16 | ch(8, k.y) << 8 | ch(0, k.z)
 }
 

@@ -180,3 +180,16 @@ fn downscale_also_works() {
     assert!(upscale_nearest(&src, 4, 4, &mut dst, 2, 2));
     assert_eq!(dst, [5, 7, 13, 15]);
 }
+
+#[test]
+fn huge_step_does_not_overflow() {
+    let cfg = ResolutionConfig {
+        step_permille: u32::MAX,
+        ..ResolutionConfig::default()
+    };
+    let mut c = ResolutionController::new(cfg).unwrap();
+    c.update(cfg.budget_us + 1);
+    for _ in 0..100 {
+        assert!(c.update(1) <= FULL);
+    }
+}

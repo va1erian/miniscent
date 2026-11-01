@@ -41,6 +41,8 @@ pub use player::Player;
 pub use weapon::{Shot, Weapon};
 
 #[cfg(test)]
+mod adv_tests;
+#[cfg(test)]
 mod enemy_tests;
 #[cfg(test)]
 mod game_tests;

@@ -318,3 +318,17 @@ fn real_brick_bump_changes_exactly_the_non_flat_texels() {
     );
     assert_eq!(flat_off, 0, "flat texels must match the unbumped render");
 }
+
+#[test]
+fn huge_light_colour_saturates_instead_of_overflowing() {
+    // A float-to-int cast saturates at u32::MAX, so adding it to a channel
+    // must not wrap (debug builds panic on the overflow).
+    let k = Vec3::new(1.0e12, 1.0e12, 1.0e12);
+    assert_eq!(add_spec(0xff80_8080, k, 1.0), 0xffff_ffff);
+    assert_eq!(mul_rgb3(0xff80_8080, k), 0xffff_ffff);
+    let nan = Vec3::new(f32::NAN, f32::INFINITY, -1.0);
+    let _ = (
+        add_spec(0xff80_8080, nan, f32::NAN),
+        mul_rgb3(0xff80_8080, nan),
+    );
+}

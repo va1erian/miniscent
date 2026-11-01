@@ -68,3 +68,5 @@ mod format_tests;
 mod gen_tests;
 #[cfg(test)]
 mod portals_tests;
+#[cfg(test)]
+mod review_tests;

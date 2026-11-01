@@ -54,7 +54,8 @@ impl HudModel {
     }
 
     fn bar_color(&self) -> u32 {
-        match self.health * 4 / self.max_health.max(1) {
+        // i64: the model is plain public data, so `health * 4` may overflow i32.
+        match i64::from(self.health) * 4 / i64::from(self.max_health.max(1)) {
             h if h >= 2 => GREEN,
             1 => YELLOW,
             _ => RED,

@@ -75,7 +75,10 @@ impl ResolutionController {
         } else if self.can_step_up(cost_us) {
             self.cheap_frames += 1;
             if self.cheap_frames >= self.config.recover_frames {
-                self.scale = (self.scale + self.config.step_permille).min(FULL);
+                self.scale = self
+                    .scale
+                    .saturating_add(self.config.step_permille)
+                    .min(FULL);
                 self.cheap_frames = 0;
             }
         } else {
@@ -103,7 +106,10 @@ impl ResolutionController {
         if self.scale >= FULL {
             return false;
         }
-        let up = (self.scale + self.config.step_permille).min(FULL);
+        let up = self
+            .scale
+            .saturating_add(self.config.step_permille)
+            .min(FULL);
         let predicted = f64::from(cost_us) * f64::from(up).powi(2) / f64::from(self.scale).powi(2);
         let limit = f64::from(self.config.budget_us) * f64::from(self.config.headroom_percent);
         predicted * 100.0 <= limit
