@@ -54,9 +54,9 @@ pub(super) fn key_name(key: Key) -> String {
 /// text (tool letters) or that a text field handles itself (Delete, Ctrl+Z)
 /// are wrapped in [`Msg::Guarded`].
 ///
-/// xui's winit backend only reports F1 to F4, so F5 and F7 never arrive in a
-/// real window (see `docs/xui-patches/NOTES.md`); Ctrl+R and Ctrl+B are the
-/// same commands on keys that do arrive.
+/// The pinned xui's winit backend only reports F1 to F4; the vendored copy maps
+/// F5 to F12 (see `docs/xui-patches/README.md`). Ctrl+R and Ctrl+B are the
+/// same commands as a fallback.
 pub(super) fn shortcut(key: Key, mods: Modifiers) -> Option<Msg> {
     let guarded = |m: Msg| Some(Msg::Guarded(Box::new(m)));
     if mods.ctrl {

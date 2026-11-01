@@ -51,6 +51,19 @@ hardware (`lazyos/docs/compat/kabylake/hw-survey/03-cpuinfo.txt`).
 | Bump mapping | Tangent-space normal map against the baked direction, evaluated per 16 px span | Measured in `examples/bump_bench.rs` at 640x360: bump roughly doubles span-stepped shading (0.47 to 0.94 ms per frame on the dev machine, an estimated 4 to 5 ms on the i3-7100U at overdraw 1); evaluating the light per pixel instead of per span costs about twice that again |
 | Specular | High-detail option only, from the same baked direction and a per-material gloss | No extra lightmap data; zero cost when off |
 
+## Deviations since the first plan
+
+- **TexInfo.** Faces map textures with a Hammer-style per-plane `TexInfo` (axes, shift, scale,
+  rotation, flips, fit, justify), not a fixed planar projection; level format version 2 stores it.
+- **Vendored xui-canvas.** The editor builds against `vendor/xui-canvas` (a `[patch]` on the pinned
+  xui rev) with two fixes (RefCell re-borrow on monitor change, F5 to F12 key mapping), kept as
+  patches in `docs/xui-patches/` for upstreaming. The game still has no xui dependency.
+- **Threaded play.** Instant Play runs the game on a render thread with a one-slot frame mailbox,
+  not on the UI thread, so a slow scene never slows the UI.
+- **Bake cache and soft shadows.** The lightmap is baked once per distinct set of inputs
+  (`BakeCache`, optional file mirror) and frames never touch it; lamps are discs so shadow edges are
+  smooth, and albedo is mipmapped, to stop shimmer at a distance.
+
 ## Architecture
 
 ```
@@ -114,8 +127,9 @@ solid and never skips a wall.
 An xui app with three orthographic views and a 3D view that uses the same
 rasterizer. Tools create and resize brushes, toggle add/subtract, and place the
 player start, lights, enemies and the goal. Build runs CSG, portals and the
-bake. Instant Play starts the game in-process on the freshly built level, and
-`Esc` returns to the editor.
+bake. Instant Play starts the game in-process, on its own thread, on the freshly built level,
+and `Esc` returns to the editor. The tool palette is icon buttons; F7 builds and F5 plays (Ctrl+B
+and Ctrl+R as a fallback). Clicking a face in the 3D view edits its Hammer-style texture mapping.
 
 ## Code standards
 
