@@ -55,7 +55,7 @@ fn baked() -> Lightmap {
     };
     let lamp = PointLight {
         position: Vec3::new(-1.5, 0.0, 0.0),
-        color: Vec3::new(8.0, 8.0, 8.0),
+        color: Vec3::new(32.0, 32.0, 32.0),
         radius: 3.0,
     };
     let cfg = BakeConfig {
@@ -328,10 +328,23 @@ fn huge_light_colour_saturates_instead_of_overflowing() {
     // must not wrap (debug builds panic on the overflow).
     let k = Vec3::new(1.0e12, 1.0e12, 1.0e12);
     assert_eq!(add_spec(0xff80_8080, k, 1.0), 0xffff_ffff);
-    assert_eq!(mul_rgb3(0xff80_8080, k), 0xffff_ffff);
+    assert_eq!(mul_rgb3(0xff80_8080, k, 0.0), 0xffff_ffff);
     let nan = Vec3::new(f32::NAN, f32::INFINITY, -1.0);
     let _ = (
         add_spec(0xff80_8080, nan, f32::NAN),
-        mul_rgb3(0xff80_8080, nan),
+        mul_rgb3(0xff80_8080, nan, 0.0),
     );
+}
+
+#[test]
+fn soft_limit_is_monotonic_continuous_and_bounded() {
+    assert_eq!(soft_limit(100.0), 100.0);
+    let mut prev = 0.0;
+    for i in 0..4000 {
+        let y = soft_limit(i as f32);
+        assert!(y >= prev && y < KNEE + ROLL, "{i} -> {y}");
+        prev = y;
+    }
+    // Two very bright inputs stay distinguishable (no flat clipping).
+    assert!(soft_limit(900.0) > soft_limit(500.0) + 5.0);
 }

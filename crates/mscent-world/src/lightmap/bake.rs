@@ -213,7 +213,7 @@ fn light_at(
         return None;
     }
     let falloff = 1.0 - dist / light.radius;
-    Some((light.color * (falloff * falloff * facing), dir))
+    Some((light.color * (falloff * falloff * falloff * facing), dir))
 }
 
 /// Adds ambient and turns the accumulated direction into a unit vector, with

@@ -17,6 +17,7 @@ pub mod app;
 pub mod assets;
 pub mod cli;
 pub mod controls;
+mod feedback;
 pub mod levels;
 pub mod session;
 

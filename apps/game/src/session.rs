@@ -22,6 +22,7 @@ use mscent_render::{
 use mscent_world::Level;
 
 use crate::controls::Controls;
+use crate::feedback::Feedback;
 
 /// Radians of turn per pixel of mouse movement.
 const DEFAULT_SENSITIVITY: f32 = 0.0022;
@@ -93,6 +94,7 @@ pub struct GameSession {
     muzzle: u32,
     hit: u32,
     kill: u32,
+    feedback: Feedback,
 }
 
 /// Cheap interpolation between nearby orientations.
@@ -131,6 +133,7 @@ impl GameSession {
             LevelRenderer::from_level(level, materials, &cfg.build).map_err(SessionError::Build)?;
         let mut game = Game::new(arena);
         game.player.orientation = spawn_orientation(game.arena.player_yaw);
+        game.player.up_ref = Some(Vec3::new(0.0, 0.0, 1.0));
         let mut menu = Menu::new();
         // Item 0 of the main menu is "Start".
         menu.press(MenuCommand::Select);
@@ -148,6 +151,7 @@ impl GameSession {
             muzzle: 0,
             hit: 0,
             kill: 0,
+            feedback: Feedback::default(),
         })
     }
 
@@ -178,6 +182,7 @@ impl GameSession {
     /// Starts the level over: player, enemies, weapon and menu.
     pub fn restart(&mut self) {
         self.game.restart();
+        self.game.player.up_ref = Some(Vec3::new(0.0, 0.0, 1.0));
         self.game.player.orientation = spawn_orientation(self.game.arena.player_yaw);
         self.prev_orientation = self.game.player.orientation;
         self.stepper = FixedStepper::new();
@@ -185,6 +190,7 @@ impl GameSession {
         self.menu = Menu::new();
         self.menu.press(MenuCommand::Select);
         (self.muzzle, self.hit, self.kill) = (0, 0, 0);
+        self.feedback.clear();
     }
 
     fn playing(&self) -> bool {
@@ -249,7 +255,9 @@ impl GameSession {
                 }
                 return true;
             }
-            Key::Char('R') => {
+            // R is thrust-up while flying; it restarts only from a menu or
+            // the win/lose screen, never mid-run.
+            Key::Char('R') if !self.playing() => {
                 self.restart();
                 return false;
             }
@@ -276,11 +284,13 @@ impl GameSession {
         if dx == 0.0 && dy == 0.0 {
             return;
         }
-        let pitch = Quat::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), -dy * self.sensitivity);
-        let yaw = Quat::from_axis_angle(Vec3::new(0.0, 1.0, 0.0), -dx * self.sensitivity);
-        let delta = pitch * yaw;
-        let p = &mut self.game.player;
-        p.orientation = (p.orientation * delta).normalized();
+        let before = self.game.player.orientation;
+        self.game
+            .player
+            .look(-dy * self.sensitivity, -dx * self.sensitivity);
+        // Mouse look is instant: shift the interpolation start by the same
+        // rotation so it is never smoothed.
+        let delta = before.conjugate() * self.game.player.orientation;
         self.prev_orientation = (self.prev_orientation * delta).normalized();
     }
 
@@ -292,6 +302,7 @@ impl GameSession {
                 GameEvent::EnemyKilled(_) => self.kill = FLASH_FRAMES * 2,
                 _ => {}
             }
+            self.feedback.note(&self.game, &e);
         }
     }
 
@@ -339,6 +350,8 @@ impl GameSession {
             .renderer
             .render(&mut fb, &view, self.quality, &actors, None);
         if drawn.is_some() {
+            let fov = self.renderer.config().fov_y;
+            self.feedback.draw(&mut fb, &view, fov);
             self.draw_overlays(&mut fb);
         }
         self.muzzle = self.muzzle.saturating_sub(1);

@@ -43,7 +43,7 @@ const WIN: &str = include_str!("../../../assets/scripts/corridor_win.txt");
 #[test]
 fn scripted_run_kills_the_enemy_reaches_the_goal_and_shows_the_win_screen() {
     let mut s = session();
-    let p = play(WIN, 600, &mut s);
+    let p = play(WIN, 1200, &mut s);
     assert_eq!(s.phase(), Phase::Won);
     assert_eq!(s.game().enemies_alive(), 0, "the enemy was shot");
     assert_eq!(s.screen(), Screen::Won);

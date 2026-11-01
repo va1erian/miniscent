@@ -33,8 +33,12 @@ impl SpecTable {
 
     /// Response for a dot product `n.h`; non-positive dots give 0.
     pub fn response(&self, n_dot_h: f32) -> f32 {
-        let i = (n_dot_h.clamp(0.0, 1.0) * (TABLE_LEN - 1) as f32) as usize;
-        self.lut[i.min(TABLE_LEN - 1)]
+        // NaN clamps to NaN and casts to 0, so it reads the first entry.
+        let x = n_dot_h.clamp(0.0, 1.0) * (TABLE_LEN - 1) as f32;
+        let i = (x as usize).min(TABLE_LEN - 2);
+        let t = x - i as f32;
+        // Interpolate: stepping between entries shows up as bright rings.
+        self.lut[i] + (self.lut[i + 1] - self.lut[i]) * t
     }
 }
 

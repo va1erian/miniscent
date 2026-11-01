@@ -19,7 +19,7 @@ use crate::texture::Texture;
 
 /// Highlight strength: the table peaks at gloss/255 of the light colour,
 /// which on dim baked light would be invisible.
-const SPEC_GAIN: f32 = 3.2;
+const SPEC_GAIN: f32 = 1.1;
 
 /// One fitting sample: texel `(u, v)` paired with luxel `(lx, ly)`.
 type Pair = [f32; 4];
@@ -212,9 +212,37 @@ fn blend(a: Luxel, b: Luxel, t: f32) -> Luxel {
 
 /// Multiply the colour channels by per-channel light `k` (256 = unchanged).
 /// Negative or NaN products saturate to zero in the float-to-int cast.
-fn mul_rgb3(c: u32, k: Vec3) -> u32 {
-    let ch = |shift: u32, k: f32| (((c >> shift) & 0xff) as f32 * k * (1.0 / 256.0)) as u32;
+/// `dither` in `[0, 1)` is added before truncation so smooth gradients do not
+/// quantise into visible rings.
+fn mul_rgb3(c: u32, k: Vec3, dither: f32) -> u32 {
+    let ch =
+        |shift: u32, k: f32| (((c >> shift) & 0xff) as f32 * k * (1.0 / 256.0) + dither) as u32;
     0xff00_0000 | ch(16, k.x).min(255) << 16 | ch(8, k.y).min(255) << 8 | ch(0, k.z).min(255)
+}
+
+/// Light level (256 = full) above which [`soft_limit`] starts rolling off.
+const KNEE: f32 = 190.0;
+/// Distance past the knee at which the roll-off reaches its ceiling.
+const ROLL: f32 = 110.0;
+
+/// Smoothly compresses light above the knee towards `KNEE + ROLL`, so bright
+/// pools keep texture detail instead of clipping to flat white.
+fn soft_limit(x: f32) -> f32 {
+    if x <= KNEE {
+        x
+    } else {
+        let d = x - KNEE;
+        KNEE + d / (1.0 + d / ROLL)
+    }
+}
+
+/// Cheap per-texel noise in `[0, 1)` from the texture position.
+fn dither_of(fu: i32, fv: i32, i: u32) -> f32 {
+    let h = (fu as u32).wrapping_mul(0x9E37_79B1)
+        ^ (fv as u32).wrapping_mul(0x85EB_CA6B)
+        ^ i.wrapping_mul(0xC2B2_AE35);
+    let h = (h ^ (h >> 15)).wrapping_mul(0x2C1B_3C6D);
+    ((h >> 8) & 0xffff) as f32 * (1.0 / 65536.0)
 }
 
 /// Add a white highlight of strength `s` scaled by the light colour `k`,
@@ -243,7 +271,8 @@ impl<const SPEC: bool> SpanShader for LightingShader<'_, SPEC> {
             n = texel_normal(self.face.texture, fu, fv);
             k = k * bump_gain(n, self.dir0 + self.ddir * f);
         }
-        let mut out = mul_rgb3(texel, k);
+        k = Vec3::new(soft_limit(k.x), soft_limit(k.y), soft_limit(k.z));
+        let mut out = mul_rgb3(texel, k, dither_of(fu, fv, i));
         if let Some(spec) = self.spec.filter(|_| SPEC) {
             let h = self.half0 + self.dhalf * f;
             // Stepping unit vectors linearly shortens them mid-span, which

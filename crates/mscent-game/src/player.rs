@@ -14,9 +14,17 @@ use mscent_world::Bsp;
 /// Collision sphere radius.
 pub const PLAYER_RADIUS: f32 = 0.5;
 /// Thrust acceleration at full stick, units per second squared.
-pub const THRUST_ACCEL: f32 = 40.0;
-/// Linear drag per second; terminal speed is `THRUST_ACCEL / DRAG`.
-pub const DRAG: f32 = 2.0;
+pub const THRUST_ACCEL: f32 = 36.0;
+/// Linear drag per second; terminal speed is `THRUST_ACCEL / DRAG` (12 m/s,
+/// slow enough to thread a 4 m doorway).
+pub const DRAG: f32 = 3.0;
+/// Extra drag per second while no thrust is held, so the ship stops quickly.
+pub const BRAKE: f32 = 5.0;
+/// Extra drag per second on the velocity sideways to the thrust, so the
+/// ship follows where it is pointed instead of drifting.
+pub const STEER: f32 = 6.0;
+/// How fast a free roll returns to level, per second (proportional).
+pub const LEVEL_RATE: f32 = 2.5;
 /// Turn rate at full stick, radians per second.
 pub const MAX_TURN_RATE: f32 = 2.5;
 /// How fast the turn rate follows the stick, radians per second squared.
@@ -31,6 +39,9 @@ pub struct Player {
     /// Angular velocity in the body frame, radians per second.
     pub ang_vel: Vec3,
     pub health: i32,
+    /// World-space up used by mouse yaw and roll self-levelling; `None` is
+    /// pure 6DoF with no preferred up.
+    pub up_ref: Option<Vec3>,
 }
 
 impl Player {
@@ -43,6 +54,7 @@ impl Player {
             orientation: Quat::from_axis_angle(Vec3::new(0.0, 1.0, 0.0), yaw),
             ang_vel: Vec3::ZERO,
             health: MAX_HEALTH,
+            up_ref: None,
         }
     }
 
@@ -78,7 +90,45 @@ impl Player {
         // Forward on the stick is -Z in the body frame.
         let local = Vec3::new(i.thrust.x, i.thrust.y, -i.thrust.z);
         let thrust = self.orientation.rotate(local) * THRUST_ACCEL;
-        self.body.step(bsp, thrust - self.body.vel * DRAG);
+        let vel = self.body.vel;
+        let mut drag = vel * DRAG;
+        if local.length() < 1e-3 {
+            drag = drag + vel * BRAKE;
+        } else {
+            let dir = thrust * (1.0 / THRUST_ACCEL);
+            let dir = dir * (1.0 / dir.length().max(1e-6));
+            drag = drag + (vel - dir * vel.dot(dir)) * STEER;
+        }
+        self.body.step(bsp, thrust - drag);
+        if let (0.0, Some(up)) = (i.roll, self.up_ref) {
+            self.level(up);
+        }
+    }
+
+    /// Immediate view rotation (mouse look): `pitch` about the body right
+    /// axis, `yaw` about the world up, so looking up and turning never
+    /// accumulates roll. Upside down, yaw is mirrored to keep its feel.
+    pub fn look(&mut self, pitch: f32, yaw: f32) {
+        if !(pitch.is_finite() && yaw.is_finite()) {
+            return;
+        }
+        let pitch_q = Quat::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), pitch);
+        let Some(up) = self.up_ref else {
+            let yaw_q = Quat::from_axis_angle(Vec3::new(0.0, 1.0, 0.0), yaw);
+            self.orientation = (self.orientation * yaw_q * pitch_q).normalized();
+            return;
+        };
+        let sign = if self.up().dot(up) < 0.0 { -1.0 } else { 1.0 };
+        let yaw_q = Quat::from_axis_angle(up, yaw * sign);
+        self.orientation = (yaw_q * self.orientation * pitch_q).normalized();
+    }
+
+    /// Eases the roll back toward upright about the view axis.
+    fn level(&mut self, world_up: Vec3) {
+        let err = -self.right().dot(world_up).atan2(self.up().dot(world_up));
+        let k = (LEVEL_RATE * STEP_DT).min(1.0);
+        let delta = Quat::from_axis_angle(Vec3::new(0.0, 0.0, 1.0), err * k);
+        self.orientation = (self.orientation * delta).normalized();
     }
 
     /// Follows the stick with a limited angular acceleration, then rotates

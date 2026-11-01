@@ -171,7 +171,7 @@ fn scripted_session_edits_the_model_and_the_pixels() {
     assert!(colours.len() > 8, "top view has content: {}", colours.len());
     // The empty 3D pane is a flat placeholder, different from the views.
     assert!(differs(
-        image.pixel(700, 450).unwrap(),
+        image.pixel(700, 650).unwrap(),
         image.pixel(300, 100).unwrap()
     ));
 }

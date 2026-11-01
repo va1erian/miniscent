@@ -72,8 +72,8 @@ impl Default for BuildConfig {
     fn default() -> Self {
         Self {
             luxel_size: 0.25,
-            ambient: Vec3::new(0.07, 0.07, 0.10),
-            light_gain: 2.0,
+            ambient: Vec3::new(0.22, 0.20, 0.26),
+            light_gain: 3.2,
             sky_top: 0xff10_2048,
             sky_bottom: 0xff3a_4a78,
             fog_start: 4.0,

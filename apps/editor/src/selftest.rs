@@ -12,6 +12,7 @@ use std::time::Duration;
 use mscent_platform::{Event, Key};
 use mscent_world::{Entity, Op};
 use xui::Dip;
+use xui::theme::Theme;
 use xui::xui_canvas::snapshot::{Snapshot, Stage, render_with};
 
 use crate::model::Document;
@@ -53,6 +54,12 @@ struct Holder {
 
 /// Runs the script; returns the process exit code.
 pub fn run(dir: &Path) -> i32 {
+    let light = run_theme(dir, Theme::light());
+    let dark = run_theme(&dir.join("dark"), Theme::dark());
+    light.max(dark)
+}
+
+fn run_theme(dir: &Path, theme: Theme) -> i32 {
     if let Err(e) = std::fs::create_dir_all(dir) {
         eprintln!("cannot create {}: {e}", dir.display());
         return 2;
@@ -64,7 +71,7 @@ pub fn run(dir: &Path) -> i32 {
     let probe: Rc<RefCell<Option<Holder>>> = Rc::new(RefCell::new(None));
     let (p2, r2) = (probe.clone(), run.clone());
     let result = render_with(
-        Snapshot::new(Dip(1280.0), Dip(800.0)),
+        Snapshot::new(Dip(1280.0), Dip(800.0)).theme(theme),
         move |ui| {
             let app = Editor::build(ui, Document::from_level(&mscent_world::showcase_level()))?;
             *p2.borrow_mut() = Some(Holder {
@@ -108,7 +115,28 @@ fn wait_for_build(stage: &Stage<'_, Msg>, probe: &Probe) -> String {
     "timed out waiting for the build".into()
 }
 
+/// Selects the biggest brush so a large highlight shows in every view.
+fn select_biggest(probe: &Probe) {
+    {
+        let state = probe.state();
+        let mut st = state.borrow_mut();
+        let volume = |b: &&crate::model::document::BrushDef| {
+            let (lo, hi) = b.bounds();
+            (0..3).map(|i| hi[i] - lo[i]).product::<f64>()
+        };
+        let big = st
+            .doc
+            .brushes()
+            .iter()
+            .max_by(|a, b| volume(a).total_cmp(&volume(b)))
+            .map(|b| b.id);
+        st.selection = big.map(crate::model::Selection::Brush);
+    }
+}
+
 fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
+    select_biggest(probe);
+    stage.emit(Msg::Tool(0));
     run.shot(stage, "01-before-build.png");
 
     // Edit the showcase: a pillar and a light next to the player start.
@@ -183,6 +211,8 @@ fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     stage.emit(Msg::Menu(cmd::BUILD));
     let m = wait_for_build(stage, probe);
     run.check(m.starts_with("Build finished"), &format!("built: {m}"));
+    select_biggest(probe);
+    stage.emit(Msg::Tool(0));
     stage.emit(Msg::Step(Duration::ZERO));
     run.shot(stage, "02-four-views.png");
     let doc_before_play = probe.state().borrow().doc.clone();
@@ -216,6 +246,17 @@ fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         probe.message() == "Back in the editor",
         &format!("returned: {}", probe.message()),
     );
+    // Select an enemy so an entity highlight shows too.
+    {
+        let state = probe.state();
+        let mut st = state.borrow_mut();
+        let enemy = st.doc.entities().iter().find_map(|e| match e.entity {
+            Entity::Enemy { .. } => Some(e.id),
+            _ => None,
+        });
+        st.selection = enemy.map(crate::model::Selection::Entity);
+    }
+    stage.emit(Msg::Tool(0));
     run.shot(stage, "04-after-play.png");
 
     // Edit again: the build goes stale and a second play works.

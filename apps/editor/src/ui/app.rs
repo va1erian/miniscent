@@ -199,8 +199,8 @@ impl Editor {
             row()
                 .gap(4)
                 .children((pane(0).fill(1), pane(1).fill(1), pane(2).fill(1)))
-                .fill(2),
-            build(View3d::new).bind(&app.view3d).fill(3),
+                .fill(3),
+            build(View3d::new).bind(&app.view3d).fill(2),
         ));
         let mut tools = column().gap(4);
         for (i, (name, _)) in TOOLS.iter().enumerate() {
@@ -345,7 +345,7 @@ Press F7 to build, F5 to play.
         if pw == 0 || ph == 0 {
             return;
         }
-        let (w, h) = frame_size((pw, ph), if play { 512 } else { 960 });
+        let (w, h) = frame_size((pw, ph), 960);
         let state = self.state.clone();
         let st = state.borrow();
         if let Some(fb) = self.studio.render(w, h, &st.doc) {

@@ -1,15 +1,29 @@
-# Showcase flythrough: start room A (fire at the enemy, roll), corridor,
-# room D (red brick), corridor, room C (goal). (R restarts: do not use it.)
-at 0.1s fire for 0.6s
-at 0.8s hold Q for 0.3s
-at 1.3s hold E for 0.3s
-at 2.1s mouse -168 0
-at 2.4s hold W for 2.4s
-at 4.8s mouse 480 -30 over 0.4s
-at 5.2s mouse 0 30
-at 5.2s hold W for 0.4s
-at 5.5s mouse 90 0
-at 5.9s hold W for 2.0s
-at 8.0s mouse -150 0
-at 8.0s hold W for 3s
-at 12.5s quit
+# Showcase flythrough: aim at and shoot the start-room enemy, roll, look
+# around, then fly corridor, steel hall, corridor, cave, to the goal.
+# Travel distance is about 8.5 units per second of held W; the waits let the
+# ship's drift die out before each turn. (R is thrust-up in play and
+# restarts only from a menu.)
+at 0.1s mouse 64 30
+at 0.3s fire for 0.8s
+at 1.3s hold Q for 0.4s
+at 1.8s hold E for 0.4s
+at 2.3s mouse -64 -30
+at 2.6s mouse 0 -120 over 0.4s
+at 3.2s mouse 0 120 over 0.4s
+# east corridor mouth, then straight into the steel hall
+at 4.0s mouse 231 0 over 0.3s
+at 4.4s hold W for 2.4s
+at 8.1s mouse 134 0 over 0.3s
+at 8.5s hold W for 1.3s
+# steel hall: north, then east around the platform
+at 11.3s mouse -714 0 over 0.4s
+at 11.8s hold W for 0.8s
+at 14.0s mouse 714 0 over 0.4s
+at 14.5s hold W for 0.65s
+# north corridor into the cave
+at 16.6s mouse -714 0 over 0.4s
+at 17.1s hold W for 3.7s
+# east to the goal
+at 22.3s mouse 714 0 over 0.4s
+at 22.8s hold W for 1.1s
+at 27s quit

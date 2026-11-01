@@ -27,6 +27,8 @@ pub enum Event {
     PlayerFired,
     EnemyHit(usize),
     EnemyKilled(usize),
+    /// Enemy `i` fired at the player (whether or not the shot connected).
+    EnemyFired(usize),
     PlayerHurt(i32),
     PlayerDied,
     GoalReached,
@@ -139,8 +141,12 @@ impl Game {
             centre: self.player.pos(),
             radius: PLAYER_RADIUS,
         };
-        for e in &mut self.enemies {
-            if let Some(dmg) = e.step(&self.arena.bsp, &target) {
+        for (i, e) in self.enemies.iter_mut().enumerate() {
+            let dmg = e.step(&self.arena.bsp, &target);
+            if e.fired {
+                self.events.push(Event::EnemyFired(i));
+            }
+            if let Some(dmg) = dmg {
                 self.player.damage(dmg);
                 self.hurt_steps = HURT_FLASH_STEPS;
                 self.events.push(Event::PlayerHurt(dmg));

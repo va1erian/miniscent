@@ -173,7 +173,7 @@ fn entities(pen: &mut Pen, scene: &Scene) {
         Some(Selection::Entity(id)) => Some(id),
         _ => None,
     };
-    let r = 6.0 * pen.s;
+    let r = 4.5 * pen.s;
     for e in scene.state.doc.entities() {
         let q = pos(&e.entity);
         let c = pen.pt([q[a], q[b]]);

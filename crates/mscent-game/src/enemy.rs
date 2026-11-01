@@ -38,10 +38,10 @@ pub struct EnemyStats {
 pub fn stats_for(kind: u8) -> EnemyStats {
     let drone = EnemyStats {
         max_hp: 50,
-        radius: 0.6,
+        radius: 0.75,
         speed: 5.0,
         sight_range: 40.0,
-        attack_range: 14.0,
+        attack_range: 9.0,
         attack_damage: 10,
         attack_cooldown: (STEP_HZ / 2) as u32,
         lose_steps: (STEP_HZ * 3) as u32,
@@ -77,6 +77,9 @@ pub struct Enemy {
     pub state: AiState,
     /// Where the player was last in sight, while hunting.
     pub last_seen: Option<Vec3>,
+    /// True for the step in which this enemy fired (hit or miss), so the
+    /// game can show where the shot came from.
+    pub fired: bool,
     stats: EnemyStats,
     lost_steps: u32,
     cooldown: u32,
@@ -96,6 +99,7 @@ impl Enemy {
             hp: stats.max_hp,
             state: AiState::Patrol,
             last_seen: None,
+            fired: false,
             stats,
             lost_steps: 0,
             cooldown: stats.attack_cooldown,
@@ -138,6 +142,7 @@ impl Enemy {
         if !self.alive() {
             return None;
         }
+        self.fired = false;
         self.cooldown = self.cooldown.saturating_sub(1);
         let to_player = player.centre - self.body.pos;
         let dist = to_player.length();
@@ -220,6 +225,7 @@ impl Enemy {
             return None;
         }
         self.cooldown = self.stats.attack_cooldown;
+        self.fired = true;
         let reach = self.stats.attack_range * ATTACK_HYSTERESIS;
         let dir = player.centre - self.body.pos;
         let shot = hitscan(bsp, self.body.pos, dir, reach, &[*player]);

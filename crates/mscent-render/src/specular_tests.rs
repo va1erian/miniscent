@@ -31,3 +31,12 @@ fn half_vector_is_unit_and_bisects() {
     assert!((h.x - h.z).abs() < 1e-6);
     assert_eq!(half_vector(l, -l), l);
 }
+
+#[test]
+fn response_is_interpolated_between_table_entries() {
+    let t = SpecTable::new(200);
+    let (a, b) = (0.9000_f32, 0.9020_f32);
+    let (ra, rm, rb) = (t.response(a), t.response((a + b) / 2.0), t.response(b));
+    // Strictly between the ends, not equal to one of them.
+    assert!(rm > ra.min(rb) && rm < ra.max(rb));
+}

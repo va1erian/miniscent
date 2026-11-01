@@ -193,12 +193,12 @@ fn segment_clear_respects_walls_and_thin_slabs() {
 #[test]
 fn unshadowed_floor_matches_hand_value() {
     let bsp = build(&[room()]);
-    // Light 50 above luxel centre (45, 45): facing 1, falloff (1 - 50/200)^2.
+    // Light 50 above luxel centre (45, 45): facing 1, falloff (1 - 50/200)^3.
     let light = white_light(v3(45.0, 45.0, 50.0), 200.0);
     let lm = bake(&bsp, &[floor()], &[light], &cfg()).unwrap();
     let l = lm.sample_world(0, v3(45.0, 45.0, 0.0)).unwrap();
-    close(l.color.x, 0.5625);
-    close(l.color.y, 0.5625);
+    close(l.color.x, 0.421_875);
+    close(l.color.y, 0.421_875);
     let p = &lm.projections()[0];
     let dir = l.dir;
     close(dir.x, 0.0);
@@ -230,8 +230,8 @@ fn plate_casts_the_hand_computed_shadow() {
     assert_eq!(at(55.0, 55.0), 0.0);
     assert_eq!(at(65.0, 55.0), 0.0); // dx 15 * 0.56 = 8.4 < 10
     assert_eq!(at(45.0, 45.0), 0.0);
-    // dx 25 * 0.56 = 14 > 10: lit. d^2 = 625 + 625 + 2500.
-    close(at(75.0, 75.0), 0.393_043_14);
+    // dx 25 * 0.56 = 14 > 10: lit. d^2 = 625 + 625 + 2500 (cubic falloff).
+    close(at(75.0, 75.0), 0.272_698_74);
     close(at(75.0, 55.0), at(55.0, 75.0));
     assert!(at(75.0, 55.0) > 0.0);
     assert!(at(5.0, 5.0) > 0.0);

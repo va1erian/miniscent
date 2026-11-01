@@ -98,7 +98,10 @@ fn motion_and_rotation_have_inertia() {
     }
     let (speed, spin) = (p.body.vel.length(), p.ang_vel.length());
     p.step(&g.arena.bsp, &Input::default());
-    assert!(p.body.vel.length() > 0.95 * speed, "coasts after release");
+    assert!(
+        p.body.vel.length() > 0.8 * speed,
+        "eases off, not an instant stop"
+    );
     assert!(
         p.ang_vel.length() > 0.5 * spin,
         "keeps turning after release"
@@ -187,4 +190,67 @@ fn hostile_input_never_poisons_the_state() {
     p.damage(i32::MAX);
     p.damage(i32::MAX);
     assert!(p.is_dead());
+}
+
+#[test]
+fn mouse_look_accumulates_no_roll_and_is_immediate() {
+    let g = open_game();
+    let mut p = g.player;
+    p.up_ref = Some(v(0.0, 1.0, 0.0));
+    for _ in 0..10 {
+        p.look(0.15, 0.2);
+        p.look(-0.05, -0.1);
+    }
+    assert!(
+        p.right().y.abs() < 1e-4,
+        "horizon stays level: {:?}",
+        p.right()
+    );
+    let before = p.forward();
+    p.look(0.0, 0.3);
+    assert!(angle_between(before, p.forward()) > 0.1, "applied at once");
+    assert_eq!(p.ang_vel, Vec3::ZERO, "no angular momentum from the mouse");
+}
+
+#[test]
+fn a_free_roll_levels_itself_but_a_held_roll_does_not() {
+    let g = open_game();
+    let mut p = g.player;
+    p.up_ref = Some(v(0.0, 1.0, 0.0));
+    p.orientation = Quat::from_axis_angle(v(0.0, 0.0, 1.0), 0.8);
+    let err = |p: &crate::Player| p.right().y.atan2(p.up().y).abs();
+    let start = err(&p);
+    assert!(start > 0.7);
+    let hold = Input {
+        roll: 1.0,
+        ..Input::default()
+    };
+    for _ in 0..10 {
+        p.step(&g.arena.bsp, &hold);
+    }
+    assert!(err(&p) > 0.7, "held roll is not fought");
+    for _ in 0..240 {
+        p.step(&g.arena.bsp, &Input::default());
+    }
+    assert!(err(&p) < 0.02, "levelled, still {}", err(&p));
+}
+
+#[test]
+fn top_speed_is_doorway_friendly_and_release_brakes_quickly() {
+    let g = open_game();
+    let mut p = g.player;
+    let start = p.body.pos;
+    let fwd = Input {
+        thrust: v(0.0, 0.0, 1.0),
+        ..Input::default()
+    };
+    for _ in 0..240 {
+        p.body.pos = start;
+        p.step(&g.arena.bsp, &fwd);
+    }
+    assert!(p.body.vel.length() < 13.0, "{}", p.body.vel.length());
+    for _ in 0..60 {
+        p.step(&g.arena.bsp, &Input::default());
+    }
+    assert!(p.body.vel.length() < 0.5, "stops within a second");
 }

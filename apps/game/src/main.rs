@@ -48,9 +48,20 @@ fn run_options(o: &Options, cap: bool) -> RunOptions {
 }
 
 fn run_headless(o: &Options, session: &mut GameSession) -> Result<RunReport, String> {
-    let frames = o.frames.unwrap_or(if o.bench { 300 } else { 120 });
-    let mut platform = HeadlessPlatform::new(o.res.0, o.res.1, HEADLESS_DT, script_of(o)?)
-        .with_frame_limit(frames);
+    let script = script_of(o)?;
+    // Without --frames a script runs to its last action (plus a margin).
+    let script_frames =
+        script.actions().iter().map(|a| a.0).fold(0.0, f64::max) / HEADLESS_DT.as_secs_f64();
+    let default_frames = if script_frames > 0.0 {
+        script_frames.ceil() as u64 + 30
+    } else if o.bench {
+        300
+    } else {
+        120
+    };
+    let frames = o.frames.unwrap_or(default_frames);
+    let mut platform =
+        HeadlessPlatform::new(o.res.0, o.res.1, HEADLESS_DT, script).with_frame_limit(frames);
     let report = app::run(&mut platform, session, &run_options(o, false));
     if let (Some(path), Some(frame)) = (&o.screenshot, platform.last_frame()) {
         let png = encode_png(frame.width, frame.height, &frame.pixels)
@@ -110,7 +121,14 @@ fn real_main() -> Result<(), String> {
     for shot in &report.shots {
         println!("wrote {}", shot.display());
     }
-    println!("final phase {:?}", session.phase());
+    let at = session.game().player.pos();
+    println!(
+        "final phase {:?} at ({:.1}, {:.1}, {:.1})",
+        session.phase(),
+        at.x,
+        at.y,
+        at.z
+    );
     Ok(())
 }
 
