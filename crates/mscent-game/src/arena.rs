@@ -82,6 +82,8 @@ impl Arena {
                     enemies.push(EnemySpawn { pos, kind });
                 }
                 Entity::Goal { pos, radius } => goals.push(Goal { pos, radius }),
+                // Look settings only; the renderer reads them.
+                Entity::World { .. } => {}
             }
         }
         let (player_start, player_yaw) = start.ok_or(LoadError::NoPlayerStart)?;

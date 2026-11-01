@@ -181,6 +181,7 @@ impl Editor {
             row()
                 .gap(2)
                 .children((tool_button(6), tool_button(7), tool_button(8))),
+            row().gap(2).children((tool_button(9),)),
         ));
         let op_button = |i: usize| {
             let (tip, glyph) = OPS[i];

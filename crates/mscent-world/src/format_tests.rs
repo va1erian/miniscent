@@ -176,3 +176,39 @@ fn random_garbage_never_panics() {
         let _ = format::read(&data);
     }
 }
+
+fn world(fog_start: f32, fog_end: f32) -> Entity {
+    Entity::World {
+        pos: Vec3::new(0.0, 0.0, 1.0),
+        fog_start,
+        fog_end,
+    }
+}
+
+#[test]
+fn world_entity_round_trips_and_sets_the_level_fog() {
+    let mut level = sample();
+    assert_eq!(level.fog(), None);
+    level.entities.push(world(10.0, 80.0));
+    level.entities.push(world(1.0, 2.0));
+    let back = format::read(&format::write(&level)).unwrap();
+    assert_eq!(back, level);
+    assert_eq!(back.fog(), Some((10.0, 80.0)), "the first one counts");
+}
+
+#[test]
+fn hostile_world_entities_are_rejected() {
+    for (start, end) in [
+        (30.0f32, 20.0),
+        (-1.0, 5.0),
+        (f32::NAN, 5.0),
+        (1.0, f32::INFINITY),
+        (1.0, 1.0e9),
+        (5.0, 5.0),
+    ] {
+        let mut level = sample();
+        level.entities.push(world(start, end));
+        let r = format::read(&format::write(&level));
+        assert_eq!(r, Err(FormatError::BadEntity), "{start} {end}");
+    }
+}

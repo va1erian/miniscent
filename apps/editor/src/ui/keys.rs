@@ -8,7 +8,7 @@ use super::icons::Glyph;
 use crate::model::{EntityKind, Tool};
 
 /// The palette: tooltip name, shortcut key, icon and tool.
-pub(super) const TOOLS: [(&str, Key, Glyph, Tool); 9] = [
+pub(super) const TOOLS: [(&str, Key, Glyph, Tool); 10] = [
     (
         "Select / move",
         Key::Q,
@@ -30,6 +30,12 @@ pub(super) const TOOLS: [(&str, Key, Glyph, Tool); 9] = [
         Tool::Place(EntityKind::Enemy),
     ),
     ("Goal", Key::G, Glyph::Flag, Tool::Place(EntityKind::Goal)),
+    (
+        "World (fog)",
+        Key::W,
+        Glyph::Lucide(Lucide::Settings),
+        Tool::Place(EntityKind::World),
+    ),
     (
         "Face / texture",
         Key::T,

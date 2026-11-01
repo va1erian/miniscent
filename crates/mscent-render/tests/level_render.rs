@@ -5,7 +5,7 @@ use std::path::Path;
 
 use mscent_math::Vec3;
 use mscent_render::{BuildConfig, Framebuffer, LevelRenderer, MaterialTable, Quality, View};
-use mscent_world::showcase_level;
+use mscent_world::{Entity, showcase_level};
 
 fn renderer() -> LevelRenderer {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures");
@@ -168,5 +168,45 @@ fn distance_fog_pulls_far_walls_toward_the_fog_colour() {
     assert!(
         dist(&centre) < dist(&near_row),
         "far row is not closer to the fog colour"
+    );
+}
+
+#[test]
+fn a_world_entity_sets_the_levels_fog() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures");
+    let build = |fog: Option<(f32, f32)>| {
+        let materials = MaterialTable::load_dir(&dir).expect("textures");
+        let mut level = showcase_level();
+        level
+            .entities
+            .extend(fog.map(|(fog_start, fog_end)| Entity::World {
+                pos: Vec3::ZERO,
+                fog_start,
+                fog_end,
+            }));
+        LevelRenderer::from_level(&level, materials, &BuildConfig::default()).expect("builds")
+    };
+    let view = View::from_angles(
+        Vec3::new(3.0, 10.0, 2.0),
+        -core::f32::consts::FRAC_PI_2,
+        0.0,
+        0.0,
+    );
+    let default = build(None);
+    let clear = build(Some((900.0, 1000.0)));
+    let thick = build(Some((0.5, 3.0)));
+    assert_eq!(default.config().fog_end, BuildConfig::default().fog_end);
+    assert_eq!(thick.config().fog_end, 3.0);
+    let fog = thick.config().sky_bottom;
+    let away = |r: &LevelRenderer| -> f32 {
+        let m = mean_rgb(&frame(r, &view, Quality::High));
+        (0..3)
+            .map(|k| (m[k] - ((fog >> (16 - 8 * k)) & 0xff) as f32).abs())
+            .sum()
+    };
+    let (c, t) = (away(&clear), away(&thick));
+    assert!(
+        t < c * 0.8,
+        "thick fog {t} should be nearer the fog colour than clear {c}"
     );
 }

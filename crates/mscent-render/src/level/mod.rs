@@ -149,6 +149,19 @@ fn lights_of(level: &Level, gain: f32) -> Vec<PointLight> {
         .collect()
 }
 
+/// `cfg` with the fog of the level's world entity, if it has one. Fog does
+/// not affect the bake.
+fn with_level_fog(cfg: &BuildConfig, level: &Level) -> BuildConfig {
+    match level.fog() {
+        Some((fog_start, fog_end)) => BuildConfig {
+            fog_start,
+            fog_end,
+            ..*cfg
+        },
+        None => *cfg,
+    }
+}
+
 fn actors_of(level: &Level) -> Vec<Actor> {
     let actor = |kind, pos| Actor {
         kind,

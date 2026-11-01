@@ -16,7 +16,7 @@ use mscent_world::{Bsp, Face, Level, Portals, compile, extract_faces};
 
 use super::{
     Actor, BakeCache, BakedLight, BuildConfig, BuildError, LevelRenderer, actors_of,
-    check_materials, lights_of,
+    check_materials, lights_of, with_level_fog,
 };
 use crate::texture::MaterialTable;
 
@@ -62,7 +62,7 @@ impl Compiled {
             portals,
             lights: lights_of(level, cfg.light_gain),
             actors: actors_of(level),
-            cfg: *cfg,
+            cfg: with_level_fog(cfg, level),
         };
         Ok(Self {
             parts,

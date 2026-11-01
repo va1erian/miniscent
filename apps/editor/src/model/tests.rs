@@ -1,6 +1,7 @@
 #![allow(clippy::field_reassign_with_default)] // tests set one field after `default()` for readability
 
 use super::document::Id;
+use super::entity::{EntityKind, set_param};
 use super::pointer::handles;
 use super::view::Camera2D;
 use super::*;
@@ -394,4 +395,28 @@ fn eight_handles_surround_a_rectangle() {
         h.iter()
             .any(|(k, p)| k.dx == 0 && k.dy == -1 && *p == [2.0, 0.0])
     );
+}
+
+#[test]
+fn world_entity_edits_fog_with_undo_and_there_is_only_one() {
+    let mut s = EditorState::default();
+    s.place_entity(EntityKind::World, [0.0, 0.0, 1.0]);
+    let second = s.place_entity(EntityKind::World, [2.0, 0.0, 1.0]);
+    let worlds = |s: &EditorState| {
+        s.doc
+            .entities()
+            .iter()
+            .filter(|e| matches!(e.entity, Entity::World { .. }))
+            .count()
+    };
+    assert_eq!(worlds(&s), 1, "a second world replaces the first");
+    assert_eq!(s.selection, Some(Selection::Entity(second)));
+    assert!(s.edit_selected_entity(|e| set_param(e, 1, 90.0)));
+    assert_eq!(s.doc.to_level().unwrap().fog(), Some((4.0, 90.0)));
+    assert!(
+        !s.edit_selected_entity(|e| set_param(e, 0, 200.0)),
+        "start past end"
+    );
+    assert!(s.undo());
+    assert_eq!(s.doc.to_level().unwrap().fog(), Some((4.0, 26.0)));
 }
