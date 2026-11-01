@@ -44,6 +44,10 @@ examples were dropped. Once the fix is merged upstream and the `rev` in
 section and the `exclude = ["vendor"]` line in the root `Cargo.toml`, then
 `cargo update -p xui`.
 
+The vendored `README.md` has its two relative links (`../xui`, `../../README.md`)
+rewritten to absolute URLs at the pinned rev, because `tools/check_docs.py`
+(CI) checks every tracked markdown file and they do not resolve inside this repo.
+
 To run the vendored crate's own tests (it is excluded from the workspace):
 `CARGO_TARGET_DIR=target/vendor-tests cargo test --manifest-path vendor/xui-canvas/Cargo.toml --lib`
 (some tests write `target/ui/*.png` under the vendor dir; it is git-ignored).

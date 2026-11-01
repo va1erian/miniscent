@@ -279,6 +279,9 @@ impl Loop {
                     scene.restart();
                 }
                 self.mode = m;
+                // A quit asked for by a step that was already running when
+                // the UI changed mode belongs to the old session.
+                sh.quit.store(false, Ordering::Release);
                 self.events.clear();
                 self.dirty = true;
             }

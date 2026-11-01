@@ -397,6 +397,8 @@ W/A/S/D: move   R/F: up/down
 Q/E: roll   Shift: fast";
 
 #[cfg(test)]
+mod race_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod texture_tests;

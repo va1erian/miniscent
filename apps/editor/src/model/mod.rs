@@ -13,6 +13,8 @@ pub mod view;
 #[cfg(test)]
 mod facetex_tests;
 #[cfg(test)]
+mod hostile_tests;
+#[cfg(test)]
 mod review_tests;
 #[cfg(test)]
 mod tests;
