@@ -1,16 +1,24 @@
 //! Everything between the document and the 3D pane that needs no widgets:
 //! the running build, the built level, the free-fly camera and Instant Play.
-//! The xui shell calls [`Studio::tick`] on a timer and shows the frame it
-//! returns, so the whole edit, build, play, return loop is testable headless.
+//! The xui shell calls [`Studio::tick`] on a timer. Stepping the game and
+//! drawing the 3D view run on a render thread (`worker.rs`), so a slow frame
+//! never slows the UI; `tick` forwards input and returns the newest finished
+//! frame without ever waiting. The whole edit, build, play, return loop is
+//! testable headless.
 
-use std::time::Duration;
+use std::thread::JoinHandle;
 
-use miniscent_game::FrameStats;
 use mscent_platform::Event;
-use mscent_render::{Framebuffer, Quality, draw_text};
 
-use crate::build::{self, BuildJob, Built, STEPS, Update};
+use crate::build::{self, BuildJob, STEPS, Update};
 use crate::model::{Document, FlyCam};
+
+mod scene;
+pub mod worker;
+
+use scene::LevelScene;
+pub use worker::{Frame, Scene};
+use worker::{Slow, Worker};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -19,29 +27,35 @@ pub enum Mode {
 }
 
 /// What happened during one [`Studio::tick`].
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Tick {
-    /// The frame changed and should be shown.
-    pub redraw: bool,
+    /// The newest finished picture, when there is one to show.
+    pub frame: Option<Frame>,
     /// Text for the status bar, when it changed.
     pub status: Option<String>,
     /// New log lines.
     pub log: Vec<String>,
     /// A build just finished successfully with `then_play` set.
     pub play_now: bool,
-    /// Play ended by itself (the game asked to quit).
+    /// Play ended by itself (the game asked to quit, or the thread died).
     pub left_play: bool,
 }
 
+/// The build, the render thread and the mode.
 pub struct Studio {
     job: Option<BuildJob>,
-    built: Option<(Built, Document)>,
+    /// The document the current build was made from.
+    built_doc: Option<Document>,
+    unplayable: Option<String>,
+    worker: Option<Worker>,
+    handle: Option<JoinHandle<()>>,
+    /// Threads told to stop, dropped once they have finished.
+    retired: Vec<JoinHandle<()>>,
     pub mode: Mode,
-    pub fly: FlyCam,
+    camera: FlyCam,
     /// Progress of the running build, `0..=STEPS`.
     pub progress: u32,
-    fb: Option<Framebuffer>,
-    redraw: bool,
+    check_stale: bool,
 }
 
 /// The internal render size for a pane of `pane` pixels: the pane divided by
@@ -56,12 +70,15 @@ impl Studio {
     pub fn new(doc: &Document) -> Studio {
         Studio {
             job: None,
-            built: None,
+            built_doc: None,
+            unplayable: None,
+            worker: None,
+            handle: None,
+            retired: Vec::new(),
             mode: Mode::Edit,
-            fly: FlyCam::for_document(doc),
+            camera: FlyCam::for_document(doc),
             progress: 0,
-            fb: None,
-            redraw: true,
+            check_stale: false,
         }
     }
 
@@ -70,21 +87,49 @@ impl Studio {
     }
 
     pub fn has_build(&self) -> bool {
-        self.built.is_some()
+        self.built_doc.is_some()
     }
 
     /// Whether the built level no longer matches `doc`.
     pub fn stale(&self, doc: &Document) -> bool {
-        self.built.as_ref().is_some_and(|(_, d)| d != doc)
+        self.built_doc.as_ref().is_some_and(|d| d != doc)
+    }
+
+    /// Tells the picture whether it is out of date.
+    pub fn set_stale(&self, stale: bool) {
+        if let Some(w) = &self.worker {
+            w.stale(stale);
+        }
+    }
+
+    /// Render threads still running, including ones told to stop.
+    #[cfg(test)]
+    pub fn worker_threads(&self) -> usize {
+        let retired = self.retired.iter().filter(|h| !h.is_finished()).count();
+        usize::from(self.handle.is_some()) + retired
     }
 
     /// Resets the camera for a new document and forgets the build.
     pub fn reset(&mut self, doc: &Document) {
         self.job = None;
-        self.built = None;
+        self.retire_worker();
+        self.built_doc = None;
+        self.unplayable = None;
         self.mode = Mode::Edit;
-        self.fly = FlyCam::for_document(doc);
-        self.redraw = true;
+        self.camera = FlyCam::for_document(doc);
+    }
+
+    /// Puts the fly camera back where a new document starts.
+    pub fn reset_camera(&mut self, doc: &Document) {
+        self.set_camera(FlyCam::for_document(doc));
+    }
+
+    /// Moves the fly camera.
+    pub fn set_camera(&mut self, fly: FlyCam) {
+        if let Some(w) = &self.worker {
+            w.camera(&fly);
+        }
+        self.camera = fly;
     }
 
     /// Starts a build unless one is running. `then_play` starts Play when it
@@ -100,70 +145,115 @@ impl Studio {
 
     /// Enters Play on the current build.
     pub fn enter_play(&mut self) -> Result<(), String> {
-        let (built, _) = self.built.as_mut().ok_or("build the level first")?;
-        let why = built.unplayable().map(str::to_string);
-        let session = built.session_mut().ok_or_else(|| {
-            format!(
-                "cannot play: {}",
-                why.unwrap_or_else(|| "not playable".into())
-            )
-        })?;
-        session.restart();
+        let Some(w) = &self.worker else {
+            return Err("build the level first".into());
+        };
+        if let Some(why) = &self.unplayable {
+            return Err(format!("cannot play: {why}"));
+        }
+        w.mode(Mode::Play);
         self.mode = Mode::Play;
-        self.redraw = true;
         Ok(())
     }
 
     /// Back to editing; the document was never touched by Play.
     pub fn leave_play(&mut self) {
         self.mode = Mode::Edit;
-        self.redraw = true;
+        if let Some(w) = &self.worker {
+            w.mode(Mode::Edit);
+        }
     }
 
-    /// Marks the picture as needing a redraw (e.g. the document went stale).
-    pub fn invalidate(&mut self) {
-        self.redraw = true;
+    /// Gives a new render thread a finished level (a build's product),
+    /// keeping the camera where the old one left it.
+    fn attach(&mut self, scene: Box<dyn Scene>, doc: Document, unplayable: Option<String>) {
+        if let Some(c) = self.worker.as_ref().and_then(Worker::current_camera) {
+            self.camera = c;
+        }
+        self.retire_worker();
+        let delay = worker::slow_ms();
+        let scene: Box<dyn Scene> = if delay > 0 {
+            Box::new(Slow {
+                inner: scene,
+                delay: std::time::Duration::from_millis(delay),
+            })
+        } else {
+            scene
+        };
+        match Worker::spawn(scene, self.camera.clone()) {
+            Ok((w, h)) => {
+                self.worker = Some(w);
+                self.handle = Some(h);
+                self.built_doc = Some(doc);
+                self.unplayable = unplayable;
+                self.check_stale = true;
+            }
+            Err(_) => self.built_doc = None,
+        }
     }
 
-    /// Advances by `dt` with the pane's `events`: polls the build, flies the
-    /// camera or steps the game.
-    pub fn tick(&mut self, dt: Duration, events: &[Event]) -> Tick {
+    /// Starts a render thread on `scene` as if a build of `doc` had finished
+    /// (tests drive the thread with their own scenes).
+    #[cfg(test)]
+    pub fn attach_scene(&mut self, scene: Box<dyn Scene>, doc: &Document) {
+        self.attach(scene, doc.clone(), None);
+    }
+
+    fn retire_worker(&mut self) {
+        if let Some(w) = self.worker.take() {
+            w.stop();
+        }
+        if let Some(h) = self.handle.take() {
+            self.retired.push(h);
+        }
+    }
+
+    /// Forwards the pane's `events`, polls the build and collects what the
+    /// render thread produced. `pane` is the visible pane's size in pixels
+    /// (zero when hidden); `doc` the current document. Never blocks.
+    pub fn tick(&mut self, events: &[Event], pane: (u32, u32), doc: &Document) -> Tick {
         let mut out = Tick::default();
         self.poll_build(&mut out);
-        match self.mode {
-            Mode::Edit => {
-                let mut moved = false;
-                for e in events {
-                    moved |= self.fly.event(e);
-                }
-                moved |= self.fly.step(dt.as_secs_f32());
-                if moved {
-                    self.redraw = true;
-                }
-            }
-            Mode::Play => {
-                let quit = self
-                    .built
-                    .as_mut()
-                    .and_then(|(b, _)| b.session_mut())
-                    .is_some_and(|s| {
-                        let secs = dt.as_secs_f32();
-                        s.set_stats(FrameStats {
-                            fps: if secs > 0.0 { 1.0 / secs } else { 0.0 },
-                            frame_ms: secs * 1000.0,
-                        });
-                        s.step(dt, events).quit
-                    });
-                self.redraw = true;
-                if quit {
-                    self.leave_play();
-                    out.left_play = true;
-                    out.status = Some("Left the game; back in the editor".into());
-                }
-            }
+        self.retired.retain(|h| !h.is_finished());
+        if std::mem::take(&mut self.check_stale) {
+            self.set_stale(self.stale(doc));
         }
-        out.redraw = std::mem::take(&mut self.redraw);
+        let size = if pane.0 == 0 || pane.1 == 0 {
+            (0, 0)
+        } else {
+            frame_size(pane, 960)
+        };
+        let Some(w) = self.worker.as_mut() else {
+            return out;
+        };
+        w.size(size.0, size.1);
+        w.input(events);
+        let error = w.take_error();
+        if error.is_some() || !w.alive() {
+            let why = error.unwrap_or_else(|| "the render thread stopped".into());
+            self.lose_worker(&why, &mut out);
+            return out;
+        }
+        if self.mode == Mode::Play && w.take_quit() {
+            out.left_play = true;
+            out.status = Some("Left the game; back in the editor".into());
+        }
+        out.frame = w.take_frame().filter(|f| f.mode == self.mode);
+        if out.left_play {
+            self.leave_play();
+        }
         out
+    }
+
+    /// The render thread died: report it and fall back to editing. The
+    /// document is untouched; building again starts a fresh thread.
+    fn lose_worker(&mut self, why: &str, out: &mut Tick) {
+        self.retire_worker();
+        self.built_doc = None;
+        out.left_play = self.mode == Mode::Play;
+        self.mode = Mode::Edit;
+        out.status = Some(format!("Render thread failed: {why}"));
+        out.log.push(format!("ERROR: render thread failed: {why}"));
     }
 
     fn poll_build(&mut self, out: &mut Tick) {
@@ -186,19 +276,21 @@ impl Studio {
         match result {
             Ok(built) => {
                 let doc = job.map(|j| j.doc).unwrap_or_default();
-                let note = built
-                    .unplayable()
+                let why = built.unplayable().map(str::to_string);
+                let note = why
+                    .as_ref()
                     .map(|w| format!(" (view only: {w})"))
                     .unwrap_or_default();
                 out.status = Some(format!(
                     "Build finished in {:.1} s{note}",
                     started.elapsed().as_secs_f32()
                 ));
-                out.play_now = then_play && built.unplayable().is_none();
+                out.play_now = then_play && why.is_none();
                 if then_play && !out.play_now {
                     out.status = Some(format!("Cannot play{note}"));
                 }
-                self.built = Some((built, doc));
+                self.mode = Mode::Edit;
+                self.attach(Box::new(LevelScene::new(built)), doc, why);
             }
             Err(e) => {
                 out.status = Some(format!("Build failed: {e}"));
@@ -206,32 +298,17 @@ impl Studio {
             }
         }
         self.progress = 0;
-        self.redraw = true;
     }
+}
 
-    /// Renders the current picture at `w` x `h`: the game view in Play, the
-    /// fly camera otherwise. `None` before any build or on a bad size.
-    pub fn render(&mut self, w: u32, h: u32, doc: &Document) -> Option<&Framebuffer> {
-        let stale = self.stale(doc);
-        let view = self.fly.view();
-        let play = self.mode == Mode::Play;
-        let (built, _) = self.built.as_mut()?;
-        if play {
-            let session = built.session_mut()?;
-            return session.render(w, h);
+impl Drop for Studio {
+    /// Stops the render thread and waits for it (only at exit, never while
+    /// the UI is live).
+    fn drop(&mut self) {
+        self.retire_worker();
+        for h in self.retired.drain(..) {
+            let _ = h.join();
         }
-        if self.fb.as_ref().map(|f| (f.width(), f.height())) != Some((w, h)) {
-            self.fb = Some(Framebuffer::new(w, h)?);
-        }
-        let fb = self.fb.as_mut()?;
-        let actors = built.renderer().actors().to_vec();
-        built
-            .renderer()
-            .render(fb, &view, Quality::High, &actors, None)?;
-        if stale {
-            draw_text(fb, 6, 6, "OUT OF DATE: F7", 0xffff_c040, 1);
-        }
-        self.fb.as_ref()
     }
 }
 

@@ -1,6 +1,10 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "apps/*"]
+# vendor/ holds third-party code copied verbatim (plus a bug fix) and is not held
+# to this workspace's lint, file-length or unsafe rules; it is built only as a
+# path dependency through the [patch] section below.
+exclude = ["vendor"]
 
 [workspace.package]
 version = "0.1.0"
@@ -21,3 +25,9 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"
+
+# xui-canvas at the pinned rev panics ("RefCell already borrowed") when a window
+# moves between monitors of different DPI. Use the fixed copy until the fix is
+# upstream; see docs/xui-patches/README.md.
+[patch."https://github.com/va1erian/xui"]
+xui-canvas = { path = "vendor/xui-canvas" }

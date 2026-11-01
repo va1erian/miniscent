@@ -4,7 +4,7 @@
 //! a list move. Entities are the game's own [`Entity`] values plus an id.
 
 use mscent_math::{DPlane, Vec3d};
-use mscent_world::{Brush, BrushError, Entity, Level, Op};
+use mscent_world::{Brush, BrushError, Entity, Level, Op, TexInfo};
 
 /// A stable identity that survives reordering, deletion and undo.
 pub type Id = u32;
@@ -25,6 +25,10 @@ pub struct BrushDef {
     pub shape: Shape,
     pub op: Op,
     pub material: u16,
+    /// Texture mapping per brush plane, kept so loading and saving a level
+    /// does not lose it. Empty means the defaults; the material of every
+    /// plane is always `material`.
+    pub texinfos: Vec<TexInfo>,
 }
 
 /// One placed entity.
@@ -85,17 +89,58 @@ impl BrushDef {
             )?,
             Shape::Convex(planes) => Brush::new(planes, self.op, order)?,
         };
-        Ok(brush.with_material(self.material))
+        let mut brush = brush.with_material(self.material);
+        if self.texinfos.len() == brush.planes().len() {
+            for (i, t) in self.texinfos.iter().enumerate() {
+                let t = TexInfo {
+                    material: self.material,
+                    ..*t
+                };
+                brush.set_texinfo(i, t);
+            }
+        }
+        Ok(brush)
     }
 
     fn from_brush(id: Id, b: &Brush) -> BrushDef {
+        let shape = shape_of(b);
         BrushDef {
             id,
-            shape: shape_of(b),
+            texinfos: texinfos_for(&shape, b),
+            shape,
             op: b.op(),
             material: b.material(),
         }
     }
+}
+
+/// The brush's mappings in the plane order [`BrushDef::to_brush`] will
+/// build (a box is rebuilt by `Brush::cuboid`, whose plane order may differ
+/// from a loaded file's).
+fn texinfos_for(shape: &Shape, b: &Brush) -> Vec<TexInfo> {
+    let Shape::Box { min, max } = shape else {
+        return b.texinfos().to_vec();
+    };
+    let canon = Brush::cuboid(
+        Vec3d::new(min[0], min[1], min[2]),
+        Vec3d::new(max[0], max[1], max[2]),
+        b.op(),
+        0,
+    );
+    let Ok(canon) = canon else {
+        return Vec::new();
+    };
+    let find = |n: Vec3d| {
+        b.planes()
+            .iter()
+            .position(|p| (p.normal - n).length() < 1e-9)
+    };
+    let mapped: Option<Vec<TexInfo>> = canon
+        .planes()
+        .iter()
+        .map(|p| find(p.normal).and_then(|i| b.texinfos().get(i).copied()))
+        .collect();
+    mapped.unwrap_or_default()
 }
 
 /// Recognises the six planes of an axis-aligned box.

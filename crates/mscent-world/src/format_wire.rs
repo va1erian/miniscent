@@ -2,6 +2,7 @@
 //! and matching writers. Every read returns `Err` rather than panicking.
 
 use crate::format::FormatError;
+use crate::texinfo::TexInfo;
 use mscent_math::Vec3;
 
 /// Forward-only reader over a byte slice.
@@ -54,6 +55,33 @@ impl<'a> Cursor<'a> {
     pub fn vec3(&mut self) -> Result<Vec3, FormatError> {
         Ok(Vec3::new(self.f32()?, self.f32()?, self.f32()?))
     }
+
+    /// A [`TexInfo`] record ([`TEXINFO_BYTES`]); out-of-range values are an
+    /// error, not clamped, so a bad file is reported.
+    pub fn texinfo(&mut self) -> Result<TexInfo, FormatError> {
+        let material = self.u16()?;
+        let (u_axis, v_axis) = (self.vec3()?, self.vec3()?);
+        let [u_shift, v_shift, u_scale, v_scale, rotation_deg] = [(); 5].map(|()| self.f32());
+        let lock_to_world = match self.u8()? {
+            0 => false,
+            1 => true,
+            _ => return Err(FormatError::BadTexInfo),
+        };
+        let info = TexInfo {
+            material,
+            u_axis,
+            v_axis,
+            u_shift: u_shift?,
+            v_shift: v_shift?,
+            u_scale: u_scale?,
+            v_scale: v_scale?,
+            rotation_deg: rotation_deg?,
+            lock_to_world,
+        };
+        info.is_valid()
+            .then_some(info)
+            .ok_or(FormatError::BadTexInfo)
+    }
 }
 
 pub fn put_u16(out: &mut Vec<u8>, v: u16) {
@@ -70,6 +98,19 @@ pub fn put_f32(out: &mut Vec<u8>, v: f32) {
 
 pub fn put_f64(out: &mut Vec<u8>, v: f64) {
     out.extend_from_slice(&v.to_le_bytes());
+}
+
+/// Size of one serialised [`TexInfo`].
+pub const TEXINFO_BYTES: usize = 2 + 24 + 20 + 1;
+
+pub fn put_texinfo(out: &mut Vec<u8>, t: &TexInfo) {
+    put_u16(out, t.material);
+    put_vec3(out, t.u_axis);
+    put_vec3(out, t.v_axis);
+    for v in [t.u_shift, t.v_shift, t.u_scale, t.v_scale, t.rotation_deg] {
+        put_f32(out, v);
+    }
+    out.push(u8::from(t.lock_to_world));
 }
 
 pub fn put_vec3(out: &mut Vec<u8>, v: Vec3) {

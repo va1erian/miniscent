@@ -9,9 +9,12 @@
 //! chosen by [`Quality`], distance fog, a sky gradient behind everything,
 //! the level's enemy and goal meshes and an optional HUD.
 
+mod cache;
 mod overlay;
 mod shader;
 pub mod view;
+
+use std::sync::Arc;
 
 use mscent_math::Vec3;
 use mscent_world::lightmap::{BakeConfig, LightFace, Lightmap, LightmapError, PointLight};
@@ -28,6 +31,7 @@ use crate::specular::SpecTable;
 use crate::texture::{MaterialId, MaterialTable};
 use shader::FaceShader;
 
+pub use cache::{BakeCache, Source};
 pub use overlay::{Actor, ActorKind, Overlay};
 pub use view::View;
 
@@ -58,6 +62,10 @@ pub struct BuildConfig {
     /// Multiplier on every point light's colour (the baked light then
     /// saturates the texture, which is what makes bright pools).
     pub light_gain: f32,
+    /// Radius of the lamp disc for soft shadows, in world units (0: hard).
+    pub light_radius: f32,
+    /// Shadow rays per luxel and light for soft shadows.
+    pub shadow_samples: u32,
     /// Colours of the sky gradient; the bottom one is also the fog colour.
     pub sky_top: u32,
     pub sky_bottom: u32,
@@ -72,8 +80,10 @@ impl Default for BuildConfig {
     fn default() -> Self {
         Self {
             luxel_size: 0.25,
-            ambient: Vec3::new(0.22, 0.20, 0.26),
+            ambient: Vec3::new(0.16, 0.15, 0.19),
             light_gain: 3.2,
+            light_radius: 0.5,
+            shadow_samples: 16,
             sky_top: 0xff10_2048,
             sky_bottom: 0xff3a_4a78,
             fog_start: 4.0,
@@ -96,7 +106,7 @@ pub enum BuildError {
 /// A level compiled, lit and ready to draw.
 pub struct LevelRenderer {
     scene: Scene,
-    lightmap: Lightmap,
+    lightmap: Arc<Lightmap>,
     uv_maps: Vec<Option<UvToLuxel>>,
     spec: Vec<SpecTable>,
     lighting: MeshLighting,
@@ -189,6 +199,18 @@ impl LevelRenderer {
         materials: MaterialTable,
         cfg: &BuildConfig,
     ) -> Result<Self, BuildError> {
+        Self::from_level_cached(level, materials, cfg, &mut BakeCache::new())
+    }
+
+    /// Like [`Self::from_level`], but the bake goes through `cache`: when the
+    /// faces, lights and bake settings are those of the cache's last bake (or
+    /// of its file), no shadow ray is traced and the same lightmap is shared.
+    pub fn from_level_cached(
+        level: &Level,
+        materials: MaterialTable,
+        cfg: &BuildConfig,
+        cache: &mut BakeCache,
+    ) -> Result<Self, BuildError> {
         check_materials(&materials)?;
         let bsp = compile(&level.brushes).map_err(BuildError::Csg)?;
         let faces = extract_faces(&bsp, &level.brushes);
@@ -199,9 +221,12 @@ impl LevelRenderer {
             luxel_size: cfg.luxel_size,
             ambient: cfg.ambient,
             bounce_gain: 0.5,
+            light_radius: cfg.light_radius,
+            shadow_samples: cfg.shadow_samples,
             ..BakeConfig::default()
         };
-        let lightmap = mscent_world::lightmap::bake(&bsp, &light_faces, &lights, &bake_cfg)
+        let lightmap = cache
+            .get_or_bake(&bsp, &light_faces, &lights, &bake_cfg)
             .map_err(BuildError::Bake)?;
         let spec = spec_tables(&materials);
         // The game path pays for smooth texture sampling; the raw

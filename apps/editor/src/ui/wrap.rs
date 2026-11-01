@@ -1,8 +1,8 @@
 //! Word wrapping for the build log box.
 
 /// Characters per line and lines shown in the build log box.
-pub const LOG_COLS: usize = 38;
-pub const LOG_ROWS: usize = 8;
+pub const LOG_COLS: usize = 44;
+pub const LOG_ROWS: usize = 13;
 
 /// Breaks `line` into pieces of at most `cols` characters, at spaces when it can.
 pub fn wrap(line: &str, cols: usize) -> Vec<String> {

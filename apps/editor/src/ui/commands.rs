@@ -6,7 +6,7 @@ use xui::widget::MenuId;
 
 use super::app::{Editor, cmd};
 use crate::files;
-use crate::model::{Document, FlyCam};
+use crate::model::Document;
 use crate::studio::Mode;
 
 impl Editor {
@@ -36,8 +36,7 @@ impl Editor {
             cmd::BUILD => self.start_build(false),
             cmd::PLAY => self.play_command(),
             cmd::RESET_CAMERA => {
-                self.studio.fly = FlyCam::for_document(&self.state.borrow().doc);
-                self.studio.invalidate();
+                self.studio.reset_camera(&self.state.borrow().doc);
             }
             cmd::FIT => self.refit(),
             _ => self.edit_command(id),

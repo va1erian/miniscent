@@ -6,28 +6,20 @@ use mscent_world::{Bsp, Child, Face};
 
 use crate::raster::Vertex;
 
-/// World units covered by one texture repeat.
-const UNITS_PER_REPEAT: f32 = 8.0;
+/// Texture size assumed for a material the table does not hold, so that
+/// the default mapping still tiles every 8 world units.
+const FALLBACK_TEXTURE_SIZE: (u32, u32) = (128, 128);
 
-/// A face as the rasterizer wants it, with planar texture coordinates.
-pub(super) fn face_vertices(face: &Face) -> Vec<Vertex> {
-    let n = face.plane.normal;
-    let (ax, ay, az) = (n.x.abs(), n.y.abs(), n.z.abs());
-    // Project along the dominant axis so the mapping stays well conditioned.
-    let axes = if az >= ax && az >= ay {
-        (0, 1)
-    } else if ax >= ay {
-        (1, 2)
-    } else {
-        (0, 2)
-    };
+/// A face as the rasterizer wants it: texture coordinates in repeats from
+/// the face's [`TexInfo`](mscent_world::TexInfo) and the texture's size.
+pub(super) fn face_vertices(face: &Face, texture_size: Option<(u32, u32)>) -> Vec<Vertex> {
+    let size = texture_size.unwrap_or(FALLBACK_TEXTURE_SIZE);
     face.polygon
         .vertices()
         .iter()
-        .map(|p| {
-            let pos = p.to_f32();
-            let pick = |a: usize| [pos.x, pos.y, pos.z][a] / UNITS_PER_REPEAT;
-            Vertex::new(pos, pick(axes.0), pick(axes.1))
+        .map(|&p| {
+            let (u, v) = face.texinfo.uv_at(p, size);
+            Vertex::new(p.to_f32(), u, v)
         })
         .collect()
 }

@@ -7,7 +7,7 @@
 //!
 //! Each [`Face`] is wound counter-clockwise seen from the empty side and its
 //! plane normal points into empty space. Coplanar neighbours with the same
-//! material are merged into larger convex polygons, and finally every edge is
+//! [`TexInfo`] (material and mapping) are merged into larger convex polygons, and finally every edge is
 //! subdivided at foreign vertices lying on it so adjacent faces share exactly
 //! the same vertices (no T-junctions, hence no pixel cracks).
 
@@ -18,6 +18,7 @@ mod tjunction;
 
 use crate::brush::Brush;
 use crate::bsp::{Bsp, LeafId};
+use crate::texinfo::TexInfo;
 use mscent_math::{DPlane, Polygon, epsilon};
 
 /// One planar piece of visible surface.
@@ -28,8 +29,12 @@ pub struct Face {
     /// Convex polygon, counter-clockwise seen from the empty side. After
     /// T-junction repair it may carry extra collinear vertices.
     pub polygon: Polygon,
-    /// Material id taken from the brush that created the surface.
+    /// Material id taken from the brush that created the surface; always
+    /// equal to `texinfo.material`.
     pub material: u16,
+    /// Texture mapping of the brush plane the surface came from. It survives
+    /// CSG clipping and merging (faces with different mappings never merge).
+    pub texinfo: TexInfo,
     /// Empty leaves in front of the face, sorted and unique. Merging faces
     /// across leaf boundaries unions these lists.
     pub front_leaves: Vec<LeafId>,
@@ -38,7 +43,7 @@ pub struct Face {
 }
 
 /// Extracts the visible faces of `bsp`. `brushes` must be the slice the tree
-/// was compiled from; they only supply materials, so a mismatch yields
+/// was compiled from; they only supply texture mappings, so a mismatch yields
 /// default materials, never a panic.
 pub fn extract_faces(bsp: &Bsp, brushes: &[Brush]) -> Vec<Face> {
     let mut sorted: Vec<&Brush> = brushes.iter().collect();
@@ -47,8 +52,10 @@ pub fn extract_faces(bsp: &Bsp, brushes: &[Brush]) -> Vec<Face> {
         .into_iter()
         .map(|f| {
             let at = material::centroid(&f.polygon);
+            let texinfo = material::texinfo_for(&sorted, &f.plane, at);
             Face {
-                material: material::material_for(&sorted, &f.plane, at),
+                material: texinfo.material,
+                texinfo,
                 plane: f.plane,
                 polygon: f.polygon,
                 front_leaves: vec![f.empty],

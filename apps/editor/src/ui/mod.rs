@@ -2,8 +2,11 @@
 
 mod app;
 mod commands;
+mod icons;
+mod keys;
 mod paint2d;
 pub mod props;
+mod toolbar;
 mod view3d;
 mod viewport;
 mod wrap;

@@ -175,20 +175,18 @@ impl Texture {
     /// coordinates. Texel centres sit at half-integers, so an exact texel
     /// centre returns that texel unchanged. Wraps like [`Self::texel`].
     pub fn sample_bilinear(&self, fu: i32, fv: i32) -> u32 {
-        let (u, v) = (fu.wrapping_sub(0x8000), fv.wrapping_sub(0x8000));
-        let (x0, y0) = ((u >> 16) as u32, (v >> 16) as u32);
-        let (mx, my) = (self.mask_x(), self.mask_y());
-        let w = self.width as usize;
-        let (xa, xb) = ((x0 & mx) as usize, (x0.wrapping_add(1) & mx) as usize);
-        let (ra, rb) = (
-            (y0 & my) as usize * w,
-            (y0.wrapping_add(1) & my) as usize * w,
-        );
-        let px = &self.albedo;
-        let (tx, ty) = (((u >> 8) & 0xff) as u32, ((v >> 8) & 0xff) as u32);
-        let top = lerp_texel(px[ra + xa], px[ra + xb], tx);
-        let bottom = lerp_texel(px[rb + xa], px[rb + xb], tx);
-        lerp_texel(top, bottom, ty)
+        bilinear(&self.albedo, self.width, self.height, fu, fv)
+    }
+
+    /// Bilinearly filtered albedo from mip `level` (clamped to the chain) at
+    /// the same full-resolution 16.16 coordinates as [`Self::sample_bilinear`].
+    pub fn sample_bilinear_lod(&self, fu: i32, fv: i32, level: u32) -> u32 {
+        let Some(l) = (level as usize).min(self.mips.len()).checked_sub(1) else {
+            return self.sample_bilinear(fu, fv);
+        };
+        let shift = l as u32 + 1;
+        let (w, h) = ((self.width >> shift).max(1), (self.height >> shift).max(1));
+        bilinear(&self.mips[l], w, h, fu >> shift, fv >> shift)
     }
 
     /// Unit normal at a texel, if a normal map is attached.
@@ -217,6 +215,25 @@ impl Texture {
     pub fn has_heights(&self) -> bool {
         self.heights.is_some()
     }
+}
+
+/// Bilinear fetch from a `w` x `h` (powers of two) image at 16.16 coordinates.
+/// Out-of-range indices cannot happen (masked), but a short slice reads black.
+fn bilinear(px: &[u32], w: u32, h: u32, fu: i32, fv: i32) -> u32 {
+    let (u, v) = (fu.wrapping_sub(0x8000), fv.wrapping_sub(0x8000));
+    let (x0, y0) = ((u >> 16) as u32, (v >> 16) as u32);
+    let (mx, my) = (w - 1, h - 1);
+    let w = w as usize;
+    let (xa, xb) = ((x0 & mx) as usize, (x0.wrapping_add(1) & mx) as usize);
+    let (ra, rb) = (
+        (y0 & my) as usize * w,
+        (y0.wrapping_add(1) & my) as usize * w,
+    );
+    let at = |i: usize| px.get(i).copied().unwrap_or(0xff00_0000);
+    let (tx, ty) = (((u >> 8) & 0xff) as u32, ((v >> 8) & 0xff) as u32);
+    let top = lerp_texel(at(ra + xa), at(ra + xb), tx);
+    let bottom = lerp_texel(at(rb + xa), at(rb + xb), tx);
+    lerp_texel(top, bottom, ty)
 }
 
 /// Blend two opaque texels by `t / 256`, two channels at a time.

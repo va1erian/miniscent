@@ -139,10 +139,14 @@ fn light_falls_off_smoothly_across_spans() {
     let tex = grooved((0.0, 0.0));
     let mut sh = LightingShader::new(face(&lm, &tex, false)).unwrap();
     let img = render(&tex, &mut sh);
-    // Monotone from the lamp outward along a row, with no jump at span
-    // boundaries (every 16 pixels).
+    // The lightmap peaks under the lamp (pixel 8) and falls away from it,
+    // with no jump at span boundaries (every 16 pixels). Sampling finer than
+    // a span resolves the peak, so the row rises into it and falls after it.
     let row: Vec<u32> = (4..40).map(|x| red(px(&img, x, 20))).collect();
-    assert!(row.windows(2).all(|w| w[1] <= w[0] + 1), "{row:?}");
+    let peak = row.iter().enumerate().max_by_key(|&(_, v)| *v).unwrap().0;
+    assert!((2..8).contains(&peak), "peak at {peak} in {row:?}");
+    assert!(row[..=peak].windows(2).all(|w| w[1] + 1 >= w[0]), "{row:?}");
+    assert!(row[peak..].windows(2).all(|w| w[1] <= w[0] + 1), "{row:?}");
     let max_step = row.windows(2).map(|w| w[0].abs_diff(w[1])).max().unwrap();
     assert!(max_step <= 12, "step {max_step} in {row:?}");
 }
@@ -284,10 +288,58 @@ fn fog_blends_toward_its_colour() {
     assert!(px(&img, 60, 20) & 0xff > 100);
 }
 
+/// Every `k`th texel of albedo and normals: a smaller texture with the same
+/// look, so the wall shows it at about half a texel per pixel (magnified)
+/// instead of two.
+fn decimated(t: &Texture, k: u32) -> Texture {
+    let (w, h) = (t.width() / k, t.height() / k);
+    let at = |f: &dyn Fn(i32, i32) -> u32| -> Vec<u32> {
+        (0..w * h)
+            .map(|i| f((i % w * k) as i32, (i / w * k) as i32))
+            .collect()
+    };
+    let albedo = at(&|x, y| t.texel(x, y));
+    let normals = at(&|x, y| t.normal_texel(x, y).unwrap());
+    Texture::new(w, h, albedo)
+        .unwrap()
+        .with_normals(normals)
+        .unwrap()
+}
+
+#[test]
+fn bump_fades_out_where_the_normal_map_is_minified() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures");
+    let tex = load_texture(&dir, "brick").unwrap();
+    let lm = baked();
+    // Two repeats across the wall: four texels per pixel, far past aliasing.
+    let dense: Vec<Vertex> = wall()
+        .iter()
+        .map(|v| Vertex::new(v.pos, v.uv.x * 2.0, v.uv.y * 2.0))
+        .collect();
+    let map = UvToLuxel::from_vertices(&lm.projections()[0], &dense, &tex).unwrap();
+    let draw = |bump: bool| {
+        let (mut fb, cam) = setup();
+        let fl = FaceLight {
+            map,
+            ..face(&lm, &tex, bump)
+        };
+        draw_polygon(
+            &mut fb,
+            &cam,
+            &dense,
+            &tex,
+            &mut LightingShader::new(fl).unwrap(),
+        );
+        fb.pixels().to_vec()
+    };
+    // The bumped picture equals the flat one: dither included, no aliased relief.
+    assert_eq!(draw(true), draw(false), "aliased bumps still show");
+}
+
 #[test]
 fn real_brick_bump_changes_exactly_the_non_flat_texels() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures");
-    let tex = load_texture(&dir, "brick").unwrap();
+    let tex = decimated(&load_texture(&dir, "brick").unwrap(), 4);
     let lm = baked();
     let flat = render(
         &tex,
@@ -304,9 +356,10 @@ fn real_brick_bump_changes_exactly_the_non_flat_texels() {
             if a < 40 {
                 continue; // too dark to compare
             }
-            let (tx, ty) = (x * tex.width() / SIZE, y * tex.height() / SIZE);
-            let n = tex.normal(tx as i32, ty as i32).unwrap();
-            if n.z > 0.9995 {
+            let centre = |p: u32, n: u32| ((p as f32 + 0.5) * n as f32 / SIZE as f32) as i32;
+            let (tx, ty) = (centre(x, tex.width()), centre(y, tex.height()));
+            let n = tex.normal(tx, ty).unwrap();
+            if n.z > 0.9999 {
                 // Relief scaling lets near-flat texels differ a little.
                 flat_off += u32::from(a.abs_diff(b) * 6 > a);
             } else {

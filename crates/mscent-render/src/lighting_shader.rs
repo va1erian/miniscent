@@ -9,7 +9,7 @@
 //! default path pays nothing for it.
 
 use mscent_math::Vec3;
-use mscent_world::lightmap::{FaceProjection, Lightmap, Luxel};
+use mscent_world::lightmap::{FaceGrid, FaceProjection, Lightmap, Luxel};
 
 use crate::bump::{FLAT_NORMAL, bump_gain, texel_normal};
 use crate::raster::Vertex;
@@ -123,18 +123,64 @@ struct SpecInput<'a> {
 /// Lightmap, bump and optional specular in one span shader.
 pub struct LightingShader<'a, const SPEC: bool> {
     face: FaceLight<'a>,
+    grid: FaceGrid<'a>,
     proj: FaceProjection,
     spec: Option<SpecInput<'a>>,
-    // Per-span linear state; colour is in 256 = full-light units.
+    // Per-span state. The lightmap is sampled every `1 << shift` pixels and
+    // linear between those knots; colour is in 256 = full-light units.
+    segs: [Seg; MAX_SEGS],
+    shift: u32,
+    /// How much of the bump effect survives at the current minification.
+    bump_scale: f32,
+    /// Screen position of pixel 0 of the span, for the dither.
+    x0: i32,
+    y0: i32,
+    fog0: f32,
+    fog_step: f32,
+}
+
+/// Longest lightmap sampling interval, in pixels (a power of two).
+const MAX_SEG_SHIFT: u32 = 4;
+/// Shortest sampling interval, as a shift: every second pixel.
+const MIN_SEG_SHIFT: u32 = 1;
+/// Segments of the longest span (`SPAN_LEN >> MIN_SEG_SHIFT`).
+const MAX_SEGS: usize = 8;
+/// Largest distance, in luxels, between two lightmap samples on screen.
+/// Beyond one luxel the linear step between knots would skip over the
+/// penumbra of a shadow edge, and the edge would crawl with the span grid.
+const MAX_KNOT_LUXELS: f32 = 2.0;
+/// Texels per pixel up to which bump mapping keeps full strength, and the
+/// rate at which it has faded out (the normal map aliases beyond that).
+const BUMP_FULL: f32 = 1.0;
+const BUMP_GONE: f32 = 3.0;
+
+/// Linear light state over one sampling interval.
+#[derive(Clone, Copy)]
+struct Seg {
     col0: Vec3,
     dcol: Vec3,
     dir0: Vec3,
     ddir: Vec3,
     half0: Vec3,
     dhalf: Vec3,
-    fog0: f32,
-    fog_step: f32,
 }
+
+/// Light at one lightmap sample.
+#[derive(Clone, Copy)]
+struct Knot {
+    col: Vec3,
+    dir: Vec3,
+    half: Vec3,
+}
+
+const EMPTY_SEG: Seg = Seg {
+    col0: Vec3::ZERO,
+    dcol: Vec3::ZERO,
+    dir0: FLAT_NORMAL,
+    ddir: Vec3::ZERO,
+    half0: FLAT_NORMAL,
+    dhalf: Vec3::ZERO,
+};
 
 impl<'a> LightingShader<'a, false> {
     /// Diffuse-only shader. `None` if `face.face` is not in the lightmap.
@@ -157,36 +203,54 @@ impl<'a> LightingShader<'a, true> {
 impl<'a, const SPEC: bool> LightingShader<'a, SPEC> {
     fn build(face: FaceLight<'a>, spec: Option<SpecInput<'a>>) -> Option<Self> {
         let proj = *face.lightmap.projections().get(face.face)?;
+        let grid = face.lightmap.face_grid(face.face)?;
         Some(Self {
             face,
+            grid,
             proj,
             spec,
-            col0: Vec3::ZERO,
-            dcol: Vec3::ZERO,
-            dir0: FLAT_NORMAL,
-            ddir: Vec3::ZERO,
-            half0: FLAT_NORMAL,
-            dhalf: Vec3::ZERO,
+            segs: [EMPTY_SEG; MAX_SEGS],
+            shift: MAX_SEG_SHIFT,
+            bump_scale: 1.0,
+            x0: 0,
+            y0: 0,
             fog0: 0.0,
             fog_step: 0.0,
         })
     }
 
+    /// Whether anything downstream reads the baked light direction.
+    fn wants_dir(&self) -> bool {
+        self.face.bump || self.spec.is_some()
+    }
+
     /// Bilinear luxel sample at continuous luxel coordinates, clamped to the
-    /// face's own grid so neighbouring faces in the atlas never bleed in.
+    /// face's own grid so neighbouring faces in the atlas never bleed in. The
+    /// direction is blended once and normalised once.
     fn sample(&self, lx: f32, ly: f32) -> Luxel {
-        let (w, h) = (self.proj.width, self.proj.height);
+        let g = &self.grid;
         let clamp = |c: f32, n: u32| (c - 0.5).clamp(0.0, n.saturating_sub(1) as f32);
-        let (fx, fy) = (clamp(lx, w), clamp(ly, h));
+        let (fx, fy) = (clamp(lx, g.width()), clamp(ly, g.height()));
         let (x0, y0) = (fx as u32, fy as u32);
-        let x1 = (x0 + 1).min(w.saturating_sub(1));
-        let y1 = (y0 + 1).min(h.saturating_sub(1));
-        let lm = self.face.lightmap;
-        let at = |x, y| lm.face_luxel(self.face.face, x, y).unwrap_or(Luxel::DARK);
         let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
-        let top = blend(at(x0, y0), at(x1, y0), tx);
-        let bottom = blend(at(x0, y1), at(x1, y1), tx);
-        blend(top, bottom, ty)
+        let taps = [
+            (g.at_clamped(x0, y0), (1.0 - tx) * (1.0 - ty)),
+            (g.at_clamped(x0 + 1, y0), tx * (1.0 - ty)),
+            (g.at_clamped(x0, y0 + 1), (1.0 - tx) * ty),
+            (g.at_clamped(x0 + 1, y0 + 1), tx * ty),
+        ];
+        let color = taps.iter().fold(Vec3::ZERO, |a, (l, w)| a + l.color * *w);
+        if !self.wants_dir() {
+            return Luxel {
+                color,
+                dir: Luxel::FALLBACK_DIR,
+            };
+        }
+        let dir = taps.iter().fold(Vec3::ZERO, |a, (l, w)| a + l.dir * *w);
+        Luxel {
+            color,
+            dir: dir.normalized().unwrap_or(Luxel::FALLBACK_DIR),
+        }
     }
 
     /// Unit direction from a point on the face (luxel coordinates) to the eye.
@@ -200,35 +264,60 @@ impl<'a, const SPEC: bool> LightingShader<'a, SPEC> {
         (spec.eye_t - at).normalized().unwrap_or(FLAT_NORMAL)
     }
 
-    fn begin_light(&mut self, start: &SpanEnd, end: &SpanEnd, inv: f32) {
-        let (ax, ay) = self.face.map.apply(start.u, start.v);
-        let (bx, by) = self.face.map.apply(end.u, end.v);
-        let (a, b) = (self.sample(ax, ay), self.sample(bx, by));
-        self.col0 = a.color * 256.0;
-        self.dcol = (b.color - a.color) * (256.0 * inv);
+    /// Light at luxel coordinates `(lx, ly)`.
+    fn knot(&self, lx: f32, ly: f32) -> Knot {
+        let l = self.sample(lx, ly);
         // Bump normals live in the texture frame; the baked directions and
         // the view vector are in the lightmap's tangent frame.
         let to_tex = |v: Vec3| self.face.map.to_texture_frame(v);
-        let (da, db) = (to_tex(a.dir), to_tex(b.dir));
-        self.dir0 = da;
-        self.ddir = (db - da) * inv;
-        if let Some(spec) = self.spec {
-            let ha = to_tex(half_vector(a.dir, self.view_dir(&spec, ax, ay)));
-            let hb = to_tex(half_vector(b.dir, self.view_dir(&spec, bx, by)));
-            self.half0 = ha;
-            self.dhalf = (hb - ha) * inv;
+        if !self.wants_dir() {
+            return Knot {
+                col: l.color * 256.0,
+                dir: FLAT_NORMAL,
+                half: FLAT_NORMAL,
+            };
+        }
+        let half = match self.spec {
+            Some(spec) => to_tex(half_vector(l.dir, self.view_dir(&spec, lx, ly))),
+            None => FLAT_NORMAL,
+        };
+        Knot {
+            col: l.color * 256.0,
+            dir: to_tex(l.dir),
+            half,
         }
     }
-}
 
-fn blend(a: Luxel, b: Luxel, t: f32) -> Luxel {
-    Luxel {
-        color: a.color.lerp(b.color, t),
-        dir: a
-            .dir
-            .lerp(b.dir, t)
-            .normalized()
-            .unwrap_or(Luxel::FALLBACK_DIR),
+    /// Sample the lightmap along the span every `1 << shift` pixels, where
+    /// the shift keeps the knots about a luxel apart on the face. Luxel
+    /// coordinates are affine in the span's texture coordinates, so knots are
+    /// placed by linear interpolation of the two ends (evaluated at pixel
+    /// centres, so they do not depend on where the span grid starts).
+    fn begin_light(&mut self, start: &SpanEnd, end: &SpanEnd, len: u32) {
+        let (ax, ay) = self.face.map.apply(start.u, start.v);
+        let (bx, by) = self.face.map.apply(end.u, end.v);
+        let per_px = (bx - ax).abs().max((by - ay).abs()) / len.max(1) as f32;
+        self.shift = MAX_SEG_SHIFT;
+        while self.shift > MIN_SEG_SHIFT && (1u32 << self.shift) as f32 * per_px > MAX_KNOT_LUXELS {
+            self.shift -= 1;
+        }
+        let seg_len = 1u32 << self.shift;
+        let t_per_px = 1.0 / len.max(1) as f32;
+        let inv = 1.0 / seg_len as f32;
+        let mut a = self.knot(ax, ay);
+        for k in 0..len.div_ceil(seg_len) {
+            let t = ((k + 1) * seg_len) as f32 * t_per_px;
+            let b = self.knot(ax + (bx - ax) * t, ay + (by - ay) * t);
+            self.segs[k as usize & (MAX_SEGS - 1)] = Seg {
+                col0: a.col,
+                dcol: (b.col - a.col) * inv,
+                dir0: a.dir,
+                ddir: (b.dir - a.dir) * inv,
+                half0: a.half,
+                dhalf: (b.half - a.half) * inv,
+            };
+            a = b;
+        }
     }
 }
 
@@ -258,11 +347,11 @@ fn soft_limit(x: f32) -> f32 {
     }
 }
 
-/// Cheap per-texel noise in `[0, 1)` from the texture position.
-fn dither_of(fu: i32, fv: i32, i: u32) -> f32 {
-    let h = (fu as u32).wrapping_mul(0x9E37_79B1)
-        ^ (fv as u32).wrapping_mul(0x85EB_CA6B)
-        ^ i.wrapping_mul(0xC2B2_AE35);
+/// Cheap noise in `[0, 1)` from the screen position. It is fixed on the
+/// screen, so it cannot crawl across surfaces as the camera moves (noise
+/// keyed by span index or texel does, since both shift every frame).
+fn dither_of(x: i32, y: i32) -> f32 {
+    let h = (x as u32).wrapping_mul(0x9E37_79B1) ^ (y as u32).wrapping_mul(0x85EB_CA6B);
     let h = (h ^ (h >> 15)).wrapping_mul(0x2C1B_3C6D);
     ((h >> 8) & 0xffff) as f32 * (1.0 / 65536.0)
 }
@@ -276,27 +365,39 @@ fn add_spec(c: u32, k: Vec3, s: f32) -> u32 {
 }
 
 impl<const SPEC: bool> SpanShader for LightingShader<'_, SPEC> {
+    fn set_texel_rate(&mut self, texels_per_pixel: f32) {
+        let t = (BUMP_GONE - texels_per_pixel) / (BUMP_GONE - BUMP_FULL);
+        self.bump_scale = if t.is_nan() { 0.0 } else { t.clamp(0.0, 1.0) };
+    }
+
     fn begin_span(&mut self, start: &SpanEnd, end: &SpanEnd, len: u32) {
-        let inv = 1.0 / len.max(1) as f32;
-        self.begin_light(start, end, inv);
+        self.begin_light(start, end, len);
+        (self.x0, self.y0) = (start.x, start.y);
         if let Some(fog) = self.face.fog {
+            let inv = 1.0 / len.max(1) as f32;
             self.fog0 = fog.amount(start.depth);
             self.fog_step = (fog.amount(end.depth) - self.fog0) * inv;
         }
     }
 
     fn shade(&self, i: u32, texel: u32, fu: i32, fv: i32) -> u32 {
-        let f = i as f32;
-        let mut k = self.col0 + self.dcol * f;
+        let seg = &self.segs[(i >> self.shift) as usize & (MAX_SEGS - 1)];
+        let f = (i & ((1 << self.shift) - 1)) as f32;
+        let mut k = seg.col0 + seg.dcol * f;
         let mut n = FLAT_NORMAL;
         if self.face.bump {
+            // Fade the normal towards flat as the map is minified.
             n = texel_normal(self.face.texture, fu, fv);
-            k = k * bump_gain(n, self.dir0 + self.ddir * f);
+            if self.bump_scale < 1.0 {
+                n = FLAT_NORMAL + (n - FLAT_NORMAL) * self.bump_scale;
+            }
+            k = k * bump_gain(n, seg.dir0 + seg.ddir * f);
         }
         k = Vec3::new(soft_limit(k.x), soft_limit(k.y), soft_limit(k.z));
-        let mut out = mul_rgb3(texel, k, dither_of(fu, fv, i));
+        let dither = dither_of(self.x0 + i as i32, self.y0);
+        let mut out = mul_rgb3(texel, k, dither);
         if let Some(spec) = self.spec.filter(|_| SPEC) {
-            let h = self.half0 + self.dhalf * f;
+            let h = seg.half0 + seg.dhalf * f;
             // Stepping unit vectors linearly shortens them mid-span, which
             // would flatten the peak; one Newton step of 1/|h| restores it.
             let n_dot_h = n.dot(h) * (1.5 - 0.5 * h.dot(h));
@@ -305,7 +406,7 @@ impl<const SPEC: bool> SpanShader for LightingShader<'_, SPEC> {
         }
         match self.face.fog {
             Some(fog) => {
-                let amount = (self.fog0 + self.fog_step * f).clamp(0.0, 256.0);
+                let amount = (self.fog0 + self.fog_step * i as f32).clamp(0.0, 256.0);
                 lerp_rgb(out, fog.color, amount as u32)
             }
             None => out,

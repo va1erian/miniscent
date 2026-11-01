@@ -3,11 +3,15 @@
 use super::atlas::{Atlas, PADDING, Rect, ppm};
 use super::bounce;
 use super::parallel::par_map;
-use super::ray::segment_clear;
+use super::soft;
 use super::uv::{FaceProjection, project_face};
 use super::{BakeConfig, LightFace, LightmapError, Luxel, PointLight};
 use crate::bsp::Bsp;
 use mscent_math::Vec3;
+
+/// Cap on shadow rays per luxel and light, so a config cannot make a bake
+/// run for hours.
+pub const MAX_SHADOW_SAMPLES: u32 = 256;
 
 /// Everything a worker needs, shared read-only across threads.
 pub(super) struct Scene<'a> {
@@ -27,6 +31,19 @@ pub struct Lightmap {
 }
 
 impl Lightmap {
+    pub(super) fn from_parts(atlas: Atlas, proj: Vec<FaceProjection>, texels: Vec<Luxel>) -> Self {
+        Self {
+            atlas,
+            proj,
+            texels,
+        }
+    }
+
+    /// All luxels, atlas row by row (gutter included).
+    pub(super) fn texel_slice(&self) -> &[Luxel] {
+        &self.texels
+    }
+
     pub fn atlas(&self) -> &Atlas {
         &self.atlas
     }
@@ -54,6 +71,20 @@ impl Lightmap {
         self.texel(r.x + x, r.y + y)
     }
 
+    /// Direct view of one face's luxels for per-pixel lookups, or `None` for
+    /// an unknown face.
+    pub fn face_grid(&self, face: usize) -> Option<FaceGrid<'_>> {
+        let r = self.atlas.rects().get(face)?;
+        let stride = self.atlas.width() as usize;
+        Some(FaceGrid {
+            texels: &self.texels,
+            start: r.y as usize * stride + r.x as usize,
+            stride,
+            w: r.w,
+            h: r.h,
+        })
+    }
+
     /// Nearest luxel of `face` to a world point on it.
     pub fn sample_world(&self, face: usize, p: Vec3) -> Option<Luxel> {
         let (x, y) = self.proj.get(face)?.nearest_luxel(p);
@@ -72,6 +103,37 @@ impl Lightmap {
             self.atlas.height() as usize,
             px,
         )
+    }
+}
+
+/// One face's luxel grid inside the atlas, with its row stride.
+#[derive(Clone, Copy, Debug)]
+pub struct FaceGrid<'a> {
+    texels: &'a [Luxel],
+    start: usize,
+    stride: usize,
+    w: u32,
+    h: u32,
+}
+
+impl FaceGrid<'_> {
+    pub fn width(&self) -> u32 {
+        self.w
+    }
+
+    pub fn height(&self) -> u32 {
+        self.h
+    }
+
+    /// Luxel `(x, y)` with both clamped into the face's own grid, so
+    /// filtering never reads a neighbour's luxels.
+    pub fn at_clamped(&self, x: u32, y: u32) -> Luxel {
+        let x = x.min(self.w.saturating_sub(1)) as usize;
+        let y = y.min(self.h.saturating_sub(1)) as usize;
+        self.texels
+            .get(self.start + y * self.stride + x)
+            .copied()
+            .unwrap_or(Luxel::DARK)
     }
 }
 
@@ -121,6 +183,9 @@ fn validate(lights: &[PointLight], cfg: &BakeConfig) -> Result<(), LightmapError
         && cfg.luxel_size > 0.0
         && cfg.normal_bias.is_finite()
         && cfg.normal_bias >= 0.0
+        && cfg.light_radius.is_finite()
+        && cfg.light_radius >= 0.0
+        && cfg.shadow_samples <= MAX_SHADOW_SAMPLES
         && cfg.ambient.is_finite()
         && (0.0..=1.0).contains(&cfg.albedo)
         && cfg.bounce_gain.is_finite()
@@ -209,11 +274,23 @@ fn light_at(
     }
     // Start the ray off the surface so a face does not shadow itself.
     let origin = point + p.normal * s.cfg.normal_bias;
-    if !segment_clear(s.bsp, origin.to_f64(), light.position.to_f64()) {
+    let clear = soft::clear_to(s.bsp, origin);
+    let seen = soft::visibility(
+        &clear,
+        origin,
+        light.position,
+        s.cfg.light_radius,
+        s.cfg.shadow_samples,
+        soft::spin_of(point),
+    );
+    if seen <= 0.0 {
         return None;
     }
     let falloff = 1.0 - dist / light.radius;
-    Some((light.color * (falloff * falloff * falloff * facing), dir))
+    Some((
+        light.color * (falloff * falloff * falloff * facing * seen),
+        dir,
+    ))
 }
 
 /// Adds ambient and turns the accumulated direction into a unit vector, with

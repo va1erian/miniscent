@@ -16,6 +16,10 @@
 //!     counter-clockwise from outside), `op()`, `order()`, `contains(Vec3d)`,
 //!     `bounds()`, `flipped_op()`.
 //!   - Limits: [`brush::MAX_PLANES`], coordinates within `polytope::MAX_COORD`.
+//! * [`TexInfo`] (`texinfo.rs`): Hammer-style texture mapping per brush plane
+//!   (axes, shift, scale, rotation, material). `Brush::texinfos()` /
+//!   `set_texinfo` / `plane_facing`; extracted [`Face`]s carry the `texinfo`
+//!   of their source plane; level file version 2 stores them.
 //! * [`Bsp`] (`bsp.rs`): `Node { plane: DPlane, front, back }` and
 //!   `Leaf { kind: LeafKind::{Solid, Empty} }`, stored in flat arrays and
 //!   addressed by [`NodeId`] / [`LeafId`] (`u32` newtypes; a leaf's id is its
@@ -50,6 +54,7 @@ pub mod materials;
 pub mod polytope;
 pub mod portals;
 pub mod showcase;
+pub mod texinfo;
 
 pub use brush::{Brush, BrushError, Op};
 pub use bsp::{Bsp, BspError, Child, Leaf, LeafId, LeafKind, Node, NodeId, Region};
@@ -62,6 +67,7 @@ pub use gen_level::generate_level;
 pub use level_builder::LevelBuilder;
 pub use portals::{Portal, Portals};
 pub use showcase::showcase_level;
+pub use texinfo::TexInfo;
 
 #[cfg(test)]
 mod brush_tests;
@@ -77,3 +83,5 @@ mod gen_tests;
 mod portals_tests;
 #[cfg(test)]
 mod review_tests;
+#[cfg(test)]
+mod texinfo_plumb_tests;

@@ -43,6 +43,18 @@ only exercised with `--autoclose-ms` (starts and exits cleanly; no human input),
 on the i3-7100U, any LazyOS run, or the editor in a real interactive session (only the
 headless selftest). `tools/check_frame_cost.py` was not rerun this pass.
 
+## Per-face texture mapping (TexInfo)
+
+Each brush plane has a Hammer-style `TexInfo` (`crates/mscent-world/src/texinfo.rs`): axes,
+shift, scale (world units per texel, default 0.0625 = the old 8-unit tile for 128 px textures),
+rotation, flips, fit, justify, align to face/world and copy across an edge. Faces keep it through
+CSG and merging, the renderer derives UVs from it, level format version 2 stores it (version 1
+still loads with defaults), and the editor document passes it through load and save. The editor UI
+for it is not built yet. Known limit: a face takes its TexInfo from the plane that owns its
+centroid, so a re-texturing slab that covers only part of a coplanar face does not split it.
+Evidence: `crates/mscent-render/tests/texinfo_render.rs` (pixel checks, bump frame, old-projection
+equality) and PNGs in `target/shots/texinfo/`.
+
 ## M0 Foundations
 
 | ID | Status | Evidence |

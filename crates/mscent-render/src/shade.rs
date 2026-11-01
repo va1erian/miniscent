@@ -29,6 +29,12 @@ pub trait SpanShader {
     /// `i` is `start + (end - start) * i / len`.
     fn begin_span(&mut self, start: &SpanEnd, end: &SpanEnd, len: u32);
 
+    /// Called before [`begin_span`](Self::begin_span) with how many texels
+    /// of the albedo one screen pixel covers at the span (the larger of the
+    /// two screen axes). Shaders that fetch from unfiltered maps use it to
+    /// fade detail that would alias. Ignored by default.
+    fn set_texel_rate(&mut self, _texels_per_pixel: f32) {}
+
     /// Final `0xAARRGGBB` colour of pixel `i` of the current span, given its
     /// albedo `texel` and its unwrapped texel coordinates `(fu, fv)` in 16.16
     /// fixed point (texel `n` starts at `n << 16`).

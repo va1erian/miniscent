@@ -66,7 +66,15 @@ impl Scene {
     /// Prepare a level for drawing. Faces whose material id is not in
     /// `materials` use a grey fallback texture.
     pub fn new(bsp: Bsp, faces: Vec<Face>, portals: Portals, materials: MaterialTable) -> Self {
-        let polys: Vec<Vec<Vertex>> = faces.iter().map(prep::face_vertices).collect();
+        let polys: Vec<Vec<Vertex>> = faces
+            .iter()
+            .map(|f| {
+                let size = materials
+                    .get(MaterialId(f.material))
+                    .map(|m| (m.texture.width(), m.texture.height()));
+                prep::face_vertices(f, size)
+            })
+            .collect();
         let leaf_faces = prep::leaf_faces(bsp.leaves().len(), &faces);
         let boxes = prep::leaf_boxes(&leaf_faces, &polys);
         let node_bounds = prep::node_bounds(&bsp, &boxes);
@@ -104,7 +112,7 @@ impl Scene {
         &self.faces
     }
 
-    /// Rasterizer polygons (with planar texture coordinates), one per face.
+    /// Rasterizer polygons (with texture coordinates from each face's TexInfo), one per face.
     pub fn polys(&self) -> &[Vec<Vertex>] {
         &self.polys
     }

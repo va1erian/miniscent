@@ -1,7 +1,7 @@
 //! Joins coplanar neighbours into larger convex polygons.
 //!
 //! Two faces join when they share a whole edge (traversed in opposite
-//! directions), have the same plane and material, and the union stays
+//! directions), have the same plane and TexInfo, and the union stays
 //! convex. Partial overlaps stay separate and are handled as T-junctions.
 //! The pass is quadratic per plane group, which is fine for the group sizes
 //! brush levels produce.
@@ -14,7 +14,7 @@ pub(super) fn merge_coplanar(faces: Vec<Face>) -> Vec<Face> {
     for face in faces {
         let slot = groups
             .iter()
-            .position(|g| g[0].material == face.material && same_plane(&g[0].plane, &face.plane));
+            .position(|g| g[0].texinfo == face.texinfo && same_plane(&g[0].plane, &face.plane));
         match slot {
             Some(i) => groups[i].push(face),
             None => groups.push(vec![face]),

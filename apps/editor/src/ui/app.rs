@@ -5,21 +5,21 @@
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
 
 use mscent_world::Op;
 use xui::prelude::*;
 use xui::widget::{FileDialog, HasText, MenuId};
-use xui::{Key, Modifiers};
 
+use super::keys::{OPS, TOOLS, key_name, shortcut};
 use super::probe::Probe;
 use super::props::{Panel, apply};
+use super::toolbar::IconButton;
 use super::view3d::View3d;
 use super::viewport::{ViewEvent, Viewport};
 use super::wrap::{LOG_COLS, LOG_ROWS, wrap};
 use crate::files;
-use crate::model::{Document, EditorState, EntityKind, Tool, View, state::GRIDS};
-use crate::studio::{HELP, Mode, Studio, frame_size};
+use crate::model::{Document, EditorState, View, state::GRIDS};
+use crate::studio::{HELP, Mode, Studio};
 
 #[derive(Clone)]
 pub enum Msg {
@@ -30,25 +30,24 @@ pub enum Msg {
     Grid(usize),
     View(ViewEvent),
     Prop(super::props::Prop),
-    /// The frame timer: measures the elapsed time itself.
+    /// The frame timer.
     Tick,
-    /// Advance by this much time (scripted runs have no timers).
-    Step(Duration),
+    /// One UI tick on demand (scripted runs have no timers).
+    Step,
     /// The Escape key anywhere: leaves Play.
     Escape,
+    /// A shortcut that would also type into a text field or fight Play's own
+    /// keys: dropped when one has the focus or the level is being played.
+    Guarded(Box<Msg>),
     OpenPath(PathBuf),
     SavePath(PathBuf),
 }
 
-/// The palette: label and tool.
-const TOOLS: [(&str, Tool); 6] = [
-    ("Select / move", Tool::Select),
-    ("Box brush", Tool::Box),
-    ("Player start", Tool::Place(EntityKind::PlayerStart)),
-    ("Light", Tool::Place(EntityKind::Light)),
-    ("Enemy", Tool::Place(EntityKind::Enemy)),
-    ("Goal", Tool::Place(EntityKind::Goal)),
-];
+/// Width of the right-hand column (properties and build log), in dip.
+const SIDE_WIDTH: i32 = 300;
+
+/// Height of the build log box, in dip.
+const LOG_HEIGHT: i32 = 220;
 
 /// Menu command ids.
 pub mod cmd {
@@ -77,8 +76,8 @@ pub struct Editor {
     pub(super) play: Handle<View3d<Msg>>,
     menu: Handle<Menu<Msg>>,
     pub(super) status: Handle<StatusBar<Msg>>,
-    tools: [Handle<ToggleButton<Msg>>; TOOLS.len()],
-    op: Handle<RadioGroup<Msg>>,
+    tools: [Handle<IconButton<Msg>>; TOOLS.len()],
+    ops: [Handle<IconButton<Msg>>; OPS.len()],
     pub(super) panel: Panel,
     pub(super) log_view: Handle<MultilineEdit<Msg>>,
     pub(super) studio: Studio,
@@ -89,7 +88,6 @@ pub struct Editor {
     pub(super) saved: Document,
     pub(super) open_dialog: FileDialog<Msg>,
     pub(super) save_dialog: FileDialog<Msg>,
-    last_tick: Instant,
     last_stale: bool,
 }
 
@@ -118,24 +116,6 @@ fn menus(m: &mut xui::widget::MenuScope<'_>) {
         p.item(cmd::BUILD, "&Build   F7");
         p.item(cmd::PLAY, "&Play   F5");
     });
-}
-
-/// Global shortcuts: they work wherever the focus is.
-fn shortcut(key: Key, mods: Modifiers) -> Option<Msg> {
-    if mods.ctrl {
-        return match key {
-            Key::S => Some(Msg::Menu(cmd::SAVE)),
-            Key::O => Some(Msg::Menu(cmd::OPEN)),
-            Key::N => Some(Msg::Menu(cmd::NEW)),
-            _ => None,
-        };
-    }
-    match key {
-        Key::F5 => Some(Msg::Menu(cmd::PLAY)),
-        Key::F7 => Some(Msg::Menu(cmd::BUILD)),
-        Key::ESCAPE => Some(Msg::Escape),
-        _ => None,
-    }
 }
 
 impl Editor {
@@ -176,7 +156,7 @@ impl Editor {
             menu: Handle::new(),
             status: Handle::new(),
             tools: Default::default(),
-            op: Handle::new(),
+            ops: Default::default(),
             panel: Panel::default(),
             log_view: Handle::new(),
             studio,
@@ -185,7 +165,6 @@ impl Editor {
             saved,
             open_dialog,
             save_dialog,
-            last_tick: Instant::now(),
             last_stale: false,
         };
         app.panel.attach(ui);
@@ -202,46 +181,47 @@ impl Editor {
                 .fill(3),
             build(View3d::new).bind(&app.view3d).fill(2),
         ));
-        let mut tools = column().gap(4);
-        for (i, (name, _)) in TOOLS.iter().enumerate() {
-            tools = tools.child(
-                toggle_button(*name)
-                    .checked(i == 0)
-                    .on_toggle(move |_| Msg::Tool(i))
-                    .bind(&app.tools[i]),
-            );
-        }
+        let tool_button = |i: usize| {
+            let (name, key, glyph, _) = TOOLS[i];
+            let tip = format!("{name} ({})", key_name(key));
+            build(move |ui| IconButton::new(ui, glyph, &tip, Msg::Tool(i))).bind(&app.tools[i])
+        };
+        let tools = column().gap(2).children((
+            row()
+                .gap(2)
+                .children((tool_button(0), tool_button(1), tool_button(2))),
+            row()
+                .gap(2)
+                .children((tool_button(3), tool_button(4), tool_button(5))),
+        ));
+        let op_button = |i: usize| {
+            let (tip, glyph) = OPS[i];
+            build(move |ui| IconButton::new(ui, glyph, tip, Msg::NewOp(i))).bind(&app.ops[i])
+        };
         let grid_names: Vec<String> = GRIDS.iter().map(|g| format!("{g}")).collect();
         let grid_refs: Vec<&str> = grid_names.iter().map(String::as_str).collect();
-        let palette = scroll(
-            column().padding(8).gap(8).children((
-                group("Tools", tools),
-                group(
-                    "New brush",
-                    column().child(
-                        radio_group(&["Subtract", "Add"])
-                            .selected(0)
-                            .on_select(Msg::NewOp)
-                            .bind(&app.op),
-                    ),
-                ),
-                group(
-                    "Grid size",
-                    column().child(combo_box(&grid_refs).on_select(Msg::Grid).then(|c| {
-                        c.select(2);
-                        c
-                    })),
-                ),
-            )),
-        );
+        let palette = scroll(column().padding(8).gap(8).children((
+            group("Tools", tools),
+            group(
+                "New brush",
+                row().gap(2).children((op_button(0), op_button(1))),
+            ),
+            group(
+                "Grid size",
+                column().child(combo_box(&grid_refs).on_select(Msg::Grid).then(|c| {
+                    c.select(2);
+                    c
+                })),
+            ),
+        )));
         let side = column().gap(4).children((
             scroll(column().child(app.panel.layout())).fill(1),
             group(
                 "Build log",
-                column().child(multiline_edit().bind(&app.log_view).height(150)),
+                column().child(multiline_edit().bind(&app.log_view).height(LOG_HEIGHT)),
             ),
         ));
-        let work = row().children((palette.width(150), views.fill(1), side.width(280)));
+        let work = row().children((palette.width(150), views.fill(1), side.width(SIDE_WIDTH)));
         ui.root(
             column().children((
                 menu_bar(menus).on_select(Msg::Menu).bind(&app.menu),
@@ -270,7 +250,7 @@ impl Editor {
         let stale = self.studio.stale(&st.doc);
         if stale != self.last_stale {
             self.last_stale = stale;
-            self.studio.invalidate();
+            self.studio.set_stale(stale);
         }
         let dirty = st.doc != self.saved;
         let bar = self.status.get();
@@ -294,13 +274,22 @@ impl Editor {
         for id in [cmd::FLIP, cmd::FORWARD, cmd::BACK] {
             menu.set_enabled(id, brush);
         }
-        for (i, (_, tool)) in TOOLS.iter().enumerate() {
-            self.tools[i].get().set_checked(*tool == st.tool);
+        for (i, t) in TOOLS.iter().enumerate() {
+            self.tools[i].get().set_checked(t.3 == st.tool);
         }
-        self.op.get().select(usize::from(st.new_op == Op::Add));
+        for (i, op) in [Op::Subtract, Op::Add].into_iter().enumerate() {
+            self.ops[i].get().set_checked(st.new_op == op);
+        }
     }
 
     /// The 3D pane's text before the first build.
+    /// Whether a text box has the keyboard focus, so letters and Delete are
+    /// text there and not shortcuts.
+    fn text_has_focus(&self, ui: &Ui<Msg>) -> bool {
+        ui.focus_holder()
+            .is_some_and(|id| self.panel.owns(id) || id == self.log_view.get().id())
+    }
+
     pub(super) fn show_prompt(&self) {
         let text = format!(
             "No build yet.
@@ -333,34 +322,18 @@ Press F7 to build, F5 to play.
         self.status.get().set_text(0, text);
     }
 
-    /// Draws the studio's current picture into the pane that shows it.
-    fn show_frame(&mut self) {
-        let play = self.studio.mode == Mode::Play;
-        let pane = if play {
-            self.play.get()
-        } else {
-            self.view3d.get()
-        };
-        let (pw, ph) = pane.size();
-        if pw == 0 || ph == 0 {
-            return;
-        }
-        let (w, h) = frame_size((pw, ph), 960);
-        let state = self.state.clone();
-        let st = state.borrow();
-        if let Some(fb) = self.studio.render(w, h, &st.doc) {
-            pane.set_image(fb.pixels(), w, h);
-        }
-    }
-
-    fn advance(&mut self, dt: Duration) {
+    /// One UI tick: forwards the active pane's input to the render thread
+    /// and shows the newest frame it finished. Nothing here waits.
+    fn advance(&mut self) {
         let pane = if self.studio.mode == Mode::Play {
             self.play.get()
         } else {
             self.view3d.get()
         };
         let events = pane.take_events();
-        let tick = self.studio.tick(dt, &events);
+        let size = pane.size();
+        let state = self.state.clone();
+        let tick = self.studio.tick(&events, size, &state.borrow().doc);
         self.push_log(&tick.log);
         if let Some(s) = &tick.status {
             self.state.borrow_mut().message = s.clone();
@@ -372,8 +345,12 @@ Press F7 to build, F5 to play.
         if tick.left_play {
             self.end_play(None);
         }
-        if tick.redraw || tick.play_now {
-            self.show_frame();
+        if let Some(f) = tick.frame {
+            let target = match f.mode {
+                Mode::Play => self.play.get(),
+                Mode::Edit => self.view3d.get(),
+            };
+            target.set_rgba(f.w, f.h, f.rgba);
         }
     }
 
@@ -389,7 +366,6 @@ Press F7 to build, F5 to play.
                 let text = "Playing: Esc = back, WASD move, Space fire, Q/E roll";
                 self.state.borrow_mut().message = text.into();
                 self.set_status(text);
-                self.show_frame();
             }
             Err(e) => {
                 self.state.borrow_mut().message = e.clone();
@@ -406,7 +382,6 @@ Press F7 to build, F5 to play.
         if let Some(m) = message {
             self.state.borrow_mut().message = m.into();
         }
-        self.show_frame();
         self.refresh();
     }
 
@@ -426,15 +401,19 @@ Press F7 to build, F5 to play.
 }
 
 #[cfg(test)]
+mod keys_tests;
+#[cfg(test)]
+mod layout_tests;
+#[cfg(test)]
 mod tests;
 
 impl App for Editor {
     type Msg = Msg;
 
-    fn update(&mut self, msg: Msg, _ui: &mut Ui<Msg>) {
+    fn update(&mut self, msg: Msg, ui: &mut Ui<Msg>) {
         match msg {
             Msg::Menu(id) => self.menu_command(id),
-            Msg::Tool(i) => self.state.borrow_mut().tool = TOOLS[i].1,
+            Msg::Tool(i) => self.state.borrow_mut().tool = TOOLS[i.min(TOOLS.len() - 1)].3,
             Msg::NewOp(i) => {
                 self.state.borrow_mut().new_op = if i == 0 { Op::Subtract } else { Op::Add };
             }
@@ -451,17 +430,15 @@ impl App for Editor {
                 return;
             }
             Msg::View(ViewEvent::Changed) => {}
-            Msg::Tick => {
-                let now = Instant::now();
-                let dt = now
-                    .duration_since(self.last_tick)
-                    .min(Duration::from_millis(100));
-                self.last_tick = now;
-                self.advance(dt);
+            Msg::Tick | Msg::Step => {
+                self.advance();
                 return;
             }
-            Msg::Step(dt) => {
-                self.advance(dt);
+            Msg::Guarded(inner) => {
+                if self.studio.mode == Mode::Play || self.text_has_focus(ui) {
+                    return;
+                }
+                self.update(*inner, ui);
                 return;
             }
             Msg::Escape => {

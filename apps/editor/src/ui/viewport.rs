@@ -207,17 +207,12 @@ fn handle<M: 'static>(c: &Ctx<M>, mode: &Cell<Mode>, event: &Event) -> Option<M>
             c.ui.invalidate(c.id);
             None
         }
-        Event::KeyDown { key, modifiers, .. } => {
+        Event::KeyDown { key, .. } => {
             let mut st = c.state.borrow_mut();
-            let done = if *key == Key::DELETE {
-                st.delete_selected()
-            } else if *key == Key::ESCAPE {
+            // Delete, Ctrl+Z and Ctrl+Y are window-wide shortcuts (`app.rs`).
+            let done = if *key == Key::ESCAPE {
                 st.cancel_drag();
                 true
-            } else if modifiers.ctrl && *key == Key::Z {
-                st.undo()
-            } else if modifiers.ctrl && *key == Key::Y {
-                st.redo()
             } else {
                 false
             };

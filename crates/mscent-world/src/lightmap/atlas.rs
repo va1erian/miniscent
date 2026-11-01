@@ -83,6 +83,27 @@ impl Atlas {
         })
     }
 
+    /// A layout from stored parts: `None` unless every rectangle is
+    /// non-empty and, with its gutter, inside the atlas.
+    pub fn from_parts(width: u32, height: u32, rects: Vec<Rect>) -> Option<Self> {
+        let fits = |pos: u32, len: u32, max: u32| {
+            len > 0
+                && pos >= PADDING
+                && pos
+                    .checked_add(len)
+                    .and_then(|e| e.checked_add(PADDING))
+                    .is_some_and(|e| e <= max)
+        };
+        let ok = rects
+            .iter()
+            .all(|r| fits(r.x, r.w, width) && fits(r.y, r.h, height));
+        ok.then_some(Self {
+            width,
+            height,
+            rects,
+        })
+    }
+
     pub fn width(&self) -> u32 {
         self.width
     }

@@ -209,13 +209,10 @@ fn vertical_gradient(pts: &[ScreenVert]) -> Option<Attr> {
     })
 }
 
-/// Mip level for a span: the largest texel step per pixel along x or y at
-/// the span centre, with level 0 kept up to 1.5 texels per pixel so nearby
-/// surfaces stay sharp.
-fn mip_level(tex: &Texture, centre: Attr, gx: Attr, gy: Option<Attr>) -> u32 {
-    if tex.mip_count() == 0 {
-        return 0;
-    }
+/// Texels per pixel at a span centre, and the mip level that follows from it:
+/// the largest texel step per pixel along x or y, with level 0 kept up to 1.5
+/// texels per pixel so nearby surfaces stay sharp.
+fn mip_level(tex: &Texture, centre: Attr, gx: Attr, gy: Option<Attr>) -> (u32, f32) {
     let inv = 1.0 / centre.iz.max(1e-12);
     let (u, v) = (centre.uz * inv, centre.vz * inv);
     let step = |g: Attr| {
@@ -227,10 +224,13 @@ fn mip_level(tex: &Texture, centre: Attr, gx: Attr, gy: Option<Attr>) -> u32 {
     // short one, so grazing floors keep detail instead of smearing.
     let (a, b) = (step(gx), gy.map_or(0.0, step));
     let rate = a.max(b).min(a.min(b) * 4.0).max(a.max(b) * 0.25);
-    if rate.is_nan() || rate <= 1.5 {
-        return 0;
+    if tex.mip_count() == 0 || rate.is_nan() || rate <= 1.5 {
+        return (0, rate);
     }
-    ((rate / 1.5).log2().ceil() as u32).min(tex.mip_count())
+    (
+        ((rate / 1.5).log2().ceil() as u32).min(tex.mip_count()),
+        rate,
+    )
 }
 
 /// Left and right edge crossings of a convex polygon at scanline `yc`.
@@ -296,9 +296,10 @@ fn draw_row<S: SpanShader>(
         let n = SPAN_LEN.min(xe - x);
         let b = a.advance(grad, n as f32);
         let (ea, eb) = (a.at(x, y), b.at(x + n, y));
+        let (level, rate) = mip_level(tex, a.advance(grad, n as f32 * 0.5), grad, gy);
+        shader.set_texel_rate(rate);
         shader.begin_span(&ea, &eb, n as u32);
         stats.spans += 1;
-        let level = mip_level(tex, a.advance(grad, n as f32 * 0.5), grad, gy);
         let span = Span {
             x: x as usize,
             n: n as usize,
@@ -307,7 +308,7 @@ fn draw_row<S: SpanShader>(
             iz0: a.iz,
             diz: grad.iz,
             level,
-            smooth: level == 0 && tex.is_filtered(),
+            smooth: tex.is_filtered(),
         };
         stats.pixels += span_pixels(color, depth, &span, tex, shader);
         a = b;
@@ -323,8 +324,7 @@ struct Span {
     iz0: f32,
     diz: f32,
     level: u32,
-    /// Magnified filtered texture: sample bilinearly (minified ones use
-    /// the mip level instead).
+    /// Filtered texture: sample bilinearly, from the span's mip level.
     smooth: bool,
 }
 
@@ -350,7 +350,7 @@ fn span_pixels<S: SpanShader>(
             let (tx, ty) = (tx as i32, ty as i32);
             depth[slot] = iz;
             let texel = if s.smooth {
-                tex.sample_bilinear(fu, fv)
+                tex.sample_bilinear_lod(fu, fv, s.level)
             } else {
                 tex.texel_lod(tx, ty, s.level)
             };

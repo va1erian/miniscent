@@ -14,15 +14,19 @@ mod bake;
 mod bounce;
 mod parallel;
 pub mod ray;
+mod soft;
+pub mod store;
 pub mod uv;
 
 #[cfg(test)]
 mod review_tests;
 #[cfg(test)]
+mod store_tests;
+#[cfg(test)]
 mod tests;
 
 pub use atlas::{Atlas, AtlasError, PADDING, Rect};
-pub use bake::{Lightmap, bake};
+pub use bake::{FaceGrid, Lightmap, MAX_SHADOW_SAMPLES, bake};
 pub use uv::{FaceProjection, MAX_FACE_LUXELS};
 
 use mscent_math::Vec3;
@@ -87,6 +91,11 @@ pub struct BakeConfig {
     pub workers: usize,
     /// How far shadow rays start off the surface, to avoid self-shadowing.
     pub normal_bias: f32,
+    /// Radius of the disc a point light is treated as for shadows, in world
+    /// units; 0 makes hard shadows from a single ray.
+    pub light_radius: f32,
+    /// Shadow rays per luxel and light when `light_radius` is above zero.
+    pub shadow_samples: u32,
     /// Flat light added everywhere.
     pub ambient: Vec3,
     /// Fraction of light a surface re-emits in the bounce pass; 0 disables it.
@@ -103,6 +112,8 @@ impl Default for BakeConfig {
             luxel_size: 8.0,
             workers: std::thread::available_parallelism().map_or(1, usize::from),
             normal_bias: 0.25,
+            light_radius: 0.0,
+            shadow_samples: 1,
             ambient: Vec3::new(0.03, 0.03, 0.03),
             albedo: 0.5,
             bounce_gain: 1.0,

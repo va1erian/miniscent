@@ -15,7 +15,11 @@ fn renderer() -> LevelRenderer {
 }
 
 fn frame(r: &LevelRenderer, view: &View, q: Quality) -> Vec<u32> {
-    let mut fb = Framebuffer::new(160, 90).expect("fb");
+    frame_sized(r, view, q, 160, 90)
+}
+
+fn frame_sized(r: &LevelRenderer, view: &View, q: Quality, w: u32, h: u32) -> Vec<u32> {
+    let mut fb = Framebuffer::new(w, h).expect("fb");
     r.render(&mut fb, view, q, r.actors(), None)
         .expect("render");
     fb.pixels().to_vec()
@@ -119,11 +123,10 @@ fn bump_and_specular_are_clearly_visible_not_just_nonzero() {
     let r = renderer();
     // The steel hall: glossy metal walls lit by the blue lamp.
     let view = View::from_angles(Vec3::new(34.0, 2.0, 3.5), -0.7, -0.15, 0.0);
-    let (low, med, high) = (
-        frame(&r, &view, Quality::Low),
-        frame(&r, &view, Quality::Medium),
-        frame(&r, &view, Quality::High),
-    );
+    // Game resolution: the normal map fades out where it is minified, so a
+    // tiny frame would (rightly) show little relief.
+    let at = |q| frame_sized(&r, &view, q, 640, 360);
+    let (low, med, high) = (at(Quality::Low), at(Quality::Medium), at(Quality::High));
     let (bump, spec) = (mean_abs_diff(&low, &med), mean_abs_diff(&med, &high));
     assert!(
         bump > 2.0,

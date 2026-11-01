@@ -140,6 +140,7 @@ impl EditorState {
             shape: Shape::Box { min, max },
             op: self.new_op,
             material: self.new_material,
+            texinfos: Vec::new(),
         };
         let index = self.doc.brushes().len();
         self.history

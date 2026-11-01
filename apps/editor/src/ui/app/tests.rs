@@ -213,7 +213,7 @@ fn light_selection_fills_the_panel_and_the_3d_pane_shows_the_built_level() {
             let state = probe.borrow().clone().expect("built");
             stage.emit(Msg::Menu(cmd::BUILD));
             for _ in 0..30_000 {
-                stage.emit(Msg::Step(std::time::Duration::ZERO));
+                stage.emit(Msg::Step);
                 if state.borrow().message.starts_with("Build finished") {
                     break;
                 }
@@ -231,7 +231,10 @@ fn light_selection_fills_the_panel_and_the_3d_pane_shows_the_built_level() {
             };
             state.borrow_mut().selection = Some(Selection::Entity(light));
             stage.emit(Msg::Tool(0));
-            stage.emit(Msg::Step(std::time::Duration::ZERO));
+            for _ in 0..30 {
+                stage.emit(Msg::Step);
+                std::thread::sleep(std::time::Duration::from_millis(16));
+            }
         },
     )
     .expect("render");

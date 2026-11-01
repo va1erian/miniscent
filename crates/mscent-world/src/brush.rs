@@ -5,8 +5,13 @@
 //! space ([`Op::Subtract`]); brushes are applied in ascending `order`.
 //! Every constructor validates, so a `Brush` value is always bounded, convex,
 //! non-degenerate and within [`MAX_COORD`].
+//!
+//! Every plane also carries a [`TexInfo`] (texture mapping and material),
+//! parallel to [`Brush::planes`]. [`Brush::with_material`] sets the material
+//! of all planes; [`Brush::set_texinfo`] edits one.
 
 use crate::polytope::{self, MAX_COORD, SEED_HALF};
+use crate::texinfo::TexInfo;
 use mscent_math::{Aabb, DPlane, Polygon, Side, Vec3d, epsilon};
 
 /// Most planes one brush may carry; bounds validation cost on hostile input.
@@ -51,13 +56,32 @@ pub struct Brush {
     faces: Vec<Polygon>,
     op: Op,
     order: u32,
-    material: u16,
+    /// One per plane, `texinfos[i]` for `planes[i]`.
+    texinfos: Vec<TexInfo>,
 }
 
 impl Brush {
     /// Builds a brush from outward-facing planes. Normals are normalised;
     /// planes that do not touch the solid (redundant) are dropped.
     pub fn new(planes: &[DPlane], op: Op, order: u32) -> Result<Self, BrushError> {
+        let default = |p: &DPlane| TexInfo::default_for_normal(p.normal);
+        let infos: Vec<TexInfo> = planes.iter().map(default).collect();
+        Self::new_textured(planes, &infos, op, order)
+    }
+
+    /// Like [`Brush::new`], with a [`TexInfo`] per input plane. `texinfos`
+    /// must be as long as `planes`; each is repaired with
+    /// [`TexInfo::sanitized`]. Texinfos follow their planes when redundant
+    /// planes are dropped.
+    pub fn new_textured(
+        planes: &[DPlane],
+        texinfos: &[TexInfo],
+        op: Op,
+        order: u32,
+    ) -> Result<Self, BrushError> {
+        if texinfos.len() != planes.len() {
+            return Err(BrushError::Degenerate);
+        }
         if planes.len() < 4 {
             return Err(BrushError::TooFewPlanes);
         }
@@ -83,13 +107,17 @@ impl Brush {
                 BrushError::OutOfRange
             });
         }
+        let texinfos = found
+            .iter()
+            .map(|&(i, _)| texinfos[i].sanitized(planes[i].normal))
+            .collect();
         let planes = found.iter().map(|&(i, _)| planes[i]).collect();
         Ok(Self {
             planes,
             faces,
             op,
             order,
-            material: DEFAULT_MATERIAL,
+            texinfos,
         })
     }
 
@@ -175,14 +203,49 @@ impl Brush {
         self.order
     }
 
-    /// Material id that faces born from this brush's surface receive.
+    /// Material of the first plane: what [`Brush::with_material`] set when
+    /// all planes share one. Use [`Brush::texinfos`] for per-plane values.
     pub fn material(&self) -> u16 {
-        self.material
+        self.texinfos
+            .first()
+            .map_or(DEFAULT_MATERIAL, |t| t.material)
     }
 
-    /// Returns the brush with `material` as its surface material.
-    pub fn with_material(self, material: u16) -> Self {
-        Self { material, ..self }
+    /// Returns the brush with `material` on every plane.
+    pub fn with_material(mut self, material: u16) -> Self {
+        for t in &mut self.texinfos {
+            t.material = material;
+        }
+        self
+    }
+
+    /// Texture mapping per plane, `texinfos()[i]` for `planes()[i]`.
+    pub fn texinfos(&self) -> &[TexInfo] {
+        &self.texinfos
+    }
+
+    /// Replaces the TexInfo of plane `index` (repaired with
+    /// [`TexInfo::sanitized`]). `false` if the index is out of range.
+    pub fn set_texinfo(&mut self, index: usize, info: TexInfo) -> bool {
+        let (Some(slot), Some(plane)) = (self.texinfos.get_mut(index), self.planes.get(index))
+        else {
+            return false;
+        };
+        *slot = info.sanitized(plane.normal);
+        true
+    }
+
+    /// Index of the plane whose outward normal is closest to `dir`, `None`
+    /// if `dir` is zero or not finite.
+    pub fn plane_facing(&self, dir: Vec3d) -> Option<usize> {
+        let dir = dir.normalized()?;
+        (0..self.planes.len()).max_by(|&a, &b| {
+            let (da, db) = (
+                self.planes[a].normal.dot(dir),
+                self.planes[b].normal.dot(dir),
+            );
+            da.total_cmp(&db)
+        })
     }
 
     /// Returns the same brush with the add/subtract flag flipped.

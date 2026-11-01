@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! magic   "MSLV"           4 bytes
-//! version u16              currently 1
+//! version u16              currently 2 (1 is still read)
 //! flags   u16              reserved, must be 0
 //! count   u32              number of sections (<= MAX_SECTIONS)
 //! section*: id u32, len u32, payload[len]
@@ -14,16 +14,24 @@
 //! reserved for compiled data, which the loader skips because it recompiles
 //! from brushes. Unknown section ids are skipped for forward compatibility.
 //! Brushes are stored as raw planes and rebuilt through [`Brush::new`], so a
-//! hostile file cannot smuggle in an invalid brush. Counts are checked
+//! hostile file cannot smuggle in an invalid brush. Version 2 follows each
+//! brush's planes with one TexInfo record per plane (`texinfo.rs`, 47 bytes);
+//! version 1 has none and every plane gets the default mapping for its
+//! normal, with the brush's material. Counts are checked
 //! against the bytes actually present before anything is allocated.
 
 use crate::brush::{Brush, BrushError, MAX_PLANES, Op};
 use crate::entity::{Entity, Level};
-use crate::format_wire::{Cursor, len_u32, put_f32, put_f64, put_u16, put_u32, put_vec3};
+use crate::format_wire::{
+    Cursor, TEXINFO_BYTES, len_u32, put_f32, put_f64, put_texinfo, put_u16, put_u32, put_vec3,
+};
+use crate::texinfo::TexInfo;
 use mscent_math::{DPlane, Vec3d};
 
 pub const MAGIC: [u8; 4] = *b"MSLV";
-pub const VERSION: u16 = 1;
+pub const VERSION: u16 = 2;
+/// Oldest version [`read`] still accepts.
+const MIN_VERSION: u16 = 1;
 pub const MAX_FILE_BYTES: usize = 64 << 20;
 pub const MAX_BRUSHES: usize = 65_536;
 pub const MAX_ENTITIES: usize = 65_536;
@@ -60,6 +68,8 @@ pub enum FormatError {
     /// An entity field is NaN, infinite or out of range.
     BadEntity,
     Brush(BrushError),
+    /// A texture mapping field is non-finite or out of range.
+    BadTexInfo,
 }
 
 /// Serialises a level (source data only).
@@ -94,6 +104,9 @@ fn write_brushes(brushes: &[Brush]) -> Vec<u8> {
             for v in [p.normal.x, p.normal.y, p.normal.z, p.dist] {
                 put_f64(&mut out, v);
             }
+        }
+        for t in b.texinfos() {
+            put_texinfo(&mut out, t);
         }
     }
     out
@@ -139,7 +152,7 @@ pub fn read(data: &[u8]) -> Result<Level, FormatError> {
         return Err(FormatError::BadMagic);
     }
     let version = c.u16()?;
-    if version != VERSION {
+    if !(MIN_VERSION..=VERSION).contains(&version) {
         return Err(FormatError::UnsupportedVersion(version));
     }
     if c.u16()? != 0 {
@@ -155,7 +168,7 @@ pub fn read(data: &[u8]) -> Result<Level, FormatError> {
         let len = usize::try_from(c.u32()?).map_err(|_| FormatError::TooLarge)?;
         let body = c.take(len)?;
         match id {
-            SEC_BRUSHES => store(&mut brushes, id, read_brushes(body))?,
+            SEC_BRUSHES => store(&mut brushes, id, read_brushes(body, version))?,
             SEC_ENTITIES => store(&mut entities, id, read_entities(body))?,
             _ => {}
         }
@@ -192,12 +205,12 @@ fn read_count(c: &mut Cursor, cap: usize, min_record: usize) -> Result<usize, Fo
     Ok(n)
 }
 
-fn read_brushes(body: &[u8]) -> Result<Vec<Brush>, FormatError> {
+fn read_brushes(body: &[u8], version: u16) -> Result<Vec<Brush>, FormatError> {
     let mut c = Cursor::new(body);
     let n = read_count(&mut c, MAX_BRUSHES, BRUSH_HEAD)?;
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        out.push(read_brush(&mut c)?);
+        out.push(read_brush(&mut c, version)?);
     }
     if c.remaining() != 0 {
         return Err(FormatError::Trailing);
@@ -205,7 +218,7 @@ fn read_brushes(body: &[u8]) -> Result<Vec<Brush>, FormatError> {
     Ok(out)
 }
 
-fn read_brush(c: &mut Cursor) -> Result<Brush, FormatError> {
+fn read_brush(c: &mut Cursor, version: u16) -> Result<Brush, FormatError> {
     let op = match c.u8()? {
         0 => Op::Add,
         1 => Op::Subtract,
@@ -214,7 +227,8 @@ fn read_brush(c: &mut Cursor) -> Result<Brush, FormatError> {
     let order = c.u32()?;
     let material = c.u16()?;
     let np = usize::try_from(c.u32()?).map_err(|_| FormatError::TooMany)?;
-    let bytes = np.checked_mul(PLANE_BYTES).ok_or(FormatError::TooMany)?;
+    let per_plane = PLANE_BYTES + if version >= 2 { TEXINFO_BYTES } else { 0 };
+    let bytes = np.checked_mul(per_plane).ok_or(FormatError::TooMany)?;
     if np > MAX_PLANES || bytes > c.remaining() {
         return Err(FormatError::TooMany);
     }
@@ -223,9 +237,18 @@ fn read_brush(c: &mut Cursor) -> Result<Brush, FormatError> {
         let n = Vec3d::new(c.f64()?, c.f64()?, c.f64()?);
         planes.push(DPlane::new(n, c.f64()?));
     }
-    Brush::new(&planes, op, order)
-        .map(|b| b.with_material(material))
-        .map_err(FormatError::Brush)
+    let infos = if version >= 2 {
+        (0..np)
+            .map(|_| c.texinfo())
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        let default = |p: &DPlane| TexInfo {
+            material,
+            ..TexInfo::default_for_normal(p.normal)
+        };
+        planes.iter().map(default).collect()
+    };
+    Brush::new_textured(&planes, &infos, op, order).map_err(FormatError::Brush)
 }
 
 fn read_entities(body: &[u8]) -> Result<Vec<Entity>, FormatError> {

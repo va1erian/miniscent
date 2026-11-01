@@ -59,6 +59,16 @@ impl Panel {
         self.min[0].get()
     }
 
+    /// Whether `id` is one of the panel's fields or lists (which take typed
+    /// keys, so the editor's single-key shortcuts leave them alone).
+    pub fn owns(&self, id: WidgetId) -> bool {
+        let numbers = [&self.min[..], &self.max, &self.pos, &self.params]
+            .into_iter()
+            .flatten()
+            .any(|h| h.get().id() == id);
+        numbers || self.op.get().id() == id || self.material.get().id() == id
+    }
+
     /// Gives the panel the UI it needs to show and hide its sections.
     pub fn attach(&mut self, ui: &Ui<Msg>) {
         self.ui = Some(ui.clone());

@@ -29,7 +29,10 @@ pub mod tiles;
 pub use camera::{Camera, Frustum, ScreenPoint};
 pub use draw2d::{Sprite, blit, draw_text, fill_rect, stroke_rect, text_size};
 pub use framebuffer::Framebuffer;
-pub use level::{Actor, ActorKind, BuildConfig, BuildError, LevelRenderer, Overlay, Quality, View};
+pub use level::{
+    Actor, ActorKind, BakeCache, BuildConfig, BuildError, LevelRenderer, Overlay, Quality, Source,
+    View,
+};
 pub use lighting_shader::{FaceLight, LightingShader, UvToLuxel};
 pub use raster::{DrawStats, Vertex, draw_polygon, draw_polygon_flat};
 pub use shade::{FlatShader, Fog, SpanEnd, SpanShader};

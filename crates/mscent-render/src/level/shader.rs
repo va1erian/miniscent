@@ -11,6 +11,14 @@ pub(super) enum FaceShader<'a> {
 }
 
 impl SpanShader for FaceShader<'_> {
+    fn set_texel_rate(&mut self, rate: f32) {
+        match self {
+            Self::Lit(s) => s.set_texel_rate(rate),
+            Self::Spec(s) => s.set_texel_rate(rate),
+            Self::Flat(_) => {}
+        }
+    }
+
     fn begin_span(&mut self, start: &SpanEnd, end: &SpanEnd, len: u32) {
         match self {
             Self::Lit(s) => s.begin_span(start, end, len),

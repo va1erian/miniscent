@@ -1,5 +1,5 @@
 //! The 3D pane (and the full-area Play pane): one custom-painted xui node
-//! that shows the newest frame given to [`View3d::set_image`] and turns the
+//! that shows the newest frame given to [`View3d::set_rgba`] and turns the
 //! input it receives into [`mscent_platform::Event`]s, the same vocabulary the
 //! game uses. xui has no pointer lock, so looking is "hold the right mouse
 //! button and drag" (relative motion computed from successive positions) or
@@ -92,17 +92,10 @@ impl<M: 'static> View3d<M> {
         Ok(View3d { control, shared })
     }
 
-    /// Shows a `0xAARRGGBB` frame of `w` by `h` pixels. Ignored if the slice
-    /// is not exactly `w * h` long.
-    pub fn set_image(&self, pixels: &[u32], w: u32, h: u32) {
-        if w == 0 || h == 0 || pixels.len() != w as usize * h as usize {
-            return;
-        }
-        let mut bytes = Vec::with_capacity(pixels.len() * 4);
-        for p in pixels {
-            bytes.extend_from_slice(&[(p >> 16) as u8, (p >> 8) as u8, *p as u8, 255]);
-        }
-        if let Ok(img) = Image::from_rgba(w, h, bytes) {
+    /// Shows a frame of `w` by `h` RGBA pixels built off the UI thread; the
+    /// bytes are moved in, not copied. Ignored if the length is wrong.
+    pub fn set_rgba(&self, w: u32, h: u32, rgba: Vec<u8>) {
+        if let Ok(img) = Image::from_rgba(w, h, rgba) {
             *self.shared.image.borrow_mut() = Some(img);
             self.control.invalidate();
         }

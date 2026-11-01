@@ -18,8 +18,14 @@ use xui::xui_canvas::snapshot::{Snapshot, Stage, render_with};
 use crate::model::Document;
 use crate::ui::{Editor, Msg, Probe, cmd};
 
-/// One simulation step at 120 Hz.
-const STEP: Duration = Duration::from_micros(8333);
+/// Ticks the UI `n` times, 16 ms apart, so the render thread's frames arrive
+/// and show before a snapshot.
+fn pump(stage: &Stage<'_, Msg>, n: u32) {
+    for _ in 0..n {
+        stage.emit(Msg::Step);
+        std::thread::sleep(Duration::from_millis(16));
+    }
+}
 
 struct Run {
     dir: PathBuf,
@@ -101,7 +107,7 @@ fn run_theme(dir: &Path, theme: Theme) -> i32 {
 /// Emits steps until the build ends; returns the final status message.
 fn wait_for_build(stage: &Stage<'_, Msg>, probe: &Probe) -> String {
     for _ in 0..30_000 {
-        stage.emit(Msg::Step(Duration::ZERO));
+        stage.emit(Msg::Step);
         let m = probe.message();
         if m.starts_with("Build finished")
             || m.starts_with("Playing")
@@ -213,7 +219,7 @@ fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     run.check(m.starts_with("Build finished"), &format!("built: {m}"));
     select_biggest(probe);
     stage.emit(Msg::Tool(0));
-    stage.emit(Msg::Step(Duration::ZERO));
+    pump(stage, 20);
     run.shot(stage, "02-four-views.png");
     let doc_before_play = probe.state().borrow().doc.clone();
 
@@ -232,8 +238,10 @@ fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         if i == 60 {
             pane.push_event(Event::MouseMotion { dx: 90.0, dy: 0.0 });
         }
-        stage.emit(Msg::Step(STEP));
+        stage.emit(Msg::Step);
+        std::thread::sleep(Duration::from_millis(8));
     }
+    pump(stage, 5);
     run.shot(stage, "03-in-play.png");
 
     // Esc returns with the document untouched.
@@ -257,6 +265,7 @@ fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         st.selection = enemy.map(crate::model::Selection::Entity);
     }
     stage.emit(Msg::Tool(0));
+    pump(stage, 20);
     run.shot(stage, "04-after-play.png");
 
     // Edit again: the build goes stale and a second play works.
@@ -270,7 +279,7 @@ fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         );
     }
     stage.emit(Msg::Tool(0));
-    stage.emit(Msg::Step(STEP));
+    pump(stage, 20);
     run.shot(stage, "05-edit-again-stale.png");
     stage.emit(Msg::Menu(cmd::PLAY));
     let m = wait_for_build(stage, probe);
@@ -278,14 +287,13 @@ fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         m.starts_with("Playing"),
         &format!("rebuilt and playing: {m}"),
     );
-    for _ in 0..30 {
-        stage.emit(Msg::Step(STEP));
-    }
+    pump(stage, 30);
     run.check(
         probe.message().starts_with("Playing"),
         "second play started",
     );
     run.shot(stage, "06-second-play.png");
     stage.emit(Msg::Escape);
+    pump(stage, 20);
     run.shot(stage, "07-edit-after-second-play.png");
 }

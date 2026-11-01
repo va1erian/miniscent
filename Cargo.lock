@@ -2682,7 +2682,6 @@ dependencies = [
 [[package]]
 name = "xui-canvas"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=71dc3b5903ac94dba00466a6d6a00d69251beeab#71dc3b5903ac94dba00466a6d6a00d69251beeab"
 dependencies = [
  "arboard",
  "cosmic-text",
