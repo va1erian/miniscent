@@ -223,7 +223,10 @@ fn mip_level(tex: &Texture, centre: Attr, gx: Attr, gy: Option<Attr>) -> u32 {
         let dv = (g.vz - v * g.iz) * inv;
         du.abs().max(dv.abs())
     };
-    let rate = step(gx).max(gy.map_or(0.0, step));
+    // Cheap anisotropy: the long axis may be up to 4x blurrier than the
+    // short one, so grazing floors keep detail instead of smearing.
+    let (a, b) = (step(gx), gy.map_or(0.0, step));
+    let rate = a.max(b).min(a.min(b) * 4.0).max(a.max(b) * 0.25);
     if rate.is_nan() || rate <= 1.5 {
         return 0;
     }

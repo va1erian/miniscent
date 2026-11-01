@@ -22,7 +22,7 @@ impl SpecTable {
     pub fn new(gloss: u8) -> Self {
         let g = f32::from(gloss);
         // Tighter highlights and stronger ones both grow with gloss.
-        let power = 5.0 + g * 0.28;
+        let power = 6.0 + g * 0.1;
         let strength = g / 255.0;
         let mut lut = [0.0; TABLE_LEN];
         for (i, e) in lut.iter_mut().enumerate() {

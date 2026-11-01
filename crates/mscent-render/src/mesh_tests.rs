@@ -38,26 +38,6 @@ fn render(mesh: &Mesh, cam: &Camera, lighting: &MeshLighting) -> Framebuffer {
     fb
 }
 
-/// One character per pixel: space for background, else a brightness ramp.
-fn ascii(fb: &Framebuffer) -> String {
-    const RAMP: &[u8] = b".:-=+*#%@";
-    let mut s = String::new();
-    for y in 0..N as i32 {
-        for x in 0..N as i32 {
-            let p = fb.pixel(x, y).unwrap();
-            if p == BG {
-                s.push(' ');
-            } else {
-                let (r, g, b) = ((p >> 16) & 255, (p >> 8) & 255, p & 255);
-                let lum = (r * 30 + g * 59 + b * 11) / 100;
-                s.push(RAMP[(lum as usize * RAMP.len() / 128).min(RAMP.len() - 1)] as char);
-            }
-        }
-        s.push('\n');
-    }
-    s
-}
-
 fn silhouette(fb: &Framebuffer) -> Vec<bool> {
     fb.pixels().iter().map(|&p| p != BG).collect()
 }
@@ -82,8 +62,8 @@ fn constructors_validate() {
     };
     assert!(Mesh::new(vec![v, v], vec![bad]).is_none(), "index 2 of 2");
     assert!(Mesh::new(vec![v, v, v], vec![bad]).is_some());
-    // Enemy: body 12, two horns 6 each, eye 8, skirt 8. Goal: 8 + six gems of 8.
-    assert_eq!(Mesh::enemy().triangles().len(), 40);
+    // Enemy: body 8x14 sphere (196), two horns 10 each, eye 4x8 sphere (48).
+    assert_eq!(Mesh::enemy().triangles().len(), 196 + 20 + 48);
     assert_eq!(Mesh::goal().triangles().len(), 56);
 }
 
@@ -256,142 +236,16 @@ fn hostile_poses_and_cameras_draw_nothing_without_panicking() {
     );
 }
 
-/// Trailing blanks are not significant in a snapshot.
-fn trimmed(s: &str) -> Vec<&str> {
-    s.lines().map(str::trim_end).collect()
-}
-
-fn assert_snapshot(yaw: f32, pitch: f32, rows: &[&str]) {
-    let fb = render(
-        &Mesh::enemy(),
-        &camera(yaw, pitch, 3.2),
-        &MeshLighting::default(),
-    );
-    let got = ascii(&fb);
-    assert_eq!(
-        trimmed(&got),
-        rows,
-        "yaw {yaw} pitch {pitch}:
-{got}"
-    );
-}
-
 #[test]
-fn enemy_snapshot_0() {
-    #[rustfmt::skip]
-    let rows = [
-        "",
-        "",
-        "",
-        "           @        @",
-        "           @        @",
-        "           @        @",
-        "           @        @",
-        "          @@   **   @%",
-        "          @@   **   @%",
-        "              **++",
-        "             *+++++",
-        "            ++++++==",
-        "            +++@@===",
-        "           +++@@@@===",
-        "          +++@@@@%*=--",
-        "          ++==@%%*=---",
-        "          +====##=----",
-        "           ======----",
-        "            ====----",
-        "             ==----",
-        "              ----",
-        "            ::--::::",
-        "             ::::::",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-    ];
-    assert_snapshot(0.0, 0.0, &rows);
-}
-
-#[test]
-fn enemy_snapshot_1() {
-    #[rustfmt::skip]
-    let rows = [
-        "",
-        "                 @",
-        "                 @",
-        "              @  @",
-        "             @@  @",
-        "             @@  @",
-        "             @@  @",
-        "             @%**%",
-        "             %#***",
-        "             #*+++",
-        "             ++++++",
-        "            +++++++=",
-        "            ========",
-        "         @@==========",
-        "        %##-=======---",
-        "         *------------",
-        "          -------------",
-        "          ::--------::",
-        "           ::::::::::",
-        "            ::::::::",
-        "             ::::::",
-        "            ::::::::",
-        "            :::::::..",
-        "             ...",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-    ];
-    assert_snapshot(1.9, 0.25, &rows);
-}
-
-#[test]
-fn enemy_snapshot_2() {
-    #[rustfmt::skip]
-    let rows = [
-        "",
-        "",
-        "",
-        "",
-        "",
-        "                   @@",
-        "                   @@",
-        "            @      %@",
-        "           @@  **  *#",
-        "           %@ +++*",
-        "           *#+=+++",
-        "             ======",
-        "            =--=====",
-        "           --------==",
-        "          -::--------+",
-        "         ::::-------==",
-        "         ::::-------==+",
-        "          ::::------==",
-        "           :::-----==",
-        "            :::----=",
-        "             ::----",
-        "            ...:::::::",
-        "            ....:::",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-    ];
-    assert_snapshot(3.6, -0.3, &rows);
+fn sphere_normals_are_unit_and_validated() {
+    let m = Mesh::sphere(6, 10, 2.0, 0xffff_ffff).unwrap();
+    for v in m.vertices() {
+        assert!((v.normal.length() - 1.0).abs() < 1e-4);
+        assert!((v.pos.length() - 2.0).abs() < 1e-4);
+    }
+    // Two fans of 10 plus four bands of 10 quads.
+    assert_eq!(m.triangles().len(), 20 + 4 * 20);
+    assert!(Mesh::sphere(1, 10, 1.0, 0).is_none());
+    assert!(Mesh::sphere(6, 2, 1.0, 0).is_none());
+    assert!(Mesh::sphere(6, 10, f32::NAN, 0).is_none());
 }

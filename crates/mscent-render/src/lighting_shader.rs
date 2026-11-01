@@ -19,7 +19,7 @@ use crate::texture::Texture;
 
 /// Highlight strength: the table peaks at gloss/255 of the light colour,
 /// which on dim baked light would be invisible.
-const SPEC_GAIN: f32 = 1.6;
+const SPEC_GAIN: f32 = 3.2;
 
 /// One fitting sample: texel `(u, v)` paired with luxel `(lx, ly)`.
 type Pair = [f32; 4];

@@ -7,7 +7,7 @@ use mscent_world::{Bsp, Child, Face};
 use crate::raster::Vertex;
 
 /// World units covered by one texture repeat.
-const UNITS_PER_REPEAT: f32 = 16.0;
+const UNITS_PER_REPEAT: f32 = 8.0;
 
 /// A face as the rasterizer wants it, with planar texture coordinates.
 pub(super) fn face_vertices(face: &Face) -> Vec<Vertex> {

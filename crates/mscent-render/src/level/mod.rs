@@ -71,13 +71,13 @@ pub struct BuildConfig {
 impl Default for BuildConfig {
     fn default() -> Self {
         Self {
-            luxel_size: 0.5,
-            ambient: Vec3::new(0.12, 0.12, 0.16),
-            light_gain: 1.8,
+            luxel_size: 0.25,
+            ambient: Vec3::new(0.07, 0.07, 0.10),
+            light_gain: 2.0,
             sky_top: 0xff10_2048,
             sky_bottom: 0xff3a_4a78,
-            fog_start: 3.0,
-            fog_end: 38.0,
+            fog_start: 4.0,
+            fog_end: 26.0,
             fov_y: 1.3,
         }
     }
@@ -155,11 +155,11 @@ fn actors_of(level: &Level) -> Vec<Actor> {
 /// the same point lights without shadows plus a little ambient.
 fn mesh_lighting(lights: &[PointLight], ambient: Vec3) -> MeshLighting {
     MeshLighting {
-        ambient: 0.3 + (ambient.x + ambient.y + ambient.z) / 3.0,
+        ambient: 0.4 + (ambient.x + ambient.y + ambient.z) / 3.0,
         sun_dir: Vec3::new(0.3, -0.4, 0.85)
             .normalized()
             .unwrap_or(Vec3::ZERO),
-        sun: 0.55,
+        sun: 0.7,
         points: lights
             .iter()
             .map(|l| MeshLight {
@@ -198,6 +198,7 @@ impl LevelRenderer {
         let bake_cfg = BakeConfig {
             luxel_size: cfg.luxel_size,
             ambient: cfg.ambient,
+            bounce_gain: 0.5,
             ..BakeConfig::default()
         };
         let lightmap = mscent_world::lightmap::bake(&bsp, &light_faces, &lights, &bake_cfg)

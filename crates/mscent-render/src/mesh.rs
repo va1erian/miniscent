@@ -144,6 +144,52 @@ impl Mesh {
         Self::new(verts, tris)
     }
 
+    /// A smooth UV sphere of `radius` with `rings` latitude bands and
+    /// `sectors` longitude slices. `None` unless `2 <= rings <= 32`,
+    /// `3 <= sectors <= 64` and `radius` is positive and finite.
+    pub fn sphere(rings: u16, sectors: u16, radius: f32, color: u32) -> Option<Self> {
+        let ok = (2..=32).contains(&rings) && (3..=64).contains(&sectors);
+        if !ok || !radius.is_finite() || radius <= 0.0 {
+            return None;
+        }
+        let vert = |n: Vec3| MeshVertex {
+            pos: n * radius,
+            normal: n,
+        };
+        let mut verts = vec![
+            vert(Vec3::new(0.0, 0.0, 1.0)),
+            vert(Vec3::new(0.0, 0.0, -1.0)),
+        ];
+        for r in 1..rings {
+            let phi = f32::from(r) * core::f32::consts::PI / f32::from(rings);
+            let (sp, cp) = phi.sin_cos();
+            for k in 0..sectors {
+                let a = f32::from(k) * core::f32::consts::TAU / f32::from(sectors);
+                verts.push(vert(Vec3::new(a.cos() * sp, a.sin() * sp, cp)));
+            }
+        }
+        // Vertex of ring `r` (1-based) and slice `k`.
+        let at = |r: u16, k: u16| 2 + (r - 1) * sectors + k % sectors;
+        let mut tris = Vec::new();
+        let mut tri = |a, b, c| {
+            tris.push(Triangle {
+                indices: [a, b, c],
+                color,
+            });
+        };
+        for k in 0..sectors {
+            tri(at(1, k), at(1, k + 1), 0);
+            tri(at(rings - 1, k + 1), at(rings - 1, k), 1);
+        }
+        for r in 1..rings - 1 {
+            for k in 0..sectors {
+                tri(at(r, k), at(r + 1, k), at(r, k + 1));
+                tri(at(r, k + 1), at(r + 1, k), at(r + 1, k + 1));
+            }
+        }
+        Self::new(verts, tris)
+    }
+
     /// Several meshes in one, each moved by an offset. `None` if the result
     /// would have too many vertices.
     pub fn combine(parts: &[(Mesh, Vec3)]) -> Option<Self> {
@@ -166,27 +212,20 @@ impl Mesh {
         Self::new(verts, tris)
     }
 
-    /// The enemy: a red six-sided body with two bone horns and a glowing
-    /// yellow eye on its +X side, about 1.5 units tall.
+    /// The enemy: a round red body with two bone horns and a glowing yellow
+    /// eye on its +X side, about 1.5 units tall.
     pub fn enemy() -> Self {
-        let part = |s, r, t, b, c| Self::bipyramid(s, r, t, b, c);
+        let horn = || Self::bipyramid(5, 0.12, 0.6, 0.05, 0xffe8_e0c0);
         let parts: Option<Vec<(Mesh, Vec3)>> = [
-            (part(6, 0.6, 0.8, 0.6, 0xffc0_2828), Vec3::ZERO),
             (
-                part(3, 0.12, 0.6, 0.05, 0xffe8_e0c0),
-                Vec3::new(0.0, 0.4, 0.6),
+                Self::sphere(8, 14, 0.7, 0xffc0_2828),
+                Vec3::new(0.0, 0.0, 0.1),
             ),
+            (horn(), Vec3::new(0.0, 0.4, 0.6)),
+            (horn(), Vec3::new(0.0, -0.4, 0.6)),
             (
-                part(3, 0.12, 0.6, 0.05, 0xffe8_e0c0),
-                Vec3::new(0.0, -0.4, 0.6),
-            ),
-            (
-                part(4, 0.2, 0.22, 0.22, 0xfff8_e840),
-                Vec3::new(0.55, 0.0, 0.1),
-            ),
-            (
-                part(4, 0.5, 0.12, 0.12, 0xff58_1010),
-                Vec3::new(0.0, 0.0, -0.5),
+                Self::sphere(4, 8, 0.2, 0xfff8_e840),
+                Vec3::new(0.58, 0.0, 0.25),
             ),
         ]
         .into_iter()

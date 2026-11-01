@@ -236,8 +236,10 @@ fn glossy_specular_adds_a_highlight_and_never_darkens() {
     // is x = -0.75, which projects to pixel column 20.
     let (peak_off, peak_on) = (red(px(&off, 20, 32)), red(px(&on, 20, 32)));
     assert!(peak_on > peak_off + 40, "peak {peak_off} -> {peak_on}");
-    // Away from the mirror point the tight highlight is gone.
-    assert!(red(px(&on, 4, 32)) <= red(px(&off, 4, 32)) + 4);
+    // Away from the mirror point the highlight fades: its lobe is broad
+    // now, so compare the gain against the peak's instead of expecting zero.
+    let far = red(px(&on, 4, 32)).saturating_sub(red(px(&off, 4, 32)));
+    assert!(far + 30 < peak_on - peak_off, "far gain {far}");
 }
 
 #[test]
