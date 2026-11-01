@@ -17,7 +17,7 @@ use mscent_math::Vec3;
 pub const MAGIC: [u8; 4] = *b"MSLT";
 /// Bumped whenever the baker's output for the same input changes, which
 /// also invalidates old files.
-pub const VERSION: u16 = 2;
+pub const VERSION: u16 = 3;
 /// Largest accepted file.
 pub const MAX_BYTES: usize = 256 << 20;
 const MAX_ATLAS_SIDE: u32 = 1 << 16;

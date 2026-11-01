@@ -7,7 +7,13 @@ use mscent_render::Quality;
 pub const USAGE: &str = "\
 miniscent [options]
 
-  --level <file.msl>       play this level (default: the built-in showcase)
+  --level <file.msl>       play this level (default: the built-in showcase);
+                           a bare <file.msl> argument does the same
+  --bake                   only bake the level's lightmap, write the cache
+                           (<level>.msl.lit, or the per-user cache dir for
+                           built-in levels), print stats and exit
+  --no-cache               neither read nor write the lightmap cache
+  --rebake                 ignore the cached lightmap, bake, overwrite it
   --corridor               play the built-in corridor level instead
   --quality low|medium|high  lighting model (default high)
   --scale <n>              desktop window = internal resolution * n (default 2)
@@ -37,6 +43,9 @@ pub struct Options {
     pub shots_at: Vec<f64>,
     pub script: Option<PathBuf>,
     pub bench: bool,
+    pub bake: bool,
+    pub no_cache: bool,
+    pub rebake: bool,
     pub adaptive: bool,
     pub autoclose_ms: Option<u64>,
     pub help: bool,
@@ -84,6 +93,9 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
         shots_at: Vec::new(),
         script: None,
         bench: false,
+        bake: false,
+        no_cache: false,
+        rebake: false,
         adaptive: true,
         autoclose_ms: None,
         help: false,
@@ -125,6 +137,9 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
             }
             "--script" => o.script = Some(value("--script")?.into()),
             "--bench" => o.bench = true,
+            "--bake" => o.bake = true,
+            "--no-cache" => o.no_cache = true,
+            "--rebake" => o.rebake = true,
             "--no-adaptive" => o.adaptive = false,
             "--autoclose-ms" => {
                 o.autoclose_ms = Some(
@@ -134,6 +149,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
                 );
             }
             "--help" | "-h" => o.help = true,
+            file if !file.starts_with('-') && o.level.is_none() => o.level = Some(file.into()),
             other => return Err(format!("unknown option `{other}`\n\n{USAGE}")),
         }
     }
@@ -177,6 +193,16 @@ mod tests {
             (Some(30), Quality::Low, (320, 180))
         );
         assert_eq!(o.shots_at, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn cache_flags_and_a_bare_level_path_parse() {
+        let o = p(&["--bake", "a/x.msl", "--rebake"]).unwrap();
+        assert!(o.bake && o.rebake && !o.no_cache);
+        assert_eq!(o.level.as_deref(), Some(std::path::Path::new("a/x.msl")));
+        assert!(!o.headless(), "--bake is handled before a run starts");
+        assert!(p(&["--no-cache"]).unwrap().no_cache);
+        assert!(p(&["a.msl", "b.msl"]).is_err(), "one level only");
     }
 
     #[test]

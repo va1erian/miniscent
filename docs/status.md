@@ -82,6 +82,10 @@ one. Reported by the user from a real Windows session, and what was done:
   In the editor a texture-mapping edit on the showcase reports "lightmap kept" and takes 31 to 50 ms
   (selftest). I did not record a separate bake-from-scratch time; a whole showcase build is about
   0.1 s in release.
+  Persistence (feedback round 2): both apps now use the on-disk cache (`<level>.msl.lit`, or the
+  per-user cache dir for built-in/unsaved levels), written atomically, with the reason logged when
+  a file is ignored. Showcase release: cold bake 49 ms, warm load 8 ms (`tests/lightcache.rs`,
+  `bake_cache.rs`). `miniscent --bake|--rebake|--no-cache`; see `docs/lightmaps.md`.
 - **Threaded Instant Play.** Play runs on a render thread (`studio/worker.rs`): input goes in over a
   bounded `try_send` channel, frames come out through a one-slot mailbox read with `try_lock`, stale
   frames are dropped, and a slow scene lowers the adaptive resolution instead of stalling the UI. A

@@ -24,6 +24,7 @@ use mscent_world::{CsgError, Entity, Level, Portals, compile, extract_faces};
 use crate::camera::Camera;
 use crate::framebuffer::Framebuffer;
 use crate::lighting_shader::{FaceLight, LightingShader, UvToLuxel};
+use crate::lightmap_mips::LightMips;
 use crate::mesh::{MeshLighting, PointLight as MeshLight};
 use crate::scene::{Scene, SceneStats, eye_of};
 use crate::shade::{FlatShader, Fog};
@@ -31,7 +32,7 @@ use crate::specular::SpecTable;
 use crate::texture::{MaterialId, MaterialTable};
 use shader::FaceShader;
 
-pub use cache::{BakeCache, Source};
+pub use cache::{BakeCache, BakeReport, Source};
 pub use overlay::{Actor, ActorKind, Overlay};
 pub use view::View;
 
@@ -79,11 +80,11 @@ pub struct BuildConfig {
 impl Default for BuildConfig {
     fn default() -> Self {
         Self {
-            luxel_size: 0.25,
+            luxel_size: 0.125,
             ambient: Vec3::new(0.04, 0.038, 0.055),
             light_gain: 4.6,
             light_radius: 0.3,
-            shadow_samples: 16,
+            shadow_samples: 64,
             sky_top: 0xff10_2048,
             sky_bottom: 0xff3a_4a78,
             fog_start: 4.0,
@@ -107,6 +108,8 @@ pub enum BuildError {
 pub struct LevelRenderer {
     scene: Scene,
     lightmap: Arc<Lightmap>,
+    /// Pre-filtered lightmap levels, built with the renderer.
+    light_mips: LightMips,
     uv_maps: Vec<Option<UvToLuxel>>,
     spec: Vec<SpecTable>,
     lighting: MeshLighting,
@@ -245,6 +248,7 @@ impl LevelRenderer {
             actors: actors_of(level),
             meshes: overlay::ActorMeshes::new(),
             scene,
+            light_mips: LightMips::build(&lightmap),
             lightmap,
             uv_maps,
             spec,
@@ -310,6 +314,7 @@ impl LevelRenderer {
             };
             let fl = FaceLight {
                 lightmap: &self.lightmap,
+                mips: &self.light_mips,
                 face: i,
                 map,
                 texture: self.scene.texture_of(face.material),

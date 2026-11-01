@@ -2,6 +2,7 @@
 
 use super::atlas::{Atlas, PADDING, Rect, ppm};
 use super::bounce;
+use super::filter;
 use super::parallel::par_map;
 use super::soft;
 use super::uv::{FaceProjection, project_face};
@@ -165,6 +166,12 @@ pub fn bake(
         direct_row(&scene, rows[i].0, rows[i].1)
     });
     let mut grids = rows_to_grids(&proj, direct);
+    // Hard shadows (one ray, no lamp radius) stay exact; soft ones are smoothed.
+    if cfg.light_radius > 0.0 && cfg.shadow_samples > 1 {
+        for (grid, p) in grids.iter_mut().zip(&proj) {
+            filter::smooth(grid, p.width as usize, p.height as usize);
+        }
+    }
     bounce::add_bounce(&scene, &rows, &mut grids);
     for grid in &mut grids {
         for l in grid {
@@ -236,54 +243,52 @@ pub(super) fn luminance(c: Vec3) -> f32 {
 fn direct_row(s: &Scene, face: usize, row: u32) -> Vec<Luxel> {
     let p = &s.proj[face];
     (0..p.width)
-        .map(|x| direct_at(s, p, p.luxel_sample(&s.faces[face].vertices, x, row)))
+        .map(|x| {
+            let verts = &s.faces[face].vertices;
+            let centre = p.luxel_sample(verts, x, row);
+            let rx = soft::Receiver {
+                bsp: s.bsp,
+                proj: p,
+                verts,
+                x,
+                y: row,
+                bias: s.cfg.normal_bias,
+                centre,
+            };
+            direct_at(s, &rx)
+        })
         .collect()
 }
 
 /// Accumulates colour and a luminance-weighted (not yet unit) direction.
-fn direct_at(s: &Scene, p: &FaceProjection, point: Vec3) -> Luxel {
+fn direct_at(s: &Scene, rx: &soft::Receiver) -> Luxel {
     let mut acc = Luxel {
         color: Vec3::ZERO,
         dir: Vec3::ZERO,
     };
     for light in s.lights {
-        if let Some((c, to_light)) = light_at(s, p, point, light) {
+        if let Some((c, to_light)) = light_at(s, rx, light) {
             acc.color = acc.color + c;
-            acc.dir = acc.dir + p.to_tangent(to_light) * luminance(c);
+            acc.dir = acc.dir + rx.proj.to_tangent(to_light) * luminance(c);
         }
     }
     acc
 }
 
-/// Light arriving at `point` from one lamp and the unit direction towards it,
-/// or `None` when out of range, facing away or shadowed.
-fn light_at(
-    s: &Scene,
-    p: &FaceProjection,
-    point: Vec3,
-    light: &PointLight,
-) -> Option<(Vec3, Vec3)> {
-    let to = light.position - point;
+/// Light arriving at the luxel from one lamp and the unit direction towards
+/// it, or `None` when out of range, facing away or shadowed.
+fn light_at(s: &Scene, rx: &soft::Receiver, light: &PointLight) -> Option<(Vec3, Vec3)> {
+    let to = light.position - rx.centre;
     let dist = to.length();
     if dist >= light.radius {
         return None;
     }
     let dir = to.normalized()?;
-    let facing = dir.dot(p.normal);
+    let facing = dir.dot(rx.proj.normal);
     if facing <= 0.0 {
         return None;
     }
-    // Start the ray off the surface so a face does not shadow itself.
-    let origin = point + p.normal * s.cfg.normal_bias;
-    let clear = soft::clear_to(s.bsp, origin);
-    let seen = soft::visibility(
-        &clear,
-        origin,
-        light.position,
-        s.cfg.light_radius,
-        s.cfg.shadow_samples,
-        soft::spin_of(point),
-    );
+    let seen = soft::visibility(rx, light.position, s.cfg.light_radius, s.cfg.shadow_samples);
     if seen <= 0.0 {
         return None;
     }

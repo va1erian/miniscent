@@ -12,6 +12,7 @@
 pub mod atlas;
 mod bake;
 mod bounce;
+mod filter;
 mod parallel;
 pub mod ray;
 mod soft;
@@ -20,6 +21,8 @@ pub mod uv;
 
 #[cfg(test)]
 mod review_tests;
+#[cfg(test)]
+mod soft_tests;
 #[cfg(test)]
 mod store_tests;
 #[cfg(test)]

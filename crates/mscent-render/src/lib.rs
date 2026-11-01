@@ -12,7 +12,9 @@ pub mod font;
 pub mod framebuffer;
 pub mod inflate;
 pub mod level;
+pub mod light_sampler;
 pub mod lighting_shader;
+pub mod lightmap_mips;
 pub mod mesh;
 pub mod mips;
 pub mod png;
@@ -25,15 +27,17 @@ pub mod simd;
 pub mod specular;
 pub mod texture;
 pub mod tiles;
+pub mod uv_luxel;
 
 pub use camera::{Camera, Frustum, ScreenPoint};
 pub use draw2d::{Sprite, blit, draw_text, fill_rect, stroke_rect, text_size};
 pub use framebuffer::Framebuffer;
 pub use level::{
-    Actor, ActorKind, BakeCache, BuildConfig, BuildError, LevelRenderer, Overlay, Quality, Source,
-    View,
+    Actor, ActorKind, BakeCache, BakeReport, BuildConfig, BuildError, LevelRenderer, Overlay,
+    Quality, Source, View,
 };
 pub use lighting_shader::{FaceLight, LightingShader, UvToLuxel};
+pub use lightmap_mips::LightMips;
 pub use raster::{DrawStats, Vertex, draw_polygon, draw_polygon_flat};
 pub use shade::{FlatShader, Fog, SpanEnd, SpanShader};
 pub use specular::SpecTable;

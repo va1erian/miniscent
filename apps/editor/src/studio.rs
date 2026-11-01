@@ -6,8 +6,11 @@
 //! frame without ever waiting. The whole edit, build, play, return loop is
 //! testable headless.
 
+use std::path::Path;
+use std::sync::PoisonError;
 use std::thread::JoinHandle;
 
+use miniscent_game::lightcache;
 use mscent_platform::Event;
 
 use crate::build::{self, BuildJob, STEPS, SharedCache, Update};
@@ -163,6 +166,37 @@ impl Studio {
     #[cfg(test)]
     pub fn cache(&self) -> SharedCache {
         self.cache.clone()
+    }
+
+    /// Points the lightmap cache at the file for `level`: `<level>.msl.lit`
+    /// beside a saved level, else the per-user cache directory.
+    pub fn set_cache_level(&mut self, level: Option<&Path>) {
+        let path = lightcache::path_for(level, "untitled");
+        self.cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .set_path(path);
+    }
+
+    /// Save: moves the cache file next to `level` and, when the build still
+    /// has the geometry of `doc`, writes the current bake there. Returns a
+    /// note for the status bar when a file was written.
+    pub fn save_lightmap(&mut self, level: &Path, doc: &Document) -> Option<String> {
+        let path = lightcache::path_for(Some(level), "untitled")?;
+        let current = self
+            .built_doc
+            .as_ref()
+            .is_some_and(|d| d.same_geometry(doc));
+        let mut cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
+        if !current {
+            cache.set_path(Some(path));
+            return None;
+        }
+        match cache.save_to(path.clone()) {
+            Ok(true) => Some(format!("lightmap cached in {}", path.display())),
+            Ok(false) => None,
+            Err(e) => Some(format!("lightmap cache not written: {e}")),
+        }
     }
 
     /// Whether `doc` differs from the build only in materials and mappings,
@@ -350,8 +384,13 @@ impl Studio {
                     .as_ref()
                     .map(|w| format!(" (view only: {w})"))
                     .unwrap_or_default();
+                let lit = built.report.as_ref().map_or("", |r| match r.source {
+                    mscent_render::Source::Baked => "; lightmap baked",
+                    mscent_render::Source::File => "; lightmap loaded from cache",
+                    mscent_render::Source::Memory => "; lightmap reused, no bake",
+                });
                 out.status = Some(format!(
-                    "Build finished in {:.1} s{note}",
+                    "Build finished in {:.1} s{lit}{note}",
                     started.elapsed().as_secs_f32()
                 ));
                 if quiet {

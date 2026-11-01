@@ -128,3 +128,109 @@ fn renderers_share_one_lightmap_through_the_cache() {
     let ptr = |r: &LevelRenderer| std::ptr::from_ref(r.lightmap());
     assert_eq!(ptr(&a), ptr(&b), "one allocation, shared");
 }
+
+#[test]
+fn unusable_files_are_ignored_with_a_reason_and_replaced() {
+    let level = showcase_level();
+    let path = temp_file("reasons.msl.lit");
+    let _ = std::fs::remove_file(&path);
+    build(&level, &mut BakeCache::with_file(path.clone()));
+    let good = std::fs::read(&path).expect("read");
+
+    // The same file for a level whose light moved: stale, not corrupt.
+    let mut moved = showcase_level();
+    nudge_first_light(&mut moved);
+    let mut cache = BakeCache::with_file(path.clone());
+    build(&moved, &mut cache);
+    let report = cache.last_report().expect("report").clone();
+    assert_eq!((report.source, report.written), (Source::Baked, true));
+    let note = report.note.as_deref().unwrap_or_default();
+    assert!(note.contains("stale"), "{note}");
+    assert!(report.describe().contains("cache file ignored"));
+    // ...and the file now belongs to the moved level.
+    let mut again = BakeCache::with_file(path.clone());
+    build(&moved, &mut again);
+    assert_eq!(again.last_source(), Some(Source::File));
+
+    let mut old_version = good.clone();
+    old_version[4] ^= 0x7f;
+    let mut bad_sum = good.clone();
+    *bad_sum.last_mut().expect("bytes") ^= 1;
+    let cases: [(&str, Vec<u8>, &str); 5] = [
+        ("empty", Vec::new(), "truncated"),
+        ("junk", b"not a lightmap at all".to_vec(), "not a lightmap"),
+        ("version", old_version, "bake version"),
+        ("checksum", bad_sum, "damaged"),
+        ("cut", good[..good.len() / 3].to_vec(), "damaged"),
+    ];
+    for (name, bytes, expect) in cases {
+        std::fs::write(&path, bytes).expect("write");
+        let mut cache = BakeCache::with_file(path.clone());
+        build(&level, &mut cache);
+        let r = cache.last_report().expect("report");
+        let note = r.note.as_deref().unwrap_or_default();
+        assert!(
+            r.source == Source::Baked && note.contains(expect),
+            "{name}: {r:?}"
+        );
+    }
+    // A directory where the file should be is a write error, not a panic.
+    let blocked = temp_file("blocked.msl.lit");
+    std::fs::create_dir_all(&blocked).expect("dir");
+    let mut cache = BakeCache::with_file(blocked);
+    build(&level, &mut cache);
+    let r = cache.last_report().expect("report");
+    assert!(!r.written && r.note.as_deref().is_some_and(|n| n.contains("not written")));
+}
+
+#[test]
+fn writes_are_atomic_and_rebake_overwrites() {
+    let level = showcase_level();
+    let path = temp_file("atomic.msl.lit");
+    let _ = std::fs::remove_file(&path);
+    let mut cache = BakeCache::with_file(path.clone());
+    build(&level, &mut cache);
+    let leftovers = std::fs::read_dir(path.parent().expect("dir"))
+        .expect("list")
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+        .count();
+    assert_eq!(leftovers, 0, "temporary files are renamed away");
+
+    cache.force_rebake();
+    build(&level, &mut cache);
+    assert_eq!(
+        (cache.bakes(), cache.last_source()),
+        (2, Some(Source::Baked))
+    );
+    let mut fresh = BakeCache::with_file(path.clone());
+    fresh.force_rebake();
+    build(&level, &mut fresh);
+    assert_eq!(fresh.bakes(), 1, "--rebake ignores a valid file");
+
+    // save_to writes the held bake to a new place, which then serves.
+    let copy = temp_file("copy.msl.lit");
+    assert_eq!(cache.save_to(copy.clone()), Ok(true));
+    let mut from_copy = BakeCache::with_file(copy);
+    build(&level, &mut from_copy);
+    assert_eq!(from_copy.last_source(), Some(Source::File));
+}
+
+#[test]
+fn a_warm_start_beats_a_cold_one_on_the_showcase() {
+    let level = showcase_level();
+    let path = temp_file("timing.msl.lit");
+    let _ = std::fs::remove_file(&path);
+    let mut cold = BakeCache::with_file(path.clone());
+    build(&level, &mut cold);
+    let cold_ms = cold.last_report().expect("report").ms;
+    let mut warm = BakeCache::with_file(path.clone());
+    build(&level, &mut warm);
+    let warm_ms = warm.last_report().expect("report").ms;
+    let size = std::fs::metadata(&path).expect("file").len();
+    println!(
+        "showcase lightmap: cold bake {cold_ms:.1} ms, warm load {warm_ms:.1} ms, {size} bytes"
+    );
+    assert_eq!(warm.last_source(), Some(Source::File));
+    assert!(warm_ms < cold_ms, "{warm_ms} vs {cold_ms}");
+}

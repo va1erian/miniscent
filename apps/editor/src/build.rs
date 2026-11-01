@@ -11,7 +11,7 @@ use std::time::Instant;
 use miniscent_game::assets::load_materials;
 use miniscent_game::{GameSession, SessionConfig};
 use mscent_game::{Arena, LoadError};
-use mscent_render::{BakeCache, BuildConfig, LevelRenderer, Source};
+use mscent_render::{BakeCache, BakeReport, BuildConfig, LevelRenderer, Source};
 use mscent_world::{Entity, Level, Portals, compile, extract_faces};
 
 use crate::model::Document;
@@ -29,6 +29,8 @@ pub struct Built {
     pub product: Product,
     /// Where the lightmap came from: a bake, or the cache.
     pub bake: Option<Source>,
+    /// The cache's account of it: timing, file, why a file was ignored.
+    pub report: Option<BakeReport>,
 }
 
 pub enum Product {
@@ -184,8 +186,7 @@ fn work(level: &Level, tx: &Sender<Update>, cache: &SharedCache) -> Result<Built
     note(4, format!("Portals: {}", portals.portals().len()));
     drop((faces, portals, bsp));
     let materials = load_materials(None)?;
-    note(5, "Baking lightmaps (this takes a moment)".into());
-    let t = Instant::now();
+    note(5, "Lightmap: using the cache, baking only if needed".into());
     let cfg = SessionConfig::default();
     let mut cache = cache.lock().unwrap_or_else(PoisonError::into_inner);
     let product = match Arena::from_level(level) {
@@ -209,22 +210,21 @@ fn work(level: &Level, tx: &Sender<Update>, cache: &SharedCache) -> Result<Built
             Product::ViewOnly(Box::new(renderer), why)
         }
     };
-    let bake = cache.last_source();
+    let report = cache.last_report().cloned();
+    let bake = report.as_ref().map(|r| r.source);
     drop(cache);
     let lit = match &product {
         Product::Playable(s) => s.renderer().lightmap().projections().len(),
         Product::ViewOnly(r, _) => r.lightmap().projections().len(),
     };
-    let how = match bake {
-        Some(Source::Memory) => "kept from the last bake",
-        Some(Source::File) => "read from the cache file",
-        _ => "baked",
-    };
+    let mut how = report
+        .as_ref()
+        .map_or_else(|| "lightmap baked".into(), BakeReport::describe);
+    how[..1].make_ascii_uppercase();
     note(
         6,
         format!(
-            "Lightmap {how}: {lit} lit faces, {} ms. Build finished in {} ms",
-            t.elapsed().as_millis(),
+            "{how}: {lit} lit faces. Build finished in {} ms",
             t0.elapsed().as_millis()
         ),
     );
@@ -234,7 +234,11 @@ fn work(level: &Level, tx: &Sender<Update>, cache: &SharedCache) -> Result<Built
             text: format!("Not playable: {why}"),
         });
     }
-    Ok(Built { product, bake })
+    Ok(Built {
+        product,
+        bake,
+        report,
+    })
 }
 
 #[cfg(test)]

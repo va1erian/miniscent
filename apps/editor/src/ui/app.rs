@@ -135,7 +135,8 @@ impl Editor {
         path: Option<PathBuf>,
         message: Option<String>,
     ) -> xui::backend::Result<Editor> {
-        let studio = Studio::new(&doc);
+        let mut studio = Studio::new(&doc);
+        studio.set_cache_level(path.as_deref());
         let saved = doc.clone();
         let mut initial = EditorState::new(doc);
         if let Some(m) = message {

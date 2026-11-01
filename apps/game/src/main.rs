@@ -6,9 +6,10 @@ use std::time::Duration;
 
 use miniscent_game::app::{self, RunOptions, RunReport};
 use miniscent_game::cli::{self, Options, USAGE};
-use miniscent_game::{GameSession, SessionConfig, assets, levels};
+use miniscent_game::{GameSession, SessionConfig, assets, levels, lightcache};
 use mscent_platform::{HeadlessPlatform, Script};
 use mscent_render::png_encode::encode_png;
+use mscent_render::{BakeCache, LevelRenderer};
 use mscent_world::{Level, showcase_level};
 
 /// Virtual frame time of headless runs.
@@ -22,6 +23,30 @@ fn level_of(o: &Options) -> Result<Level, String> {
         (None, true) => Ok(levels::corridor_level()),
         (None, false) => Ok(showcase_level()),
     }
+}
+
+/// `--bake`: compile and bake only, leaving the cache file for later runs.
+fn bake_only(level: &Level, o: &Options, cache: &mut BakeCache) -> Result<(), String> {
+    let materials = assets::load_materials(o.assets.as_deref())?;
+    let cfg = SessionConfig::default();
+    let r = LevelRenderer::from_level_cached(level, materials, &cfg.build, cache)
+        .map_err(|e| format!("bake failed: {e:?}"))?;
+    let map = r.lightmap();
+    let atlas = map.atlas();
+    println!(
+        "lightmap: {} faces, atlas {}x{} ({} luxels)",
+        map.projections().len(),
+        atlas.width(),
+        atlas.height(),
+        u64::from(atlas.width()) * u64::from(atlas.height())
+    );
+    if let Some(rep) = cache.last_report() {
+        println!("{}", rep.describe());
+        if let Some(len) = rep.path.as_ref().and_then(|p| std::fs::metadata(p).ok()) {
+            println!("lightmap: cache file {} bytes", len.len());
+        }
+    }
+    Ok(())
 }
 
 fn script_of(o: &Options) -> Result<Script, String> {
@@ -104,9 +129,18 @@ fn real_main() -> Result<(), String> {
         quality: o.quality,
         ..SessionConfig::default()
     };
+    let name = if o.corridor { "corridor" } else { "showcase" };
+    let mut cache = lightcache::open(o.level.as_deref(), name, o.no_cache, o.rebake);
+    if o.bake {
+        return bake_only(&level, &o, &mut cache);
+    }
     let started = std::time::Instant::now();
-    let mut session = GameSession::new(&level, materials, &cfg).map_err(|e| e.to_string())?;
+    let mut session =
+        GameSession::new_cached(&level, materials, &cfg, &mut cache).map_err(|e| e.to_string())?;
     println!("level ready in {:.2}s", started.elapsed().as_secs_f32());
+    if let Some(rep) = cache.last_report() {
+        println!("{}", rep.describe());
+    }
     let report = if o.headless() {
         run_headless(&o, &mut session)?
     } else {

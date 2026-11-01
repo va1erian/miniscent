@@ -39,17 +39,24 @@ impl FaceProjection {
     /// across hangs over the face edge, and a centre past the edge sits inside
     /// the neighbouring wall, which would shadow the whole edge row black.
     pub fn luxel_sample(&self, verts: &[Vec3], x: u32, y: u32) -> Vec3 {
+        self.luxel_sample_at(verts, x as f32 + 0.5, y as f32 + 0.5)
+    }
+
+    /// Like [`Self::luxel_sample`] for a position given in luxel units
+    /// (`x + 0.5` is the centre of luxel `x`), so the baker can average over
+    /// a luxel's footprint. Points outside the polygon are pulled inside.
+    pub fn luxel_sample_at(&self, verts: &[Vec3], fx: f32, fy: f32) -> Vec3 {
         let flat = |i: usize| {
             let d = verts[i % verts.len()] - self.origin;
             [d.dot(self.tangent), d.dot(self.bitangent)]
         };
         let q = [
-            self.u_min + (x as f32 + 0.5) * self.luxel_size,
-            self.v_min + (y as f32 + 0.5) * self.luxel_size,
+            self.u_min + fx * self.luxel_size,
+            self.v_min + fy * self.luxel_size,
         ];
         match nearest_inside(verts.len(), flat, q, self.luxel_size * 0.02) {
             Some([u, v]) => self.origin + self.tangent * u + self.bitangent * v,
-            None => self.luxel_center(x, y),
+            None => self.origin + self.tangent * q[0] + self.bitangent * q[1],
         }
     }
 

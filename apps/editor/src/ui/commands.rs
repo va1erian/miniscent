@@ -71,6 +71,7 @@ impl Editor {
     /// Replaces the document (New, Open, showcase).
     fn install(&mut self, doc: Document, path: Option<PathBuf>, message: &str) {
         self.studio.reset(&doc);
+        self.studio.set_cache_level(path.as_deref());
         self.saved = doc.clone();
         self.path = path;
         {
@@ -107,9 +108,10 @@ impl Editor {
         let message = match files::save(&doc, &path) {
             Ok(msg) => {
                 files::remember(&path);
+                let lit = self.studio.save_lightmap(&path, &doc);
                 self.saved = doc;
                 self.path = Some(path);
-                msg
+                lit.map_or(msg.clone(), |l| format!("{msg}; {l}"))
             }
             Err(e) => e,
         };

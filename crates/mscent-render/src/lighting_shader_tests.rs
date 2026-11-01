@@ -1,7 +1,7 @@
 use super::*;
 use crate::camera::Camera;
 use crate::framebuffer::Framebuffer;
-use crate::raster::draw_polygon;
+use crate::raster::{Vertex, draw_polygon};
 use crate::texture::load_texture;
 use mscent_world::lightmap::{BakeConfig, LightFace, PointLight, bake};
 use mscent_world::{Brush, Op, compile};
@@ -100,6 +100,8 @@ fn face<'a>(lm: &'a Lightmap, tex: &'a Texture, bump: bool) -> FaceLight<'a> {
     let map = UvToLuxel::from_vertices(&lm.projections()[0], &wall(), tex).unwrap();
     FaceLight {
         lightmap: lm,
+        // Leaked: the tests are short-lived and the borrow outlives the helper.
+        mips: Box::leak(Box::new(LightMips::build(lm))),
         face: 0,
         map,
         texture: tex,
