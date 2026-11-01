@@ -10,6 +10,7 @@
 //! the level's enemy and goal meshes and an optional HUD.
 
 mod cache;
+mod compiled;
 mod overlay;
 mod shader;
 pub mod view;
@@ -17,9 +18,9 @@ pub mod view;
 use std::sync::Arc;
 
 use mscent_math::Vec3;
-use mscent_world::lightmap::{BakeConfig, LightFace, Lightmap, LightmapError, PointLight};
+use mscent_world::lightmap::{Lightmap, LightmapError, PointLight};
 use mscent_world::materials::{self, LIGHTPANEL};
-use mscent_world::{CsgError, Entity, Level, Portals, compile, extract_faces};
+use mscent_world::{CsgError, Entity, Level};
 
 use crate::camera::Camera;
 use crate::framebuffer::Framebuffer;
@@ -32,7 +33,8 @@ use crate::specular::SpecTable;
 use crate::texture::{MaterialId, MaterialTable};
 use shader::FaceShader;
 
-pub use cache::{BakeCache, BakeReport, Source};
+pub use cache::{BakeCache, BakeReport, BakedLight, Source};
+pub use compiled::Compiled;
 pub use overlay::{Actor, ActorKind, Overlay};
 pub use view::View;
 
@@ -215,22 +217,22 @@ impl LevelRenderer {
         cache: &mut BakeCache,
     ) -> Result<Self, BuildError> {
         check_materials(&materials)?;
-        let bsp = compile(&level.brushes).map_err(BuildError::Csg)?;
-        let faces = extract_faces(&bsp, &level.brushes);
-        let portals = Portals::build(&bsp);
-        let lights = lights_of(level, cfg.light_gain);
-        let light_faces: Vec<LightFace> = faces.iter().map(LightFace::from).collect();
-        let bake_cfg = BakeConfig {
-            luxel_size: cfg.luxel_size,
-            ambient: cfg.ambient,
-            bounce_gain: 0.18,
-            light_radius: cfg.light_radius,
-            shadow_samples: cfg.shadow_samples,
-            ..BakeConfig::default()
-        };
-        let lightmap = cache
-            .get_or_bake(&bsp, &light_faces, &lights, &bake_cfg)
-            .map_err(BuildError::Bake)?;
+        let compiled = Compiled::new(level, cfg)?;
+        let lightmap = compiled.get_or_bake(cache)?;
+        compiled.into_renderer(lightmap, materials)
+    }
+
+    /// Builds the renderer from what [`Compiled`] prepared, with materials
+    /// [`check_materials`] accepted.
+    fn assemble(parts: compiled::Parts, lightmap: Arc<Lightmap>, materials: MaterialTable) -> Self {
+        let compiled::Parts {
+            bsp,
+            faces,
+            portals,
+            lights,
+            actors,
+            cfg,
+        } = parts;
         let spec = spec_tables(&materials);
         // The game path pays for smooth texture sampling; the raw
         // rasterizer benchmark does not.
@@ -243,17 +245,17 @@ impl LevelRenderer {
                 UvToLuxel::from_vertices(proj, verts, scene.texture_of(face.material))
             })
             .collect();
-        Ok(Self {
+        Self {
             lighting: mesh_lighting(&lights, cfg.ambient),
-            actors: actors_of(level),
+            actors,
             meshes: overlay::ActorMeshes::new(),
             scene,
             light_mips: LightMips::build(&lightmap),
             lightmap,
             uv_maps,
             spec,
-            cfg: *cfg,
-        })
+            cfg,
+        }
     }
 
     pub fn scene(&self) -> &Scene {

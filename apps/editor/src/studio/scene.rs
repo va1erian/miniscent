@@ -20,6 +20,12 @@ impl LevelScene {
     pub fn new(built: Built) -> LevelScene {
         LevelScene { built, fb: None }
     }
+
+    /// The running game, for tests that look inside.
+    #[cfg(test)]
+    pub fn session(&mut self) -> Option<&mut miniscent_game::GameSession> {
+        self.built.session_mut()
+    }
 }
 
 impl Scene for LevelScene {
@@ -34,6 +40,14 @@ impl Scene for LevelScene {
             s.set_stats(stats);
             s.step(dt, events).quit
         })
+    }
+
+    /// The session keeps its running game; only what it draws with changes.
+    fn relight(&mut self, lit: Built) {
+        match self.built.session_mut() {
+            Some(session) => session.set_renderer(lit.into_renderer()),
+            None => self.built = lit,
+        }
     }
 
     fn render(&mut self, req: &Request) -> Option<&Framebuffer> {
@@ -53,8 +67,8 @@ impl Scene for LevelScene {
         {
             highlight::draw(fb, &cam, &req.highlights);
         }
-        if req.stale {
-            draw_text(fb, 6, 6, "OUT OF DATE: F7", 0xffff_c040, 1);
+        if let Some(banner) = req.banner {
+            draw_text(fb, 6, 6, banner, 0xffff_c040, 1);
         }
         self.fb.as_ref()
     }

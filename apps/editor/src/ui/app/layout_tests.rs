@@ -12,21 +12,22 @@ use crate::model::Selection;
 
 fn shoot(name: &str, theme: Theme, (w, h): (f32, f32), tool: usize) {
     let report: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
-    let state: Rc<RefCell<Option<Rc<RefCell<EditorState>>>>> = Rc::new(RefCell::new(None));
-    let (r2, s2) = (report.clone(), state.clone());
+    let probe: Rc<RefCell<Option<super::super::Probe>>> = Rc::new(RefCell::new(None));
+    let (r2, p2) = (report.clone(), probe.clone());
     let image = render_with(
         Snapshot::new(Dip(w), Dip(h)).theme(theme),
         move |ui| {
             let app = Editor::build(ui, Document::from_level(&mscent_world::showcase_level()))?;
-            *s2.borrow_mut() = Some(app.probe().state());
+            *p2.borrow_mut() = Some(app.probe());
             Ok(app)
         },
         move |stage| {
-            let state = state.borrow().clone().expect("built");
-            stage.emit(Msg::Menu(cmd::BUILD));
+            let probe = probe.borrow();
+            let probe = probe.as_ref().expect("built");
+            let state = probe.state();
             for _ in 0..30_000 {
                 stage.emit(Msg::Step);
-                if state.borrow().message.starts_with("Build finished") {
+                if probe.preview() == Preview::Full {
                     break;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(10));

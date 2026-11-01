@@ -262,7 +262,11 @@ fn concurrent_writers_in_one_process_leave_a_valid_file() {
     assert_eq!(failures.into_inner(), 0, "a concurrent write failed");
     let mut hit = false;
     for level in [&a, &b] {
-        let mut cache = BakeCache::with_file(path.clone());
+        // A miss bakes and overwrites its file, so each level reads its own
+        // copy of what the writers left: either may have written last.
+        let copy = temp_file("race-copy.msl.lit");
+        std::fs::copy(&path, &copy).expect("copied");
+        let mut cache = BakeCache::with_file(copy);
         build(level, &mut cache);
         println!("{:?}", cache.last_report());
         hit |= cache.last_source() == Some(Source::File);

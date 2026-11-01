@@ -136,9 +136,6 @@ fn render_session(theme: Theme, scripted: bool) -> (Image, Rc<Cell<u32>>) {
                 Some(Selection::Entity(_))
             ));
             stage.emit(Msg::Tool(0));
-            // Build starts on a worker thread and says so.
-            stage.emit(Msg::Menu(cmd::BUILD));
-            assert_eq!(probe.state.borrow().message, "Building...");
             // Re-select the brush for the panel in the picture.
             let (cx, cy) = at(29.0, 57.0);
             mouse(stage, 0, cx, cy);
@@ -200,26 +197,28 @@ fn light_theme_renders_the_showcase() {
 
 #[test]
 fn light_selection_fills_the_panel_and_the_3d_pane_shows_the_built_level() {
-    let probe: Rc<RefCell<Option<Rc<RefCell<EditorState>>>>> = Rc::new(RefCell::new(None));
+    let probe: Rc<RefCell<Option<super::super::Probe>>> = Rc::new(RefCell::new(None));
     let p2 = probe.clone();
     let image = render_with(
         Snapshot::new(Dip(1280.0), Dip(800.0)).theme(Theme::light()),
         move |ui| {
             let app = Editor::build(ui, Document::from_level(&mscent_world::showcase_level()))?;
-            *p2.borrow_mut() = Some(app.probe().state());
+            *p2.borrow_mut() = Some(app.probe());
             Ok(app)
         },
         move |stage| {
-            let state = probe.borrow().clone().expect("built");
-            stage.emit(Msg::Menu(cmd::BUILD));
+            let probe = probe.borrow();
+            let probe = probe.as_ref().expect("built");
+            let state = probe.state();
+            // No command: the picture comes by itself.
             for _ in 0..30_000 {
                 stage.emit(Msg::Step);
-                if state.borrow().message.starts_with("Build finished") {
+                if probe.preview() == Preview::Full {
                     break;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
-            assert!(state.borrow().message.starts_with("Build finished"));
+            assert_eq!(probe.preview(), Preview::Full);
             let light = {
                 let st = state.borrow();
                 st.doc

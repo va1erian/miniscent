@@ -1,27 +1,30 @@
 //! Everything between the document and the 3D pane that needs no widgets:
-//! the running build, the built level, the free-fly camera and Instant Play.
-//! The xui shell calls [`Studio::tick`] on a timer. Stepping the game and
+//! the jobs that keep the picture current, the built level, the free-fly
+//! camera and Instant Play. The xui shell calls [`Studio::tick`] on a timer and
+//! `preview.rs` starts whatever the document needs. Stepping the game and
 //! drawing the 3D view run on a render thread (`worker.rs`), so a slow frame
 //! never slows the UI; `tick` forwards input and returns the newest finished
-//! frame without ever waiting. The whole edit, build, play, return loop is
-//! testable headless.
+//! frame without ever waiting. The whole edit, play, return loop is testable
+//! headless.
 
 use std::path::{Path, PathBuf};
 use std::sync::TryLockError;
 use std::thread::JoinHandle;
+use std::time::Instant;
 
 use miniscent_game::lightcache;
 use mscent_platform::Event;
 
-use crate::build::{self, BuildJob, STEPS, SharedCache, Update};
+use crate::build::{BakeJob, Built, Job, Light, SharedCache};
 use crate::model::{Document, FlyCam};
 
 mod highlight;
+mod preview;
 mod scene;
 pub mod worker;
 
 use highlight::Highlights;
-use scene::LevelScene;
+pub use preview::Preview;
 pub use worker::{Frame, Scene};
 use worker::{Slow, Worker};
 
@@ -40,17 +43,41 @@ pub struct Tick {
     pub status: Option<String>,
     /// New log lines.
     pub log: Vec<String>,
-    /// A build just finished successfully with `then_play` set.
+    /// The preview that a pending Play was waiting for is up.
     pub play_now: bool,
+    /// The picture must go: nothing can be drawn. The text says why.
+    pub blank: Option<String>,
     /// Play ended by itself (the game asked to quit, or the thread died).
     pub left_play: bool,
 }
 
-/// The build, the render thread and the mode.
+/// The preview and bake jobs, the render thread and the mode.
 pub struct Studio {
-    job: Option<BuildJob>,
-    /// The document the current build was made from.
+    preview_job: Option<Job<Built>>,
+    bake_job: Option<BakeJob>,
+    /// The document last sent to a preview job, good or not: the same one is
+    /// not tried twice.
+    wanted: Option<Document>,
+    /// When the document was last seen to change.
+    changed_at: Instant,
+    /// A bake finished: the next preview picks up its lightmap.
+    refresh: bool,
+    /// The document the picture was made from.
     built_doc: Option<Document>,
+    /// The lighting of that picture.
+    light: Light,
+    /// Identifies its full lightmap.
+    light_key: u64,
+    /// The full lightmap that could not be baked.
+    failed_bake: Option<u64>,
+    /// Why the current document cannot be shown.
+    error: Option<String>,
+    /// Play starts when a preview of the current document is up.
+    play_pending: bool,
+    /// The empty level's text is up.
+    empty: bool,
+    /// The note last sent to the picture.
+    banner: Option<&'static str>,
     unplayable: Option<String>,
     worker: Option<Worker>,
     handle: Option<JoinHandle<()>>,
@@ -58,17 +85,13 @@ pub struct Studio {
     retired: Vec<JoinHandle<()>>,
     pub mode: Mode,
     camera: FlyCam,
-    /// Progress of the running build, `0..=STEPS`.
-    pub progress: u32,
-    check_stale: bool,
-    /// The last lightmap, so a rebuild after a pure texture edit skips the bake.
+    /// The last lightmap, so an edit that keeps the faces and lights skips the
+    /// bake.
     cache: SharedCache,
-    /// A cache file path set while a bake held the cache (`Some(None)`: no
-    /// file), applied by the next tick or build.
+    /// A cache file path set while a job held the cache (`Some(None)`: no
+    /// file), applied by the next tick.
     pending_path: Option<Option<PathBuf>>,
     highlights: Highlights,
-    /// The document changed since texture-only edits were last looked for.
-    recheck: bool,
 }
 
 /// The internal render size for a pane of `pane` pixels: the pane divided by
@@ -82,41 +105,34 @@ pub fn frame_size(pane: (u32, u32), max_width: u32) -> (u32, u32) {
 impl Studio {
     pub fn new(doc: &Document) -> Studio {
         Studio {
-            job: None,
+            preview_job: None,
+            bake_job: None,
+            wanted: None,
+            changed_at: Instant::now(),
+            refresh: false,
             built_doc: None,
+            light: Light::Draft,
+            light_key: 0,
+            failed_bake: None,
+            error: None,
+            play_pending: false,
+            empty: false,
+            banner: None,
             unplayable: None,
             worker: None,
             handle: None,
             retired: Vec::new(),
             mode: Mode::Edit,
             camera: FlyCam::for_document(doc),
-            progress: 0,
-            check_stale: false,
             cache: SharedCache::default(),
             pending_path: None,
             highlights: Highlights::default(),
-            recheck: false,
         }
     }
 
-    pub fn building(&self) -> bool {
-        self.job.is_some()
-    }
-
-    pub fn has_build(&self) -> bool {
-        self.built_doc.is_some()
-    }
-
-    /// Whether the built level no longer matches `doc`.
-    pub fn stale(&self, doc: &Document) -> bool {
-        self.built_doc.as_ref().is_some_and(|d| d != doc)
-    }
-
-    /// Tells the picture whether it is out of date.
-    pub fn set_stale(&self, stale: bool) {
-        if let Some(w) = &self.worker {
-            w.stale(stale);
-        }
+    /// Whether the picture was made from `doc`, so Play can start on it now.
+    pub fn is_current(&self, doc: &Document) -> bool {
+        self.built_doc.as_ref() == Some(doc)
     }
 
     /// Render threads still running, including ones told to stop.
@@ -126,14 +142,27 @@ impl Studio {
         usize::from(self.handle.is_some()) + retired
     }
 
-    /// Resets the camera for a new document and forgets the build.
+    /// Resets the camera for a new document and forgets the old one.
     pub fn reset(&mut self, doc: &Document) {
-        self.job = None;
-        self.retire_worker();
-        self.built_doc = None;
-        self.unplayable = None;
+        self.forget_build();
+        self.empty = false;
         self.mode = Mode::Edit;
         self.camera = FlyCam::for_document(doc);
+    }
+
+    /// Drops the picture and everything being prepared for it.
+    fn forget_build(&mut self) {
+        self.preview_job = None;
+        self.bake_job = None;
+        self.retire_worker();
+        self.built_doc = None;
+        self.wanted = None;
+        self.refresh = false;
+        self.light = Light::Draft;
+        self.failed_bake = None;
+        self.error = None;
+        self.play_pending = false;
+        self.unplayable = None;
     }
 
     /// Puts the fly camera back where a new document starts.
@@ -161,11 +190,6 @@ impl Studio {
         }
     }
 
-    /// The document changed: look for a texture-only edit on the next tick.
-    pub fn note_edit(&mut self) {
-        self.recheck = true;
-    }
-
     /// The lightmap cache shared by every build.
     #[cfg(test)]
     pub fn cache(&self) -> SharedCache {
@@ -174,7 +198,7 @@ impl Studio {
 
     /// Points the lightmap cache at the file for `level`: `<level>.msl.lit`
     /// beside a saved level, else the per-user cache directory. Never waits
-    /// for a running bake: the path is applied once the cache is free.
+    /// for a job: the path is applied once the cache is free.
     pub fn set_cache_level(&mut self, level: Option<&Path>) {
         self.point_cache_at(lightcache::path_for(level, "untitled"));
     }
@@ -187,30 +211,31 @@ impl Studio {
         }
     }
 
-    /// Applies a path that had to wait for a bake to finish.
+    /// Applies a path that had to wait for a job to let go of the cache.
     fn flush_cache_path(&mut self) {
         if let Some(path) = self.pending_path.take() {
             self.point_cache_at(path);
         }
     }
 
-    /// Save: moves the cache file next to `level` and, when the build still
-    /// has the geometry of `doc`, writes the current bake there. Returns a
-    /// note for the status bar when a file was written. A bake in progress
-    /// holds the cache, and the editor must not freeze behind it: the file
-    /// then moves after the bake and a second Save writes it.
+    /// Save: moves the cache file next to `level` and, when the picture is
+    /// fully lit with the geometry of `doc`, writes that bake there; a bake
+    /// still to come writes there by itself. Returns a note for the status bar
+    /// when a file was written. A job holding the cache for a moment must not
+    /// freeze the editor: the file then moves right after it.
     pub fn save_lightmap(&mut self, level: &Path, doc: &Document) -> Option<String> {
         let path = lightcache::path_for(Some(level), "untitled")?;
-        let current = self
-            .built_doc
-            .as_ref()
-            .is_some_and(|d| d.same_geometry(doc));
+        let current = self.light == Light::Full
+            && self
+                .built_doc
+                .as_ref()
+                .is_some_and(|d| d.same_geometry(doc));
         let mut cache = match self.cache.try_lock() {
             Ok(c) => c,
             Err(TryLockError::Poisoned(p)) => p.into_inner(),
             Err(TryLockError::WouldBlock) => {
                 self.pending_path = Some(Some(path));
-                return current.then(|| "lightmap not cached yet: a build is running".to_string());
+                return current.then(|| "lightmap not cached yet: the cache is busy".to_string());
             }
         };
         if !current {
@@ -224,25 +249,6 @@ impl Studio {
         }
     }
 
-    /// Whether `doc` differs from the build only in materials and mappings,
-    /// which the lightmap does not depend on.
-    fn texture_only_change(&self, doc: &Document) -> bool {
-        self.built_doc
-            .as_ref()
-            .is_some_and(|d| d != doc && d.same_geometry(doc))
-    }
-
-    /// After a texture-only edit: rebuilds in the background. The cached
-    /// lightmap is reused, so the new mapping shows within a fraction of a
-    /// second and the log stays quiet.
-    fn refresh_textures(&mut self, doc: &Document) {
-        self.flush_cache_path();
-        if let Ok(mut job) = build::start_cached(doc, false, &self.cache) {
-            job.quiet = true;
-            self.job = Some(job);
-        }
-    }
-
     /// Moves the fly camera.
     pub fn set_camera(&mut self, fly: FlyCam) {
         if let Some(w) = &self.worker {
@@ -251,22 +257,10 @@ impl Studio {
         self.camera = fly;
     }
 
-    /// Starts a build unless one is running. `then_play` starts Play when it
-    /// succeeds. Errors are messages for the status bar and log.
-    pub fn start_build(&mut self, doc: &Document, then_play: bool) -> Result<(), String> {
-        if self.job.is_some() {
-            return Err("a build is already running".into());
-        }
-        self.flush_cache_path();
-        self.job = Some(build::start_cached(doc, then_play, &self.cache)?);
-        self.progress = 0;
-        Ok(())
-    }
-
-    /// Enters Play on the current build.
+    /// Enters Play on the level in the picture.
     pub fn enter_play(&mut self) -> Result<(), String> {
         let Some(w) = &self.worker else {
-            return Err("build the level first".into());
+            return Err("the level is not ready yet".into());
         };
         if let Some(why) = &self.unplayable {
             return Err(format!("cannot play: {why}"));
@@ -284,13 +278,9 @@ impl Studio {
         }
     }
 
-    /// Gives a new render thread a finished level (a build's product),
-    /// keeping the camera where the old one left it.
+    /// Shows a finished level: on the running render thread, or a new one
+    /// when there is none yet.
     fn attach(&mut self, scene: Box<dyn Scene>, doc: Document, unplayable: Option<String>) {
-        if let Some(c) = self.worker.as_ref().and_then(Worker::current_camera) {
-            self.camera = c;
-        }
-        self.retire_worker();
         let delay = worker::slow_ms();
         let scene: Box<dyn Scene> = if delay > 0 {
             Box::new(Slow {
@@ -300,28 +290,42 @@ impl Studio {
         } else {
             scene
         };
-        match Worker::spawn(scene, self.camera.clone()) {
-            Ok((w, h)) => {
-                w.highlights(&self.highlights);
-                self.worker = Some(w);
-                self.handle = Some(h);
-                self.built_doc = Some(doc);
-                self.unplayable = unplayable;
-                self.check_stale = true;
+        if let Some(w) = &mut self.worker {
+            w.scene(scene);
+        } else {
+            match Worker::spawn(scene, self.camera.clone()) {
+                Ok((w, h)) => {
+                    w.highlights(&self.highlights);
+                    self.worker = Some(w);
+                    self.handle = Some(h);
+                    self.banner = None;
+                }
+                Err(e) => {
+                    self.built_doc = None;
+                    self.error = Some(e);
+                    return;
+                }
             }
-            Err(_) => self.built_doc = None,
         }
+        self.built_doc = Some(doc);
+        self.unplayable = unplayable;
     }
 
-    /// Starts a render thread on `scene` as if a build of `doc` had finished
-    /// (tests drive the thread with their own scenes).
+    /// Starts a render thread on `scene` as if a fully lit preview of `doc`
+    /// had finished (tests drive the thread with their own scenes).
     #[cfg(test)]
     pub fn attach_scene(&mut self, scene: Box<dyn Scene>, doc: &Document) {
+        self.wanted = Some(doc.clone());
+        self.light = Light::Full;
         self.attach(scene, doc.clone(), None);
     }
 
     fn retire_worker(&mut self) {
         if let Some(w) = self.worker.take() {
+            // The next thread starts where this one left the camera.
+            if let Some(c) = w.current_camera() {
+                self.camera = c;
+            }
             w.stop();
         }
         if let Some(h) = self.handle.take() {
@@ -329,23 +333,15 @@ impl Studio {
         }
     }
 
-    /// Forwards the pane's `events`, polls the build and collects what the
-    /// render thread produced. `pane` is the visible pane's size in pixels
-    /// (zero when hidden); `doc` the current document. Never blocks.
+    /// Forwards the pane's `events`, brings the picture up to `doc` and
+    /// collects what the render thread produced. `pane` is the visible pane's
+    /// size in pixels (zero when hidden). Never blocks.
     pub fn tick(&mut self, events: &[Event], pane: (u32, u32), doc: &Document) -> Tick {
         let mut out = Tick::default();
         self.flush_cache_path();
-        self.poll_build(&mut out);
+        self.sync_preview(doc, &mut out);
         self.retired.retain(|h| !h.is_finished());
-        if self.recheck && self.job.is_none() && self.mode == Mode::Edit && self.worker.is_some() {
-            self.recheck = false;
-            if self.texture_only_change(doc) {
-                self.refresh_textures(doc);
-            }
-        }
-        if std::mem::take(&mut self.check_stale) {
-            self.set_stale(self.stale(doc));
-        }
+        self.sync_banner(doc);
         let size = if pane.0 == 0 || pane.1 == 0 {
             (0, 0)
         } else {
@@ -354,6 +350,7 @@ impl Studio {
         let Some(w) = self.worker.as_mut() else {
             return out;
         };
+        w.flush();
         w.size(size.0, size.1);
         w.input(events);
         let error = w.take_error();
@@ -373,77 +370,31 @@ impl Studio {
         out
     }
 
+    /// Keeps the note on the picture true.
+    fn sync_banner(&mut self, doc: &Document) {
+        let Some(banner) = self.preview(doc).banner() else {
+            return;
+        };
+        if banner != self.banner
+            && let Some(w) = &self.worker
+            && w.banner(banner)
+        {
+            self.banner = banner;
+        }
+    }
+
     /// The render thread died: report it and fall back to editing. The
-    /// document is untouched; building again starts a fresh thread.
+    /// document is untouched; the next edit starts a fresh thread.
     fn lose_worker(&mut self, why: &str, out: &mut Tick) {
         self.retire_worker();
         self.built_doc = None;
+        // Not retried for the same document: a scene that panics would panic
+        // again, as often as it could be rebuilt.
+        self.error = Some(format!("the render thread failed: {why}"));
         out.left_play = self.mode == Mode::Play;
         self.mode = Mode::Edit;
         out.status = Some(format!("Render thread failed: {why}"));
         out.log.push(format!("ERROR: render thread failed: {why}"));
-    }
-
-    fn poll_build(&mut self, out: &mut Tick) {
-        let Some(job) = self.job.as_mut() else { return };
-        let then_play = job.then_play;
-        let quiet = job.quiet;
-        let started = job.started;
-        let mut finished = None;
-        for u in job.poll() {
-            match u {
-                Update::Step { step, text } => {
-                    self.progress = step;
-                    if !quiet {
-                        out.status = Some(format!("Building {step}/{STEPS}: {text}"));
-                        out.log.push(text);
-                    }
-                }
-                Update::Finished(r) => finished = Some(r),
-            }
-        }
-        let Some(result) = finished else { return };
-        let job = self.job.take();
-        match result {
-            Ok(built) => {
-                let doc = job.map(|j| j.doc).unwrap_or_default();
-                let why = built.unplayable().map(str::to_string);
-                let note = why
-                    .as_ref()
-                    .map(|w| format!(" (view only: {w})"))
-                    .unwrap_or_default();
-                let lit = built.report.as_ref().map_or("", |r| match r.source {
-                    mscent_render::Source::Baked => "; lightmap baked",
-                    mscent_render::Source::File => "; lightmap loaded from cache",
-                    mscent_render::Source::Memory => "; lightmap reused, no bake",
-                });
-                out.status = Some(format!(
-                    "Build finished in {:.1} s{lit}{note}",
-                    started.elapsed().as_secs_f32()
-                ));
-                if quiet {
-                    let how = match built.bake {
-                        Some(mscent_render::Source::Baked) => "re-baked",
-                        _ => "lightmap kept",
-                    };
-                    out.status = Some(format!(
-                        "Texture mapping updated in {} ms ({how})",
-                        started.elapsed().as_millis()
-                    ));
-                }
-                out.play_now = then_play && why.is_none();
-                if then_play && !out.play_now {
-                    out.status = Some(format!("Cannot play{note}"));
-                }
-                self.mode = Mode::Edit;
-                self.attach(Box::new(LevelScene::new(built)), doc, why);
-            }
-            Err(e) => {
-                out.status = Some(format!("Build failed: {e}"));
-                out.log.push(format!("ERROR: {e}"));
-            }
-        }
-        self.progress = 0;
     }
 }
 
@@ -465,6 +416,8 @@ Q/E: roll   Shift: fast";
 
 #[cfg(test)]
 mod cache_lock_tests;
+#[cfg(test)]
+mod preview_tests;
 #[cfg(test)]
 mod race_tests;
 #[cfg(test)]

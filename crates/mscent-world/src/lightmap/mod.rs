@@ -29,7 +29,7 @@ mod store_tests;
 mod tests;
 
 pub use atlas::{Atlas, AtlasError, PADDING, Rect};
-pub use bake::{FaceGrid, Lightmap, MAX_SHADOW_SAMPLES, bake};
+pub use bake::{FaceGrid, Lightmap, MAX_SHADOW_SAMPLES, bake, bake_cancellable};
 pub use uv::{FaceProjection, MAX_FACE_LUXELS};
 
 use mscent_math::Vec3;
@@ -139,6 +139,8 @@ pub enum LightmapError {
     InvalidConfig,
     /// The atlas could not hold every face.
     Atlas(AtlasError),
+    /// The caller abandoned the bake.
+    Cancelled,
 }
 
 impl From<AtlasError> for LightmapError {

@@ -1,4 +1,4 @@
-//! The edit, build, play, return, edit loop, driven without a window, and the
+//! The edit, play, return, edit loop, driven without a window, and the
 //! render thread's promise that a slow scene never slows the UI.
 
 use std::sync::Arc;
@@ -17,13 +17,12 @@ fn showcase() -> Document {
     Document::from_level(&mscent_world::showcase_level())
 }
 
-fn build_and_wait(studio: &mut Studio, doc: &Document, then_play: bool) -> Tick {
-    studio.start_build(doc, then_play).expect("starts");
-    loop {
-        let t = studio.tick(&[], PANE, doc);
-        if !studio.building() {
-            return t;
-        }
+/// Ticks until the picture of `doc` is up and fully lit.
+fn settle(studio: &mut Studio, doc: &Document) {
+    let end = Instant::now() + Duration::from_secs(60);
+    while studio.preview(doc) != Preview::Full {
+        studio.tick(&[], PANE, doc);
+        assert!(Instant::now() < end, "never settled");
         std::thread::sleep(Duration::from_millis(5));
     }
 }
@@ -56,7 +55,7 @@ fn rgba_of(fb: &Framebuffer) -> Vec<u8> {
 fn editor_view_is_pixel_identical_to_the_renderer_for_the_same_camera() {
     let doc = showcase();
     let mut studio = Studio::new(&doc);
-    build_and_wait(&mut studio, &doc, false);
+    settle(&mut studio, &doc);
     let mut cam = FlyCam::new(mscent_math::Vec3::new(2.0, -3.0, 2.0), 0.7, -0.2);
     cam.roll = 0.25;
     studio.set_camera(cam.clone());
@@ -92,12 +91,14 @@ fn edit_play_return_edit_again_leaves_the_document_alone_and_leaks_no_thread() {
     let doc = showcase();
     let before = doc.clone();
     let mut studio = Studio::new(&doc);
-    assert_eq!(studio.enter_play().unwrap_err(), "build the level first");
+    assert_eq!(
+        studio.enter_play().unwrap_err(),
+        "the level is not ready yet"
+    );
     assert_eq!(studio.worker_threads(), 0);
 
-    let t = build_and_wait(&mut studio, &doc, true);
-    assert!(t.play_now && !t.log.is_empty());
-    assert!(!studio.stale(&doc));
+    settle(&mut studio, &doc);
+    assert!(studio.is_current(&doc));
     assert_eq!(studio.worker_threads(), 1);
     let edit = next_frame(&mut studio, &doc, &[]);
 
@@ -143,22 +144,21 @@ fn edit_play_return_edit_again_leaves_the_document_alone_and_leaks_no_thread() {
         );
     }
 
-    // Edit again: the build goes stale, rebuilding retires the old thread.
+    // Edit again: Play waits for the new picture, on the same thread.
     let mut state = crate::model::EditorState::new(doc);
     state
         .add_box([40.0, 40.0, 0.0], [44.0, 44.0, 3.0])
         .expect("added");
-    assert!(studio.stale(&state.doc));
-    let t = build_and_wait(&mut studio, &state.doc, true);
-    assert!(t.play_now);
-    studio.enter_play().expect("plays again");
-    assert_eq!(next_frame(&mut studio, &state.doc, &[]).mode, Mode::Play);
-    let end = Instant::now() + Duration::from_secs(10);
-    while studio.worker_threads() != 1 {
-        studio.tick(&[], PANE, &state.doc);
-        assert!(Instant::now() < end, "the old render thread never ended");
+    assert!(!studio.is_current(&state.doc));
+    studio.play_when_ready(&state.doc).expect("will play");
+    let end = Instant::now() + Duration::from_secs(60);
+    while !studio.tick(&[], PANE, &state.doc).play_now {
+        assert!(Instant::now() < end, "Play never started");
         std::thread::sleep(Duration::from_millis(5));
     }
+    studio.enter_play().expect("plays again");
+    assert_eq!(next_frame(&mut studio, &state.doc, &[]).mode, Mode::Play);
+    assert_eq!(studio.worker_threads(), 1);
     studio.reset(&state.doc);
     let end = Instant::now() + Duration::from_secs(10);
     while studio.worker_threads() != 0 {
@@ -166,25 +166,17 @@ fn edit_play_return_edit_again_leaves_the_document_alone_and_leaks_no_thread() {
         assert!(Instant::now() < end, "reset left a render thread running");
         std::thread::sleep(Duration::from_millis(5));
     }
-    assert!(!studio.has_build());
+    assert!(!studio.is_current(&state.doc));
 }
 
 #[test]
-fn failed_build_reports_and_leaves_the_studio_usable() {
+fn an_empty_level_is_refused_for_play_and_leaves_the_studio_usable() {
     let doc = showcase();
     let mut studio = Studio::new(&doc);
-    let err = studio.start_build(&Document::new(), false).unwrap_err();
+    let err = studio.play_when_ready(&Document::new()).unwrap_err();
     assert!(err.contains("no brushes"), "{err}");
-    assert!(!studio.building());
-    build_and_wait(&mut studio, &doc, false);
-    assert!(studio.has_build());
-    // A second request while one runs is refused, not queued.
-    studio.start_build(&doc, false).expect("starts");
-    assert!(studio.start_build(&doc, false).is_err());
-    while studio.building() {
-        studio.tick(&[], PANE, &doc);
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    settle(&mut studio, &doc);
+    assert!(studio.is_current(&doc));
 }
 
 #[test]
@@ -348,8 +340,11 @@ fn a_panicking_scene_is_reported_and_the_editor_stays_up() {
         "{status}"
     );
     assert_eq!(studio.mode, Mode::Edit);
-    assert!(!studio.has_build());
-    assert_eq!(studio.enter_play().unwrap_err(), "build the level first");
+    assert!(!studio.is_current(&doc));
+    assert_eq!(
+        studio.enter_play().unwrap_err(),
+        "the level is not ready yet"
+    );
 }
 
 #[test]

@@ -31,6 +31,9 @@ pub(super) fn add_bounce(s: &Scene, rows: &[(usize, u32)], grids: &mut [Vec<Luxe
         return;
     }
     let extra = par_map(s.cfg.workers, rows.len(), |i| {
+        if s.cancelled() {
+            return Vec::new();
+        }
         gather_row(s, &patches, rows[i].0, rows[i].1)
     });
     let extra = rows_to_grids(s.proj, extra);

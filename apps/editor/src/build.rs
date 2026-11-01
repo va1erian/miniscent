@@ -1,35 +1,48 @@
-//! The Build command: validation, CSG, faces, portals and the lightmap bake
-//! on a worker thread, reported as progress messages. Errors (an invalid
-//! brush, a CSG failure, a panic in the worker) come back as text and never
-//! take the editor down.
+//! Turning the document into something the 3D pane can draw, off the UI
+//! thread, in two stages. A preview job compiles the level and lights it with
+//! the stored lightmap or a draft, in milliseconds, and runs for every edit. A
+//! bake job traces the full lightmap, however long that takes, and can be
+//! dropped when the level changes. Errors (an invalid brush, a CSG failure, a
+//! panic in a job) come back as text and never take the editor down.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Instant;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, TryRecvError, channel};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use miniscent_game::assets::load_materials;
 use miniscent_game::{GameSession, SessionConfig};
 use mscent_game::{Arena, LoadError};
-use mscent_render::{BakeCache, BakeReport, BuildConfig, LevelRenderer, Source};
-use mscent_world::{Entity, Level, Portals, compile, extract_faces};
+use mscent_render::{
+    BakeCache, BakeReport, BuildError, Compiled, LevelRenderer, MaterialTable, Source,
+};
+use mscent_world::lightmap::LightmapError;
+use mscent_world::{Entity, Level};
 
 use crate::model::Document;
 
-/// Number of progress steps a build reports.
-pub const STEPS: u32 = 6;
-
-/// The last lightmap, shared by every build so a rebuild that changed only
-/// texture mappings does not bake again.
+/// The last full lightmap, shared by every job: an edit that leaves faces and
+/// lights alone gets it back with no bake. Held only for moments, never for a
+/// bake.
 pub type SharedCache = Arc<Mutex<BakeCache>>;
 
-/// A compiled and baked level.
+/// How good the lighting of a preview is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Light {
+    /// Coarse, standing in until the full bake is done.
+    Draft,
+    /// The full lightmap: what the game ships with.
+    Full,
+}
+
+/// A compiled and lit level.
 pub struct Built {
     /// What the 3D pane and Play use.
     pub product: Product,
-    /// Where the lightmap came from: a bake, or the cache.
-    pub bake: Option<Source>,
-    /// The cache's account of it: timing, file, why a file was ignored.
+    pub light: Light,
+    /// Identifies the full lightmap of this level.
+    pub light_key: u64,
+    /// The cache's account of a [`Light::Full`] lightmap.
     pub report: Option<BakeReport>,
 }
 
@@ -45,6 +58,13 @@ impl Built {
         match &self.product {
             Product::Playable(s) => s.renderer(),
             Product::ViewOnly(r, _) => r,
+        }
+    }
+
+    pub fn into_renderer(self) -> LevelRenderer {
+        match self.product {
+            Product::Playable(s) => s.into_renderer(),
+            Product::ViewOnly(r, _) => *r,
         }
     }
 
@@ -64,22 +84,38 @@ impl Built {
     }
 }
 
-/// What the worker tells the UI.
-pub enum Update {
-    Step { step: u32, text: String },
-    Finished(Result<Built, String>),
+/// A job running on its own thread.
+pub struct Job<T> {
+    rx: Receiver<Result<T, String>>,
+    /// The document the job works on.
+    pub doc: Document,
 }
 
-/// A running build.
-pub struct BuildJob {
-    rx: Receiver<Update>,
-    /// The document being built, to tell later whether the result is stale.
-    pub doc: Document,
-    /// Start playing as soon as the build succeeds.
-    pub then_play: bool,
-    pub started: Instant,
-    /// A background refresh (texture edits): it does not write the log.
-    pub quiet: bool,
+impl<T> Job<T> {
+    /// The result, once there is one. A thread that vanished without one is
+    /// reported as a failure.
+    pub fn poll(&self) -> Option<Result<T, String>> {
+        match self.rx.try_recv() {
+            Ok(r) => Some(r),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => Some(Err("the build thread stopped".into())),
+        }
+    }
+}
+
+/// A full bake in progress. Dropping it cancels the bake.
+pub struct BakeJob {
+    /// The report of the finished bake; `None` when it was cancelled.
+    pub job: Job<Option<BakeReport>>,
+    /// The lightmap being baked, as in [`Built::light_key`].
+    pub key: u64,
+    cancel: Arc<AtomicBool>,
+}
+
+impl Drop for BakeJob {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::Relaxed);
+    }
 }
 
 /// Checks every brush and the entities, naming the first problem. The
@@ -102,30 +138,25 @@ pub fn validate(doc: &Document) -> Result<Level, String> {
     Ok(Level { brushes, entities })
 }
 
-/// Starts a build of `doc` on a worker thread, baking through `cache`.
-pub fn start_cached(
+/// Runs `work` on `doc` on a new thread; a panic becomes an error text.
+fn spawn<T: Send + 'static>(
+    name: &str,
     doc: &Document,
-    then_play: bool,
-    cache: &SharedCache,
-) -> Result<BuildJob, String> {
-    let level = validate(doc)?;
+    work: impl FnOnce(&Document) -> Result<T, String> + Send + 'static,
+) -> Result<Job<T>, String> {
     let (tx, rx) = channel();
-    let tx2 = tx.clone();
-    let cache = Arc::clone(cache);
+    let copy = doc.clone();
     std::thread::Builder::new()
-        .name("mscent-build".into())
+        .name(name.into())
         .spawn(move || {
-            let result = catch_unwind(AssertUnwindSafe(|| work(&level, &tx, &cache)))
+            let result = catch_unwind(AssertUnwindSafe(|| work(&copy)))
                 .unwrap_or_else(|p| Err(format!("the build crashed: {}", panic_text(&*p))));
-            let _ = tx2.send(Update::Finished(result));
+            let _ = tx.send(result);
         })
         .map_err(|e| format!("cannot start the build thread: {e}"))?;
-    Ok(BuildJob {
+    Ok(Job {
         rx,
         doc: doc.clone(),
-        then_play,
-        started: Instant::now(),
-        quiet: false,
     })
 }
 
@@ -136,109 +167,128 @@ pub(crate) fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
         .unwrap_or_else(|| "unknown panic".into())
 }
 
-impl BuildJob {
-    /// Everything the worker has reported since the last call. A worker that
-    /// vanished without a result is reported as a failure.
-    pub fn poll(&mut self) -> Vec<Update> {
-        let mut out = Vec::new();
-        loop {
-            match self.rx.try_recv() {
-                Ok(u) => out.push(u),
-                Err(std::sync::mpsc::TryRecvError::Empty) => return out,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    if !out.iter().any(|u| matches!(u, Update::Finished(_))) {
-                        out.push(Update::Finished(Err("the build thread stopped".into())));
-                    }
-                    return out;
-                }
-            }
+/// Starts the job that makes `doc` visible as fast as possible.
+pub fn start_preview(doc: &Document, cache: &SharedCache) -> Result<Job<Built>, String> {
+    let cache = Arc::clone(cache);
+    spawn("mscent-preview", doc, move |doc| preview(doc, &cache))
+}
+
+/// Starts the full bake of `doc`, whose [`Built::light_key`] is `key`.
+pub fn start_bake(doc: &Document, key: u64, cache: &SharedCache) -> Result<BakeJob, String> {
+    let cache = Arc::clone(cache);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&cancel);
+    let job = spawn("mscent-bake", doc, move |doc| bake(doc, &cache, &flag))?;
+    Ok(BakeJob { job, key, cancel })
+}
+
+/// One decode for the whole session: at 67 ms it would be most of the cost of
+/// a preview, and a clone shares the pixels.
+fn materials() -> Result<MaterialTable, String> {
+    static TABLE: OnceLock<Result<MaterialTable, String>> = OnceLock::new();
+    TABLE.get_or_init(|| load_materials(None)).clone()
+}
+
+fn lock(cache: &SharedCache) -> std::sync::MutexGuard<'_, BakeCache> {
+    cache.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn compile_level(level: &Level, cfg: &SessionConfig) -> Result<Compiled, String> {
+    Compiled::new(level, &cfg.build).map_err(|e| format!("CSG failed: {e:?}"))
+}
+
+fn preview(doc: &Document, cache: &SharedCache) -> Result<Built, String> {
+    let level = validate(doc)?;
+    let cfg = SessionConfig::default();
+    let compiled = compile_level(&level, &cfg)?;
+    let light_key = compiled.light_key();
+    let stored = {
+        let mut cache = lock(cache);
+        let map = compiled.stored(&mut cache);
+        map.map(|m| (m, cache.last_report().cloned()))
+    };
+    let (map, light, report) = match stored {
+        Some((map, report)) => (map, Light::Full, report),
+        None => {
+            let draft = compiled
+                .draft()
+                .map_err(|e| format!("draft failed: {e:?}"))?;
+            (Arc::new(draft), Light::Draft, None)
         }
+    };
+    let renderer = compiled
+        .into_renderer(map, materials()?)
+        .map_err(|e| format!("cannot prepare the level: {e:?}"))?;
+    Ok(Built {
+        product: product(&level, renderer, &cfg),
+        light,
+        light_key,
+        report,
+    })
+}
+
+fn product(level: &Level, renderer: LevelRenderer, cfg: &SessionConfig) -> Product {
+    match Arena::from_level(level) {
+        Ok(arena) => Product::Playable(Box::new(GameSession::with_renderer(arena, renderer, cfg))),
+        Err(LoadError::NoPlayerStart) => {
+            Product::ViewOnly(Box::new(renderer), "the level has no player start".into())
+        }
+        Err(LoadError::NoGoal) => {
+            Product::ViewOnly(Box::new(renderer), "the level has no goal".into())
+        }
+        Err(other) => Product::ViewOnly(
+            Box::new(renderer),
+            format!("the level cannot be played ({other:?})"),
+        ),
     }
 }
 
-fn work(level: &Level, tx: &Sender<Update>, cache: &SharedCache) -> Result<Built, String> {
-    let t0 = Instant::now();
-    let note = |step: u32, text: String| {
-        let _ = tx.send(Update::Step { step, text });
-    };
-    note(
-        1,
-        format!(
-            "Checked {} brushes and {} entities",
-            level.brushes.len(),
-            level.entities.len()
-        ),
-    );
-    let t = Instant::now();
-    let bsp = compile(&level.brushes).map_err(|e| format!("CSG failed: {e:?}"))?;
-    note(
-        2,
-        format!(
-            "CSG: {} nodes, {} leaves, {} ms",
-            bsp.nodes().len(),
-            bsp.leaves().len(),
-            t.elapsed().as_millis()
-        ),
-    );
-    let faces = extract_faces(&bsp, &level.brushes);
-    note(3, format!("Faces: {}", faces.len()));
-    let portals = Portals::build(&bsp);
-    note(4, format!("Portals: {}", portals.portals().len()));
-    drop((faces, portals, bsp));
-    let materials = load_materials(None)?;
-    note(5, "Lightmap: using the cache, baking only if needed".into());
-    let cfg = SessionConfig::default();
-    let mut cache = cache.lock().unwrap_or_else(PoisonError::into_inner);
-    let product = match Arena::from_level(level) {
-        Ok(_) => Product::Playable(Box::new(
-            GameSession::new_cached(level, materials, &cfg, &mut cache)
-                .map_err(|e| e.to_string())?,
-        )),
-        Err(e) => {
-            let why = match e {
-                LoadError::NoPlayerStart => "the level has no player start".to_string(),
-                LoadError::NoGoal => "the level has no goal".to_string(),
-                other => format!("the level cannot be played ({other:?})"),
-            };
-            let renderer = LevelRenderer::from_level_cached(
-                level,
-                materials,
-                &BuildConfig::default(),
-                &mut cache,
-            )
-            .map_err(|e| format!("bake failed: {e:?}"))?;
-            Product::ViewOnly(Box::new(renderer), why)
-        }
-    };
-    let report = cache.last_report().cloned();
-    let bake = report.as_ref().map(|r| r.source);
-    drop(cache);
-    let lit = match &product {
-        Product::Playable(s) => s.renderer().lightmap().projections().len(),
-        Product::ViewOnly(r, _) => r.lightmap().projections().len(),
-    };
-    let mut how = report
-        .as_ref()
-        .map_or_else(|| "lightmap baked".into(), BakeReport::describe);
-    how[..1].make_ascii_uppercase();
-    note(
-        6,
-        format!(
-            "{how}: {lit} lit faces. Build finished in {} ms",
-            t0.elapsed().as_millis()
-        ),
-    );
-    if let Product::ViewOnly(_, why) = &product {
-        let _ = tx.send(Update::Step {
-            step: STEPS,
-            text: format!("Not playable: {why}"),
-        });
+/// All cores but one: the render and UI threads keep running during a bake.
+fn bake_workers() -> usize {
+    std::thread::available_parallelism()
+        .map_or(1, usize::from)
+        .saturating_sub(1)
+        .max(1)
+}
+
+fn bake(
+    doc: &Document,
+    cache: &SharedCache,
+    cancel: &AtomicBool,
+) -> Result<Option<BakeReport>, String> {
+    let level = validate(doc)?;
+    let compiled = compile_level(&level, &SessionConfig::default())?;
+    // Looked up first so the report can say why a file was not good enough.
+    if compiled.stored(&mut lock(cache)).is_some() {
+        return Ok(lock(cache).last_report().cloned());
     }
-    Ok(Built {
-        product,
-        bake,
-        report,
-    })
+    // The cache stays free for the whole bake: previews and Save go on.
+    let baked = match compiled.bake(bake_workers(), cancel) {
+        Ok(b) => b,
+        Err(BuildError::Bake(LightmapError::Cancelled)) => return Ok(None),
+        Err(e) => return Err(format!("bake failed: {e:?}")),
+    };
+    if cancel.load(Ordering::Relaxed) {
+        return Ok(None);
+    }
+    let mut cache = lock(cache);
+    cache.store(baked);
+    Ok(cache.last_report().cloned())
+}
+
+/// A report as one sentence for the log.
+pub fn log_line(report: &BakeReport) -> String {
+    let mut line = report.describe();
+    if let Some(first) = line.get_mut(..1) {
+        first.make_ascii_uppercase();
+    }
+    line
+}
+
+/// Whether a preview's lightmap came from the file, which the log mentions; a
+/// memory hit happens on every edit and is not news.
+pub fn loaded_from_file(built: &Built) -> bool {
+    built.report.as_ref().map(|r| r.source) == Some(Source::File)
 }
 
 #[cfg(test)]
@@ -246,12 +296,10 @@ mod tests {
     use super::*;
     use mscent_world::Op;
 
-    fn wait(job: &mut BuildJob) -> Result<Built, String> {
+    fn wait<T>(job: &Job<T>) -> Result<T, String> {
         loop {
-            for u in job.poll() {
-                if let Update::Finished(r) = u {
-                    return r;
-                }
+            if let Some(r) = job.poll() {
+                return r;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
@@ -282,7 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn a_level_without_start_or_goal_builds_view_only() {
+    fn a_level_without_start_or_goal_previews_view_only() {
         let room = mscent_world::Brush::cuboid(
             mscent_math::Vec3d::new(-4.0, -4.0, -1.0),
             mscent_math::Vec3d::new(4.0, 4.0, 3.0),
@@ -294,39 +342,48 @@ mod tests {
             brushes: vec![room],
             entities: vec![],
         });
-        let mut job = start_cached(&doc, false, &SharedCache::default()).expect("starts");
-        let built = wait(&mut job).expect("builds");
+        let job = start_preview(&doc, &SharedCache::default()).expect("starts");
+        let built = wait(&job).expect("builds");
         assert!(built.unplayable().is_some());
     }
 
     #[test]
-    fn the_showcase_builds_playable_with_progress() {
+    fn the_showcase_previews_playable_on_a_draft_and_a_bake_makes_it_full() {
         let doc = Document::from_level(&mscent_world::showcase_level());
-        let mut job = start_cached(&doc, true, &SharedCache::default()).expect("starts");
-        let mut steps = Vec::new();
-        let mut lines = Vec::new();
-        let built = loop {
-            let mut done = None;
-            for u in job.poll() {
-                match u {
-                    Update::Step { step, text } => {
-                        steps.push(step);
-                        lines.push(text);
-                    }
-                    Update::Finished(r) => done = Some(r),
-                }
-            }
-            if let Some(r) = done {
-                break r.expect("builds");
-            }
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        };
-        assert!(built.unplayable().is_none());
-        assert!(
-            steps.windows(2).all(|w| w[0] < w[1]) && steps.len() >= 4,
-            "{steps:?}"
+        let cache = SharedCache::default();
+        let first = wait(&start_preview(&doc, &cache).expect("starts")).expect("builds");
+        assert!(first.unplayable().is_none());
+        assert_eq!(first.light, Light::Draft);
+        assert_eq!(
+            cache.lock().expect("cache").bakes(),
+            0,
+            "a draft is no bake"
         );
-        assert!(lines.iter().any(|l| l.starts_with("CSG:")), "{lines:?}");
-        assert!(lines.last().unwrap().contains("Build finished"));
+
+        let job = start_bake(&doc, first.light_key, &cache).expect("starts");
+        let report = wait(&job.job).expect("bakes").expect("not cancelled");
+        assert_eq!(report.source, Source::Baked);
+
+        let second = wait(&start_preview(&doc, &cache).expect("starts")).expect("builds");
+        assert_eq!(second.light, Light::Full);
+        assert_eq!(second.light_key, first.light_key);
+        assert_eq!(cache.lock().expect("cache").bakes(), 1);
+    }
+
+    #[test]
+    fn dropping_a_bake_job_cancels_it() {
+        let doc = Document::from_level(&mscent_world::showcase_level());
+        let cache = SharedCache::default();
+        let cancel = Arc::new(AtomicBool::new(true));
+        let flag = Arc::clone(&cancel);
+        let copy = Arc::clone(&cache);
+        let job = spawn("test-bake", &doc, move |d| bake(d, &copy, &flag)).expect("starts");
+        assert!(wait(&job).expect("runs").is_none(), "reported as cancelled");
+        assert_eq!(cache.lock().expect("cache").bakes(), 0, "nothing stored");
+
+        let job = start_bake(&doc, 0, &cache).expect("starts");
+        let flag = Arc::clone(&job.cancel);
+        drop(job);
+        assert!(flag.load(Ordering::Relaxed));
     }
 }

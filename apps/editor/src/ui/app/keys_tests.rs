@@ -48,7 +48,7 @@ fn wait(stage: &Stage<'_, Msg>, state: &Rc<RefCell<EditorState>>, done: impl Fn(
 }
 
 #[test]
-fn shortcuts_build_play_edit_and_select_tools_wherever_focus_is() {
+fn shortcuts_play_edit_and_select_tools_wherever_focus_is() {
     let probe: Rc<RefCell<Option<Handles>>> = Rc::new(RefCell::new(None));
     let p2 = probe.clone();
     let ran = Rc::new(Cell::new(false));
@@ -66,21 +66,20 @@ fn shortcuts_build_play_edit_and_select_tools_wherever_focus_is() {
             let tool = || state.borrow().tool;
             let brushes = || state.borrow().doc.brushes().len();
 
-            // F7 builds.
+            // There is nothing to build any more: F7 and Ctrl+B do nothing.
+            let before = state.borrow().message.clone();
             press(stage, Key::F7, Modifiers::NONE);
-            assert_eq!(state.borrow().message, "Building...");
-            wait(stage, state, |m| m.starts_with("Build finished"));
+            press(stage, Key::B, CTRL);
+            assert_eq!(state.borrow().message, before);
 
-            // F5 plays the fresh build; Esc comes back.
+            // F5 plays as soon as the first preview is up; Esc comes back.
             press(stage, Key::F5, Modifiers::NONE);
+            assert_eq!(state.borrow().message, "Preparing the level...");
             wait(stage, state, |m| m.starts_with("Playing"));
             press(stage, Key::ESCAPE, Modifiers::NONE);
             wait(stage, state, |m| m == "Back in the editor");
 
-            // Ctrl+B and Ctrl+R are the same commands on keys every backend sends.
-            press(stage, Key::B, CTRL);
-            assert_eq!(state.borrow().message, "Building...");
-            wait(stage, state, |m| m.starts_with("Build finished"));
+            // Ctrl+R is the same command on a key every backend sends.
             press(stage, Key::R, CTRL);
             wait(stage, state, |m| m.starts_with("Playing"));
             press(stage, Key::ESCAPE, Modifiers::NONE);
@@ -117,8 +116,9 @@ fn shortcuts_build_play_edit_and_select_tools_wherever_focus_is() {
             press(stage, Key::DELETE, Modifiers::NONE);
             assert_eq!(brushes(), before, "Delete edited the field");
             // Window-level shortcuts still work from the field.
-            press(stage, Key::F7, Modifiers::NONE);
-            assert_eq!(state.borrow().message, "Building...");
+            press(stage, Key::F5, Modifiers::NONE);
+            wait(stage, state, |m| m.starts_with("Playing"));
+            press(stage, Key::ESCAPE, Modifiers::NONE);
             ran.set(true);
         },
     )

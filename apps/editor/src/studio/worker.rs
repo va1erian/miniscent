@@ -4,8 +4,11 @@
 //! channel with `try_send`, frames come out through a one-slot mailbox read
 //! with `try_lock`, and a slow scene costs resolution (the adaptive scale),
 //! not UI responsiveness. Stale frames are replaced in the mailbox, never
-//! queued. A panic in the scene is caught and reported as an error text.
+//! queued. A panic in the scene is caught and reported as an error text. A new
+//! scene replaces the old one on the running thread, so the fly camera and any
+//! held key carry straight over an edit.
 
+use std::collections::VecDeque;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{
@@ -21,7 +24,7 @@ use mscent_render::{Framebuffer, View};
 
 use super::Mode;
 use super::highlight::Highlights;
-use crate::build::panic_text;
+use crate::build::{Built, panic_text};
 use crate::model::FlyCam;
 
 /// One frame every 1/60 s.
@@ -51,6 +54,9 @@ pub trait Scene: Send + 'static {
     fn step(&mut self, dt: Duration, events: &[Event], stats: FrameStats) -> bool;
     /// Draws the picture `req` asks for.
     fn render(&mut self, req: &Request) -> Option<&Framebuffer>;
+    /// Draws the same level with the light of `lit` from now on, leaving a
+    /// running game as it is.
+    fn relight(&mut self, _lit: Built) {}
 }
 
 /// A picture the thread is asked to draw.
@@ -60,8 +66,8 @@ pub struct Request {
     /// Game view (true) or the editor's fly camera.
     pub play: bool,
     pub view: View,
-    /// The level changed since the build: say so on the picture.
-    pub stale: bool,
+    /// A note about the picture to write on it.
+    pub banner: Option<&'static str>,
     /// Picked faces to tint and outline (editor view only).
     pub highlights: Highlights,
 }
@@ -93,6 +99,10 @@ impl Scene for Slow {
         std::thread::sleep(self.delay);
         self.inner.render(req)
     }
+
+    fn relight(&mut self, lit: Built) {
+        self.inner.relight(lit);
+    }
 }
 
 enum Cmd {
@@ -100,8 +110,10 @@ enum Cmd {
     Size(u32, u32),
     Mode(Mode),
     Camera(Box<FlyCam>),
-    Stale(bool),
+    Banner(Option<&'static str>),
     Highlights(Highlights),
+    Scene(Box<dyn Scene>),
+    Relight(Box<Built>),
 }
 
 #[derive(Default)]
@@ -133,6 +145,8 @@ pub struct Worker {
     shared: Arc<Shared>,
     size: (u32, u32),
     lost_input: bool,
+    /// Commands that must not be lost, waiting for room in the queue.
+    held: VecDeque<Cmd>,
 }
 
 impl Worker {
@@ -157,6 +171,7 @@ impl Worker {
             shared,
             size: (0, 0),
             lost_input: false,
+            held: VecDeque::new(),
         };
         Ok((w, handle))
     }
@@ -195,8 +210,31 @@ impl Worker {
         self.send(Cmd::Highlights(h.clone()));
     }
 
-    pub fn stale(&self, stale: bool) {
-        self.send(Cmd::Stale(stale));
+    /// Sets the note on the picture; false when the queue had no room for it.
+    pub fn banner(&self, banner: Option<&'static str>) -> bool {
+        self.send(Cmd::Banner(banner))
+    }
+
+    /// Replaces the scene on the running thread.
+    pub fn scene(&mut self, scene: Box<dyn Scene>) {
+        self.held.push_back(Cmd::Scene(scene));
+        self.flush();
+    }
+
+    /// Hands the current scene new light for the same level.
+    pub fn relight(&mut self, lit: Built) {
+        self.held.push_back(Cmd::Relight(Box::new(lit)));
+        self.flush();
+    }
+
+    /// Sends what was held back, in order, as far as the queue has room.
+    pub fn flush(&mut self) {
+        while let Some(cmd) = self.held.pop_front() {
+            if let Err(TrySendError::Full(cmd)) = self.tx.try_send(cmd) {
+                self.held.push_front(cmd);
+                return;
+            }
+        }
     }
 
     pub fn camera(&self, fly: &FlyCam) {
@@ -259,7 +297,7 @@ impl Adaptive {
 struct Loop {
     mode: Mode,
     size: (u32, u32),
-    stale: bool,
+    banner: Option<&'static str>,
     highlights: Highlights,
     dirty: bool,
     events: Vec<Event>,
@@ -267,7 +305,7 @@ struct Loop {
 }
 
 impl Loop {
-    fn apply(&mut self, cmd: Cmd, scene: &mut dyn Scene, sh: &Shared) {
+    fn apply(&mut self, cmd: Cmd, scene: &mut Box<dyn Scene>, sh: &Shared) {
         match cmd {
             Cmd::Input(mut e) => self.events.append(&mut e),
             Cmd::Size(w, h) => {
@@ -290,8 +328,16 @@ impl Loop {
                 *lock(&sh.camera) = Some(self.fly.clone());
                 self.dirty = true;
             }
-            Cmd::Stale(s) => {
-                self.stale = s;
+            Cmd::Banner(b) => {
+                self.banner = b;
+                self.dirty = true;
+            }
+            Cmd::Scene(s) => {
+                *scene = s;
+                self.dirty = true;
+            }
+            Cmd::Relight(lit) => {
+                scene.relight(*lit);
                 self.dirty = true;
             }
             Cmd::Highlights(h) => {
@@ -307,7 +353,7 @@ fn run(mut scene: Box<dyn Scene>, rx: &Receiver<Cmd>, sh: &Shared, fly: FlyCam) 
     let mut st = Loop {
         mode: Mode::Edit,
         size: (0, 0),
-        stale: false,
+        banner: None,
         highlights: Highlights::default(),
         dirty: true,
         events: Vec::new(),
@@ -322,7 +368,7 @@ fn run(mut scene: Box<dyn Scene>, rx: &Receiver<Cmd>, sh: &Shared, fly: FlyCam) 
         last = now;
         loop {
             match rx.try_recv() {
-                Ok(c) => st.apply(c, &mut *scene, sh),
+                Ok(c) => st.apply(c, &mut scene, sh),
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => return,
             }
@@ -341,7 +387,7 @@ fn run(mut scene: Box<dyn Scene>, rx: &Receiver<Cmd>, sh: &Shared, fly: FlyCam) 
         let deadline = now + TARGET;
         while let Some(left) = deadline.checked_duration_since(Instant::now()) {
             match rx.recv_timeout(left) {
-                Ok(c) => st.apply(c, &mut *scene, sh),
+                Ok(c) => st.apply(c, &mut scene, sh),
                 Err(RecvTimeoutError::Timeout) => break,
                 Err(RecvTimeoutError::Disconnected) => return,
             }
@@ -386,7 +432,7 @@ fn publish(st: &Loop, scene: &mut dyn Scene, sh: &Shared, (w, h): (u32, u32)) {
         h,
         play: st.mode == Mode::Play,
         view: st.fly.view(),
-        stale: st.stale,
+        banner: st.banner,
         highlights: st.highlights.clone(),
     };
     let Some(fb) = scene.render(&req) else { return };

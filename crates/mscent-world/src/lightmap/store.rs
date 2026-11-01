@@ -22,6 +22,9 @@ pub const VERSION: u16 = 3;
 pub const MAX_BYTES: usize = 256 << 20;
 const MAX_ATLAS_SIDE: u32 = 1 << 16;
 const MAX_FACES: usize = 1 << 20;
+/// Magic, version and key: enough to tell a file from other inputs without
+/// reading its atlas.
+pub const HEADER_BYTES: usize = 14;
 
 /// Why a stored lightmap was refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,6 +102,27 @@ pub fn input_key(faces: &[LightFace], lights: &[PointLight], cfg: &BakeConfig) -
         h.vec3(f.normal);
     }
     h.0
+}
+
+/// Checks the start of a stored lightmap, [`HEADER_BYTES`] of it or more,
+/// against `key`. A reader whose level changes constantly refuses a stale file
+/// with this instead of reading megabytes of it.
+pub fn check_header(data: &[u8], key: u64) -> Result<(), StoreError> {
+    read_header(&mut Reader { data, pos: 0 }, key)
+}
+
+fn read_header(r: &mut Reader<'_>, key: u64) -> Result<(), StoreError> {
+    if r.take(4)? != MAGIC {
+        return Err(StoreError::BadMagic);
+    }
+    let version = r.u16()?;
+    if version != VERSION {
+        return Err(StoreError::UnsupportedVersion(version));
+    }
+    if r.u64()? != key {
+        return Err(StoreError::KeyMismatch);
+    }
+    Ok(())
 }
 
 struct Reader<'a> {
@@ -203,16 +227,7 @@ impl Lightmap {
         let mut sum = Fnv(FNV_BASIS);
         sum.bytes(body);
         let mut r = Reader { data: body, pos: 0 };
-        if r.take(4)? != MAGIC {
-            return Err(StoreError::BadMagic);
-        }
-        let version = r.u16()?;
-        if version != VERSION {
-            return Err(StoreError::UnsupportedVersion(version));
-        }
-        if r.u64()? != key {
-            return Err(StoreError::KeyMismatch);
-        }
+        read_header(&mut r, key)?;
         if tail != sum.0.to_le_bytes() {
             return Err(StoreError::Corrupt);
         }

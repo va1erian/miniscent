@@ -1,21 +1,24 @@
 //! `--selftest <dir>`: a scripted run of the whole editor loop on the
 //! headless xui backend. It loads the showcase, edits it, saves and reloads,
-//! builds, snapshots the four views, plays 120 simulated frames with scripted
-//! input, returns, edits again and snapshots after each stage. PNGs go to
-//! `<dir>`; the exit code is 0 only when every check held.
+//! waits for the picture that needs no command, snapshots the four views, plays
+//! 120 simulated frames with scripted input, returns, edits again and snapshots
+//! after each stage. PNGs go to `<dir>`; the exit code is 0 only when every
+//! check held.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use mscent_math::Vec3;
 use mscent_platform::{Event, Key};
 use mscent_world::{Entity, Op};
 use xui::Dip;
 use xui::theme::Theme;
 use xui::xui_canvas::snapshot::{Snapshot, Stage, render_with};
 
-use crate::model::Document;
+use crate::model::{Document, FlyCam};
+use crate::studio::Preview;
 use crate::ui::{Editor, Msg, Probe, cmd};
 
 mod faces;
@@ -119,21 +122,31 @@ fn run_theme(
     }
 }
 
-/// Emits steps until the build ends; returns the final status message.
-fn wait_for_build(stage: &Stage<'_, Msg>, probe: &Probe) -> String {
+/// Emits steps until the picture has caught up with the document as far as it
+/// will; returns where it ended, which is `Full` when all went well.
+fn wait_for_preview(stage: &Stage<'_, Msg>, probe: &Probe) -> Preview {
+    for _ in 0..30_000 {
+        stage.emit(Msg::Step);
+        let p = probe.preview();
+        if matches!(p, Preview::Full | Preview::DraftOnly | Preview::Failed) {
+            return p;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    Preview::Updating
+}
+
+/// Emits steps until the status line starts with `prefix`.
+fn wait_for_message(stage: &Stage<'_, Msg>, probe: &Probe, prefix: &str) -> String {
     for _ in 0..30_000 {
         stage.emit(Msg::Step);
         let m = probe.message();
-        if m.starts_with("Build finished")
-            || m.starts_with("Playing")
-            || m.starts_with("Build failed")
-            || m.starts_with("Cannot")
-        {
+        if m.starts_with(prefix) {
             return m;
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    "timed out waiting for the build".into()
+    format!("timed out waiting for {prefix}: {}", probe.message())
 }
 
 /// Selects the biggest brush so a large highlight shows in every view.
@@ -155,12 +168,11 @@ fn select_biggest(probe: &Probe) {
     }
 }
 
-/// The wide window: build, then the Face tool with a face framed, so the
-/// properties panel, the face panel and the build log show at full width.
+/// The wide window: the Face tool with a face framed, so the properties panel,
+/// the face panel and the lighting log show at full width.
 fn wide_script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
-    stage.emit(Msg::Menu(cmd::BUILD));
-    let m = wait_for_build(stage, probe);
-    run.check(m.starts_with("Build finished"), &format!("built: {m}"));
+    let p = wait_for_preview(stage, probe);
+    run.check(p == Preview::Full, &format!("preview by itself: {p:?}"));
     select_biggest(probe);
     stage.emit(Msg::Tool(0));
     pump(stage, 20);
@@ -174,7 +186,7 @@ fn wide_script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
 fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     select_biggest(probe);
     stage.emit(Msg::Tool(0));
-    run.shot(stage, "01-before-build.png");
+    run.shot(stage, "01-start.png");
 
     // Edit the showcase: a pillar and a light next to the player start.
     let start = probe
@@ -244,10 +256,9 @@ fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         ),
     );
 
-    // Build on the worker thread and look at the four views.
-    stage.emit(Msg::Menu(cmd::BUILD));
-    let m = wait_for_build(stage, probe);
-    run.check(m.starts_with("Build finished"), &format!("built: {m}"));
+    // Nobody asks for it: the 3D pane shows the reloaded level, fully lit.
+    let p = wait_for_preview(stage, probe);
+    run.check(p == Preview::Full, &format!("preview by itself: {p:?}"));
     select_biggest(probe);
     stage.emit(Msg::Tool(0));
     pump(stage, 20);
@@ -299,7 +310,12 @@ fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     pump(stage, 20);
     run.shot(stage, "04-after-play.png");
 
-    // Edit again: the build goes stale and a second play works.
+    // Edit again in front of the camera: the picture follows with no command.
+    let eye = Vec3::new(start.x - 2.5, start.y, start.z);
+    stage.emit(Msg::Camera(Box::new(FlyCam::new(eye, 0.0, 0.0))));
+    pump(stage, 30);
+    let pane = probe.view_pane();
+    let before = pane.frame_checksum();
     {
         let state = probe.state();
         let mut st = state.borrow_mut();
@@ -310,14 +326,28 @@ fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         );
     }
     stage.emit(Msg::Tool(0));
-    pump(stage, 20);
-    run.shot(stage, "05-edit-again-stale.png");
-    stage.emit(Msg::Menu(cmd::PLAY));
-    let m = wait_for_build(stage, probe);
+    let edited_at = Instant::now();
+    let mut waited = 0;
+    while pane.frame_checksum() == before && waited < 10_000 {
+        stage.emit(Msg::Step);
+        std::thread::sleep(Duration::from_millis(1));
+        waited += 1;
+    }
     run.check(
-        m.starts_with("Playing"),
-        &format!("rebuilt and playing: {m}"),
+        pane.frame_checksum() != before,
+        &format!("the edit reached the picture in {:?}", edited_at.elapsed()),
     );
+    run.shot(stage, "05-edit-live.png");
+    let p = wait_for_preview(stage, probe);
+    run.check(
+        p == Preview::Full,
+        &format!("full light {:?} after the edit: {p:?}", edited_at.elapsed()),
+    );
+    pump(stage, 20);
+    run.shot(stage, "05b-edit-baked.png");
+    stage.emit(Msg::Menu(cmd::PLAY));
+    let m = wait_for_message(stage, probe, "Playing");
+    run.check(m.starts_with("Playing"), &format!("playing the edit: {m}"));
     pump(stage, 30);
     run.check(
         probe.message().starts_with("Playing"),

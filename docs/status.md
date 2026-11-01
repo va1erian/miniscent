@@ -15,7 +15,7 @@ cargo run --release -p miniscent-game -- --bench --frames 200
 # level editor (the only xui user); XUI_SNAPSHOT=<dir> renders it headlessly
 cargo run --release -p mscent-editor
 cargo run --release -p mscent-editor -- --showcase
-# scripted editor session: load, edit, save, reload, build, four views, play, Esc, edit again
+# scripted editor session: load, edit, save, reload, four views, play, Esc, edit again
 cargo run --release -p mscent-editor -- --selftest target/shots/editor
 
 # gate
@@ -50,16 +50,28 @@ one. Reported by the user from a real Windows session, and what was done:
   `ui/app/lock_tests.rs` (real editor on the offscreen backend, which records the lock: lock on
   right-down and on F5, camera yaw/pitch change from injected deltas, released on button-up, Esc and
   lock loss). Not verified: a real mouse and cursor on screen (the OS grab path in `xui-canvas`).
+- **Live preview, no build command.** F7, Ctrl+B and the Build menu item are gone: every edit
+  reaches the 3D pane by itself (`studio/preview.rs`, design in `docs/lightmaps.md`). A new scene
+  replaces the old one on the running render thread, so the fly camera and held keys survive an
+  edit. Measured in release on the showcase (26 brushes): CSG, faces and portals 6 ms, draft bake
+  1.4 ms, full bake 166 ms, material decode 67 ms once per session. Edit to picture 15 ms
+  (`studio/preview_tests.rs`) and 29 to 60 ms through the whole UI (selftest), full light 285 to 490
+  ms after the edit, worst UI tick in that span 113 microseconds. On a generated 348-brush level the
+  first picture takes 706 ms with a worst UI tick of 207 microseconds. Cancelling a 928 ms bake
+  ended it in 1 ms. Known limit: that 348-brush level overflows the atlas at the full luxel size
+  (`Atlas(TooTall)`), as it did before; it now stays on draft lighting instead of failing to show.
+  Not verified: a real window, and a level whose full bake takes many seconds with real editing
+  during it.
 - **F5 and F7.** Root cause: xui's winit keymap only produced `Key::F1` to `F4`, so a real window
   never raised F5 to F12 (offscreen tests inject events and hid it).
   Fixed upstream (xui#316, #317); the editor builds against stock xui `0b1b7ef` and the vendored
   copy is gone. The
-  editor also binds Ctrl+B (build) and Ctrl+R (play) as a fallback. `selftest/keys.rs` injects
-  `KeyDown` F7, F5 and Esc events through the UI and checks the build, the play and the return;
+  editor also binds Ctrl+R (play) as a fallback. `selftest/keys.rs` injects
+  `KeyDown` F5 and Esc events through the UI and checks the play and the return;
   `ui/app/keys_tests.rs` does the same. Not verified: a physical keyboard.
 - **Icon toolbar.** The tool palette is square icon-only toggle buttons with tooltips
   (`ui/toolbar.rs`, `ui/icons.rs`: xui's Lucide icons plus a drawn person, bulb and flag); the
-  selected tool is filled with the accent colour. The properties and build-log columns were
+  selected tool is filled with the accent colour. The properties and log columns were
   re-laid out to fit at wide windows (`ui/app/layout_tests.rs`, selftest `wide-*.png`).
 - **Lightmap shimmer and faint shadows.** Causes: one-luxel hard shadow edges that alias when seen
   from a distance, albedo sampled without a mip chain, and low shadow contrast. Changes: lamps are
@@ -78,9 +90,8 @@ one. Reported by the user from a real Windows session, and what was done:
   missing, stale, damaged or forged file (`tests/bake_cache.rs`, `forged_cache.rs`,
   `store_tests.rs`). Frames never bake or copy the atlas: `tests/frame_alloc.rs` measures 256
   allocations and 32 KB per frame in both Low and High, against a 4.77 MB atlas that is untouched.
-  In the editor a texture-mapping edit on the showcase reports "lightmap kept" and takes 31 to 50 ms
-  (selftest). I did not record a separate bake-from-scratch time; a whole showcase build is about
-  0.1 s in release.
+  In the editor a texture-mapping edit on the showcase reuses the lightmap and never shows a draft
+  (`studio/preview_tests.rs`).
   Persistence (feedback round 2): both apps now use the on-disk cache (`<level>.msl.lit`, or the
   per-user cache dir for built-in/unsaved levels), written atomically, with the reason logged when
   a file is ignored. Showcase release: cold bake 49 ms, warm load 8 ms (`tests/lightcache.rs`,
@@ -239,7 +250,7 @@ PNGs in `target/shots/texinfo/` and `target/shots/editor-final/`.
 | M7.3 | Done | `ui/view3d.rs` calls the game renderer; the lit, textured, shadowed view is visible in the four-view snapshot. "Same pixels as the game" is not asserted by a test |
 | M7.4 | Done | `model/command.rs`, `pointer.rs`; create, move, resize, add/subtract toggle with undo and redo (`model/tests.rs`, `review_tests.rs`). Undo coverage is as far as those tests go, not exhaustive |
 | M7.5 | Done | `model/entity.rs`; player start, light, enemy and goal tools; markers visible in all views and they survive save and reload (selftest) |
-| M7.6 | Done | `apps/editor/src/build.rs`: CSG, faces, portals and bake with a log; invalid brushes and empty levels are errors naming the problem (`build::tests`); log shown in the panel |
+| M7.6 | Done | `apps/editor/src/build.rs` and `studio/preview.rs`: CSG, faces, portals and bake follow every edit in the background; invalid brushes are errors naming the problem (`build::tests`, `studio/preview_tests.rs`); lighting log shown in the panel |
 | M7.7 | Partial | `files.rs`, `model/document.rs`: save and load of brush and entity source (`.msl`); selftest round-trips 27 brushes and 13 entities; hostile files and missing paths are errors (`files::tests`). Format versioning was not tested |
 | M7.8 | Done | `studio.rs`, `studio/worker.rs`: Play runs `miniscent-game` in-process (default features off) on its own thread, Esc returns, edit then play again; selftest passes both plays and checks the document is untouched. Run headlessly only; not tried interactively with a real mouse |
 
