@@ -42,7 +42,7 @@ pub fn stats_for(kind: u8) -> EnemyStats {
         speed: 5.0,
         sight_range: 40.0,
         attack_range: 9.0,
-        attack_damage: 10,
+        attack_damage: 6,
         attack_cooldown: (STEP_HZ / 2) as u32,
         lose_steps: (STEP_HZ * 3) as u32,
     };
@@ -50,7 +50,7 @@ pub fn stats_for(kind: u8) -> EnemyStats {
         1 => EnemyStats {
             max_hp: 100,
             speed: 7.0,
-            attack_damage: 20,
+            attack_damage: 12,
             attack_cooldown: STEP_HZ as u32,
             ..drone
         },

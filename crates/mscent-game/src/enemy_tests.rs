@@ -134,7 +134,8 @@ fn attack_hits_in_the_open_and_never_through_the_wall() {
     let mut e = Enemy::new(0, v(-10.0, 0.0, 0.0), 0);
     let seen = player_at(SEEN);
     let dealt: i32 = (0..300).filter_map(|_| e.step(&b, &seen)).sum();
-    assert!(dealt >= 40 && dealt % 10 == 0, "dealt {dealt}");
+    let dmg = stats_for(0).attack_damage;
+    assert!(dealt >= 4 * dmg && dealt % dmg == 0, "dealt {dealt}");
     let mut e = Enemy::new(0, v(-10.0, 0.0, 0.0), 0);
     let hidden = player_at(BEHIND_WALL);
     let dealt: i32 = (0..300).filter_map(|_| e.step(&b, &hidden)).sum();

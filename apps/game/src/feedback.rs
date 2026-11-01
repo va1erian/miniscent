@@ -106,11 +106,16 @@ fn line(fb: &mut Framebuffer, a: (f32, f32), b: (f32, f32), colour: u32, fade: f
     }
 }
 
-/// A red bar on the screen edge toward the attacker, or on the attacker
-/// itself's side when it is in front but off screen.
+/// A red block on the screen edge toward an attacker that is not in view.
 fn marker(fb: &mut Framebuffer, cam: &Camera, pos: Vec3) {
     let c = cam.world_to_camera(pos);
     let (w, h) = (fb.width() as i32, fb.height() as i32);
+    let on_screen = cam
+        .project(c)
+        .is_some_and(|p| p.x >= 0.0 && p.y >= 0.0 && p.x < w as f32 && p.y < h as f32);
+    if on_screen {
+        return;
+    }
     let ang = c.y.atan2(c.x);
     let (cx, cy) = (w / 2, h / 2);
     let (ex, ey) = (ang.cos() * cx as f32 * 0.9, -ang.sin() * cy as f32 * 0.9);

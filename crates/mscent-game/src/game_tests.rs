@@ -93,7 +93,7 @@ fn dying_loses() {
     assert!(g.player.is_dead());
     let events = g.take_events();
     assert!(events.contains(&Event::PlayerDied));
-    assert!(events.contains(&Event::PlayerHurt(10)));
+    assert!(events.contains(&Event::PlayerHurt(crate::enemy::stats_for(0).attack_damage)));
     assert!(g.hurt_steps <= crate::game::HURT_FLASH_STEPS);
 }
 
