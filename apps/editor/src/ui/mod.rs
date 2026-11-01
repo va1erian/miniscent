@@ -6,6 +6,7 @@ mod paint2d;
 pub mod props;
 mod view3d;
 mod viewport;
+mod wrap;
 
 mod probe;
 

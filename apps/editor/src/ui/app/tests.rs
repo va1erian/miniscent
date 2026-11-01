@@ -84,8 +84,8 @@ fn render_session(theme: Theme, scripted: bool) -> (Image, Rc<Cell<u32>>) {
 
             // Box tool: drag a new brush out of empty space east of the level.
             stage.emit(Msg::Tool(1));
-            let (x0, y0) = at(60.0, 20.0);
-            let (x1, y1) = at(66.0, 26.0);
+            let (x0, y0) = at(30.0, 55.0);
+            let (x1, y1) = at(34.0, 58.0);
             mouse(stage, 0, x0, y0);
             mouse(stage, 1, (x0 + x1) / 2, (y0 + y1) / 2);
             mouse(stage, 2, x1, y1);
@@ -96,8 +96,8 @@ fn render_session(theme: Theme, scripted: bool) -> (Image, Rc<Cell<u32>>) {
             };
             let bounds =
                 |s: &Rc<RefCell<EditorState>>| s.borrow().doc.brush(id).expect("alive").bounds();
-            assert_eq!(bounds(&probe.state).0[..2], [60.0, 20.0]);
-            assert_eq!(probe.min_x.value(), 60.0, "panel shows the selection");
+            assert_eq!(bounds(&probe.state).0[..2], [30.0, 55.0]);
+            assert_eq!(probe.min_x.value(), 30.0, "panel shows the selection");
 
             // Undo and redo through the menu.
             stage.emit(Msg::Menu(cmd::UNDO));
@@ -107,21 +107,22 @@ fn render_session(theme: Theme, scripted: bool) -> (Image, Rc<Cell<u32>>) {
 
             // Select tool: move the brush 4 units west by dragging its middle.
             stage.emit(Msg::Tool(0));
-            let (mx, my) = at(63.0, 23.0);
-            let (tx, ty) = at(59.0, 23.0);
+            let (mx, my) = at(32.0, 56.0);
+            let (tx, ty) = at(28.0, 56.0);
             mouse(stage, 0, mx, my);
             mouse(stage, 1, tx, ty);
             mouse(stage, 2, tx, ty);
-            assert_eq!(bounds(&probe.state).0[0], 56.0);
+            assert_eq!(bounds(&probe.state).0[0], 26.0);
 
-            // Resize with the top-right handle, now at (62, 26).
-            let (hx, hy) = at(62.0, 26.0);
-            let (ex, ey) = at(66.0, 30.0);
+            // Resize with the right-middle handle (the box is small, so the corner
+            // handles overlap it on the narrow top view).
+            let (hx, hy) = at(30.0, 56.5);
+            let (ex, ey) = at(33.0, 56.5);
             mouse(stage, 0, hx, hy);
             mouse(stage, 1, ex, ey);
             mouse(stage, 2, ex, ey);
-            assert_eq!(bounds(&probe.state).1[..2], [66.0, 30.0]);
-            assert_eq!(probe.min_x.value(), 56.0);
+            assert_eq!(bounds(&probe.state).1[..2], [33.0, 58.0]);
+            assert_eq!(probe.min_x.value(), 26.0);
 
             // Flip through the menu, then place a light with its tool.
             stage.emit(Msg::Menu(cmd::FLIP));
@@ -139,7 +140,7 @@ fn render_session(theme: Theme, scripted: bool) -> (Image, Rc<Cell<u32>>) {
             stage.emit(Msg::Menu(cmd::BUILD));
             assert_eq!(probe.state.borrow().message, "Building...");
             // Re-select the brush for the panel in the picture.
-            let (cx, cy) = at(61.0, 27.0);
+            let (cx, cy) = at(29.0, 57.0);
             mouse(stage, 0, cx, cy);
             mouse(stage, 2, cx, cy);
             assert_eq!(probe.state.borrow().selection, Some(Selection::Brush(id)));
@@ -179,7 +180,7 @@ fn scripted_session_edits_the_model_and_the_pixels() {
 fn dark_theme_renders_a_dark_viewport() {
     let (image, _) = render_session(Theme::dark(), false);
     save(&image, "showcase-dark.png");
-    let p = image.pixel(160, 765).unwrap();
+    let p = image.pixel(155, 315).unwrap();
     assert!(
         p[0] < 90 && p[1] < 90 && p[2] < 90,
         "viewport background is dark: {p:?}"
@@ -190,7 +191,7 @@ fn dark_theme_renders_a_dark_viewport() {
 fn light_theme_renders_the_showcase() {
     let (image, _) = render_session(Theme::light(), false);
     save(&image, "showcase-light.png");
-    let p = image.pixel(160, 765).unwrap();
+    let p = image.pixel(155, 315).unwrap();
     assert!(
         p[0] > 200 && p[1] > 200,
         "viewport background is light: {p:?}"
@@ -198,46 +199,54 @@ fn light_theme_renders_the_showcase() {
 }
 
 #[test]
-fn light_selection_fills_the_panel_and_the_3d_pane_shows_an_image() {
+fn light_selection_fills_the_panel_and_the_3d_pane_shows_the_built_level() {
+    let probe: Rc<RefCell<Option<Rc<RefCell<EditorState>>>>> = Rc::new(RefCell::new(None));
+    let p2 = probe.clone();
     let image = render_with(
         Snapshot::new(Dip(1280.0), Dip(800.0)).theme(Theme::light()),
-        |ui| {
-            let mut app = Editor::build(ui, Document::from_level(&mscent_world::showcase_level()))?;
-            // Left half green, right half blue, as the renderer would hand over.
-            let (w, h) = (64u32, 40u32);
-            let px: Vec<u32> = (0..w * h)
-                .map(|i| {
-                    if i % w < w / 2 {
-                        0xff30_c050
-                    } else {
-                        0xff20_40d0
-                    }
-                })
-                .collect();
-            app.probe().view3d().set_image(&px, w, h);
-            app.probe().view3d().set_image(&px[..10], w, h); // wrong length: ignored
-            {
-                let state = app.probe().state();
-                let mut st = state.borrow_mut();
-                let light = st
-                    .doc
+        move |ui| {
+            let app = Editor::build(ui, Document::from_level(&mscent_world::showcase_level()))?;
+            *p2.borrow_mut() = Some(app.probe().state());
+            Ok(app)
+        },
+        move |stage| {
+            let state = probe.borrow().clone().expect("built");
+            stage.emit(Msg::Menu(cmd::BUILD));
+            for _ in 0..30_000 {
+                stage.emit(Msg::Step(std::time::Duration::ZERO));
+                if state.borrow().message.starts_with("Build finished") {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert!(state.borrow().message.starts_with("Build finished"));
+            let light = {
+                let st = state.borrow();
+                st.doc
                     .entities()
                     .iter()
                     .find(|e| matches!(e.entity, mscent_world::Entity::Light { .. }))
                     .map(|e| e.id)
-                    .expect("showcase has lights");
-                st.selection = Some(Selection::Entity(light));
-            }
-            app.refresh();
-            Ok(app)
+                    .expect("showcase has lights")
+            };
+            state.borrow_mut().selection = Some(Selection::Entity(light));
+            stage.emit(Msg::Tool(0));
+            stage.emit(Msg::Step(std::time::Duration::ZERO));
         },
-        |_| {},
     )
     .expect("render");
     save(&image, "light-selected.png");
-    // The 3D pane spans x 592..1030, y 404..776; the image is centred in it.
-    let left = image.pixel(700, 590).unwrap();
-    let right = image.pixel(920, 590).unwrap();
-    assert_eq!(left[..3], [0x30, 0xc0, 0x50]);
-    assert_eq!(right[..3], [0x20, 0x40, 0xd0]);
+    // The 3D pane is the lower-left of the views: a rendered level has many
+    // colours, a placeholder has one.
+    let mut colours = std::collections::HashSet::new();
+    for y in (500..760).step_by(5) {
+        for x in (200..900).step_by(5) {
+            colours.insert(image.pixel(x, y).unwrap());
+        }
+    }
+    assert!(
+        colours.len() > 200,
+        "3D pane shows the level: {}",
+        colours.len()
+    );
 }

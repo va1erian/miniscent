@@ -4,8 +4,9 @@
 #![allow(clippy::needless_range_loop)]
 
 use mscent_world::{Entity, Op, materials::NAMES};
+use xui::backend::WidgetId;
 use xui::prelude::*;
-use xui::widget::HasText;
+use xui::widget::{GroupBox, HasText};
 
 use super::Msg;
 use crate::model::entity::{kind, params, pos, set_param, with_pos};
@@ -29,6 +30,9 @@ const PARAMS: usize = 5;
 /// Handles to every widget that shows selection data.
 #[derive(Default)]
 pub struct Panel {
+    ui: Option<Ui<Msg>>,
+    brush_group: Handle<GroupBox<Msg>>,
+    entity_group: Handle<GroupBox<Msg>>,
     what: Handle<Label<Msg>>,
     op: Handle<ComboBox<Msg>>,
     material: Handle<ComboBox<Msg>>,
@@ -53,6 +57,17 @@ impl Panel {
     #[cfg(test)]
     pub fn min_x(&self) -> std::rc::Rc<NumberField<Msg>> {
         self.min[0].get()
+    }
+
+    /// Gives the panel the UI it needs to show and hide its sections.
+    pub fn attach(&mut self, ui: &Ui<Msg>) {
+        self.ui = Some(ui.clone());
+    }
+
+    fn show(&self, id: WidgetId, visible: bool) {
+        if let Some(ui) = &self.ui {
+            ui.set_visible(id, visible);
+        }
     }
 
     pub fn layout(&self) -> impl IntoEntry<Msg> + use<> {
@@ -93,8 +108,8 @@ impl Panel {
         }
         scroll(column().padding(8).gap(8).children((
             label("Nothing selected").bind(&self.what),
-            group("Brush", brush),
-            group("Entity", ent),
+            group("Brush", brush).bind(&self.brush_group),
+            group("Entity", ent).bind(&self.entity_group),
         )))
     }
 
@@ -113,6 +128,10 @@ impl Panel {
             _ => "Nothing selected".to_string(),
         };
         self.what.get().set_text(&text);
+        // Only the section that applies is shown: no greyed placeholder
+        // values for something that is not selected.
+        self.show(self.brush_group.get().id(), brush.is_some());
+        self.show(self.entity_group.get().id(), ent.is_some());
 
         let (lo, hi) = brush.map_or(([0.0; 3], [0.0; 3]), |b| b.bounds());
         let editable = brush.is_some_and(|b| b.is_box());
@@ -141,6 +160,8 @@ impl Panel {
             self.param_labels[i].get().set_text(name);
             self.params[i].get().set_value(value);
             self.params[i].get().set_enabled(i < list.len());
+            self.show(self.param_labels[i].get().id(), i < list.len());
+            self.show(self.params[i].get().id(), i < list.len());
         }
     }
 }

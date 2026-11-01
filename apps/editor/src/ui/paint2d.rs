@@ -152,6 +152,7 @@ fn brushes(pen: &mut Pen, scene: &Scene) {
     let (lo, hi) = br.bounds();
     let r = pen.rect([lo[a], lo[b]], [hi[a], hi[b]]);
     let accent = scene.theme.accent;
+    pen.canvas.fill_rect_rgba(r, rgba(accent, 90));
     pen.canvas
         .stroke_rect(r.shrink(-1), Color::rgb(255, 255, 255), 1.0);
     pen.canvas.stroke_rect(r, accent, 2.0 * pen.s);

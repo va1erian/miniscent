@@ -1,0 +1,15 @@
+# Showcase flythrough: start room A (fire at the enemy, roll), corridor,
+# room D (red brick), corridor, room C (goal). (R restarts: do not use it.)
+at 0.1s fire for 0.6s
+at 0.8s hold Q for 0.3s
+at 1.3s hold E for 0.3s
+at 2.1s mouse -168 0
+at 2.4s hold W for 2.4s
+at 4.8s mouse 480 -30 over 0.4s
+at 5.2s mouse 0 30
+at 5.2s hold W for 0.4s
+at 5.5s mouse 90 0
+at 5.9s hold W for 2.0s
+at 8.0s mouse -150 0
+at 8.0s hold W for 3s
+at 12.5s quit

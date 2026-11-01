@@ -236,8 +236,9 @@ impl Studio {
 }
 
 /// What the 3D pane's controls are, for its placeholder text.
-pub const HELP: &str =
-    "RMB drag or arrows: look   W/A/S/D: move   R/F: up/down   Q/E: roll   Shift: fast";
+pub const HELP: &str = "RMB drag or arrows: look
+W/A/S/D: move   R/F: up/down
+Q/E: roll   Shift: fast";
 
 #[cfg(test)]
 mod tests;

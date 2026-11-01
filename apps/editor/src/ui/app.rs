@@ -16,6 +16,7 @@ use super::probe::Probe;
 use super::props::{Panel, apply};
 use super::view3d::View3d;
 use super::viewport::{ViewEvent, Viewport};
+use super::wrap::{LOG_COLS, LOG_ROWS, wrap};
 use crate::files;
 use crate::model::{Document, EditorState, EntityKind, Tool, View, state::GRIDS};
 use crate::studio::{HELP, Mode, Studio, frame_size};
@@ -187,6 +188,7 @@ impl Editor {
             last_tick: Instant::now(),
             last_stale: false,
         };
+        app.panel.attach(ui);
         let emit: Rc<dyn Fn(ViewEvent) -> Msg> = Rc::new(Msg::View);
         let pane = |i: usize| {
             let (state, emit) = (state.clone(), emit.clone());
@@ -196,15 +198,9 @@ impl Editor {
         let views = column().gap(4).children((
             row()
                 .gap(4)
-                .children((pane(0).fill(1), pane(1).fill(1)))
-                .fill(1),
-            row()
-                .gap(4)
-                .children((
-                    pane(2).fill(1),
-                    build(View3d::new).bind(&app.view3d).fill(1),
-                ))
-                .fill(1),
+                .children((pane(0).fill(1), pane(1).fill(1), pane(2).fill(1)))
+                .fill(2),
+            build(View3d::new).bind(&app.view3d).fill(3),
         ));
         let mut tools = column().gap(4);
         for (i, (name, _)) in TOOLS.iter().enumerate() {
@@ -242,10 +238,10 @@ impl Editor {
             scroll(column().child(app.panel.layout())).fill(1),
             group(
                 "Build log",
-                column().child(multiline_edit().bind(&app.log_view).height(130)),
+                column().child(multiline_edit().bind(&app.log_view).height(150)),
             ),
         ));
-        let work = row().children((palette.width(150), views.fill(1), side.width(250)));
+        let work = row().children((palette.width(150), views.fill(1), side.width(280)));
         ui.root(
             column().children((
                 menu_bar(menus).on_select(Msg::Menu).bind(&app.menu),
@@ -320,10 +316,17 @@ Press F7 to build, F5 to play.
         if lines.is_empty() {
             return;
         }
-        self.log.extend(lines.iter().cloned());
+        for line in lines {
+            self.log.extend(wrap(line, LOG_COLS));
+        }
         let excess = self.log.len().saturating_sub(300);
         self.log.drain(..excess);
-        self.log_view.get().set_text(&self.log.join("\r\n"));
+        // The box cannot be scrolled to its end, so it shows the newest lines.
+        let from = self.log.len().saturating_sub(LOG_ROWS);
+        self.log_view.get().set_text(&self.log[from..].join(
+            "
+",
+        ));
     }
 
     pub(super) fn set_status(&self, text: &str) {
@@ -342,7 +345,7 @@ Press F7 to build, F5 to play.
         if pw == 0 || ph == 0 {
             return;
         }
-        let (w, h) = frame_size((pw, ph), if play { 512 } else { 400 });
+        let (w, h) = frame_size((pw, ph), if play { 512 } else { 960 });
         let state = self.state.clone();
         let st = state.borrow();
         if let Some(fb) = self.studio.render(w, h, &st.doc) {
@@ -383,8 +386,7 @@ Press F7 to build, F5 to play.
                 play.focus();
                 // Focus changes from the editor are not the player's input.
                 play.take_events();
-                let text = "Playing: Esc returns to the editor; WASD move, click or Space fire, \
-                            arrows or right-drag look, Q/E roll";
+                let text = "Playing: Esc = back, WASD move, Space fire, Q/E roll";
                 self.state.borrow_mut().message = text.into();
                 self.set_status(text);
                 self.show_frame();
@@ -418,8 +420,6 @@ Press F7 to build, F5 to play.
     pub fn probe(&self) -> Probe {
         Probe {
             state: self.state.clone(),
-            #[cfg(test)]
-            view3d: self.view3d.get(),
             play: self.play.get(),
         }
     }

@@ -11,8 +11,6 @@ use crate::model::EditorState;
 /// What a scripted run reads and drives from outside the editor.
 pub struct Probe {
     pub(super) state: Rc<RefCell<EditorState>>,
-    #[cfg(test)]
-    pub(super) view3d: Rc<View3d<Msg>>,
     pub(super) play: Rc<View3d<Msg>>,
 }
 
@@ -25,12 +23,6 @@ impl Probe {
     /// The last status message.
     pub fn message(&self) -> String {
         self.state.borrow().message.clone()
-    }
-
-    /// The 3D pane in the editor layout.
-    #[cfg(test)]
-    pub fn view3d(&self) -> Rc<View3d<Msg>> {
-        self.view3d.clone()
     }
 
     /// The Instant Play pane (covers the work area while playing).

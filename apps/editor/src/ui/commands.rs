@@ -98,7 +98,6 @@ impl Editor {
                 self.install(doc, Some(path.to_path_buf()), &msg);
             }
             Err(e) => {
-                self.push_log(&[format!("ERROR: {e}")]);
                 self.state.borrow_mut().message = e;
             }
         }
@@ -113,10 +112,7 @@ impl Editor {
                 self.path = Some(path);
                 msg
             }
-            Err(e) => {
-                self.push_log(&[format!("ERROR: {e}")]);
-                e
-            }
+            Err(e) => e,
         };
         self.state.borrow_mut().message = message;
     }
