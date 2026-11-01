@@ -36,6 +36,9 @@ pub(super) fn menus(m: &mut xui::widget::MenuScope<'_>) {
     m.submenu(MenuId::new(102), "&View", |v| {
         v.item(cmd::FIT, "&Fit views to level");
         v.item(cmd::RESET_CAMERA, "&Reset 3D camera");
+        v.separator();
+        v.item(cmd::LAYOUT_CLASSIC, "&Classic layout");
+        v.item(cmd::LAYOUT_QUAD, "&Quad layout (2 x 2)");
     });
     m.submenu(MenuId::new(103), "&Play", |p| {
         p.item(cmd::PLAY, "&Play   F5");
@@ -71,6 +74,7 @@ impl Editor {
                 self.studio.reset_camera(&self.state.borrow().doc);
             }
             cmd::FIT => self.refit(),
+            _ if self.layout_command(id) => {}
             _ => self.edit_command(id),
         }
     }

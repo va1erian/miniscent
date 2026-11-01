@@ -10,7 +10,7 @@ use xui::{Dip, Theme};
 use super::*;
 use crate::model::Selection;
 
-fn shoot(name: &str, theme: Theme, (w, h): (f32, f32), tool: usize) {
+fn shoot(name: &str, theme: Theme, (w, h): (f32, f32), tool: usize, quad: bool) {
     let report: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
     let probe: Rc<RefCell<Option<super::super::Probe>>> = Rc::new(RefCell::new(None));
     let (r2, p2) = (report.clone(), probe.clone());
@@ -35,6 +35,9 @@ fn shoot(name: &str, theme: Theme, (w, h): (f32, f32), tool: usize) {
             let id = state.borrow().doc.brushes()[0].id;
             state.borrow_mut().selection = Some(Selection::Brush(id));
             stage.emit(Msg::Tool(tool));
+            if quad {
+                stage.emit(Msg::Menu(cmd::LAYOUT_QUAD));
+            }
             *r2.borrow_mut() = stage.ui().layout_report();
         },
     )
@@ -58,8 +61,13 @@ fn laptop_and_wide_windows_lay_out_without_warnings() {
         for (size_name, size) in [("1280", (1280.0, 800.0)), ("2000", (2000.0, 1124.0))] {
             for (theme_name, theme) in [("light", Theme::light()), ("dark", Theme::dark())] {
                 let name = format!("{size_name}-{theme_name}{suffix}");
-                shoot(&name, theme, size, tool);
+                shoot(&name, theme, size, tool, false);
             }
         }
     }
+}
+
+#[test]
+fn quad_layout_lays_out_without_warnings() {
+    shoot("1280-light-quad", Theme::light(), (1280.0, 800.0), 0, true);
 }

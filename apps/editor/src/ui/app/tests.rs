@@ -9,15 +9,17 @@ use xui::message::{Modifiers, MouseButton};
 use xui::xui_canvas::snapshot::{Snapshot, render_with};
 use xui::{Dip, Image, Theme, widget::NumberField};
 
-use super::super::viewport::fit_camera;
+use super::super::viewport::{Viewport, fit_camera};
 use super::*;
 use crate::model::Selection;
+use crate::model::View;
 use xui::widget::Placeable;
 
 /// What the step closure needs from the built app.
 struct Probe {
     state: Rc<RefCell<EditorState>>,
     top: Rc<Viewport<Msg>>,
+    menu: Rc<Menu<Msg>>,
     min_x: Rc<NumberField<Msg>>,
 }
 
@@ -58,7 +60,8 @@ fn render_session(theme: Theme, scripted: bool) -> (Image, Rc<Cell<u32>>) {
             let app = Editor::build(ui, Document::from_level(&mscent_world::showcase_level()))?;
             *p2.borrow_mut() = Some(Probe {
                 state: app.probe().state(),
-                top: app.viewports[0].get(),
+                menu: app.menu.get(),
+                top: app.classic.viewports[0].get(),
                 min_x: app.panel.min_x(),
             });
             Ok(app)
@@ -71,7 +74,13 @@ fn render_session(theme: Theme, scripted: bool) -> (Image, Rc<Cell<u32>>) {
             let probe = probe.as_ref().expect("built");
             // Paint once so the views fit the level.
             let _ = stage.ui().capture();
-            let rect = stage.ui().bounds(Placeable::id(&*probe.top));
+            // Bounds are relative to the enclosing splitter; the top view is the
+            // first pane of every one, so it sits at the work area's corner.
+            let menu = stage.ui().bounds(Placeable::id(&*probe.menu));
+            let rect = stage
+                .ui()
+                .bounds(Placeable::id(&*probe.top))
+                .offset(PALETTE_WIDTH, menu.bottom);
             let size = (rect.width() as f64, rect.height() as f64);
             let mut cam = crate::model::Camera2D::default();
             fit_camera(&mut cam, &probe.state.borrow(), View::Top, size);
@@ -188,7 +197,7 @@ fn dark_theme_renders_a_dark_viewport() {
 fn light_theme_renders_the_showcase() {
     let (image, _) = render_session(Theme::light(), false);
     save(&image, "showcase-light.png");
-    let p = image.pixel(300, 450).unwrap();
+    let p = image.pixel(300, 360).unwrap();
     assert!(
         p[0] > 200 && p[1] > 200,
         "viewport background is light: {p:?}"

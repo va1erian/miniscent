@@ -6,6 +6,7 @@ pub mod facepanel;
 mod faces;
 mod icons;
 mod keys;
+mod layouts;
 mod paint2d;
 pub mod props;
 mod toolbar;

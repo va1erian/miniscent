@@ -65,6 +65,32 @@ impl Session<'_> {
         panic!("timed out waiting for {what}");
     }
 
+    /// A window point over the node `id`: bounds are relative to the
+    /// enclosing splitter, so look for the point that locks the pointer there.
+    fn inside(&self, id: xui::backend::WidgetId) -> (i32, i32) {
+        for y in (10..800).step_by(25) {
+            for x in (10..1280).step_by(25) {
+                self.inject(Event::MouseDown {
+                    x,
+                    y,
+                    button: MouseButton::Right,
+                    modifiers: NONE,
+                });
+                let hit = self.backend.pointer_lock() == Some(id);
+                self.inject(Event::MouseUp {
+                    x,
+                    y,
+                    button: MouseButton::Right,
+                    modifiers: NONE,
+                });
+                if hit {
+                    return (x, y);
+                }
+            }
+        }
+        panic!("no point over the node");
+    }
+
     fn wait_message(&self, prefix: &str) {
         self.wait(prefix, |e| e.state.borrow().message.starts_with(prefix));
     }
@@ -124,8 +150,7 @@ fn fly_look_locks_the_pointer_and_turns_the_camera_from_relative_motion() {
         let probe = s.editor.borrow().probe();
         let pane = probe.view_pane();
         let id = xui::widget::Placeable::id(&*pane);
-        let b = s.ui.bounds(id);
-        let (x, y) = (b.left + b.width() / 2, b.top + b.height() / 2);
+        let (x, y) = s.inside(id);
         let down = |button| Event::MouseDown {
             x,
             y,
