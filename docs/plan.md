@@ -28,10 +28,13 @@ i3-7100U, 2 cores and 4 threads at 2.4 GHz (no turbo), 3 MiB L3, AVX2 in
 hardware (`lazyos/docs/compat/kabylake/hw-survey/03-cpuinfo.txt`).
 
 - 60 fps is 16.6 ms, about 40 M cycles per frame.
-- On LazyOS the default kernel runs user code on one core with SSE2 only.
-  A `LAZYOS_SMP=1` kernel runs user tasks on every core in parallel; the
-  kernel entry lock serializes only time spent in the kernel. Whether AVX is
-  enabled there is unverified (work item M1.3).
+- LazyOS's kernel enables AVX state (`CR4.OSXSAVE`, `XCR0`) at boot when the
+  CPU has `XSAVE` and `AVX` (`lazyos/docs/architecture/arch.md`). QEMU's
+  default `qemu64` model has neither, so AVX2 is available on the real box but
+  not in the default emulator; M1.3 confirms it on the box.
+- Only a `LAZYOS_SMP=1` kernel runs user tasks on every core, in parallel; the
+  kernel entry lock serializes only time spent in the kernel. Any other kernel
+  keeps the other cores idle.
 - The renderer must therefore work with one worker on the SSE2 baseline, and
   use more workers and AVX2 where the platform offers them.
 
@@ -164,7 +167,7 @@ trace channel instead of printed markers, and paths from `libs/fhs`.
 
 ## Open questions
 
-- Is a weapon in scope? Enemies need some way to be handled; work item G5
+- Is a weapon in scope? Enemies need some way to be handled; work item M6.5
   assumes a single primary-fire weapon and nothing else.
 - Does "point" in the game-element list mean point lights, as assumed here?
 - Licence and repository host for the project.
