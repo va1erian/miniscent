@@ -213,26 +213,38 @@ fn mouse_look_accumulates_no_roll_and_is_immediate() {
 }
 
 #[test]
-fn a_free_roll_levels_itself_but_a_held_roll_does_not() {
+fn a_free_roll_locks_to_the_nearest_quarter_turn_but_a_held_roll_does_not() {
     let g = open_game();
-    let mut p = g.player;
-    p.up_ref = Some(v(0.0, 1.0, 0.0));
-    p.orientation = Quat::from_axis_angle(v(0.0, 0.0, 1.0), 0.8);
-    let err = |p: &crate::Player| p.right().y.atan2(p.up().y).abs();
-    let start = err(&p);
-    assert!(start > 0.7);
-    let hold = Input {
-        roll: 1.0,
-        ..Input::default()
+    let roll_of = |p: &crate::Player| p.right().y.atan2(p.up().y);
+    let settle = |start: f32, hold: bool| {
+        let mut p = g.player;
+        p.up_ref = Some(v(0.0, 1.0, 0.0));
+        p.orientation = Quat::from_axis_angle(v(0.0, 0.0, 1.0), start);
+        let input = Input {
+            roll: if hold { 1.0 } else { 0.0 },
+            ..Input::default()
+        };
+        for _ in 0..10 {
+            p.step(&g.arena.bsp, &input);
+        }
+        if hold {
+            return roll_of(&p);
+        }
+        for _ in 0..360 {
+            p.step(&g.arena.bsp, &Input::default());
+        }
+        roll_of(&p)
     };
-    for _ in 0..10 {
-        p.step(&g.arena.bsp, &hold);
-    }
-    assert!(err(&p) > 0.7, "held roll is not fought");
-    for _ in 0..240 {
-        p.step(&g.arena.bsp, &Input::default());
-    }
-    assert!(err(&p) < 0.02, "levelled, still {}", err(&p));
+    assert!((settle(0.3, false)).abs() < 0.02, "small tilt levels out");
+    assert!(
+        (settle(1.2, false).abs() - FRAC_PI_2).abs() < 0.02,
+        "locks on its side"
+    );
+    assert!(
+        (settle(2.9, false).abs() - 2.0 * FRAC_PI_2).abs() < 0.02,
+        "locks inverted"
+    );
+    assert!(settle(0.8, true) > 0.7, "held roll is not fought");
 }
 
 #[test]
@@ -253,4 +265,42 @@ fn top_speed_is_doorway_friendly_and_release_brakes_quickly() {
         p.step(&g.arena.bsp, &Input::default());
     }
     assert!(p.body.vel.length() < 0.5, "stops within a second");
+}
+
+#[test]
+fn hovering_bobs_and_flying_fast_does_not() {
+    let g = open_game();
+    let mut p = g.player;
+    p.up_ref = Some(v(0.0, 1.0, 0.0));
+    let (mut lo, mut hi) = (0.0_f32, 0.0_f32);
+    for _ in 0..600 {
+        p.step(&g.arena.bsp, &Input::default());
+        lo = lo.min(p.bob_offset().y);
+        hi = hi.max(p.bob_offset().y);
+    }
+    assert!(hi > 0.05 && lo < -0.05, "bobs both ways: {lo}..{hi}");
+    assert!(hi < 0.1, "only slightly: {hi}");
+    p.body.vel = v(0.0, 0.0, -12.0);
+    assert_eq!(p.bob_offset(), Vec3::ZERO, "no bob at speed");
+}
+
+#[test]
+fn turning_banks_into_the_turn_and_thrust_spools_up() {
+    let g = open_game();
+    let mut p = g.player;
+    let left = Input {
+        yaw: 1.0,
+        thrust: v(0.0, 0.0, 1.0),
+        ..Input::default()
+    };
+    p.step(&g.arena.bsp, &left);
+    assert!(
+        p.body.vel.length() < 0.1,
+        "thrust ramps in, no instant kick"
+    );
+    for _ in 0..120 {
+        p.step(&g.arena.bsp, &left);
+    }
+    let lean = p.bank_rotation().rotate(v(1.0, 0.0, 0.0)).y;
+    assert!(lean > 0.1, "right side rises when turning left: {lean}");
 }
