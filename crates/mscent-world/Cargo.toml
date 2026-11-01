@@ -1,0 +1,11 @@
+[package]
+name = "mscent-world"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+mscent-math.workspace = true
+
+[lints]
+workspace = true

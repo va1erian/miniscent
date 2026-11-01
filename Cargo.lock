@@ -3,5 +3,42 @@
 version = 4
 
 [[package]]
-name = "miniscent"
+name = "mscent-bench"
 version = "0.1.0"
+
+[[package]]
+name = "mscent-collide"
+version = "0.1.0"
+dependencies = [
+ "mscent-math",
+ "mscent-world",
+]
+
+[[package]]
+name = "mscent-game"
+version = "0.1.0"
+dependencies = [
+ "mscent-collide",
+ "mscent-math",
+ "mscent-render",
+ "mscent-world",
+]
+
+[[package]]
+name = "mscent-math"
+version = "0.1.0"
+
+[[package]]
+name = "mscent-render"
+version = "0.1.0"
+dependencies = [
+ "mscent-math",
+ "mscent-world",
+]
+
+[[package]]
+name = "mscent-world"
+version = "0.1.0"
+dependencies = [
+ "mscent-math",
+]

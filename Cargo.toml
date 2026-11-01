@@ -1,6 +1,21 @@
-[package]
-name = "miniscent"
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
+publish = false
 
-[dependencies]
+[workspace.dependencies]
+mscent-math = { path = "crates/mscent-math" }
+mscent-world = { path = "crates/mscent-world" }
+mscent-collide = { path = "crates/mscent-collide" }
+mscent-render = { path = "crates/mscent-render" }
+
+[workspace.lints.rust]
+# Crates that genuinely need unsafe must opt out explicitly with a reason.
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
