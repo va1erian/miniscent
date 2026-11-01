@@ -80,6 +80,8 @@ pub fn paint(canvas: &mut dyn Canvas, scene: &Scene) {
     brushes(&mut pen, scene);
     entities(&mut pen, scene);
     creating(&mut pen, scene);
+    slicing(&mut pen, scene);
+    corners(&mut pen, scene);
     label(&mut pen, scene, bounds);
     pen.canvas.pop_clip();
     pen.canvas.stroke_rect(bounds, theme.border, 1.0);
@@ -258,6 +260,52 @@ fn creating(pen: &mut Pen, scene: &Scene) {
     };
     pen.canvas.fill_rect_rgba(r, rgba(color, 60));
     pen.canvas.stroke_rect(r, color, 2.0 * pen.s);
+}
+
+/// The slice line, with ticks on the side that stays.
+fn slicing(pen: &mut Pen, scene: &Scene) {
+    let Some(cut) = scene.state.slice_line() else {
+        return;
+    };
+    if cut.view != scene.view {
+        return;
+    }
+    let (p, q) = (pen.pt(cut.a), pen.pt(cut.b));
+    let color = Color::rgb(235, 60, 60);
+    pen.canvas.draw_line(p, q, color, 2.0 * pen.s);
+    let (dx, dy) = ((q.x - p.x) as f32, (q.y - p.y) as f32);
+    let len = dx.hypot(dy);
+    if len < 1.0 {
+        return;
+    }
+    // Screen y points down, so the right of the drawn direction is (-dy, dx).
+    let (nx, ny) = (-dy / len, dx / len);
+    let keep = scene.state.keep;
+    for (side, show) in [
+        (1.0, keep != crate::model::Keep::Left),
+        (-1.0, keep != crate::model::Keep::Right),
+    ] {
+        if !show {
+            continue;
+        }
+        let mid = Point::new((p.x + q.x) / 2, (p.y + q.y) / 2);
+        let tip = Point::new(
+            mid.x + (nx * side * 10.0 * pen.s) as i32,
+            mid.y + (ny * side * 10.0 * pen.s) as i32,
+        );
+        pen.canvas.draw_line(mid, tip, color, pen.s);
+    }
+}
+
+/// The selected brush's corners while the vertex tool is active.
+fn corners(pen: &mut Pen, scene: &Scene) {
+    let h = (3.5 * pen.s) as i32;
+    for v in scene.state.corner_handles(scene.view) {
+        let c = pen.pt(v);
+        let r = Rect::new(c.x - h, c.y - h, c.x + h + 1, c.y + h + 1);
+        pen.canvas.fill_rect(r, Color::rgb(255, 235, 80));
+        pen.canvas.stroke_rect(r, Color::rgb(60, 50, 20), 1.0);
+    }
 }
 
 fn label(pen: &mut Pen, scene: &Scene, bounds: Rect) {
