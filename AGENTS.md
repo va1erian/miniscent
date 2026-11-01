@@ -23,6 +23,15 @@ python tools/check_file_length.py
 python tools/check_docs.py
 ```
 
+Run it (details in [docs/status.md](docs/status.md)):
+
+```
+cargo run --release -p miniscent-game
+cargo run --release -p miniscent-game -- --screenshot target/shots/p.png --script apps/game/scripts/flythrough.txt --shots-at 2,12,24
+cargo run --release -p mscent-editor
+cargo run --release -p mscent-editor -- --selftest target/shots/editor
+```
+
 Crate edges: world depends on math; collide on math and world; render on math
-and world; game on all of them. Do not add external dependencies without a
+and world; game on all of them; the game talks to the OS only through `mscent-platform` and never depends on xui (only `apps/editor` does). Do not add external dependencies without a
 reason recorded in the PR.

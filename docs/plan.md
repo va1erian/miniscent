@@ -44,7 +44,7 @@ hardware (`lazyos/docs/compat/kabylake/hw-survey/03-cpuinfo.txt`).
 |---|---|---|
 | Language | Rust workspace, `no_std + alloc` in core crates where practical | xui and LazyOS are Rust; keeps the LazyOS port cheap |
 | Renderer | Software only | LazyOS has a framebuffer and no GPU driver for rendering |
-| Platform layer | An xui canvas widget presenting a framebuffer | One path on Windows and LazyOS, reused by the editor |
+| Platform layer | A small `mscent-platform` trait (present a framebuffer, poll input with relative mouse, time, quit); desktop backend on winit + softbuffer, headless scripted backend, LazyOS backend later. The game does not use xui; only the editor does | Keeps the game small and portable between Windows and LazyOS |
 | World | Ordered add/subtract convex brushes compiled to a solid/empty-leaf BSP with portals | The original Unreal model |
 | Collision | Swept sphere against the BSP, analytic sphere-sphere for entities | Tunnel-proof; a sphere suits 6DoF |
 | Lighting | Offline bake: colour plus a dominant light direction per luxel | Enables bump mapping at no per-pixel lightmap cost |
@@ -60,9 +60,9 @@ crates/
   mscent-collide   trace and sweep against the BSP and entities
   mscent-render    software rasterizer
   mscent-game      6DoF player, enemies, goal, fixed-timestep loop
-  mscent-platform  xui framebuffer and input glue (Windows, LazyOS)
+  mscent-platform  Platform trait, desktop (winit) and headless backends; LazyOS backend later
 apps/
-  game/            runtime
+  game/            runtime, no xui
   editor/          xui level editor with instant play
 ```
 
