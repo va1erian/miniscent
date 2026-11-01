@@ -51,7 +51,7 @@ impl Compiled {
         let bake_cfg = BakeConfig {
             luxel_size: cfg.luxel_size,
             ambient: cfg.ambient,
-            bounce_gain: 0.18,
+            bounce_gain: 0.08,
             light_radius: cfg.light_radius,
             shadow_samples: cfg.shadow_samples,
             ..BakeConfig::default()
