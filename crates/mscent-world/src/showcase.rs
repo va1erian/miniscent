@@ -127,7 +127,7 @@ fn entities() -> Vec<Entity> {
             yaw: -core::f32::consts::FRAC_PI_4,
         },
         // Warm light west of the pillar so it throws a long shadow north east.
-        light([6.0, 6.0, 6.5], [1.0, 0.85, 0.6], 26.0, 1.4),
+        light([6.0, 6.0, 6.5], [1.0, 0.85, 0.6], 32.0, 2.4),
         light([41.0, 10.0, 8.5], [0.4, 0.55, 1.0], 26.0, 1.4),
         light([43.0, 44.0, 10.0], [0.4, 1.0, 0.5], 30.0, 1.4),
         light([16.0, 44.0, 6.5], [1.0, 0.3, 0.25], 24.0, 1.4),

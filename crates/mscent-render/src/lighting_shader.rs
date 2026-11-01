@@ -21,6 +21,10 @@ use crate::texture::Texture;
 /// which on dim baked light would be invisible.
 const SPEC_GAIN: f32 = 1.1;
 
+/// Table response below which a highlight adds nothing visible (the light
+/// level tops out near 300 of 256, so 1/300 is under one level).
+const MIN_SPEC: f32 = 1.0 / 300.0;
+
 /// One fitting sample: texel `(u, v)` paired with luxel `(lx, ly)`.
 type Pair = [f32; 4];
 
@@ -339,12 +343,10 @@ const ROLL: f32 = 110.0;
 /// Smoothly compresses light above the knee towards `KNEE + ROLL`, so bright
 /// pools keep texture detail instead of clipping to flat white.
 fn soft_limit(x: f32) -> f32 {
-    if x <= KNEE {
-        x
-    } else {
-        let d = x - KNEE;
-        KNEE + d / (1.0 + d / ROLL)
-    }
+    // KNEE + d / (1 + d / ROLL) with d = x - KNEE, rearranged to x - d^2 /
+    // (ROLL + d) so there is no branch: d is zero below the knee.
+    let d = (x - KNEE).max(0.0);
+    x - d * d / (ROLL + d)
 }
 
 /// Cheap noise in `[0, 1)` from the screen position. It is fixed on the
@@ -385,7 +387,9 @@ impl<const SPEC: bool> SpanShader for LightingShader<'_, SPEC> {
         let f = (i & ((1 << self.shift) - 1)) as f32;
         let mut k = seg.col0 + seg.dcol * f;
         let mut n = FLAT_NORMAL;
-        if self.face.bump {
+        // Past BUMP_GONE the relief has faded to flat, whose gain is exactly
+        // 1, so the normal fetch is skipped.
+        if self.face.bump && self.bump_scale > 0.0 {
             // Fade the normal towards flat as the map is minified.
             n = texel_normal(self.face.texture, fu, fv);
             if self.bump_scale < 1.0 {
@@ -402,7 +406,11 @@ impl<const SPEC: bool> SpanShader for LightingShader<'_, SPEC> {
             // would flatten the peak; one Newton step of 1/|h| restores it.
             let n_dot_h = n.dot(h) * (1.5 - 0.5 * h.dot(h));
             let s = spec.table.response(n_dot_h);
-            out = add_spec(out, k, s * SPEC_GAIN);
+            // Most pixels are outside the lobe; below this the add is under
+            // one level for any light the shader can produce.
+            if s > MIN_SPEC {
+                out = add_spec(out, k, s * SPEC_GAIN);
+            }
         }
         match self.face.fog {
             Some(fog) => {

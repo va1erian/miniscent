@@ -40,3 +40,11 @@ fn response_is_interpolated_between_table_entries() {
     // Strictly between the ends, not equal to one of them.
     assert!(rm > ra.min(rb) && rm < ra.max(rb));
 }
+
+#[test]
+fn matte_materials_are_not_drawn_with_highlights() {
+    assert!(!SpecTable::new(0).is_visible());
+    assert!(!SpecTable::new(10).is_visible());
+    assert!(SpecTable::new(40).is_visible());
+    assert!(SpecTable::new(200).is_visible());
+}

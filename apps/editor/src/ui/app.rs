@@ -47,10 +47,10 @@ pub enum Msg {
 }
 
 /// Width of the right-hand column (properties and build log), in dip.
-const SIDE_WIDTH: i32 = 300;
+const SIDE_WIDTH: i32 = 340;
 
 /// Height of the build log box, in dip.
-const LOG_HEIGHT: i32 = 220;
+const LOG_HEIGHT: i32 = 170;
 
 /// Menu command ids.
 pub mod cmd {
@@ -226,7 +226,7 @@ impl Editor {
                 column().child(multiline_edit().bind(&app.log_view).height(LOG_HEIGHT)),
             ),
         ));
-        let work = row().children((palette.width(150), views.fill(1), side.width(SIDE_WIDTH)));
+        let work = row().children((palette.width(130), views.fill(1), side.width(SIDE_WIDTH)));
         ui.root(
             column().children((
                 menu_bar(menus).on_select(Msg::Menu).bind(&app.menu),

@@ -45,3 +45,9 @@ fn magnified_normals_interpolate_between_texel_centres() {
     assert!(a < b && b < c, "{a} {b} {c}");
     assert!(b.abs() < 0.05);
 }
+
+#[test]
+fn flat_normal_gain_is_one_even_for_grazing_light() {
+    let grazing = Vec3::new(0.99, 0.0, 0.1).normalized().unwrap();
+    assert!((bump_gain(FLAT_NORMAL, grazing) - 1.0).abs() < 1e-6);
+}

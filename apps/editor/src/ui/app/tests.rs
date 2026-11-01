@@ -180,7 +180,7 @@ fn scripted_session_edits_the_model_and_the_pixels() {
 fn dark_theme_renders_a_dark_viewport() {
     let (image, _) = render_session(Theme::dark(), false);
     save(&image, "showcase-dark.png");
-    let p = image.pixel(155, 315).unwrap();
+    let p = image.pixel(300, 450).unwrap();
     assert!(
         p[0] < 90 && p[1] < 90 && p[2] < 90,
         "viewport background is dark: {p:?}"
@@ -191,7 +191,7 @@ fn dark_theme_renders_a_dark_viewport() {
 fn light_theme_renders_the_showcase() {
     let (image, _) = render_session(Theme::light(), false);
     save(&image, "showcase-light.png");
-    let p = image.pixel(155, 315).unwrap();
+    let p = image.pixel(300, 450).unwrap();
     assert!(
         p[0] > 200 && p[1] > 200,
         "viewport background is light: {p:?}"

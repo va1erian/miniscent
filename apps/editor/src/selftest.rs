@@ -19,6 +19,7 @@ use crate::model::Document;
 use crate::ui::{Editor, Msg, Probe, cmd};
 
 mod faces;
+mod keys;
 
 /// Ticks the UI `n` times, 16 ms apart, so the render thread's frames arrive
 /// and show before a snapshot.
@@ -167,6 +168,7 @@ fn wide_script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     faces::frame_big_face(run, stage, probe);
     pump(stage, 30);
     run.shot(stage, "wide-02-face.png");
+    faces::wide_edit(run, stage, probe);
 }
 
 fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
@@ -326,4 +328,5 @@ fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     pump(stage, 20);
     run.shot(stage, "07-edit-after-second-play.png");
     faces::script(run, stage, probe);
+    keys::script(run, stage, probe);
 }

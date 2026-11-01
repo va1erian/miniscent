@@ -36,14 +36,19 @@ fn edit(stage: &Stage<'_, Msg>, e: FaceEdit) {
     stage.emit(Msg::Face(FaceMsg::Edit(e)));
 }
 
-/// How far in front of a face the camera stands, in world units.
-const STAND_OFF: f64 = 6.0;
+/// Half the vertical field of view's tangent (the renderer's 1.3 rad).
+const HALF_TAN: f64 = 0.7602;
+/// The narrowest picture the face must fit into, width over height.
+const MIN_ASPECT: f64 = 2.5;
+/// Farthest the camera stands from a wall, in world units.
+const MAX_STAND_OFF: f64 = 22.0;
 
-/// The largest wall that a camera standing in front of it really sees: the
-/// face, and the camera that looks at its middle. A thin sliver would make
-/// the scale, rotation and shift of a mapping impossible to judge.
+/// The largest wall that a camera standing back far enough to see all of it,
+/// with room around it for its highlight, really sees: the face, and the
+/// camera that looks at its middle. A thin sliver would make the scale,
+/// rotation and shift of a mapping impossible to judge.
 fn biggest_wall(doc: &Document) -> Option<(FaceRef, FlyCam)> {
-    let mut walls: Vec<(f64, FaceRef, Vec3d, Vec3d)> = Vec::new();
+    let mut walls: Vec<(f64, FaceRef, Vec3d, Vec3d, f64)> = Vec::new();
     for (def, brush) in doc.brushes().iter().zip(build_all(doc)) {
         let planes = brush.map_or(0, |b| b.planes().len());
         for plane in 0..planes {
@@ -58,13 +63,20 @@ fn biggest_wall(doc: &Document) -> Option<(FaceRef, FlyCam)> {
             if n.z.abs() >= 0.5 || verts.is_empty() {
                 continue;
             }
-            let sum = verts.iter().fold(Vec3d::ZERO, |a, v| a + *v);
-            walls.push((poly.area(), face, sum * (1.0 / verts.len() as f64), n));
+            let mid = verts.iter().fold(Vec3d::ZERO, |a, v| a + *v) * (1.0 / verts.len() as f64);
+            let (mut half_h, mut half_w) = (0.0f64, 0.0f64);
+            for v in verts {
+                let d = *v - mid;
+                half_h = half_h.max(d.z.abs());
+                half_w = half_w.max((d.x * n.y - d.y * n.x).abs());
+            }
+            let stand = (half_h / HALF_TAN).max(half_w / (HALF_TAN * MIN_ASPECT)) * 1.35;
+            walls.push((poly.area(), face, mid, n, stand));
         }
     }
     walls.sort_by(|a, b| b.0.total_cmp(&a.0));
-    walls.into_iter().find_map(|(_, face, mid, n)| {
-        let eye = mid + n * STAND_OFF;
+    walls.into_iter().find_map(|(_, face, mid, n, stand)| {
+        let eye = mid + n * stand.clamp(3.0, MAX_STAND_OFF);
         let ray = Ray {
             origin: eye,
             dir: -n,
@@ -125,6 +137,27 @@ pub(super) fn frame_big_face(
     picked
 }
 
+/// Scale 2x (0.125 units per texel), rotate 45 degrees, shift.
+pub(super) fn apply_mapping(stage: &Stage<'_, Msg>) {
+    edit(stage, FaceEdit::ScaleU(0.125));
+    edit(stage, FaceEdit::ScaleV(0.125));
+    edit(stage, FaceEdit::Rotation(45.0));
+    edit(stage, FaceEdit::ShiftU(24.0));
+    edit(stage, FaceEdit::ShiftV(8.0));
+}
+
+/// The wide window's before/after pair of the picked face.
+pub(super) fn wide_edit(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
+    apply_mapping(stage);
+    let status = wait_for_refresh(stage, probe);
+    run.check(
+        status.contains("lightmap kept"),
+        &format!("wide: new mapping reused the lightmap: {status}"),
+    );
+    pump(stage, 20);
+    run.shot(stage, "wide-03-face-edited.png");
+}
+
 pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     let pane = probe.view_pane();
     let state = probe.state();
@@ -140,12 +173,7 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     let original = state.borrow().face_texinfo(face);
     let depth = state.borrow().history.depth();
 
-    // Scale 2x (0.125 units per texel), rotate 45 degrees, shift.
-    edit(stage, FaceEdit::ScaleU(0.125));
-    edit(stage, FaceEdit::ScaleV(0.125));
-    edit(stage, FaceEdit::Rotation(45.0));
-    edit(stage, FaceEdit::ShiftU(24.0));
-    edit(stage, FaceEdit::ShiftV(8.0));
+    apply_mapping(stage);
     let status = wait_for_refresh(stage, probe);
     run.check(
         status.contains("lightmap kept"),

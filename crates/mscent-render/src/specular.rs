@@ -14,7 +14,13 @@ const TABLE_LEN: usize = 256;
 #[derive(Clone, Debug)]
 pub struct SpecTable {
     lut: [f32; TABLE_LEN],
+    strength: f32,
 }
+
+/// Peak response below which a highlight is not worth its per-pixel cost:
+/// at 0.12 a bright pool (light level ~300 of 256) gains about 40 levels at
+/// the very peak of the lobe, and less everywhere else.
+const MIN_VISIBLE: f32 = 0.12;
 
 impl SpecTable {
     /// Table for a material gloss of 0 (matte, no highlight) to 255
@@ -28,7 +34,13 @@ impl SpecTable {
         for (i, e) in lut.iter_mut().enumerate() {
             *e = (i as f32 / (TABLE_LEN - 1) as f32).powf(power) * strength;
         }
-        Self { lut }
+        Self { lut, strength }
+    }
+
+    /// Whether the material's highlight is strong enough to draw. Matte
+    /// materials (rock, most brick) skip the specular path entirely.
+    pub fn is_visible(&self) -> bool {
+        self.strength >= MIN_VISIBLE
     }
 
     /// Response for a dot product `n.h`; non-positive dots give 0.

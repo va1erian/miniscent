@@ -46,7 +46,7 @@ pub struct FacePanel {
     rotation: Handle<NumberField<Msg>>,
     tiles: [Handle<NumberField<Msg>>; 2],
     follow: Handle<CheckBox<Msg>>,
-    info: [Handle<Label<Msg>>; 2],
+    info: Handle<Label<Msg>>,
 }
 
 /// A square RGBA preview of a texture.
@@ -123,28 +123,42 @@ impl FacePanel {
         }
         let scale_range = (-1000.0, 1000.0, 0.0625);
         let shift_range = (-65_536.0, 65_536.0, 1.0);
-        let fields = grid([Track::Auto, Track::Fill(1)])
+        let pair = |label_text: &str,
+                    handles: &[Handle<NumberField<Msg>>; 2],
+                    range: (f64, f64, f64),
+                    make: [fn(f32) -> FaceEdit; 2]| {
+            (
+                label(label_text),
+                number(&handles[0], range, move |v| edit(make[0](v as f32))),
+                number(&handles[1], range, move |v| edit(make[1](v as f32))),
+            )
+        };
+        // The U and V fields of one setting share a row.
+        let (l1, u1, v1) = pair(
+            "Scale",
+            &self.scale,
+            scale_range,
+            [FaceEdit::ScaleU, FaceEdit::ScaleV],
+        );
+        let (l2, u2, v2) = pair(
+            "Shift",
+            &self.shift,
+            shift_range,
+            [FaceEdit::ShiftU, FaceEdit::ShiftV],
+        );
+        let fields = grid([Track::Auto, Track::Fill(1), Track::Fill(1)])
             .gap(6)
-            .child(label("Scale X"))
-            .child(number(&self.scale[0], scale_range, |v| {
-                edit(FaceEdit::ScaleU(v as f32))
-            }))
-            .child(label("Scale Y"))
-            .child(number(&self.scale[1], scale_range, |v| {
-                edit(FaceEdit::ScaleV(v as f32))
-            }))
-            .child(label("Shift X"))
-            .child(number(&self.shift[0], shift_range, |v| {
-                edit(FaceEdit::ShiftU(v as f32))
-            }))
-            .child(label("Shift Y"))
-            .child(number(&self.shift[1], shift_range, |v| {
-                edit(FaceEdit::ShiftV(v as f32))
-            }))
+            .child(l1)
+            .child(u1)
+            .child(v1)
+            .child(l2)
+            .child(u2)
+            .child(v2)
             .child(label("Rotation"))
             .child(number(&self.rotation, (-360.0, 360.0, 15.0), |v| {
                 edit(FaceEdit::Rotation(v as f32))
-            }));
+            }))
+            .child(label("degrees"));
         let fit = grid([Track::Auto, Track::Fill(1), Track::Fill(1), Track::Auto])
             .gap(6)
             .child(label("Tiles"))
@@ -187,8 +201,7 @@ impl FacePanel {
                         .on_toggle(|on| edit(FaceEdit::FollowBrush(on)))
                         .bind(&self.follow),
                 )
-                .child(label("").bind(&self.info[0]))
-                .child(label("").bind(&self.info[1])),
+                .child(label("").bind(&self.info)),
         )
         .bind(&self.group)
     }
@@ -228,11 +241,9 @@ impl FacePanel {
         }
         self.rotation.get().set_value(round(t.rotation_deg));
         self.follow.get().set_checked(!t.lock_to_world);
-        self.info[0]
-            .get()
-            .set_text(&format!("Texture {} x {} texels", v.texture.0, v.texture.1));
-        self.info[1]
-            .get()
-            .set_text(&format!("Tile = {:.4} x {:.4} units", v.tile.0, v.tile.1));
+        self.info.get().set_text(&format!(
+            "{} x {} texels, tile {:.2} x {:.2} units",
+            v.texture.0, v.texture.1, v.tile.0, v.tile.1
+        ));
     }
 }

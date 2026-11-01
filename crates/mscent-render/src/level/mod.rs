@@ -80,7 +80,7 @@ impl Default for BuildConfig {
     fn default() -> Self {
         Self {
             luxel_size: 0.25,
-            ambient: Vec3::new(0.10, 0.095, 0.125),
+            ambient: Vec3::new(0.07, 0.066, 0.09),
             light_gain: 4.6,
             light_radius: 0.5,
             shadow_samples: 16,
@@ -321,7 +321,7 @@ impl LevelRenderer {
                 .get(usize::from(face.material))
                 .or(self.spec.last());
             let spec = table
-                .filter(|_| specular)
+                .filter(|t| specular && t.is_visible())
                 .and_then(|t| LightingShader::with_specular(fl, eye, t));
             if let Some(s) = spec {
                 return FaceShader::Spec(s);

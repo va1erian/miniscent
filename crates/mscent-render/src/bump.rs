@@ -39,11 +39,8 @@ pub fn decode_normal(packed: u32) -> Vec3 {
 pub fn texel_normal(tex: &Texture, fu: i32, fv: i32) -> Vec3 {
     let (u, v) = (fu.wrapping_sub(0x8000), fv.wrapping_sub(0x8000));
     let (x0, y0) = (u >> 16, v >> 16);
-    let (tx, ty) = (
-        ((u >> 8) & 0xff) as f32 / 256.0,
-        ((v >> 8) & 0xff) as f32 / 256.0,
-    );
-    let at = |x: i32, y: i32| tex.normal_texel(x, y).map(decode_normal);
+    let (tx, ty) = (((u >> 8) & 0xff) as u32, ((v >> 8) & 0xff) as u32);
+    let at = |x: i32, y: i32| tex.normal_texel(x, y);
     let (Some(a), Some(b), Some(c), Some(d)) = (
         at(x0, y0),
         at(x0.wrapping_add(1), y0),
@@ -52,7 +49,16 @@ pub fn texel_normal(tex: &Texture, fu: i32, fv: i32) -> Vec3 {
     ) else {
         return FLAT_NORMAL;
     };
-    a.lerp(b, tx).lerp(c.lerp(d, tx), ty)
+    // Blend the bytes with exact integer weights (summing to 1 << 16) and
+    // convert once per channel, instead of decoding four texels to floats.
+    let (wa, wb) = ((256 - tx) * (256 - ty), tx * (256 - ty));
+    let (wc, wd) = ((256 - tx) * ty, tx * ty);
+    let ch = |shift: u32| {
+        let byte = |p: u32| (p >> shift) & 0xff;
+        let sum = byte(a) * wa + byte(b) * wb + byte(c) * wc + byte(d) * wd;
+        sum as f32 * (1.0 / (65536.0 * 127.5)) - 1.0
+    };
+    Vec3::new(ch(16), ch(8), ch(0))
 }
 
 /// The normal of an unperturbed surface in tangent space.
@@ -63,8 +69,10 @@ pub const FLAT_NORMAL: Vec3 = Vec3::new(0.0, 0.0, 1.0);
 /// the perturbed surface faces away from the light.
 pub fn bump_gain(n: Vec3, l: Vec3) -> f32 {
     let flat = l.z.max(MIN_FLAT);
-    let tilted = Vec3::new(n.x * RELIEF, n.y * RELIEF, n.z);
-    (tilted.dot(l) / flat).clamp(MIN_GAIN, MAX_GAIN)
+    // The flat normal must give exactly 1 even where the light is grazing
+    // (z below MIN_FLAT), so the z term uses the same floored value.
+    let tilted = n.x * RELIEF * l.x + n.y * RELIEF * l.y + n.z * flat;
+    (tilted / flat).clamp(MIN_GAIN, MAX_GAIN)
 }
 
 #[cfg(test)]
