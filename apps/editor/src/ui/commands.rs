@@ -9,6 +9,39 @@ use crate::files;
 use crate::model::Document;
 use crate::studio::Mode;
 
+/// The menu bar.
+pub(super) fn menus(m: &mut xui::widget::MenuScope<'_>) {
+    m.submenu(MenuId::new(100), "&File", |f| {
+        f.item(cmd::NEW, "&New   Ctrl+N");
+        f.item(cmd::OPEN, "&Open...   Ctrl+O");
+        f.item(cmd::SHOWCASE, "Open &showcase level");
+        f.item(cmd::SAVE, "&Save   Ctrl+S");
+        f.item(cmd::SAVE_AS, "Save &as...");
+    });
+    m.submenu(MenuId::new(101), "&Edit", |e| {
+        e.item(cmd::UNDO, "&Undo   Ctrl+Z");
+        e.item(cmd::REDO, "&Redo   Ctrl+Y");
+        e.separator();
+        e.item(cmd::DELETE, "&Delete   Del");
+        e.item(cmd::FLIP, "&Flip add/subtract");
+        e.item(cmd::FORWARD, "Move &later in order");
+        e.item(cmd::BACK, "Move &earlier in order");
+        e.separator();
+        e.item(cmd::SLICE, "&Apply slice   Enter");
+        e.item(cmd::SLICE_SIDE, "Slice &keeps...   K");
+        e.item(cmd::CARVE, "&Carve with brush   Ctrl+Shift+C");
+        e.item(cmd::EXTRUDE, "Extrude face &out   Ctrl+E");
+        e.item(cmd::EXTRUDE_IN, "Extrude face &in   Ctrl+Shift+E");
+    });
+    m.submenu(MenuId::new(102), "&View", |v| {
+        v.item(cmd::FIT, "&Fit views to level");
+        v.item(cmd::RESET_CAMERA, "&Reset 3D camera");
+    });
+    m.submenu(MenuId::new(103), "&Play", |p| {
+        p.item(cmd::PLAY, "&Play   F5");
+    });
+}
+
 impl Editor {
     pub(super) fn menu_command(&mut self, id: MenuId) {
         if self.studio.mode == Mode::Play {
@@ -62,6 +95,19 @@ impl Editor {
             }
             cmd::BACK => {
                 st.reorder_selected(-1);
+            }
+            cmd::SLICE => {
+                st.apply_slice();
+            }
+            cmd::SLICE_SIDE => st.cycle_keep(),
+            cmd::CARVE => {
+                st.carve_selected();
+            }
+            cmd::EXTRUDE => {
+                st.extrude_faces(1.0);
+            }
+            cmd::EXTRUDE_IN => {
+                st.extrude_faces(-1.0);
             }
             _ => {}
         }
