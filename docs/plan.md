@@ -58,6 +58,9 @@ hardware (`lazyos/docs/compat/kabylake/hw-survey/03-cpuinfo.txt`).
 - **Stock xui.** The editor builds against upstream xui (rev `0b1b7ef`, which has the monitor-change fix, pointer lock and F5 to F12 keys); nothing is vendored. The game has no xui dependency.
 - **Threaded play.** Instant Play runs the game on a render thread with a one-slot frame mailbox,
   not on the UI thread, so a slow scene never slows the UI.
+- **Parallel frames by default.** The game renders in bands on a pool of parked threads with at
+  least 4 workers (`jobs.rs`), with visibility and clipping done once per frame. A kernel or platform
+  without useful threads takes the one-worker path through `LevelRenderer::set_tiling`.
 - **Bake cache and soft shadows.** The lightmap is baked once per distinct set of inputs
   (`BakeCache`, optional file mirror) and frames never touch it; lamps are discs so shadow edges are
   smooth, and albedo is mipmapped, to stop shimmer at a distance.

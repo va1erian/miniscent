@@ -141,6 +141,27 @@ generated at runtime. Findings and changes:
 - `cargo test --workspace` passes (one run saw `bake_cache::concurrent_writers_in_one_process_leave_a_valid_file`
   fail under full-workspace load; it passed alone and on rerun, so it is timing sensitive).
 
+## Parallel frames by default (M9.0, the groundwork of `docs/particles.md`)
+
+`LevelRenderer::render` draws in 24-row bands with `available_parallelism().max(4)` workers on a
+pool of parked threads (`jobs.rs`). Visibility, the BSP walk and the clipping and projection of every
+polygon run once per frame (`PolyList` in `raster.rs`); a band fills only the polygons in its rows.
+`LevelRenderer::set_tiling` overrides the band height and worker count. Game bench on the dev
+machine: 9.29 to 1.20 ms per frame. Pixels and depth equal one band on one worker at every tiling
+tried (`tests/tiled_level.rs`), and the scripted flythrough PNGs are byte-identical to the
+single-threaded renderer's. Allocations are unchanged (256 per frame, 1379 with actors;
+`tests/frame_alloc.rs`). Numbers and the scaling table are in `docs/particles.md`.
+
+Not verified: a real window, the i3-7100U (its 2 cores and 2 hyperthreads), and any LazyOS thread;
+no LazyOS backend passes the one-worker override yet. `frame_bench` still draws through `Scene::render`
+per band, on one worker, so the CI ratio does not measure this path.
+
+Seen failing on the code before this change as well as after it, and not addressed: the editor
+selftest check "a click on the picture picked the framed wall"; `tools/check_frame_cost.py` on the
+dev machine (ratio about 8.5 against a 7.61 baseline); intermittently
+`a_100_ms_scene_does_not_slow_the_ui_ticks_and_the_newest_frame_is_shown` (a 5 ms limit, under load)
+and `bake_cache::writes_are_atomic_and_rebake_overwrites`.
+
 ## Per-face texture mapping (TexInfo)
 
 Each brush plane has a Hammer-style `TexInfo` (`crates/mscent-world/src/texinfo.rs`, `texinfo/align.rs`):
@@ -208,7 +229,7 @@ GUI itself was not driven by hand, only the model through the pointer API and th
 | M3.3 | Done | `raster.rs`; `tests/snapshot.rs::brick_quad_facing_the_camera` against `tests/ref/brick_quad.ppm` |
 | M3.4 | Done | `scene.rs` and `scene/walk.rs`; `scene_tests::flythrough_matches_brute_force_with_no_doubled_faces` |
 | M3.5 | Done | `snapshot::brick_wall_in_perspective_with_fog`, `flat_lit_fallback_scales_brightness`, `framebuffer_tests::sky_gradient_runs_from_top_to_bottom_colour`; the level renderer draws sky, fog and lit surfaces in the flythrough PNGs |
-| M3.6 | Partial | `tiles.rs`, `simd.rs`, `simd_x86.rs`; `tiles_tests::one_and_many_workers_give_identical_pixels`. Scaling not measured on multiple cores, AVX2 path unmeasured, no-syscall property not asserted |
+| M3.6 | Partial | `tiles.rs`, `jobs.rs`, `simd.rs`, `simd_x86.rs`; `tiles_tests::one_and_many_workers_give_identical_pixels`, `tests/tiled_level.rs`. Default in the game since M9.0; scaling measured on the dev machine only (`docs/particles.md`), AVX2 path unmeasured, no-syscall property not asserted |
 | M3.7 | Done | `resolution.rs` controller plus `upscale_nearest` (`resolution_tests`), wired in `apps/game/src/app.rs` (adaptive path, `--no-adaptive` to disable; headless runs fix the scale). Scale stayed at 1000 in the bench, so a drop under real load was not seen in the game itself |
 | M3.8 | Done | `crates/mscent-render/examples/frame_bench.rs`, `tools/check_frame_cost.py`, `docs/perf/baseline.json`, run in CI. The 10% regression failure was not demonstrated |
 | M3.9 | Done | `mesh.rs`; `mesh_tests` (fog, lighting, poses) |
