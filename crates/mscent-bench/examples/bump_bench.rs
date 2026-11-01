@@ -7,6 +7,8 @@
 //!   B  A + per-pixel bump: normal-map fetch, bilinear baked light direction, N.L per pixel
 //!   C  B but light colour/direction evaluated at the ends of 16px spans and stepped linearly
 //!   S  A but with the light colour stepped per 16px span, the like-for-like baseline for C
+//!   D  C plus a specular highlight: Blinn half vector stepped per 16px span, per-pixel
+//!      N.H through a 256-entry power table, added to the lit colour
 //!
 //! cargo run --release --example bump_bench
 
@@ -24,6 +26,19 @@ struct Data {
     normal: Vec<[i8; 4]>, // tangent-space xyz, 127 = 1.0
     lm_col: Vec<[u8; 4]>, // baked light colour
     lm_dir: Vec<[i8; 4]>, // baked dominant light direction, tangent space
+    spec: [u8; 256],      // (N.H)^GLOSS as 0..255, indexed by N.H scaled to 0..255
+}
+
+/// Fixed view vector in tangent space (the camera looks mostly down the surface normal).
+const VIEW: [i32; 3] = [0, 0, 100];
+const GLOSS: i32 = 24;
+
+fn make_spec() -> [u8; 256] {
+    let mut t = [0u8; 256];
+    for (i, e) in t.iter_mut().enumerate() {
+        *e = ((i as f64 / 255.0).powi(GLOSS) * 255.0) as u8;
+    }
+    t
 }
 
 fn make_data() -> Data {
@@ -49,6 +64,7 @@ fn make_data() -> Data {
         normal,
         lm_col,
         lm_dir,
+        spec: make_spec(),
     }
 }
 
@@ -106,6 +122,13 @@ fn shade(albedo: u32, light: [u32; 3], k: u32) -> u32 {
     0xFF00_0000 | (b.min(255) << 16) | (g.min(255) << 8) | r.min(255)
 }
 
+/// Add the specular term to every channel, saturating.
+#[inline(always)]
+fn add_spec(c: u32, s: u32) -> u32 {
+    let ch = |shift: u32| (((c >> shift) & 255) + s).min(255) << shift;
+    0xFF00_0000 | ch(16) | ch(8) | ch(0)
+}
+
 #[inline(always)]
 fn uv(x: usize, y: usize, f: usize) -> (u32, u32, u32, u32) {
     // fake affine mapping that changes per frame so nothing is hoisted
@@ -144,7 +167,12 @@ fn frame_b(d: &Data, fb: &mut [u32], f: usize) {
     }
 }
 
-fn frame_spans<const BUMP: bool>(d: &Data, fb: &mut [u32], f: usize) {
+/// Variants that share the span structure: plain stepped light, bump, bump plus specular.
+const PLAIN: u8 = 0;
+const BUMP: u8 = 1;
+const BUMP_SPEC: u8 = 2;
+
+fn frame_spans<const MODE: u8>(d: &Data, fb: &mut [u32], f: usize) {
     for y in 0..H {
         let mut x = 0;
         while x < W {
@@ -153,6 +181,11 @@ fn frame_spans<const BUMP: bool>(d: &Data, fb: &mut [u32], f: usize) {
             let (_, _, lx1, ly1) = uv(x + SPAN, y, f);
             let (c0, c1) = (bilerp_col(d, lx0, ly0), bilerp_col(d, lx1, ly1));
             let (d0, d1) = (bilerp_dir(d, lx0, ly0), bilerp_dir(d, lx1, ly1));
+            // half vector H = L + V at both ends; stepped like L
+            let (h0, h1) = (
+                [d0[0] + VIEW[0], d0[1] + VIEW[1], d0[2] + VIEW[2]],
+                [d1[0] + VIEW[0], d1[1] + VIEW[1], d1[2] + VIEW[2]],
+            );
             for i in 0..SPAN {
                 let t = (i * 16) as i32; // 0..240
                 let col =
@@ -160,8 +193,19 @@ fn frame_spans<const BUMP: bool>(d: &Data, fb: &mut [u32], f: usize) {
                 let dir = [0, 1, 2].map(|c| (d0[c] * (256 - t) + d1[c] * t) >> 8);
                 let (u, v, _, _) = uv(x + i, y, f);
                 let ti = (v as usize >> 9 & (TEX - 1)) * TEX + (u as usize >> 9 & (TEX - 1));
-                let k = if BUMP { bump_k(d.normal[ti], dir) } else { 256 };
-                fb[y * W + x + i] = shade(d.albedo[ti], col, k);
+                let k = if MODE == PLAIN {
+                    256
+                } else {
+                    bump_k(d.normal[ti], dir)
+                };
+                let mut px = shade(d.albedo[ti], col, k);
+                if MODE == BUMP_SPEC {
+                    let h = [0, 1, 2].map(|c| (h0[c] * (256 - t) + h1[c] * t) >> 8);
+                    let n = d.normal[ti];
+                    let nh = (n[0] as i32 * h[0] + n[1] as i32 * h[1] + n[2] as i32 * h[2]) >> 8;
+                    px = add_spec(px, d.spec[nh.clamp(0, 255) as usize] as u32);
+                }
+                fb[y * W + x + i] = px;
             }
             x += SPAN;
         }
@@ -169,11 +213,15 @@ fn frame_spans<const BUMP: bool>(d: &Data, fb: &mut [u32], f: usize) {
 }
 
 fn frame_c(d: &Data, fb: &mut [u32], f: usize) {
-    frame_spans::<true>(d, fb, f);
+    frame_spans::<BUMP>(d, fb, f);
+}
+
+fn frame_d(d: &Data, fb: &mut [u32], f: usize) {
+    frame_spans::<BUMP_SPEC>(d, fb, f);
 }
 
 fn frame_s(d: &Data, fb: &mut [u32], f: usize) {
-    frame_spans::<false>(d, fb, f);
+    frame_spans::<PLAIN>(d, fb, f);
 }
 
 fn bench(name: &str, d: &Data, fb: &mut [u32], run: fn(&Data, &mut [u32], usize)) -> f64 {
@@ -217,10 +265,31 @@ fn main() {
         &mut fb,
         frame_c,
     );
+    let dd = bench(
+        "D  + bump + specular, H stepped per span",
+        &d,
+        &mut fb,
+        frame_d,
+    );
+    println!();
+    println!("variant   ms/frame   vs A     vs S     vs C");
+    for (name, ms) in [("A", a), ("B", b), ("S", s), ("C", c), ("D", dd)] {
+        println!(
+            "{name:<9} {ms:8.2}  {:+6.0}%  {:+6.0}%  {:+6.0}%",
+            (ms / a - 1.0) * 100.0,
+            (ms / s - 1.0) * 100.0,
+            (ms / c - 1.0) * 100.0
+        );
+    }
     println!(
         "bump overhead, like for like:  B vs A +{:.0}%   C vs S +{:.0}%",
         (b / a - 1.0) * 100.0,
         (c / s - 1.0) * 100.0
+    );
+    println!(
+        "specular on top of bump:       D vs C +{:.0}% ({:+.2} ms/frame)",
+        (dd / c - 1.0) * 100.0,
+        dd - c
     );
     println!(
         "checksum {}",

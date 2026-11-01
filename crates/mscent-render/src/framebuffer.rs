@@ -14,6 +14,10 @@ pub struct Framebuffer {
     height: u32,
     color: Vec<u32>,
     depth: Vec<f32>,
+    /// First screen row held (non-zero only for a tile of a larger target).
+    y0: u32,
+    /// Height of the whole target this buffer is a part of.
+    full_height: u32,
 }
 
 impl Framebuffer {
@@ -29,7 +33,33 @@ impl Framebuffer {
             height,
             color: vec![0xff00_0000; n],
             depth: vec![0.0; n],
+            y0: 0,
+            full_height: height,
         })
+    }
+
+    /// A horizontal band: `rows` rows starting at screen row `y0` of a
+    /// `full_height` target. Drawing and reads use screen coordinates, so a
+    /// band renders exactly the pixels the full target would have in its rows.
+    pub(crate) fn new_band(width: u32, y0: u32, rows: u32, full_height: u32) -> Option<Self> {
+        let end = y0.checked_add(rows)?;
+        if end > full_height {
+            return None;
+        }
+        let mut band = Self::new(width, rows)?;
+        band.y0 = y0;
+        band.full_height = full_height;
+        Some(band)
+    }
+
+    /// Screen rows `start..end` this buffer holds.
+    pub(crate) fn row_range(&self) -> (i32, i32) {
+        (self.y0 as i32, (self.y0 + self.height) as i32)
+    }
+
+    /// Colour and depth planes together, for compositing tiles.
+    pub(crate) fn planes_mut(&mut self) -> (&mut [u32], &mut [f32]) {
+        (&mut self.color, &mut self.depth)
     }
 
     pub fn width(&self) -> u32 {
@@ -59,9 +89,10 @@ impl Framebuffer {
     /// Fill the colour with a vertical gradient (the sky) and reset depth.
     pub fn clear_sky(&mut self, top: u32, bottom: u32) {
         let w = self.width as usize;
-        let last = (self.height - 1).max(1);
+        let last = (self.full_height - 1).max(1);
         for (y, row) in self.color.chunks_exact_mut(w).enumerate() {
-            let t = (y as u32 * 256 / last).min(256);
+            // Screen row, so tiles of one target share a single gradient.
+            let t = ((self.y0 + y as u32) * 256 / last).min(256);
             row.fill(lerp_rgb(top, bottom, t));
         }
         self.depth.fill(0.0);
@@ -69,6 +100,7 @@ impl Framebuffer {
 
     fn index(&self, x: i32, y: i32) -> Option<usize> {
         let (x, y) = (u32::try_from(x).ok()?, u32::try_from(y).ok()?);
+        let y = y.checked_sub(self.y0)?;
         (x < self.width && y < self.height).then(|| y as usize * self.width as usize + x as usize)
     }
 
@@ -84,7 +116,8 @@ impl Framebuffer {
     /// Mutable colour and depth of row `y`, or `None` when out of range.
     pub(crate) fn row_mut(&mut self, y: i32) -> Option<(&mut [u32], &mut [f32])> {
         let y = usize::try_from(y)
-            .ok()
+            .ok()?
+            .checked_sub(self.y0 as usize)
             .filter(|&y| y < self.height as usize)?;
         let w = self.width as usize;
         Some((

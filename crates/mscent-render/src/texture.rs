@@ -131,6 +131,12 @@ impl Texture {
         Some(v.normalized().unwrap_or(Vec3::new(0.0, 0.0, 1.0)))
     }
 
+    /// Packed `0xAARRGGBB` normal texel, undecoded: the per-pixel bump path
+    /// decodes it inline instead of paying for a normalize.
+    pub fn normal_texel(&self, x: i32, y: i32) -> Option<u32> {
+        Some(self.normals.as_ref()?[self.index(x, y)])
+    }
+
     /// Height at a texel, if a height map is attached.
     pub fn height_at(&self, x: i32, y: i32) -> Option<u8> {
         Some(self.heights.as_ref()?[self.index(x, y)])

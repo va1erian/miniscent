@@ -171,8 +171,10 @@ fn fill_polygon<S: SpanShader>(
     let (ymin, ymax) = pts.iter().fold((f32::MAX, f32::MIN), |(lo, hi), p| {
         (lo.min(p.y), hi.max(p.y))
     });
-    let first = (ymin - 0.5).ceil().max(0.0) as i32;
-    let end = ((ymax - 0.5).ceil() as i32).min(fb.height() as i32);
+    // A tile only holds some rows; clipping here keeps rows outside it free.
+    let (row_lo, row_hi) = fb.row_range();
+    let first = ((ymin - 0.5).ceil().max(0.0) as i32).max(row_lo);
+    let end = ((ymax - 0.5).ceil() as i32).min(row_hi);
     for y in first..end {
         if let Some((l, r)) = row_extent(pts, y as f32 + 0.5) {
             draw_row(fb, y, (l, r), tex, shader, stats);

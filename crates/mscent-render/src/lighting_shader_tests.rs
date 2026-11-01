@@ -1,0 +1,320 @@
+use super::*;
+use crate::camera::Camera;
+use crate::framebuffer::Framebuffer;
+use crate::raster::draw_polygon;
+use crate::texture::load_texture;
+use mscent_world::lightmap::{BakeConfig, LightFace, PointLight, bake};
+use mscent_world::{Brush, Op, compile};
+
+const SIZE: u32 = 64;
+const WHITE: u32 = 0xffff_ffff;
+
+/// 64x64 target, 90 degree fov, camera at the origin looking down -Z.
+fn setup() -> (Framebuffer, Camera) {
+    let cam = Camera::look_at(
+        Vec3::ZERO,
+        Vec3::new(0.0, 0.0, -1.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        core::f32::consts::FRAC_PI_2,
+        0.1,
+        200.0,
+        SIZE,
+        SIZE,
+    )
+    .unwrap();
+    (Framebuffer::new(SIZE, SIZE).unwrap(), cam)
+}
+
+/// A 4x4 wall at z = -2 facing the camera. Its screen footprint is exactly
+/// the framebuffer, and one texture repeat spans the whole wall.
+fn wall() -> [Vertex; 4] {
+    let p = |x: f32, y: f32, u: f32, v: f32| Vertex::new(Vec3::new(x, y, -2.0), u, v);
+    [
+        p(-2.0, 2.0, 0.0, 0.0),
+        p(2.0, 2.0, 1.0, 0.0),
+        p(2.0, -2.0, 1.0, 1.0),
+        p(-2.0, -2.0, 0.0, 1.0),
+    ]
+}
+
+/// Bake the wall lit by a lamp near its left edge: the right half is beyond
+/// the lamp's radius and stays black (no ambient, no bounce).
+fn baked() -> Lightmap {
+    // Space is solid by default; the room is carved out in front of the wall.
+    let room = Brush::cuboid(
+        mscent_math::Vec3d::new(-3.0, -3.0, -2.0),
+        mscent_math::Vec3d::new(3.0, 3.0, 4.0),
+        Op::Subtract,
+        0,
+    )
+    .unwrap();
+    let bsp = compile(&[room]).unwrap();
+    let face = LightFace {
+        vertices: wall().iter().map(|v| v.pos).collect(),
+        normal: Vec3::new(0.0, 0.0, 1.0),
+    };
+    let lamp = PointLight {
+        position: Vec3::new(-1.5, 0.0, 0.0),
+        color: Vec3::new(8.0, 8.0, 8.0),
+        radius: 3.0,
+    };
+    let cfg = BakeConfig {
+        luxel_size: 0.25,
+        workers: 2,
+        ambient: Vec3::ZERO,
+        albedo: 0.0,
+        ..BakeConfig::default()
+    };
+    bake(&bsp, &[face], &[lamp], &cfg).unwrap()
+}
+
+fn pack(n: Vec3) -> u32 {
+    let c = |x: f32| ((x * 0.5 + 0.5) * 255.0).round() as u32;
+    0xff00_0000 | c(n.x) << 16 | c(n.y) << 8 | c(n.z)
+}
+
+/// An 8x8 texture whose rows 0 and 4 are mortar grooves tilted by `tilt`
+/// (a tangent-space xy offset), all other texels flat.
+fn grooved(tilt: (f32, f32)) -> Texture {
+    let flat = pack(Vec3::new(0.0, 0.0, 1.0));
+    let groove = pack(Vec3::new(tilt.0, tilt.1, 0.7).normalized().unwrap());
+    let normals = (0..64)
+        .map(|i| if (i / 8) % 4 == 0 { groove } else { flat })
+        .collect();
+    Texture::new(8, 8, vec![WHITE; 64])
+        .unwrap()
+        .with_normals(normals)
+        .unwrap()
+}
+
+/// Tangent-space direction of the light at the luxel under pixel `(x, y)`.
+fn dir_at_pixel(lm: &Lightmap, tex: &Texture, x: u32, y: u32) -> Vec3 {
+    let map = UvToLuxel::from_vertices(&lm.projections()[0], &wall(), tex).unwrap();
+    let (u, v) = (x as f32 / 8.0, y as f32 / 8.0);
+    let (lx, ly) = map.apply(u, v);
+    lm.face_luxel(0, lx as u32, ly as u32).unwrap().dir
+}
+
+fn face<'a>(lm: &'a Lightmap, tex: &'a Texture, bump: bool) -> FaceLight<'a> {
+    let map = UvToLuxel::from_vertices(&lm.projections()[0], &wall(), tex).unwrap();
+    FaceLight {
+        lightmap: lm,
+        face: 0,
+        map,
+        texture: tex,
+        fog: None,
+        bump,
+    }
+}
+
+fn render<S: SpanShader>(tex: &Texture, shader: &mut S) -> Vec<u32> {
+    let (mut fb, cam) = setup();
+    draw_polygon(&mut fb, &cam, &wall(), tex, shader);
+    fb.pixels().to_vec()
+}
+
+fn px(img: &[u32], x: u32, y: u32) -> u32 {
+    img[(y * SIZE + x) as usize]
+}
+
+fn red(c: u32) -> u32 {
+    (c >> 16) & 0xff
+}
+
+#[test]
+fn lit_side_is_brighter_than_unlit_side() {
+    let lm = baked();
+    let tex = grooved((0.0, 0.0));
+    let mut sh = LightingShader::new(face(&lm, &tex, false)).unwrap();
+    let img = render(&tex, &mut sh);
+    let (lit, dark) = (px(&img, 8, 20), px(&img, 60, 20));
+    assert!(red(lit) > 100, "lit side is {lit:#x}");
+    assert_eq!(dark, 0xff00_0000, "beyond the lamp radius is black");
+}
+
+#[test]
+fn light_falls_off_smoothly_across_spans() {
+    let lm = baked();
+    let tex = grooved((0.0, 0.0));
+    let mut sh = LightingShader::new(face(&lm, &tex, false)).unwrap();
+    let img = render(&tex, &mut sh);
+    // Monotone from the lamp outward along a row, with no jump at span
+    // boundaries (every 16 pixels).
+    let row: Vec<u32> = (4..40).map(|x| red(px(&img, x, 20))).collect();
+    assert!(row.windows(2).all(|w| w[1] <= w[0] + 1), "{row:?}");
+    let max_step = row.windows(2).map(|w| w[0].abs_diff(w[1])).max().unwrap();
+    assert!(max_step <= 12, "step {max_step} in {row:?}");
+}
+
+#[test]
+fn bumped_mortar_is_darker_and_bricks_match_flat() {
+    let lm = baked();
+    // Tilt mortar normals away from the light's tangent-plane direction.
+    let d = dir_at_pixel(&lm, &grooved((0.0, 0.0)), 24, 36);
+    let tex = grooved((-d.x, -d.y));
+    let flat_img = render(
+        &tex,
+        &mut LightingShader::new(face(&lm, &tex, false)).unwrap(),
+    );
+    let bump_img = render(
+        &tex,
+        &mut LightingShader::new(face(&lm, &tex, true)).unwrap(),
+    );
+    // Texel row 4 covers pixel rows 32..40: mortar. Row 5 covers 40..48: brick.
+    let (mortar_flat, mortar_bump) = (px(&flat_img, 24, 36), px(&bump_img, 24, 36));
+    assert!(
+        red(mortar_bump) + 10 < red(mortar_flat),
+        "mortar flat {mortar_flat:#x} bumped {mortar_bump:#x}"
+    );
+    let (brick_flat, brick_bump) = (red(px(&flat_img, 24, 44)), red(px(&bump_img, 24, 44)));
+    assert!(
+        brick_flat.abs_diff(brick_bump) <= 3,
+        "{brick_flat} vs {brick_bump}"
+    );
+}
+
+#[test]
+fn tilting_toward_the_light_brightens_the_groove() {
+    let lm = baked();
+    let d = dir_at_pixel(&lm, &grooved((0.0, 0.0)), 24, 36);
+    let tex = grooved((d.x, d.y));
+    let flat_img = render(
+        &tex,
+        &mut LightingShader::new(face(&lm, &tex, false)).unwrap(),
+    );
+    let bump_img = render(
+        &tex,
+        &mut LightingShader::new(face(&lm, &tex, true)).unwrap(),
+    );
+    assert!(red(px(&bump_img, 24, 36)) > red(px(&flat_img, 24, 36)) + 10);
+}
+
+#[test]
+fn bump_flag_without_a_normal_map_changes_nothing() {
+    let lm = baked();
+    let tex = Texture::new(8, 8, vec![WHITE; 64]).unwrap();
+    let off = render(
+        &tex,
+        &mut LightingShader::new(face(&lm, &tex, false)).unwrap(),
+    );
+    let on = render(
+        &tex,
+        &mut LightingShader::new(face(&lm, &tex, true)).unwrap(),
+    );
+    assert_eq!(off, on);
+}
+
+#[test]
+fn zero_gloss_specular_matches_the_diffuse_path_exactly() {
+    let lm = baked();
+    let tex = grooved((0.3, 0.1));
+    let table = SpecTable::new(0);
+    let eye = Vec3::ZERO;
+    for bump in [false, true] {
+        let off = render(
+            &tex,
+            &mut LightingShader::new(face(&lm, &tex, bump)).unwrap(),
+        );
+        let mut sh = LightingShader::with_specular(face(&lm, &tex, bump), eye, &table).unwrap();
+        assert_eq!(off, render(&tex, &mut sh), "bump = {bump}");
+    }
+}
+
+#[test]
+fn glossy_specular_adds_a_highlight_and_never_darkens() {
+    let lm = baked();
+    let tex = Texture::new(8, 8, vec![0xff60_6060; 64]).unwrap();
+    let table = SpecTable::new(255);
+    let off = render(
+        &tex,
+        &mut LightingShader::new(face(&lm, &tex, false)).unwrap(),
+    );
+    let mut sh = LightingShader::with_specular(face(&lm, &tex, false), Vec3::ZERO, &table).unwrap();
+    let on = render(&tex, &mut sh);
+    assert!(off.iter().zip(&on).all(|(a, b)| red(*b) >= red(*a)));
+    // Mirror point of lamp (-1.5, 0, 0) and eye (0, 0, 0) in the wall plane
+    // is x = -0.75, which projects to pixel column 20.
+    let (peak_off, peak_on) = (red(px(&off, 20, 32)), red(px(&on, 20, 32)));
+    assert!(peak_on > peak_off + 40, "peak {peak_off} -> {peak_on}");
+    // Away from the mirror point the tight highlight is gone.
+    assert!(red(px(&on, 4, 32)) <= red(px(&off, 4, 32)) + 4);
+}
+
+#[test]
+fn uv_map_covers_the_luxel_grid() {
+    let lm = baked();
+    let tex = grooved((0.0, 0.0));
+    let proj = &lm.projections()[0];
+    let map = UvToLuxel::from_vertices(proj, &wall(), &tex).unwrap();
+    let corners = [(0.0, 0.0), (8.0, 0.0), (8.0, 8.0), (0.0, 8.0)];
+    let mapped: Vec<(f32, f32)> = corners.iter().map(|&(u, v)| map.apply(u, v)).collect();
+    let (w, h) = (proj.width as f32, proj.height as f32);
+    for (x, y) in mapped {
+        assert!(x.abs() < 1e-3 || (x - w).abs() < 1e-3, "x = {x}");
+        assert!(y.abs() < 1e-3 || (y - h).abs() < 1e-3, "y = {y}");
+    }
+}
+
+#[test]
+fn collinear_uv_is_refused_and_missing_face_is_none() {
+    let lm = baked();
+    let tex = grooved((0.0, 0.0));
+    let line = [
+        Vertex::new(Vec3::ZERO, 0.0, 0.0),
+        Vertex::new(Vec3::new(1.0, 0.0, 0.0), 0.5, 0.5),
+        Vertex::new(Vec3::new(2.0, 0.0, 0.0), 1.0, 1.0),
+    ];
+    assert!(UvToLuxel::from_vertices(&lm.projections()[0], &line, &tex).is_none());
+    let mut f = face(&lm, &tex, false);
+    f.face = 7;
+    assert!(LightingShader::new(f).is_none());
+}
+
+#[test]
+fn fog_blends_toward_its_colour() {
+    let lm = baked();
+    let tex = grooved((0.0, 0.0));
+    let mut f = face(&lm, &tex, false);
+    f.fog = Fog::new(0xff00_00ff, 0.0, 4.0);
+    let img = render(&tex, &mut LightingShader::new(f).unwrap());
+    // Wall is 2 units away: half fogged, so blue is lifted on the dark side.
+    assert!(px(&img, 60, 20) & 0xff > 100);
+}
+
+#[test]
+fn real_brick_bump_changes_exactly_the_non_flat_texels() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures");
+    let tex = load_texture(&dir, "brick").unwrap();
+    let lm = baked();
+    let flat = render(
+        &tex,
+        &mut LightingShader::new(face(&lm, &tex, false)).unwrap(),
+    );
+    let bump = render(
+        &tex,
+        &mut LightingShader::new(face(&lm, &tex, true)).unwrap(),
+    );
+    let (mut tilted, mut changed, mut flat_off) = (0, 0, 0);
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let (a, b) = (red(px(&flat, x, y)), red(px(&bump, x, y)));
+            if a < 40 {
+                continue; // too dark to compare
+            }
+            let (tx, ty) = (x * tex.width() / SIZE, y * tex.height() / SIZE);
+            let n = tex.normal(tx as i32, ty as i32).unwrap();
+            if n.z > 0.9995 {
+                flat_off += u32::from(a.abs_diff(b) * 20 > a);
+            } else {
+                tilted += 1;
+                changed += u32::from(a != b);
+            }
+        }
+    }
+    assert!(tilted > 50, "test needs tilted lit texels, got {tilted}");
+    assert!(
+        changed * 10 > tilted * 7,
+        "{changed} of {tilted} tilted pixels changed"
+    );
+    assert_eq!(flat_off, 0, "flat texels must match the unbumped render");
+}

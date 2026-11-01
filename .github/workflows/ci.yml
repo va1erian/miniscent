@@ -16,3 +16,4 @@ jobs:
       - run: cargo test --workspace
       - run: python3 tools/check_file_length.py
       - run: python3 tools/check_docs.py
+      - run: python3 tools/check_frame_cost.py

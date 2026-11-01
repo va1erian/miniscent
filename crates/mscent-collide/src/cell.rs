@@ -137,7 +137,11 @@ impl Cell {
         for (i, poly) in polys.iter().enumerate() {
             for (k, &p) in poly.iter().enumerate() {
                 let q = poly[(k + 1) % poly.len()];
-                if !self.near_box(p) && !self.near_box(q) && (q - p).length() >= MIN_EDGE {
+                // Edges running out to the clip box are kept: cells on the
+                // outer shell are unbounded, and their real edges (a doorway
+                // jamb, say) reach the box at both ends. Edges lying IN a box
+                // face fail the shared-real-face test in `add_edge`.
+                if (q - p).length() >= MIN_EDGE {
                     self.add_edge(i, p, q);
                 }
                 self.add_vertex(p);
