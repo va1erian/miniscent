@@ -145,3 +145,54 @@ fn constructor_and_render_reject_bad_sizes() {
     let mut wrong = Framebuffer::new(10, 11).unwrap();
     assert_eq!(r.render(&mut wrong, &|_| {}), Err(SizeMismatch));
 }
+
+#[test]
+fn later_passes_draw_over_earlier_ones_until_the_composite() {
+    let s = scene(6);
+    let mut r = TileRenderer::new(W, H, 16, 4).unwrap();
+    let mut fb = Framebuffer::new(W, H).unwrap();
+    let draw = |band: &mut Framebuffer, tris: &[([Vertex; 3], u32)]| {
+        for (tri, light) in tris {
+            draw_polygon_flat(band, &s.cam, tri, &s.tex, *light, s.fog);
+        }
+    };
+    r.pass(&|band| {
+        band.clear_sky(0xff10_2030, 0xff80_9070);
+        draw(band, &s.tris[..40]);
+    });
+    assert!(
+        fb.pixels().iter().all(|&p| p == 0xff00_0000),
+        "a pass alone must not touch the target"
+    );
+    r.pass(&|band| draw(band, &s.tris[40..]));
+    r.composite(&mut fb).unwrap();
+    assert_same(&reference(&s), &fb, "two passes against one frame");
+}
+
+#[test]
+fn resize_keeps_working_and_refuses_a_bad_size() {
+    let s = scene(7);
+    let mut r = TileRenderer::new(W * 2, H / 2, 16, 4).unwrap();
+    assert_eq!(r.resize(0, 10), None);
+    assert_eq!(r.size(), (W * 2, H / 2), "a refused size changes nothing");
+    r.resize(W, H).unwrap();
+    assert_eq!(r.size(), (W, H));
+    let mut fb = Framebuffer::new(W, H).unwrap();
+    r.render(&mut fb, &|band| draw_scene(&s, band)).unwrap();
+    assert_same(&reference(&s), &fb, "after a resize");
+}
+
+#[test]
+fn a_panic_in_a_band_reaches_the_caller() {
+    let mut r = TileRenderer::new(W, H, 8, 4).unwrap();
+    let mut fb = Framebuffer::new(W, H).unwrap();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        r.render(&mut fb, &|band| {
+            assert!(band.row_range().0 != 16, "band at row 16");
+        })
+    }));
+    assert!(result.is_err());
+    let s = scene(8);
+    r.render(&mut fb, &|band| draw_scene(&s, band)).unwrap();
+    assert_same(&reference(&s), &fb, "the frame after a panic");
+}

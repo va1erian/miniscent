@@ -161,6 +161,97 @@ fn project_all(cam: &Camera, tex: &Texture, clipped: &[ClipVertex]) -> Option<Ve
         .collect()
 }
 
+/// Polygons clipped and projected once, to be filled by every band of a frame:
+/// a band then pays only for the polygons in its rows.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct PolyList {
+    pts: Vec<ScreenVert>,
+    polys: Vec<ListedPoly>,
+}
+
+/// One polygon of a [`PolyList`]. `tag` says which polygon this was, for the
+/// owner of the list to find its shader.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ListedPoly {
+    pub tag: u32,
+    start: usize,
+    end: usize,
+    /// Screen rows `first..last` it may cover.
+    first: i32,
+    last: i32,
+}
+
+impl PolyList {
+    pub(crate) fn clear(&mut self) {
+        self.pts.clear();
+        self.polys.clear();
+    }
+
+    /// Clips and projects a polygon; one that cannot be seen is not listed.
+    pub(crate) fn push(&mut self, cam: &Camera, verts: &[Vertex], tex: &Texture, tag: u32) {
+        if verts.len() > MAX_POLYGON_VERTICES {
+            return;
+        }
+        let cam_verts: Vec<ClipVertex> = verts
+            .iter()
+            .map(|v| ClipVertex {
+                pos: cam.world_to_camera(v.pos),
+                uv: v.uv,
+            })
+            .collect();
+        let clipped = clip_polygon(&cam.frustum(), &cam_verts);
+        let Some(pts) = project_all(cam, tex, &clipped) else {
+            return;
+        };
+        let (first, last) = row_span(&pts);
+        if first < last {
+            let start = self.pts.len();
+            self.pts.extend_from_slice(&pts);
+            self.polys.push(ListedPoly {
+                tag,
+                start,
+                end: self.pts.len(),
+                first,
+                last,
+            });
+        }
+    }
+
+    /// The polygons touching rows `lo..hi`, in the order they were pushed.
+    pub(crate) fn in_rows(&self, (lo, hi): (i32, i32)) -> impl Iterator<Item = ListedPoly> + '_ {
+        self.polys
+            .iter()
+            .copied()
+            .filter(move |p| p.first < hi && p.last > lo)
+    }
+
+    /// Fills `poly`, one of this list's, into the rows `fb` holds.
+    pub(crate) fn fill<S: SpanShader>(
+        &self,
+        fb: &mut Framebuffer,
+        poly: ListedPoly,
+        tex: &Texture,
+        shader: &mut S,
+    ) -> DrawStats {
+        let mut stats = DrawStats::default();
+        if let Some(pts) = self.pts.get(poly.start..poly.end) {
+            fill_polygon(fb, pts, tex, shader, &mut stats);
+        }
+        stats
+    }
+}
+
+/// Screen rows `first..last` whose centres a polygon can cover.
+fn row_span(pts: &[ScreenVert]) -> (i32, i32) {
+    let (ymin, ymax) = pts.iter().fold((f32::MAX, f32::MIN), |(lo, hi), p| {
+        (lo.min(p.y), hi.max(p.y))
+    });
+    (
+        (ymin - 0.5).ceil().max(0.0) as i32,
+        (ymax - 0.5).ceil() as i32,
+    )
+}
+
 fn fill_polygon<S: SpanShader>(
     fb: &mut Framebuffer,
     pts: &[ScreenVert],
@@ -168,13 +259,11 @@ fn fill_polygon<S: SpanShader>(
     shader: &mut S,
     stats: &mut DrawStats,
 ) {
-    let (ymin, ymax) = pts.iter().fold((f32::MAX, f32::MIN), |(lo, hi), p| {
-        (lo.min(p.y), hi.max(p.y))
-    });
     // A tile only holds some rows; clipping here keeps rows outside it free.
     let (row_lo, row_hi) = fb.row_range();
-    let first = ((ymin - 0.5).ceil().max(0.0) as i32).max(row_lo);
-    let end = ((ymax - 0.5).ceil() as i32).min(row_hi);
+    let (first, last) = row_span(pts);
+    let first = first.max(row_lo);
+    let end = last.min(row_hi);
     let gy = vertical_gradient(pts);
     for y in first..end {
         if let Some((l, r)) = row_extent(pts, y as f32 + 0.5) {
