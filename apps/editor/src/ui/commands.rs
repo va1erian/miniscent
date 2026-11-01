@@ -38,6 +38,7 @@ impl Editor {
                 self.studio.reset_camera(&self.state.borrow().doc);
             }
             cmd::FIT => self.refit(),
+            _ if self.layout_command(id) => {}
             _ => self.edit_command(id),
         }
     }

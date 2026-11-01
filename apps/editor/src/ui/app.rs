@@ -12,14 +12,15 @@ use xui::prelude::*;
 use xui::widget::{FileDialog, HasText, MenuId};
 
 use super::keys::{OPS, TOOLS, key_name, shortcut};
+use super::layouts::{self, Arrangement, Disposition};
 use super::probe::Probe;
 use super::props::{Panel, apply};
 use super::toolbar::IconButton;
 use super::view3d::View3d;
-use super::viewport::{ViewEvent, Viewport};
+use super::viewport::ViewEvent;
 use super::wrap::{LOG_COLS, LOG_ROWS, wrap};
 use crate::files;
-use crate::model::{Document, EditorState, View, state::GRIDS};
+use crate::model::{Document, EditorState, state::GRIDS};
 use crate::studio::{HELP, Mode, Preview, Studio};
 
 #[derive(Clone)]
@@ -47,6 +48,9 @@ pub enum Msg {
     Camera(Box<crate::model::FlyCam>),
 }
 
+/// Width of the tool palette on the left, in dip.
+const PALETTE_WIDTH: i32 = 130;
+
 /// Width of the right-hand column (properties and log), in dip.
 const SIDE_WIDTH: i32 = 340;
 
@@ -70,12 +74,15 @@ pub mod cmd {
     pub const BACK: MenuId = MenuId::new(15);
     pub const FIT: MenuId = MenuId::new(20);
     pub const RESET_CAMERA: MenuId = MenuId::new(21);
+    pub const LAYOUT_CLASSIC: MenuId = MenuId::new(22);
+    pub const LAYOUT_QUAD: MenuId = MenuId::new(23);
 }
 
 pub struct Editor {
     pub(super) state: Rc<RefCell<EditorState>>,
-    pub(super) viewports: [Handle<Viewport<Msg>>; 3],
-    pub(super) view3d: Handle<View3d<Msg>>,
+    pub(super) classic: Arrangement,
+    pub(super) quad: Arrangement,
+    pub(super) disposition: Disposition,
     pub(super) play: Handle<View3d<Msg>>,
     menu: Handle<Menu<Msg>>,
     pub(super) status: Handle<StatusBar<Msg>>,
@@ -115,6 +122,9 @@ fn menus(m: &mut xui::widget::MenuScope<'_>) {
     m.submenu(MenuId::new(102), "&View", |v| {
         v.item(cmd::FIT, "&Fit views to level");
         v.item(cmd::RESET_CAMERA, "&Reset 3D camera");
+        v.separator();
+        v.item(cmd::LAYOUT_CLASSIC, "&Classic layout");
+        v.item(cmd::LAYOUT_QUAD, "&Quad layout (2 x 2)");
     });
     m.submenu(MenuId::new(103), "&Play", |p| {
         p.item(cmd::PLAY, "&Play   F5");
@@ -154,8 +164,9 @@ impl Editor {
             .on_cancel(|| None);
         let mut app = Editor {
             state: state.clone(),
-            viewports: Default::default(),
-            view3d: Handle::new(),
+            classic: Arrangement::default(),
+            quad: Arrangement::default(),
+            disposition: Disposition::Classic,
             play: Handle::new(),
             menu: Handle::new(),
             status: Handle::new(),
@@ -174,17 +185,9 @@ impl Editor {
         app.panel.attach(ui);
         state.borrow_mut().texture_sizes = app.panel.face.load_previews();
         let emit: Rc<dyn Fn(ViewEvent) -> Msg> = Rc::new(Msg::View);
-        let pane = |i: usize| {
-            let (state, emit) = (state.clone(), emit.clone());
-            let view = View::ALL[i];
-            build(move |ui| Viewport::new(ui, view, state, emit)).bind(&app.viewports[i])
-        };
-        let views = column().gap(4).children((
-            row()
-                .gap(4)
-                .children((pane(0).fill(1), pane(1).fill(1), pane(2).fill(1)))
-                .fill(3),
-            build(View3d::new).bind(&app.view3d).fill(2),
+        let views = stack().children((
+            layouts::classic(&app.classic, &state, &emit).fill(1),
+            layouts::quad(&app.quad, &state, &emit).fill(1),
         ));
         let tool_button = |i: usize| {
             let (name, key, glyph, _) = TOOLS[i];
@@ -227,7 +230,11 @@ impl Editor {
                 column().child(multiline_edit().bind(&app.log_view).height(LOG_HEIGHT)),
             ),
         ));
-        let work = row().children((palette.width(130), views.fill(1), side.width(SIDE_WIDTH)));
+        let work = row().children((
+            palette.width(PALETTE_WIDTH),
+            views.fill(1),
+            side.width(SIDE_WIDTH),
+        ));
         ui.root(
             column().children((
                 menu_bar(menus).on_select(Msg::Menu).bind(&app.menu),
@@ -240,6 +247,7 @@ impl Editor {
         ui.on_key(shortcut);
         ui.every(16, Msg::Tick);
         app.play.get().set_visible(false);
+        app.set_disposition(Disposition::Classic);
         app.log_view.get().set_enabled(false);
         app.refresh();
         app.show_prompt();
@@ -248,7 +256,7 @@ impl Editor {
 
     /// Repaints the views, refills the panel and rewrites the status bar.
     pub(super) fn refresh(&mut self) {
-        for v in &self.viewports {
+        for v in self.all_viewports() {
             v.get().invalidate();
         }
         let st = self.state.borrow();
@@ -299,7 +307,9 @@ F5 plays it.
 
 {HELP}"
         );
-        self.view3d.get().show_text(&text);
+        for arr in [&self.classic, &self.quad] {
+            arr.view3d.get().show_text(&text);
+        }
     }
 
     /// Adds lines to the log panel.
@@ -335,7 +345,7 @@ F5 plays it.
         let pane = if self.studio.mode == Mode::Play {
             self.play.get()
         } else {
-            self.view3d.get()
+            self.pane3d()
         };
         let events = pane.take_events();
         let clicks = pane.take_clicks();
@@ -348,7 +358,7 @@ F5 plays it.
             self.set_status(s);
         }
         if let Some(text) = &tick.blank {
-            self.view3d.get().show_text(text);
+            self.pane3d().show_text(text);
         }
         self.show_preview(self.studio.preview(&state.borrow().doc));
         if tick.play_now {
@@ -360,7 +370,7 @@ F5 plays it.
         if let Some(f) = tick.frame {
             let target = match f.mode {
                 Mode::Play => self.play.get(),
-                Mode::Edit => self.view3d.get(),
+                Mode::Edit => self.pane3d(),
             };
             target.set_rgba(f.w, f.h, f.rgba);
         }
@@ -385,7 +395,7 @@ F5 plays it.
             Ok(()) => {
                 let play = self.play.get();
                 play.set_visible(true);
-                self.view3d.get().set_grab(false);
+                self.pane3d().set_grab(false);
                 play.set_grab(true);
                 play.focus();
                 // Focus changes from the editor are not the player's input.
@@ -406,7 +416,7 @@ F5 plays it.
         self.studio.leave_play();
         self.play.get().set_grab(false);
         self.play.get().set_visible(false);
-        self.view3d.get().focus();
+        self.pane3d().focus();
         if let Some(m) = message {
             self.state.borrow_mut().message = m.into();
         }
@@ -414,7 +424,7 @@ F5 plays it.
     }
 
     pub(super) fn refit(&self) {
-        for v in &self.viewports {
+        for v in self.all_viewports() {
             v.get().refit();
         }
     }
@@ -423,7 +433,7 @@ F5 plays it.
     pub fn probe(&self) -> Probe {
         Probe {
             state: self.state.clone(),
-            view3d: self.view3d.get(),
+            view3d: self.classic.view3d.get(),
             play: self.play.get(),
             preview: self.preview.clone(),
         }
