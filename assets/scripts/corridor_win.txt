@@ -1,0 +1,9 @@
+# Fly down the corridor level, shoot the enemy hovering at the far end,
+# then fly on to the goal.
+at 0.2s hold W
+at 1.5s release W
+at 2.3s mouse 35 -29
+at 2.5s fire for 1s
+at 3.5s mouse -35 29
+at 3.6s hold W
+at 9s quit

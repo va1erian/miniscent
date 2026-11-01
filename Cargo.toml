@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "apps/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,6 +12,8 @@ mscent-math = { path = "crates/mscent-math" }
 mscent-world = { path = "crates/mscent-world" }
 mscent-collide = { path = "crates/mscent-collide" }
 mscent-render = { path = "crates/mscent-render" }
+mscent-game = { path = "crates/mscent-game" }
+mscent-platform = { path = "crates/mscent-platform" }
 
 [workspace.lints.rust]
 # Crates that genuinely need unsafe must opt out explicitly with a reason.

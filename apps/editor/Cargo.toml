@@ -1,0 +1,17 @@
+[package]
+name = "mscent-editor"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "mscent-editor"
+path = "src/main.rs"
+
+[dependencies]
+mscent-math.workspace = true
+mscent-world.workspace = true
+xui = { git = "https://github.com/va1erian/xui", rev = "71dc3b5903ac94dba00466a6d6a00d69251beeab" }
+
+[lints]
+workspace = true
