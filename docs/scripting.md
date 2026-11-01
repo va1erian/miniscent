@@ -1,0 +1,432 @@
+# Level scripting: design
+
+Status: accepted, nothing implemented. The work is M9 in [work-items.md](work-items.md). Why this
+language, with measurements: [scripting-language.md](scripting-language.md).
+
+## The short version
+
+- **One script per level**, `foo.st` beside `foo.msl`. It holds all of the level's logic, and it reads
+  top to bottom.
+- **No logic entities, ever.** A level file holds places, shapes and solids, each with a name. It has
+  no relays, counters, timers, outputs or target fields. That rule is what prevents the soup.
+- **A small Smalltalk-style language in the repo**, with no dependencies, compiled at load to bytecode.
+  Rust owns physics and invariants; a script can only ask.
+- **One mover primitive** covers doors, trapdoors, lifts and crushers: a named brush group with named
+  poses.
+- **No rebuild for an agent:** `--check` validates a script, `--test` plays a level headlessly with
+  assertions, `--trace` writes what happened as JSON lines, and a running game reloads on save.
+
+The largest piece of work is the movers, not the language. The engine has no moving geometry today:
+collision, rendering and light all assume a single static BSP.
+
+## What it looks like
+
+Every example here ran on the prototype against a stub host, handlers included. The stub logs commands
+instead of simulating, so this proves the language and the timing of waits, not gameplay.
+
+Shoot several things to open a door:
+
+```smalltalk
+vault := mover: 'vault_door'.
+vault pose: 'open' move: (x: 0 y: 0 z: 4).
+
+(markers: 'vault_switch') do: [:m | spawn: 'switch' at: m tag: 'vault_switch'].
+
+switches := tagged: 'vault_switch'.
+switches onEachDestroyed: [say: switches alive , ' left'].
+switches onAllDestroyed: [
+    vault moveTo: 'open' in: 1.5.
+    say: 'Vault unlocked'.
+].
+```
+
+Pick up a keycard. `autoDoor:` is ordinary script in the shared library, not an engine feature:
+
+```smalltalk
+card := spawn: 'red_keycard' at: (marker: 'red_key') tag: 'key'.
+card onPickup: [
+    player give: 'red'.
+    say: 'Red keycard'.
+].
+
+autoDoor: 'red_door' travel: (x: 0 y: 0 z: 3.5) key: 'red'.
+autoDoor: 'side_door' travel: (x: 0 y: 2 z: 0) key: nil.
+```
+
+```smalltalk
+"assets/scripts/lib/doors.st: opens as the player arrives, closes after they leave."
+define autoDoor: name travel: travel key: key [
+    door := mover: name.
+    door pose: 'open' move: travel.
+    area := zone: name , '_area'.
+    area onEnter: [
+        (key isNil or: [player has: key])
+            ifTrue: [door moveTo: 'open' in: 0.6]
+            ifFalse: [say: 'Needs the ' , key , ' keycard'].
+    ].
+    area onExit: [door moveTo: 'closed' in: 0.8].
+]
+```
+
+A door, a hinged trapdoor, a lift and a crusher are one primitive:
+
+```smalltalk
+trap := mover: 'trapdoor'.
+trap pose: 'open' turn: (x: 1 y: 0 z: 0) degrees: 90 about: (marker: 'trap_hinge').
+(zone: 'trap_plate') onEnter: [trap moveTo: 'open' in: 0.4].
+
+lift := mover: 'lift'.
+lift pose: 'top' move: (x: 0 y: 0 z: 12).
+lift whenBlocked: 'reverse'.
+every: 6 do: [
+    lift moveTo: (lift poseNow = 'top' ifTrue: ['closed'] ifFalse: ['top']) in: 2.5.
+].
+
+crusher := mover: 'crusher'.
+crusher pose: 'down' move: (x: 0 y: 0 z: -3).
+crusher whenBlocked: 'crush' damage: 40.
+fork: [
+    [true] whileTrue: [
+        crusher moveTo: 'down' in: 0.5.
+        waitArrived: crusher.
+        wait: 1.
+        crusher moveTo: 'closed' in: 2.
+        waitArrived: crusher.
+        wait: 1.
+    ].
+].
+```
+
+Spawn waves. A handler can pause, so a sequence is just lines of code:
+
+```smalltalk
+wayOut := mover: 'hall_exit'.
+wayOut pose: 'open' move: (x: 0 y: 0 z: 3.5).
+entry := mover: 'hall_entry'.
+entry pose: 'open' move: (x: 0 y: 0 z: 3.5).
+entry moveTo: 'open' in: 0.
+
+(zone: 'hall') onceEnter: [
+    entry moveTo: 'closed' in: 0.5.
+    wait: 1.
+    spawnAll: 'drone' at: (markers: 'hall_wave1') tag: 'wave1'.
+    waitDestroyed: (tagged: 'wave1').
+    wait: 2.
+    player hp < 50 ifTrue: [
+        say: 'Sector clear, repairs online'.
+        player heal: 50.
+    ].
+    spawnAll: 'hunter' at: (markers: 'hall_wave2') tag: 'wave2'.
+    waitDestroyed: (tagged: 'wave2').
+    wayOut moveTo: 'open' in: 1.5.
+].
+```
+
+Hack a terminal to turn enemies friendly, and tune a new enemy. The hold time and progress bar are
+engine behaviour; the consequence is script:
+
+```smalltalk
+kind := defineProp: 'terminal'.
+kind mesh: 'terminal'.
+kind radius: 1.
+
+sentry := defineEnemy: 'sentry' base: 0.
+sentry hp: 80.
+sentry speed: 0.
+
+terminal := spawn: 'terminal' at: (marker: 'sec_terminal') tag: 'term'.
+terminal onUse: [
+    (tagged: 'sec_drones') setFaction: 'friendly'.
+    (tagged: 'sec_turrets') disable.
+    say: 'Security override: drones are on your side'.
+] hold: 3.
+```
+
+Test it headlessly. A test is the same language, loaded after the level script, with a few extra
+functions. `wait:` is how it lets the game run:
+
+```smalltalk
+vault := mover: 'vault_door'.
+assert: vault poseNow = 'closed' because: 'vault starts closed'.
+(tagged: 'vault_switch') members do: [:s |
+    teleport: s distance: 8.
+    aimAt: s.
+    fireFor: 0.8.
+    wait: 0.1.
+].
+wait: 2.
+assert: vault poseNow = 'open' because: 'vault opens once every switch is destroyed'.
+shot: 'vault-open.png'.
+```
+
+## Three layers
+
+| Layer | Lives in | Holds | Changes need |
+|---|---|---|---|
+| Places | `.msl` | Named brush groups, markers, zones, enemies | Editor, or `--pack-level` |
+| Kit | `mscent-game` (Rust) | Mover physics, props, pickups, zone tests, factions | A rebuild |
+| Logic | `foo.st`, `assets/scripts/lib/*.st` | What happens when | Saving the file |
+
+The test for where something goes: if breaking it could put a sphere inside a wall or stall a frame,
+it is kit. If it is a decision about this level or this mechanic, it is logic.
+
+### Rules that keep the soup out
+
+1. The level format has no field that refers to another thing. Names point from script to level, never
+   from level to level.
+2. A repeated pattern becomes a library function, not a new entity kind.
+3. The editor has no outputs panel. It shows names and tags, and a read-only list of which lines of the
+   script use the selected thing.
+4. Common "wait for N things" logic is a built-in (`onAllDestroyed:`, `waitDestroyed:`), so nobody
+   hand-writes a counter.
+
+## Level data
+
+Entity is `Copy` and stays so: names live in a side table, not on the entity.
+
+- `Entity::Marker { pos, yaw }`: a named point.
+- `Entity::Zone { min, max }`: a box the player enters and leaves.
+- `Level.names`: `{ target: Entity(u32) | Group(u32), name, tags }`.
+- `Level.mover_groups`: named lists of brush indices. `Level::static_brushes()` is what `compile` and
+  `extract_faces` receive, so a mover never reaches the CSG.
+
+These go in a new format section under version 3. The reader validates them like everything else:
+identifiers only (`[a-z0-9_]`, at most 32 bytes), capped counts, no duplicate names, no brush in two
+groups, mover brushes must be `Op::Add`, and indices in range.
+
+Props, pickups and waves are spawned from markers by the script. So an agent can add a keycard without
+touching the level file, and the entity list stays nearly the same size as today.
+
+`LoadError::NoGoal` allows a level with a script, which can win through `win`.
+
+## Movers
+
+A mover is a group of convex `Add` brushes, excluded from the CSG, with a rigid pose (translation and
+rotation). `closed` is the authored pose. Other poses are defined in script, and `moveTo:in:` eases
+between two poses over a time. Quake's `func_door`, `func_plat` and `func_train`, and Source's
+`func_movelinear` and `func_door_rotating`, all reduce to this.
+
+### Collision
+
+`Cell` (`crates/mscent-collide/src/cell.rs`) already does an exact sphere sweep against a convex plane
+set, including rounded edges and vertices. Movers reuse it:
+
+- Each brush becomes a `Cell`, built once at load. The current sweep rebuilds cells on demand, and doing
+  that for movers on every sweep would be wasted work.
+- A new `Solids { bsp, movers }` replaces `&Bsp` in `sweep_sphere` and `slide_move`, with `From<&Bsp>`
+  for callers that have no movers. A sweep takes the earliest contact across the BSP and each mover
+  whose bounds it touches. It transforms the segment into the mover's frame; a sphere's radius does not
+  change under a rigid transform, so the cell code is untouched.
+- Line of sight and hitscan go through the same path, so a closed door stops shots and sight. `hitscan`
+  also reports which mover it struck, which makes a mover shootable with no extra code.
+
+### Pushing
+
+Movers advance at the start of each fixed step, before the player:
+
+1. Compute the trial pose for this step.
+2. For each body near the swept bounds, transform its position into the mover's frame at the old and
+   new poses. The line between them is the body's path relative to the mover. Sweep it against the
+   cells.
+3. On contact, push the body the rest of the way with `slide_move` against everything except this
+   mover. Its velocity is not changed.
+4. If a body cannot go the whole distance it is squeezed, and the mover's policy applies: `hold` stops
+   at the last clear pose, `reverse` goes back, and `crush` holds and deals damage per second until the
+   body dies. `reverse` is the default. Bodies that have been pushed are restored, so a blocked step
+   leaves nothing half done.
+
+A step is a chord, so a rotating mover's path is slightly wrong. At 120 Hz and one turn per second, a
+point 5 units out has about 0.002 units of chord error. Pose speed is capped at load, and the fuzz test
+decides whether that cap is right.
+
+If a body somehow starts inside a mover, the sweep ignores that mover rather than reporting
+`start_solid`. Otherwise a single bug would freeze the player forever. The BSP stays strict.
+
+The existing guarantee extends to movers: `tests/fuzz.rs` gains random movers on random paths and still
+asserts that no sphere ends inside solid and none crosses a wall. This is the riskiest test in the plan.
+If it cannot be made to pass with rotation, ship translation-only movers first: doors and lifts need
+nothing else, and hinged movers can follow.
+
+### Rendering and light
+
+- Mover faces come from `Brush::faces()`, drawn after `draw_level` and before the meshes. The z-buffer
+  resolves them against the world. Culling is frustum against bounds.
+- Faces join the lightmap's `LightFace` list at the authored pose, so `input_key` covers them and the
+  bake cache keeps working. Lighting a face uses face-space UVs, so only the polygon is transformed at
+  draw time and the light rides with the door. Specular needs the eye in the mover's frame. Positions
+  interpolate with the same `alpha` the enemies use.
+- Limits, as in Quake: **movers do not cast baked shadows**, so light passes through a closed door, and
+  a door keeps the light it was baked with as it moves. Author lights with that in mind.
+- A closed door does not cull what is behind it, so it costs what an open doorway costs today.
+- Lights cannot be switched at runtime. That would need separate light layers in the bake, and is out of
+  scope here.
+
+## The language
+
+The whole of it, in the form agents were given in the test in
+[scripting-language.md](scripting-language.md):
+
+```smalltalk
+x := 3.                        "assignment; the first one declares the variable"
+door moveTo: 'open' in: 1.5.   "keyword message: receiver, then name: arg name: arg"
+say: 'hello'.                  "no receiver: a global function"
+player hp.                     "unary message; a bare word that is no variable is a global function"
+a + b * c.                     "binary runs strictly left to right: (a + b) * c"
+'n = ' , 3.                    "comma concatenates and converts to text"
+{1. 2. 3}.                     "array, 1-indexed: a at: 1, a size, a add: x"
+[:x | x + 1].                  "block; call it with b value: 1. It can change outer variables"
+cond ifTrue: [ ] ifFalse: [ ]. "also ifTrue:, ifFalse:, and:, or:, not, isNil"
+[cond] whileTrue: [ ].         "also whileFalse:, n timesRepeat: [ ], a do: [:x | ]"
+define name: a other: b [ ^ a + b ]   "function; it sees top-level variables"
+define arr first [ ^ arr at: 1 ]      "with a receiver: the first word names it"
+wait: 2.                       "pause this handler only"
+fork: [ ].                     "run a block alongside"
+```
+
+Values are nil, true, false, numbers (`f32`), strings, arrays, blocks and game handles. Precedence is
+unary, then binary, then keyword. There are no classes, modules, exceptions, maps or inheritance.
+Functions and messages share one flat namespace, and new ones come from `define`.
+
+**The rule that keeps it small:** no new syntax or language feature unless a level cannot be written
+without it. A missing capability is usually a new game function.
+
+### Runtime
+
+- **Crate.** `mscent-script` holds the language and VM and knows nothing about the game. It depends on
+  nothing and is generic over a host type. `mscent-game` depends on it and binds the API. There is no
+  `dyn` boundary.
+- **Pipeline.** Lexer, parser, AST, then bytecode. `ifTrue:` and `whileTrue:` with literal blocks compile
+  to jumps, as in Smalltalk. Everything else is a send, resolved at load to a table entry.
+- **State is plain data.** A slot table with checked, generation-tagged references, precise mark and
+  sweep at step boundaries only, frames in a `Vec`. No `Rc`, no `unsafe`, no Rust recursion while
+  running. So `Game` keeps its `Clone`, and a task parks by leaving the run loop.
+- **Natives** are `fn(&mut Host, &mut Heap, Value, &[Value]) -> Result<Flow, String>`, registered from one
+  table that also feeds `--script-api` and the load-time checks.
+
+### Where it runs in a step
+
+```
+movers -> player -> fire -> enemies -> zones
+    -> start handlers for this step's events -> run due tasks -> apply commands -> win and lose checks
+```
+
+- **Stable world.** Scripts see the world as of the start of the task phase. Commands queue and apply
+  together afterwards, in order.
+- **No same-step chains.** Events caused by commands start handlers on the next step, 8 ms later, so a
+  script cannot loop inside one step.
+- **Budget.** At most 20,000 operations per task run, and 16 task runs per step, with the rest deferred
+  in order. Worst case is about 0.6 ms on the dev machine, reached only by a hostile script. An idle step
+  runs no script. The budget counts operations, not time, so it replays identically.
+
+### API surface
+
+| Area | Calls |
+|---|---|
+| Lookup | `mover:`, `zone:`, `marker:`, `markers:`, `enemy:`, `tagged:`, `player`, `who` |
+| Mover | `pose:move:`, `pose:turn:degrees:about:`, `moveTo:in:`, `poseNow`, `moving`, `whenBlocked:`, `whenBlocked:damage:`, `onArrived:`, `onHit:` |
+| Zone | `onEnter:`, `onceEnter:`, `onExit:`, `hasPlayer` |
+| Group | `alive`, `members`, `onEachDestroyed:`, `onAllDestroyed:`, `setFaction:`, `enable`, `disable` |
+| Spawned thing | `onPickup:`, `onUse:hold:`, `onHit:`, `onDestroyed:`, `destroy` |
+| Spawning | `spawn:at:tag:`, `spawnAll:at:tag:` |
+| Tuning | `defineProp:`, `defineEnemy:base:`, then a setter per field: `mesh:`, `radius:`, `hp:`, `speed:` and so on |
+| Player | `give:`, `has:`, `hp`, `heal:`, `pos` |
+| Game | `say:`, `win`, `lose`, `randomFrom:to:`, `x:y:z:` |
+| Time | `wait:`, `fork:`; in the library: `waitUntil:`, `waitArrived:`, `waitDestroyed:`, `every:do:`, `after:do:` |
+| Test only | `assert:because:`, `teleport:distance:`, `aimAt:`, `fireFor:`, `shot:` |
+
+`defineEnemy:base:` setters write the fields of `EnemyStats`, so most tuning needs no rebuild. A new AI
+state does need one: `enemy.rs` stays Rust, because it runs at 120 Hz for every enemy and sight rays are
+expensive. Scripts choose behaviour; they do not run per-step AI.
+
+Two kit additions come with this surface. A **use key** (`F`, since `E` is roll) adds `Input::use_`.
+**Factions** change `Enemy::step`, which today only ever targets the player: a friendly needs to choose
+among hostiles, with sight checks staggered across steps so the cost stays flat.
+
+### Determinism and safety
+
+- **Replay holds.** No clock is exposed, one seeded generator sits behind `randomFrom:to:`, and budgets
+  count operations. A test runs a level twice and compares traces byte for byte.
+- **Scripts are untrusted**, since they ship with levels. The language has no file, network or clock
+  access to remove. Limits: a 1 MiB file cap, parse depth, call depth, a heap counted in bytes, string and
+  array length, a task cap, and a cap of 1024 spawned things. `cargo fuzz` feeds hostile text through
+  compile and run.
+- **Every command is validated in Rust.** An unknown pose, a non-finite vector or a position inside solid
+  is a script error, not a game state. Arithmetic that gives a non-finite number is an error.
+- **Failing closed.**
+
+| When | What happens |
+|---|---|
+| Parse error, unknown selector or unknown literal name at load | The level does not start. `LoadError::Script` lists every problem, with file, line and closest match |
+| Compile error on hot reload | Old script keeps running, error shown on the HUD |
+| Runtime error in a task | Logged with file and line, shown on the HUD, that task ended and its handler disabled for the run. A `--test` run fails |
+
+Selectors are a closed set and level names are usually string literals, so a typo fails at load even
+inside a handler that never fires. A name built at run time, such as `zone: name , '_area'`, is checked
+when it runs. So is a message sent to the wrong kind of value, such as `hp` to a mover.
+
+## The agent loop
+
+The goal is a full iteration in seconds, with evidence, and no `cargo build`.
+
+```bash
+miniscent --level assets/levels/foundry.msl --check
+```
+
+Compiles the script, runs its top level against the level, and prints an inventory: every mover, zone,
+marker and tag, whether the script uses it, and every error. Exit code is non-zero on any problem. An
+unused name and a variable assigned but never read are warnings, which catches typos in the level and in
+assignments.
+
+```bash
+miniscent --level assets/levels/foundry.msl --test assets/levels/foundry.test.st --trace out.jsonl
+```
+
+Runs the level with no window as fast as the machine allows. Rendering happens only for `shot:`. The test
+is one more task, so its `wait:` is what advances the game, and the run ends when it finishes. Tests aim
+with `aimAt:` and `teleport:distance:` rather than the mouse deltas in `flythrough.txt`, which break
+whenever geometry moves.
+
+The trace is one JSON object per line:
+
+```json
+{"t":3.25,"ev":"destroyed","who":"vault_switch_2","tag":"vault_switch"}
+{"t":3.25,"cmd":"moveTo","mover":"vault_door","pose":"open","secs":1.5}
+{"t":4.75,"ev":"arrived","mover":"vault_door","pose":"open"}
+{"t":9.01,"err":"foundry.st:41: 'closed' does not understand hp"}
+```
+
+```bash
+miniscent --script-api
+```
+
+Prints every game function and the language summary above, from the table that registers them, so it
+cannot drift from the code.
+
+```bash
+miniscent --dump-level foundry.msl > foundry.level.txt
+```
+
+```bash
+miniscent --pack-level foundry.level.txt foundry.msl
+```
+
+Levels are binary, and `LevelBuilder` needs a rebuild, so without this an agent cannot add a marker or a
+door. The text form has one line per brush, entity and name, and goes through the same validation as the
+binary reader.
+
+**Hot reload.** While playing, in the game or the editor, the host checks the script's modified time four
+times a second. On a change it compiles, then restarts the level on the new script if that succeeded.
+State is not preserved, so a reload behaves exactly like a fresh start. Geometry is untouched, so there
+is no re-bake.
+
+**Editor.** The script path is per level. Errors appear in the existing log panel. Brushes get a "make
+mover" command and things get name and tag fields. There is no script editor: the file is text, and any
+real editor does it better.
+
+## Not covered
+
+- Save games. The VM state could be saved, but levels have no saves today.
+- Scripted enemy AI per step, and scripted weapons. Both stay Rust.
+- Movers casting baked shadows, switchable lights.
+- Syntax colouring or a debugger for the language.
+- Anything measured on the i3-7100U or LazyOS.
