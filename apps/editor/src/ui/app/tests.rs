@@ -61,7 +61,7 @@ fn render_session(theme: Theme, scripted: bool) -> (Image, Rc<Cell<u32>>) {
             *p2.borrow_mut() = Some(Probe {
                 state: app.probe().state(),
                 menu: app.menu.get(),
-                top: app.classic.viewports[0].get(),
+                top: app.quad.viewports[0].get(),
                 min_x: app.panel.min_x(),
             });
             Ok(app)

@@ -10,7 +10,7 @@ use xui::widget::{GroupBox, HasText};
 
 use super::Msg;
 use super::facepanel::FacePanel;
-use crate::model::entity::{kind, params, pos, set_param, with_pos};
+use crate::model::entity::{entity_name, params, pos, set_param, with_pos};
 use crate::model::{EditorState, Shape, Tool};
 
 /// A field edit made in the panel.
@@ -144,7 +144,7 @@ impl Panel {
                 let shape = if b.is_box() { "box" } else { "convex" };
                 format!("Brush {index} of {} ({op} {shape})", st.doc.brushes().len())
             }
-            (_, Some(e)) => kind(&e.entity).name().to_string(),
+            (_, Some(e)) => entity_name(&e.entity).to_string(),
             _ => "Nothing selected".to_string(),
         };
         self.what.get().set_text(&text);

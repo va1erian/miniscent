@@ -8,6 +8,7 @@ use xui::geometry::{Point, Rect};
 use xui::theme::Theme;
 use xui::units::Dip;
 
+use crate::model::document::BrushDef;
 use crate::model::entity::pos;
 use crate::model::pointer::handles;
 use crate::model::{Camera2D, EditorState, Selection, Shape, View};
@@ -131,6 +132,19 @@ fn grid(pen: &mut Pen, scene: &Scene) {
     }
 }
 
+/// The brush's silhouette in screen points.
+fn outline_points(pen: &Pen, br: &BrushDef, a: usize, b: usize) -> Vec<Point> {
+    br.outline(a, b).into_iter().map(|p| pen.pt(p)).collect()
+}
+
+/// Draws the closed loop through `pts`.
+fn stroke_loop(pen: &mut Pen, pts: &[Point], color: Color, width: f32) {
+    for (i, &p) in pts.iter().enumerate() {
+        pen.canvas
+            .draw_line(p, pts[(i + 1) % pts.len()], color, width);
+    }
+}
+
 fn brushes(pen: &mut Pen, scene: &Scene) {
     let (a, b) = scene.view.axes();
     let selected = match scene.state.selection {
@@ -138,26 +152,43 @@ fn brushes(pen: &mut Pen, scene: &Scene) {
         _ => None,
     };
     for br in scene.state.doc.brushes() {
-        let (lo, hi) = br.bounds();
-        let r = pen.rect([lo[a], lo[b]], [hi[a], hi[b]]);
         let color = match br.op {
             Op::Add => ADD,
             Op::Subtract => SUBTRACT,
         };
         let alpha = if br.op == Op::Add { 70 } else { 28 };
-        pen.canvas.fill_rect_rgba(r, rgba(color, alpha));
-        pen.canvas.stroke_rect(r, color, pen.s);
+        if br.is_box() {
+            let (lo, hi) = br.bounds();
+            let r = pen.rect([lo[a], lo[b]], [hi[a], hi[b]]);
+            pen.canvas.fill_rect_rgba(r, rgba(color, alpha));
+            pen.canvas.stroke_rect(r, color, pen.s);
+        } else {
+            let pts = outline_points(pen, br, a, b);
+            // Polygons have no alpha fill, so blend against the background.
+            let bg = scene.theme.input_background;
+            let fill = bg.lerp(color, f32::from(alpha) / 255.0);
+            pen.canvas.fill_polygon(&pts, fill);
+            stroke_loop(pen, &pts, color, pen.s);
+        }
     }
     let Some(br) = selected.and_then(|id| scene.state.doc.brush(id)) else {
         return;
     };
     let (lo, hi) = br.bounds();
-    let r = pen.rect([lo[a], lo[b]], [hi[a], hi[b]]);
     let accent = scene.theme.accent;
-    pen.canvas.fill_rect_rgba(r, rgba(accent, 90));
-    pen.canvas
-        .stroke_rect(r.shrink(-1), Color::rgb(255, 255, 255), 1.0);
-    pen.canvas.stroke_rect(r, accent, 2.0 * pen.s);
+    if br.is_box() {
+        let r = pen.rect([lo[a], lo[b]], [hi[a], hi[b]]);
+        pen.canvas.fill_rect_rgba(r, rgba(accent, 90));
+        pen.canvas
+            .stroke_rect(r.shrink(-1), Color::rgb(255, 255, 255), 1.0);
+        pen.canvas.stroke_rect(r, accent, 2.0 * pen.s);
+    } else {
+        let pts = outline_points(pen, br, a, b);
+        let bg = scene.theme.input_background;
+        pen.canvas.fill_polygon(&pts, bg.lerp(accent, 90.0 / 255.0));
+        stroke_loop(pen, &pts, Color::rgb(255, 255, 255), 3.0 * pen.s);
+        stroke_loop(pen, &pts, accent, 2.0 * pen.s);
+    }
     if matches!(br.shape, Shape::Box { .. }) {
         let h = (3.5 * pen.s) as i32;
         for (_, p) in handles([lo[a], lo[b]], [hi[a], hi[b]]) {

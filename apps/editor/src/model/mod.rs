@@ -5,6 +5,7 @@ pub mod document;
 pub mod entity;
 pub mod facetex;
 pub mod fly;
+pub mod outline;
 pub mod pick;
 pub mod pointer;
 pub mod shape_ops;
