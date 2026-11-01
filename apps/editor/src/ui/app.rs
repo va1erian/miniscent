@@ -42,6 +42,8 @@ pub enum Msg {
     Guarded(Box<Msg>),
     OpenPath(PathBuf),
     SavePath(PathBuf),
+    /// Puts the free-fly camera somewhere (scripted runs frame a face).
+    Camera(Box<crate::model::FlyCam>),
 }
 
 /// Width of the right-hand column (properties and build log), in dip.
@@ -463,6 +465,7 @@ impl App for Editor {
             }
             Msg::OpenPath(p) => self.open_path(&p),
             Msg::SavePath(p) => self.save_path(p),
+            Msg::Camera(cam) => self.studio.set_camera(*cam),
         }
         self.refresh();
     }

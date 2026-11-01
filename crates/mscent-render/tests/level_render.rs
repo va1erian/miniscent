@@ -158,7 +158,7 @@ fn distance_fog_pulls_far_walls_toward_the_fog_colour() {
             .sum()
     };
     let near_view = View::from_angles(
-        Vec3::new(18.0, 10.0, 2.0),
+        Vec3::new(40.0, 10.0, 2.0),
         -core::f32::consts::FRAC_PI_2,
         0.0,
         0.0,

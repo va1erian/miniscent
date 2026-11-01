@@ -62,12 +62,24 @@ struct Holder {
 
 /// Runs the script; returns the process exit code.
 pub fn run(dir: &Path) -> i32 {
-    let light = run_theme(dir, Theme::light());
-    let dark = run_theme(&dir.join("dark"), Theme::dark());
-    light.max(dark)
+    let light = run_theme(dir, Theme::light(), (1280.0, 800.0), script);
+    let dark = run_theme(&dir.join("dark"), Theme::dark(), (1280.0, 800.0), script);
+    // The layout at 2000 px wide: side panels and the build log must fit.
+    let wide = run_theme(
+        &dir.join("wide"),
+        Theme::light(),
+        (2000.0, 1124.0),
+        wide_script,
+    );
+    light.max(dark).max(wide)
 }
 
-fn run_theme(dir: &Path, theme: Theme) -> i32 {
+fn run_theme(
+    dir: &Path,
+    theme: Theme,
+    (width, height): (f32, f32),
+    script: fn(&mut Run, &Stage<'_, Msg>, &Probe),
+) -> i32 {
     if let Err(e) = std::fs::create_dir_all(dir) {
         eprintln!("cannot create {}: {e}", dir.display());
         return 2;
@@ -79,7 +91,7 @@ fn run_theme(dir: &Path, theme: Theme) -> i32 {
     let probe: Rc<RefCell<Option<Holder>>> = Rc::new(RefCell::new(None));
     let (p2, r2) = (probe.clone(), run.clone());
     let result = render_with(
-        Snapshot::new(Dip(1280.0), Dip(800.0)).theme(theme),
+        Snapshot::new(Dip(width), Dip(height)).theme(theme),
         move |ui| {
             let app = Editor::build(ui, Document::from_level(&mscent_world::showcase_level()))?;
             *p2.borrow_mut() = Some(Holder {
@@ -140,6 +152,21 @@ fn select_biggest(probe: &Probe) {
             .map(|b| b.id);
         st.selection = big.map(crate::model::Selection::Brush);
     }
+}
+
+/// The wide window: build, then the Face tool with a face framed, so the
+/// properties panel, the face panel and the build log show at full width.
+fn wide_script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
+    stage.emit(Msg::Menu(cmd::BUILD));
+    let m = wait_for_build(stage, probe);
+    run.check(m.starts_with("Build finished"), &format!("built: {m}"));
+    select_biggest(probe);
+    stage.emit(Msg::Tool(0));
+    pump(stage, 20);
+    run.shot(stage, "wide-01-brush.png");
+    faces::frame_big_face(run, stage, probe);
+    pump(stage, 30);
+    run.shot(stage, "wide-02-face.png");
 }
 
 fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {

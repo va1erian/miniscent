@@ -80,8 +80,8 @@ impl Default for BuildConfig {
     fn default() -> Self {
         Self {
             luxel_size: 0.25,
-            ambient: Vec3::new(0.16, 0.15, 0.19),
-            light_gain: 3.2,
+            ambient: Vec3::new(0.10, 0.095, 0.125),
+            light_gain: 4.6,
             light_radius: 0.5,
             shadow_samples: 16,
             sky_top: 0xff10_2048,
