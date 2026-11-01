@@ -9,8 +9,9 @@ use xui::prelude::*;
 use xui::widget::{GroupBox, HasText};
 
 use super::Msg;
+use super::facepanel::FacePanel;
 use crate::model::entity::{kind, params, pos, set_param, with_pos};
-use crate::model::{EditorState, Shape};
+use crate::model::{EditorState, Shape, Tool};
 
 /// A field edit made in the panel.
 #[derive(Clone, Debug, PartialEq)]
@@ -41,6 +42,7 @@ pub struct Panel {
     pos: [Handle<NumberField<Msg>>; 3],
     param_labels: [Handle<Label<Msg>>; PARAMS],
     params: [Handle<NumberField<Msg>>; PARAMS],
+    pub face: FacePanel,
 }
 
 fn field(
@@ -66,7 +68,7 @@ impl Panel {
             .into_iter()
             .flatten()
             .any(|h| h.get().id() == id);
-        numbers || self.op.get().id() == id || self.material.get().id() == id
+        numbers || self.face.owns(id) || self.op.get().id() == id || self.material.get().id() == id
     }
 
     /// Gives the panel the UI it needs to show and hide its sections.
@@ -119,6 +121,7 @@ impl Panel {
         scroll(column().padding(8).gap(8).children((
             label("Nothing selected").bind(&self.what),
             group("Brush", brush).bind(&self.brush_group),
+            self.face.layout(),
             group("Entity", ent).bind(&self.entity_group),
         )))
     }
@@ -140,8 +143,12 @@ impl Panel {
         self.what.get().set_text(&text);
         // Only the section that applies is shown: no greyed placeholder
         // values for something that is not selected.
-        self.show(self.brush_group.get().id(), brush.is_some());
+        self.show(
+            self.brush_group.get().id(),
+            brush.is_some() && st.tool != Tool::Face,
+        );
         self.show(self.entity_group.get().id(), ent.is_some());
+        self.face.sync(st, |id, visible| self.show(id, visible));
 
         let (lo, hi) = brush.map_or(([0.0; 3], [0.0; 3]), |b| b.bounds());
         let editable = brush.is_some_and(|b| b.is_box());
@@ -182,7 +189,7 @@ pub fn apply(st: &mut EditorState, prop: Prop) -> bool {
         Prop::Op(i) => st.edit_selected_brush(|b| {
             b.op = if i == 0 { Op::Add } else { Op::Subtract };
         }),
-        Prop::Material(i) => st.edit_selected_brush(|b| b.material = i as u16),
+        Prop::Material(i) => st.edit_selected_brush(|b| b.set_material(i as u16)),
         Prop::Min(a, v) => st.edit_selected_brush(|b| {
             if let Shape::Box { min, .. } = &mut b.shape {
                 min[a] = v;

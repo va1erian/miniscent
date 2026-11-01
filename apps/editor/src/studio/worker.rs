@@ -20,6 +20,7 @@ use mscent_platform::Event;
 use mscent_render::{Framebuffer, View};
 
 use super::Mode;
+use super::highlight::Highlights;
 use crate::build::panic_text;
 use crate::model::FlyCam;
 
@@ -61,6 +62,8 @@ pub struct Request {
     pub view: View,
     /// The level changed since the build: say so on the picture.
     pub stale: bool,
+    /// Picked faces to tint and outline (editor view only).
+    pub highlights: Highlights,
 }
 
 /// A finished picture, `rgba` bytes ready for the UI to show.
@@ -98,6 +101,7 @@ enum Cmd {
     Mode(Mode),
     Camera(Box<FlyCam>),
     Stale(bool),
+    Highlights(Highlights),
 }
 
 #[derive(Default)]
@@ -187,6 +191,10 @@ impl Worker {
         self.send(Cmd::Mode(mode));
     }
 
+    pub fn highlights(&self, h: &Highlights) {
+        self.send(Cmd::Highlights(h.clone()));
+    }
+
     pub fn stale(&self, stale: bool) {
         self.send(Cmd::Stale(stale));
     }
@@ -252,6 +260,7 @@ struct Loop {
     mode: Mode,
     size: (u32, u32),
     stale: bool,
+    highlights: Highlights,
     dirty: bool,
     events: Vec<Event>,
     fly: FlyCam,
@@ -282,6 +291,10 @@ impl Loop {
                 self.stale = s;
                 self.dirty = true;
             }
+            Cmd::Highlights(h) => {
+                self.highlights = h;
+                self.dirty = true;
+            }
         }
     }
 }
@@ -292,6 +305,7 @@ fn run(mut scene: Box<dyn Scene>, rx: &Receiver<Cmd>, sh: &Shared, fly: FlyCam) 
         mode: Mode::Edit,
         size: (0, 0),
         stale: false,
+        highlights: Highlights::default(),
         dirty: true,
         events: Vec::new(),
         fly,
@@ -370,6 +384,7 @@ fn publish(st: &Loop, scene: &mut dyn Scene, sh: &Shared, (w, h): (u32, u32)) {
         play: st.mode == Mode::Play,
         view: st.fly.view(),
         stale: st.stale,
+        highlights: st.highlights.clone(),
     };
     let Some(fb) = scene.render(&req) else { return };
     let mut rgba = Vec::with_capacity(fb.pixels().len() * 4);

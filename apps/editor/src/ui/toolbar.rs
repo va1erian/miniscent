@@ -9,7 +9,7 @@ use xui::backend::{Event, NodeKind, NodeSpec, Result, WidgetId};
 use xui::geometry::{Rect, Size};
 use xui::layout::Constraints;
 use xui::widget::{Control, Placeable, Tooltip};
-use xui::{Key, MouseButton};
+use xui::{Image, Key, MouseButton};
 
 use super::icons::{Glyph, draw};
 
@@ -18,17 +18,40 @@ const SIDE: i32 = 34;
 /// Side of the icon inside it, in dip.
 const ICON: i32 = 20;
 
+/// What a button shows.
+enum Content {
+    Glyph(Glyph),
+    /// A picture (a material preview) filling the button.
+    Picture(Image),
+}
+
 /// One tool button. Clicking (or Space/Enter while focused) raises `msg`;
 /// the app owns which button is checked and calls [`IconButton::set_checked`].
 pub struct IconButton<M: 'static> {
     control: Control<M>,
     checked: Rc<Cell<bool>>,
     _tip: Tooltip<M>,
+    side: i32,
 }
 
 impl<M: Clone + 'static> IconButton<M> {
     pub fn new(ui: &Ui<M>, glyph: Glyph, tip: &str, msg: M) -> Result<IconButton<M>> {
-        let spec = NodeSpec::new(NodeKind::Custom, Rect::new(0, 0, SIDE, SIDE)).tab_stop();
+        Self::make(ui, Content::Glyph(glyph), tip, msg, SIDE)
+    }
+
+    /// A button showing `image`, `side` dip wide (a material preview).
+    pub fn picture(
+        ui: &Ui<M>,
+        image: Image,
+        tip: &str,
+        msg: M,
+        side: i32,
+    ) -> Result<IconButton<M>> {
+        Self::make(ui, Content::Picture(image), tip, msg, side)
+    }
+
+    fn make(ui: &Ui<M>, content: Content, tip: &str, msg: M, side: i32) -> Result<IconButton<M>> {
+        let spec = NodeSpec::new(NodeKind::Custom, Rect::new(0, 0, side, side)).tab_stop();
         let control = Control::new(ui, &spec)?;
         let checked = Rc::new(Cell::new(false));
         let hover = Rc::new(Cell::new(false));
@@ -59,15 +82,23 @@ impl<M: Clone + 'static> IconButton<M> {
                 if focus.get() {
                     canvas.stroke_rounded_rect(frame, radius, t.border_focused, 1.0);
                 }
-                let side = (ICON as u32 * dpi / 96) as i32;
-                let icon = Rect::new(
-                    (b.left + b.right - side) / 2,
-                    (b.top + b.bottom - side) / 2,
-                    (b.left + b.right + side) / 2,
-                    (b.top + b.bottom + side) / 2,
-                );
-                let color = if on { t.text_on_accent } else { t.text };
-                draw(canvas, glyph, icon, color, dpi);
+                match &content {
+                    Content::Glyph(glyph) => {
+                        let side = (ICON as u32 * dpi / 96) as i32;
+                        let icon = Rect::new(
+                            (b.left + b.right - side) / 2,
+                            (b.top + b.bottom - side) / 2,
+                            (b.left + b.right + side) / 2,
+                            (b.top + b.bottom + side) / 2,
+                        );
+                        let color = if on { t.text_on_accent } else { t.text };
+                        draw(canvas, *glyph, icon, color, dpi);
+                    }
+                    Content::Picture(image) => {
+                        let inner = frame.shrink(((3 * dpi) / 96) as i32);
+                        canvas.draw_image(image, inner);
+                    }
+                }
             }));
         }
         {
@@ -120,6 +151,7 @@ impl<M: Clone + 'static> IconButton<M> {
             control,
             checked,
             _tip,
+            side,
         })
     }
 
@@ -137,7 +169,7 @@ impl<M: 'static> Placeable<M> for IconButton<M> {
     }
 
     fn measure(&self, ui: &Ui<M>, _constraints: Constraints) -> Size {
-        let side = (SIDE as u32 * ui.dpi() / 96) as i32;
+        let side = (self.side as u32 * ui.dpi() / 96) as i32;
         Size::new(side, side)
     }
 }

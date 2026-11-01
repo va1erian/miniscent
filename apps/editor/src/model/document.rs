@@ -25,9 +25,10 @@ pub struct BrushDef {
     pub shape: Shape,
     pub op: Op,
     pub material: u16,
-    /// Texture mapping per brush plane, kept so loading and saving a level
-    /// does not lose it. Empty means the defaults; the material of every
-    /// plane is always `material`.
+    /// Texture mapping per brush plane (in the order of
+    /// [`BrushDef::to_brush`]), kept so loading and saving a level does not
+    /// lose it. Empty means the defaults with `material` on every plane;
+    /// otherwise each entry carries its own material.
     pub texinfos: Vec<TexInfo>,
 }
 
@@ -61,8 +62,13 @@ impl BrushDef {
         matches!(self.shape, Shape::Box { .. })
     }
 
-    /// Moves the brush by `d`.
+    /// Moves the brush by `d`. A face whose texture is not locked to the
+    /// world keeps its place on the brush (see [`TexInfo::follow_translation`]).
     pub fn translate(&mut self, d: [f64; 3]) {
+        let offset = Vec3d::new(d[0], d[1], d[2]);
+        for t in &mut self.texinfos {
+            t.follow_translation(offset);
+        }
         match &mut self.shape {
             Shape::Box { min, max } => {
                 for i in 0..3 {
@@ -92,14 +98,26 @@ impl BrushDef {
         let mut brush = brush.with_material(self.material);
         if self.texinfos.len() == brush.planes().len() {
             for (i, t) in self.texinfos.iter().enumerate() {
-                let t = TexInfo {
-                    material: self.material,
-                    ..*t
-                };
-                brush.set_texinfo(i, t);
+                brush.set_texinfo(i, *t);
             }
         }
         Ok(brush)
+    }
+
+    /// The mapping of every plane with defaults filled in; empty for an
+    /// invalid brush.
+    pub fn full_texinfos(&self) -> Vec<TexInfo> {
+        self.to_brush(0)
+            .map(|b| b.texinfos().to_vec())
+            .unwrap_or_default()
+    }
+
+    /// Puts `material` on every plane (and makes it the brush's material).
+    pub fn set_material(&mut self, material: u16) {
+        self.material = material;
+        for t in &mut self.texinfos {
+            t.material = material;
+        }
     }
 
     fn from_brush(id: Id, b: &Brush) -> BrushDef {
@@ -210,6 +228,19 @@ impl Document {
             brushes,
             entities: self.entities.iter().map(|e| e.entity).collect(),
         })
+    }
+
+    /// Whether `other` has the same shapes, operations and entities, in the
+    /// same order; only materials and texture mappings may differ. The
+    /// lightmap depends on nothing else.
+    pub fn same_geometry(&self, other: &Document) -> bool {
+        self.entities == other.entities
+            && self.brushes.len() == other.brushes.len()
+            && self
+                .brushes
+                .iter()
+                .zip(&other.brushes)
+                .all(|(a, b)| a.id == b.id && a.shape == b.shape && a.op == b.op)
     }
 
     pub fn alloc_id(&mut self) -> Id {

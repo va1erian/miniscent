@@ -30,6 +30,7 @@ pub enum Msg {
     Grid(usize),
     View(ViewEvent),
     Prop(super::props::Prop),
+    Face(super::facepanel::FaceMsg),
     /// The frame timer.
     Tick,
     /// One UI tick on demand (scripted runs have no timers).
@@ -168,6 +169,7 @@ impl Editor {
             last_stale: false,
         };
         app.panel.attach(ui);
+        state.borrow_mut().texture_sizes = app.panel.face.load_previews();
         let emit: Rc<dyn Fn(ViewEvent) -> Msg> = Rc::new(Msg::View);
         let pane = |i: usize| {
             let (state, emit) = (state.clone(), emit.clone());
@@ -193,6 +195,7 @@ impl Editor {
             row()
                 .gap(2)
                 .children((tool_button(3), tool_button(4), tool_button(5))),
+            row().gap(2).children((tool_button(6),)),
         ));
         let op_button = |i: usize| {
             let (tip, glyph) = OPS[i];
@@ -247,6 +250,8 @@ impl Editor {
         }
         let st = self.state.borrow();
         self.panel.sync(&st);
+        self.studio.note_edit();
+        self.studio.set_highlights(st.highlighted_faces());
         let stale = self.studio.stale(&st.doc);
         if stale != self.last_stale {
             self.last_stale = stale;
@@ -331,6 +336,7 @@ Press F7 to build, F5 to play.
             self.view3d.get()
         };
         let events = pane.take_events();
+        let clicks = pane.take_clicks();
         let size = pane.size();
         let state = self.state.clone();
         let tick = self.studio.tick(&events, size, &state.borrow().doc);
@@ -351,6 +357,12 @@ Press F7 to build, F5 to play.
                 Mode::Edit => self.view3d.get(),
             };
             target.set_rgba(f.w, f.h, f.rgba);
+        }
+        if self.studio.mode == Mode::Edit && !clicks.is_empty() {
+            for click in clicks {
+                self.pick_click(click);
+            }
+            self.refresh();
         }
     }
 
@@ -395,6 +407,7 @@ Press F7 to build, F5 to play.
     pub fn probe(&self) -> Probe {
         Probe {
             state: self.state.clone(),
+            view3d: self.view3d.get(),
             play: self.play.get(),
         }
     }
@@ -418,6 +431,7 @@ impl App for Editor {
                 self.state.borrow_mut().new_op = if i == 0 { Op::Subtract } else { Op::Add };
             }
             Msg::Grid(i) => self.state.borrow_mut().grid = GRIDS[i.min(GRIDS.len() - 1)],
+            Msg::Face(m) => self.face_message(m),
             Msg::Prop(p) => {
                 apply(&mut self.state.borrow_mut(), p);
             }

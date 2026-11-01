@@ -11,6 +11,7 @@ use crate::model::EditorState;
 /// What a scripted run reads and drives from outside the editor.
 pub struct Probe {
     pub(super) state: Rc<RefCell<EditorState>>,
+    pub(super) view3d: Rc<View3d<Msg>>,
     pub(super) play: Rc<View3d<Msg>>,
 }
 
@@ -28,5 +29,12 @@ impl Probe {
     /// The Instant Play pane (covers the work area while playing).
     pub fn play_pane(&self) -> Rc<View3d<Msg>> {
         self.play.clone()
+    }
+}
+
+impl Probe {
+    /// The editor's 3D pane.
+    pub fn view_pane(&self) -> Rc<View3d<Msg>> {
+        self.view3d.clone()
     }
 }

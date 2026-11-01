@@ -8,7 +8,7 @@ use super::icons::Glyph;
 use crate::model::{EntityKind, Tool};
 
 /// The palette: tooltip name, shortcut key, icon and tool.
-pub(super) const TOOLS: [(&str, Key, Glyph, Tool); 6] = [
+pub(super) const TOOLS: [(&str, Key, Glyph, Tool); 7] = [
     (
         "Select / move",
         Key::Q,
@@ -30,6 +30,12 @@ pub(super) const TOOLS: [(&str, Key, Glyph, Tool); 6] = [
         Tool::Place(EntityKind::Enemy),
     ),
     ("Goal", Key::G, Glyph::Flag, Tool::Place(EntityKind::Goal)),
+    (
+        "Face / texture",
+        Key::T,
+        Glyph::Lucide(Lucide::Image),
+        Tool::Face,
+    ),
 ];
 
 /// The new-brush operation buttons: tooltip and icon (index 0 is Subtract).

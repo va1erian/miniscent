@@ -55,6 +55,38 @@ impl Command {
         }
     }
 
+    /// Whether `newer` can be folded into this command: both edit the same
+    /// brushes (one `EditBrush` each, or batches of them in the same order).
+    pub fn merges_with(&self, newer: &Command) -> bool {
+        match (self, newer) {
+            (Command::EditBrush { before: a, .. }, Command::EditBrush { before: b, .. }) => {
+                a.id == b.id
+            }
+            (Command::Batch(a), Command::Batch(b)) => {
+                !a.is_empty()
+                    && a.len() == b.len()
+                    && a.iter().zip(b).all(|(x, y)| x.merges_with(y))
+            }
+            _ => false,
+        }
+    }
+
+    /// Folds `newer` in after this command (see [`Command::merges_with`]):
+    /// the result goes from this command's start to `newer`'s end.
+    pub fn merge(&mut self, newer: &Command) {
+        match (self, newer) {
+            (Command::EditBrush { after, .. }, Command::EditBrush { after: n, .. }) => {
+                *after = n.clone();
+            }
+            (Command::Batch(a), Command::Batch(b)) => {
+                for (x, y) in a.iter_mut().zip(b) {
+                    x.merge(y);
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// The command that undoes this one.
     pub fn inverse(&self) -> Command {
         match self {
@@ -106,6 +138,27 @@ impl History {
     pub fn run(&mut self, doc: &mut Document, cmd: Command) {
         cmd.apply(doc);
         self.record(cmd);
+    }
+
+    /// Applies `cmd`. When `merge` is set and the last recorded command can
+    /// absorb it (see [`Command::merges_with`]) the two become one undo step,
+    /// so a run of edits to one field undoes in one go.
+    pub fn run_merging(&mut self, doc: &mut Document, cmd: Command, merge: bool) {
+        cmd.apply(doc);
+        if merge
+            && self.undone.is_empty()
+            && let Some(last) = self.done.last_mut()
+            && last.merges_with(&cmd)
+        {
+            last.merge(&cmd);
+            return;
+        }
+        self.record(cmd);
+    }
+
+    /// Number of undo steps recorded.
+    pub fn depth(&self) -> usize {
+        self.done.len()
     }
 
     /// Records a command whose effect is already in the document (a finished drag).

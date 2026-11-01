@@ -158,7 +158,7 @@ impl EditorState {
                 self.place_entity(k, at);
                 true
             }
-            Tool::Select => {
+            Tool::Select | Tool::Face => {
                 if let Some(handle) = self.handle_at(p)
                     && let Some(before) = self.selected_brush().cloned()
                 {
@@ -169,6 +169,7 @@ impl EditorState {
                     });
                     return true;
                 }
+                self.faces.clear();
                 self.selection = self.pick(p);
                 let before = match self.selection {
                     Some(Selection::Brush(id)) => self.doc.brush(id).cloned().map(Original::Brush),

@@ -18,6 +18,8 @@ use xui::xui_canvas::snapshot::{Snapshot, Stage, render_with};
 use crate::model::Document;
 use crate::ui::{Editor, Msg, Probe, cmd};
 
+mod faces;
+
 /// Ticks the UI `n` times, 16 ms apart, so the render thread's frames arrive
 /// and show before a snapshot.
 fn pump(stage: &Stage<'_, Msg>, n: u32) {
@@ -296,4 +298,5 @@ fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     stage.emit(Msg::Escape);
     pump(stage, 20);
     run.shot(stage, "07-edit-after-second-play.png");
+    faces::script(run, stage, probe);
 }

@@ -10,12 +10,14 @@ use std::thread::JoinHandle;
 
 use mscent_platform::Event;
 
-use crate::build::{self, BuildJob, STEPS, Update};
+use crate::build::{self, BuildJob, STEPS, SharedCache, Update};
 use crate::model::{Document, FlyCam};
 
+mod highlight;
 mod scene;
 pub mod worker;
 
+use highlight::Highlights;
 use scene::LevelScene;
 pub use worker::{Frame, Scene};
 use worker::{Slow, Worker};
@@ -56,6 +58,11 @@ pub struct Studio {
     /// Progress of the running build, `0..=STEPS`.
     pub progress: u32,
     check_stale: bool,
+    /// The last lightmap, so a rebuild after a pure texture edit skips the bake.
+    cache: SharedCache,
+    highlights: Highlights,
+    /// The document changed since texture-only edits were last looked for.
+    recheck: bool,
 }
 
 /// The internal render size for a pane of `pane` pixels: the pane divided by
@@ -79,6 +86,9 @@ impl Studio {
             camera: FlyCam::for_document(doc),
             progress: 0,
             check_stale: false,
+            cache: SharedCache::default(),
+            highlights: Highlights::default(),
+            recheck: false,
         }
     }
 
@@ -124,6 +134,55 @@ impl Studio {
         self.set_camera(FlyCam::for_document(doc));
     }
 
+    /// The fly camera as it is right now.
+    pub fn fly_camera(&self) -> FlyCam {
+        self.worker
+            .as_ref()
+            .and_then(Worker::current_camera)
+            .unwrap_or_else(|| self.camera.clone())
+    }
+
+    /// Sets the faces to outline in the 3D view. Nothing is sent when they
+    /// are the ones already shown.
+    pub fn set_highlights(&mut self, polys: Vec<Vec<mscent_math::Vec3>>) {
+        if *self.highlights == polys {
+            return;
+        }
+        self.highlights = Highlights::new(polys);
+        if let Some(w) = &self.worker {
+            w.highlights(&self.highlights);
+        }
+    }
+
+    /// The document changed: look for a texture-only edit on the next tick.
+    pub fn note_edit(&mut self) {
+        self.recheck = true;
+    }
+
+    /// The lightmap cache shared by every build.
+    #[cfg(test)]
+    pub fn cache(&self) -> SharedCache {
+        self.cache.clone()
+    }
+
+    /// Whether `doc` differs from the build only in materials and mappings,
+    /// which the lightmap does not depend on.
+    fn texture_only_change(&self, doc: &Document) -> bool {
+        self.built_doc
+            .as_ref()
+            .is_some_and(|d| d != doc && d.same_geometry(doc))
+    }
+
+    /// After a texture-only edit: rebuilds in the background. The cached
+    /// lightmap is reused, so the new mapping shows within a fraction of a
+    /// second and the log stays quiet.
+    fn refresh_textures(&mut self, doc: &Document) {
+        if let Ok(mut job) = build::start_cached(doc, false, &self.cache) {
+            job.quiet = true;
+            self.job = Some(job);
+        }
+    }
+
     /// Moves the fly camera.
     pub fn set_camera(&mut self, fly: FlyCam) {
         if let Some(w) = &self.worker {
@@ -138,7 +197,7 @@ impl Studio {
         if self.job.is_some() {
             return Err("a build is already running".into());
         }
-        self.job = Some(build::start(doc, then_play)?);
+        self.job = Some(build::start_cached(doc, then_play, &self.cache)?);
         self.progress = 0;
         Ok(())
     }
@@ -182,6 +241,7 @@ impl Studio {
         };
         match Worker::spawn(scene, self.camera.clone()) {
             Ok((w, h)) => {
+                w.highlights(&self.highlights);
                 self.worker = Some(w);
                 self.handle = Some(h);
                 self.built_doc = Some(doc);
@@ -215,6 +275,12 @@ impl Studio {
         let mut out = Tick::default();
         self.poll_build(&mut out);
         self.retired.retain(|h| !h.is_finished());
+        if self.recheck && self.job.is_none() && self.mode == Mode::Edit && self.worker.is_some() {
+            self.recheck = false;
+            if self.texture_only_change(doc) {
+                self.refresh_textures(doc);
+            }
+        }
         if std::mem::take(&mut self.check_stale) {
             self.set_stale(self.stale(doc));
         }
@@ -259,14 +325,17 @@ impl Studio {
     fn poll_build(&mut self, out: &mut Tick) {
         let Some(job) = self.job.as_mut() else { return };
         let then_play = job.then_play;
+        let quiet = job.quiet;
         let started = job.started;
         let mut finished = None;
         for u in job.poll() {
             match u {
                 Update::Step { step, text } => {
                     self.progress = step;
-                    out.status = Some(format!("Building {step}/{STEPS}: {text}"));
-                    out.log.push(text);
+                    if !quiet {
+                        out.status = Some(format!("Building {step}/{STEPS}: {text}"));
+                        out.log.push(text);
+                    }
                 }
                 Update::Finished(r) => finished = Some(r),
             }
@@ -285,6 +354,16 @@ impl Studio {
                     "Build finished in {:.1} s{note}",
                     started.elapsed().as_secs_f32()
                 ));
+                if quiet {
+                    let how = match built.bake {
+                        Some(mscent_render::Source::Baked) => "re-baked",
+                        _ => "lightmap kept",
+                    };
+                    out.status = Some(format!(
+                        "Texture mapping updated in {} ms ({how})",
+                        started.elapsed().as_millis()
+                    ));
+                }
                 out.play_now = then_play && why.is_none();
                 if then_play && !out.play_now {
                     out.status = Some(format!("Cannot play{note}"));
@@ -319,3 +398,5 @@ Q/E: roll   Shift: fast";
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod texture_tests;

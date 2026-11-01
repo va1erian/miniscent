@@ -6,6 +6,7 @@ use mscent_world::{Entity, Op};
 use super::command::{Command, History};
 use super::document::{BrushDef, Document, EntityDef, Id, Shape};
 use super::entity::{EntityKind, kind};
+use super::pick::FaceRef;
 use super::pointer::Drag;
 
 /// What the pointer does in a view.
@@ -17,6 +18,8 @@ pub enum Tool {
     Box,
     /// Click to place an entity.
     Place(EntityKind),
+    /// Pick faces in the 3D view and edit their texture mapping.
+    Face,
 }
 
 /// The one selected item.
@@ -47,6 +50,12 @@ pub struct EditorState {
     /// Coordinate along the hidden axis for new entities, per world axis.
     pub depth: [f64; 3],
     pub drag: Option<Drag>,
+    /// The faces picked in the 3D view (see `facetex.rs`).
+    pub faces: Vec<FaceRef>,
+    pub(super) face_clip: Option<super::facetex::FaceClip>,
+    pub(super) face_key: Option<super::facetex::MergeKey>,
+    /// Texel size of every material, by id (missing ids count as 128 x 128).
+    pub texture_sizes: Vec<(u32, u32)>,
     /// The last thing the user should be told.
     pub message: String,
 }
@@ -70,6 +79,10 @@ impl EditorState {
             extent: (0.0, 4.0),
             depth: [0.0, 0.0, 1.5],
             drag: None,
+            faces: Vec::new(),
+            face_clip: None,
+            face_key: None,
+            texture_sizes: Vec::new(),
             message: "Ready".into(),
         }
     }
@@ -79,6 +92,9 @@ impl EditorState {
         self.doc = doc;
         self.history.clear();
         self.selection = None;
+        self.faces.clear();
+        self.face_clip = None;
+        self.face_key = None;
         self.drag = None;
     }
 
@@ -198,6 +214,7 @@ impl EditorState {
         };
         self.history.run(&mut self.doc, cmd);
         self.selection = None;
+        self.faces.clear();
         self.message = "Deleted".into();
         true
     }

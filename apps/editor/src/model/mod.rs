@@ -3,11 +3,15 @@
 pub mod command;
 pub mod document;
 pub mod entity;
+pub mod facetex;
 pub mod fly;
+pub mod pick;
 pub mod pointer;
 pub mod state;
 pub mod view;
 
+#[cfg(test)]
+mod facetex_tests;
 #[cfg(test)]
 mod review_tests;
 #[cfg(test)]

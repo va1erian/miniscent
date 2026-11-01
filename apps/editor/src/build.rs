@@ -5,12 +5,13 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use miniscent_game::assets::load_materials;
 use miniscent_game::{GameSession, SessionConfig};
 use mscent_game::{Arena, LoadError};
-use mscent_render::{BuildConfig, LevelRenderer};
+use mscent_render::{BakeCache, BuildConfig, LevelRenderer, Source};
 use mscent_world::{Entity, Level, Portals, compile, extract_faces};
 
 use crate::model::Document;
@@ -18,10 +19,16 @@ use crate::model::Document;
 /// Number of progress steps a build reports.
 pub const STEPS: u32 = 6;
 
+/// The last lightmap, shared by every build so a rebuild that changed only
+/// texture mappings does not bake again.
+pub type SharedCache = Arc<Mutex<BakeCache>>;
+
 /// A compiled and baked level.
 pub struct Built {
     /// What the 3D pane and Play use.
     pub product: Product,
+    /// Where the lightmap came from: a bake, or the cache.
+    pub bake: Option<Source>,
 }
 
 pub enum Product {
@@ -69,6 +76,8 @@ pub struct BuildJob {
     /// Start playing as soon as the build succeeds.
     pub then_play: bool,
     pub started: Instant,
+    /// A background refresh (texture edits): it does not write the log.
+    pub quiet: bool,
 }
 
 /// Checks every brush and the entities, naming the first problem. The
@@ -91,15 +100,20 @@ pub fn validate(doc: &Document) -> Result<Level, String> {
     Ok(Level { brushes, entities })
 }
 
-/// Starts a build of `doc` on a worker thread.
-pub fn start(doc: &Document, then_play: bool) -> Result<BuildJob, String> {
+/// Starts a build of `doc` on a worker thread, baking through `cache`.
+pub fn start_cached(
+    doc: &Document,
+    then_play: bool,
+    cache: &SharedCache,
+) -> Result<BuildJob, String> {
     let level = validate(doc)?;
     let (tx, rx) = channel();
     let tx2 = tx.clone();
+    let cache = Arc::clone(cache);
     std::thread::Builder::new()
         .name("mscent-build".into())
         .spawn(move || {
-            let result = catch_unwind(AssertUnwindSafe(|| work(&level, &tx)))
+            let result = catch_unwind(AssertUnwindSafe(|| work(&level, &tx, &cache)))
                 .unwrap_or_else(|p| Err(format!("the build crashed: {}", panic_text(&*p))));
             let _ = tx2.send(Update::Finished(result));
         })
@@ -109,6 +123,7 @@ pub fn start(doc: &Document, then_play: bool) -> Result<BuildJob, String> {
         doc: doc.clone(),
         then_play,
         started: Instant::now(),
+        quiet: false,
     })
 }
 
@@ -139,7 +154,7 @@ impl BuildJob {
     }
 }
 
-fn work(level: &Level, tx: &Sender<Update>) -> Result<Built, String> {
+fn work(level: &Level, tx: &Sender<Update>, cache: &SharedCache) -> Result<Built, String> {
     let t0 = Instant::now();
     let note = |step: u32, text: String| {
         let _ = tx.send(Update::Step { step, text });
@@ -172,9 +187,11 @@ fn work(level: &Level, tx: &Sender<Update>) -> Result<Built, String> {
     note(5, "Baking lightmaps (this takes a moment)".into());
     let t = Instant::now();
     let cfg = SessionConfig::default();
+    let mut cache = cache.lock().unwrap_or_else(PoisonError::into_inner);
     let product = match Arena::from_level(level) {
         Ok(_) => Product::Playable(Box::new(
-            GameSession::new(level, materials, &cfg).map_err(|e| e.to_string())?,
+            GameSession::new_cached(level, materials, &cfg, &mut cache)
+                .map_err(|e| e.to_string())?,
         )),
         Err(e) => {
             let why = match e {
@@ -182,19 +199,31 @@ fn work(level: &Level, tx: &Sender<Update>) -> Result<Built, String> {
                 LoadError::NoGoal => "the level has no goal".to_string(),
                 other => format!("the level cannot be played ({other:?})"),
             };
-            let renderer = LevelRenderer::from_level(level, materials, &BuildConfig::default())
-                .map_err(|e| format!("bake failed: {e:?}"))?;
+            let renderer = LevelRenderer::from_level_cached(
+                level,
+                materials,
+                &BuildConfig::default(),
+                &mut cache,
+            )
+            .map_err(|e| format!("bake failed: {e:?}"))?;
             Product::ViewOnly(Box::new(renderer), why)
         }
     };
+    let bake = cache.last_source();
+    drop(cache);
     let lit = match &product {
         Product::Playable(s) => s.renderer().lightmap().projections().len(),
         Product::ViewOnly(r, _) => r.lightmap().projections().len(),
     };
+    let how = match bake {
+        Some(Source::Memory) => "kept from the last bake",
+        Some(Source::File) => "read from the cache file",
+        _ => "baked",
+    };
     note(
         6,
         format!(
-            "Bake: {lit} lit faces, {} ms. Build finished in {} ms",
+            "Lightmap {how}: {lit} lit faces, {} ms. Build finished in {} ms",
             t.elapsed().as_millis(),
             t0.elapsed().as_millis()
         ),
@@ -205,7 +234,7 @@ fn work(level: &Level, tx: &Sender<Update>) -> Result<Built, String> {
             text: format!("Not playable: {why}"),
         });
     }
-    Ok(Built { product })
+    Ok(Built { product, bake })
 }
 
 #[cfg(test)]
@@ -261,7 +290,7 @@ mod tests {
             brushes: vec![room],
             entities: vec![],
         });
-        let mut job = start(&doc, false).expect("starts");
+        let mut job = start_cached(&doc, false, &SharedCache::default()).expect("starts");
         let built = wait(&mut job).expect("builds");
         assert!(built.unplayable().is_some());
     }
@@ -269,7 +298,7 @@ mod tests {
     #[test]
     fn the_showcase_builds_playable_with_progress() {
         let doc = Document::from_level(&mscent_world::showcase_level());
-        let mut job = start(&doc, true).expect("starts");
+        let mut job = start_cached(&doc, true, &SharedCache::default()).expect("starts");
         let mut steps = Vec::new();
         let mut lines = Vec::new();
         let built = loop {

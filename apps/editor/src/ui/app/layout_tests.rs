@@ -10,7 +10,7 @@ use xui::{Dip, Theme};
 use super::*;
 use crate::model::Selection;
 
-fn shoot(name: &str, theme: Theme, w: f32, h: f32) {
+fn shoot(name: &str, theme: Theme, (w, h): (f32, f32), tool: usize) {
     let report: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
     let state: Rc<RefCell<Option<Rc<RefCell<EditorState>>>>> = Rc::new(RefCell::new(None));
     let (r2, s2) = (report.clone(), state.clone());
@@ -33,7 +33,7 @@ fn shoot(name: &str, theme: Theme, w: f32, h: f32) {
             }
             let id = state.borrow().doc.brushes()[0].id;
             state.borrow_mut().selection = Some(Selection::Brush(id));
-            stage.emit(Msg::Tool(0));
+            stage.emit(Msg::Tool(tool));
             *r2.borrow_mut() = stage.ui().layout_report();
         },
     )
@@ -53,8 +53,12 @@ fn shoot(name: &str, theme: Theme, w: f32, h: f32) {
 
 #[test]
 fn laptop_and_wide_windows_lay_out_without_warnings() {
-    shoot("1280-light", Theme::light(), 1280.0, 800.0);
-    shoot("1280-dark", Theme::dark(), 1280.0, 800.0);
-    shoot("2000-light", Theme::light(), 2000.0, 1124.0);
-    shoot("2000-dark", Theme::dark(), 2000.0, 1124.0);
+    for (suffix, tool) in [("", 0), ("-face", 6)] {
+        for (size_name, size) in [("1280", (1280.0, 800.0)), ("2000", (2000.0, 1124.0))] {
+            for (theme_name, theme) in [("light", Theme::light()), ("dark", Theme::dark())] {
+                let name = format!("{size_name}-{theme_name}{suffix}");
+                shoot(&name, theme, size, tool);
+            }
+        }
+    }
 }

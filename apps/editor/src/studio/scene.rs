@@ -7,6 +7,7 @@ use miniscent_game::FrameStats;
 use mscent_platform::Event;
 use mscent_render::{Framebuffer, Quality, draw_text};
 
+use super::highlight;
 use super::worker::{Request, Scene};
 use crate::build::Built;
 
@@ -45,6 +46,13 @@ impl Scene for LevelScene {
         let fb = self.fb.as_mut()?;
         let renderer = self.built.renderer();
         renderer.render(fb, &req.view, Quality::High, renderer.actors(), None)?;
+        if !req.highlights.is_empty()
+            && let Some(cam) = req
+                .view
+                .camera(renderer.config().fov_y, 0.1, 400.0, req.w, req.h)
+        {
+            highlight::draw(fb, &cam, &req.highlights);
+        }
         if req.stale {
             draw_text(fb, 6, 6, "OUT OF DATE: F7", 0xffff_c040, 1);
         }

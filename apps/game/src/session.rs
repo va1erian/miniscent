@@ -16,8 +16,8 @@ use mscent_game::{
 use mscent_math::{Quat, Vec3};
 use mscent_platform::{Event, Key, MouseButton};
 use mscent_render::{
-    Actor, ActorKind, BuildConfig, BuildError, Framebuffer, LevelRenderer, MaterialTable, Quality,
-    View, draw_text, fill_rect,
+    Actor, ActorKind, BakeCache, BuildConfig, BuildError, Framebuffer, LevelRenderer,
+    MaterialTable, Quality, View, draw_text, fill_rect,
 };
 use mscent_world::Level;
 
@@ -128,9 +128,21 @@ impl GameSession {
         materials: MaterialTable,
         cfg: &SessionConfig,
     ) -> Result<Self, SessionError> {
+        Self::new_cached(level, materials, cfg, &mut BakeCache::new())
+    }
+
+    /// Like [`GameSession::new`], with the lightmap bake going through
+    /// `cache`: a level whose geometry and lights did not change since the
+    /// cache's last bake (a new texture mapping, say) is not baked again.
+    pub fn new_cached(
+        level: &Level,
+        materials: MaterialTable,
+        cfg: &SessionConfig,
+        cache: &mut BakeCache,
+    ) -> Result<Self, SessionError> {
         let arena = Arena::from_level(level).map_err(SessionError::Load)?;
-        let renderer =
-            LevelRenderer::from_level(level, materials, &cfg.build).map_err(SessionError::Build)?;
+        let renderer = LevelRenderer::from_level_cached(level, materials, &cfg.build, cache)
+            .map_err(SessionError::Build)?;
         let mut game = Game::new(arena);
         game.player.orientation = spawn_orientation(game.arena.player_yaw);
         game.player.up_ref = Some(Vec3::new(0.0, 0.0, 1.0));

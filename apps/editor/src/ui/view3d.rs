@@ -40,11 +40,25 @@ pub fn platform_key(k: Key) -> Option<PKey> {
     })
 }
 
+/// A mouse press on the picture, for picking: where on the picture it fell
+/// (`0..=1` from the top left) and which keys were held.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Click {
+    pub nx: f32,
+    pub ny: f32,
+    /// Width over height of the picture shown.
+    pub aspect: f32,
+    pub right: bool,
+    pub ctrl: bool,
+    pub alt: bool,
+}
+
 #[derive(Default)]
 struct Shared {
     image: RefCell<Option<Image>>,
     events: RefCell<Vec<PEvent>>,
     placeholder: RefCell<String>,
+    clicks: RefCell<Vec<Click>>,
 }
 
 /// A pane that draws a frame and collects input.
@@ -113,6 +127,32 @@ impl<M: 'static> View3d<M> {
         std::mem::take(&mut *self.shared.events.borrow_mut())
     }
 
+    /// The presses that fell on the picture since the last call.
+    pub fn take_clicks(&self) -> Vec<Click> {
+        std::mem::take(&mut *self.shared.clicks.borrow_mut())
+    }
+
+    /// Queues a click as if it came from the user (scripted runs).
+    #[allow(dead_code, reason = "used by the self-test and unit tests")]
+    pub fn push_click(&self, c: Click) {
+        self.shared.clicks.borrow_mut().push(c);
+    }
+
+    /// A checksum of the pixels shown and their size, `None` before the
+    /// first frame (scripted runs compare pictures with it).
+    #[allow(dead_code, reason = "used by the self-test and unit tests")]
+    pub fn frame_checksum(&self) -> Option<(u32, u32, u64)> {
+        let img = self.shared.image.borrow();
+        let img = img.as_ref()?;
+        let sum = img
+            .pixels()
+            .iter()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |h, &b| {
+                (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+            });
+        Some((img.width(), img.height(), sum))
+    }
+
     pub fn set_visible(&self, visible: bool) {
         self.control.set_visible(visible);
     }
@@ -143,17 +183,52 @@ fn handle<M: 'static>(
 ) {
     let push = |e| shared.events.borrow_mut().push(e);
     match *event {
-        Event::MouseDown { x, y, button, .. } => {
+        Event::MouseDown {
+            x,
+            y,
+            button,
+            modifiers,
+        } => {
             ui.focus(id);
+            let picks = |right| {
+                let b = ui.bounds(id);
+                let img = shared.image.borrow();
+                let img = img.as_ref()?;
+                let r = fit(
+                    Rect::new(0, 0, b.width(), b.height()),
+                    img.width(),
+                    img.height(),
+                );
+                let (w, h) = (r.width().max(1) as f32, r.height().max(1) as f32);
+                let (nx, ny) = ((x - r.left) as f32 / w, (y - r.top) as f32 / h);
+                ((0.0..=1.0).contains(&nx) && (0.0..=1.0).contains(&ny)).then_some(Click {
+                    nx,
+                    ny,
+                    aspect: w / h,
+                    right,
+                    ctrl: modifiers.ctrl,
+                    alt: modifiers.alt,
+                })
+            };
             match button {
+                MouseButton::Right if modifiers.alt => {
+                    if let Some(c) = picks(true) {
+                        shared.clicks.borrow_mut().push(c);
+                    }
+                }
                 MouseButton::Right => {
                     ui.set_capture(id);
                     look.set(Some((x, y)));
                 }
-                MouseButton::Left => push(PEvent::MouseButton {
-                    button: PButton::Left,
-                    pressed: true,
-                }),
+                MouseButton::Left => {
+                    if let Some(c) = picks(false) {
+                        shared.clicks.borrow_mut().push(c);
+                    }
+                    push(PEvent::MouseButton {
+                        button: PButton::Left,
+                        pressed: true,
+                    });
+                }
                 _ => {}
             }
         }
