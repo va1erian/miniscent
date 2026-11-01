@@ -39,9 +39,9 @@ const MAX_PX: usize = SPAN_LEN as usize;
 /// sample, so it is sampled sparsely and stepped linearly in between (the
 /// colour is fetched per pixel).
 const MAX_SEG_SHIFT: u32 = 4;
-/// Shortest interval, as a shift: every eighth pixel (a knot costs two
-/// normalisations; every second pixel cost about a millisecond a frame).
-const MIN_SEG_SHIFT: u32 = 3;
+/// Shortest interval, as a shift: every sixteenth pixel (a knot costs two
+/// normalisations; every eighth pixel cost about 0.4 ms a frame more).
+const MIN_SEG_SHIFT: u32 = 4;
 /// Intervals of the longest span (`MAX_PX >> MIN_SEG_SHIFT`).
 const MAX_SEGS: usize = MAX_PX >> MIN_SEG_SHIFT;
 /// Largest distance, in luxels, between two direction samples on screen.

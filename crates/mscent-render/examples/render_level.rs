@@ -103,7 +103,7 @@ fn main() {
 
     // The lamp is at (6, 6) and the pillar at (11..13, 11..13): its shadow
     // falls on the floor and walls to the north east of it.
-    let shadow = View::from_angles(at(1.5, 9.0, 6.5), -1.0, -0.4, 0.0);
+    let shadow = View::from_angles(at(17.0, 19.0, 3.5), 3.0 * pi / 4.0 - 0.45, -0.5, 0.0);
     shots.take("showcase_9_pillar_shadow", &showcase, &shadow, high);
     let behind = View::from_angles(at(14.0, 1.0, 6.0), -0.13, -0.37, 0.0);
     shots.take("showcase_9b_shadow_from_lamp", &showcase, &behind, high);
