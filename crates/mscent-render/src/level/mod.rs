@@ -81,7 +81,7 @@ impl Default for BuildConfig {
     fn default() -> Self {
         Self {
             luxel_size: 0.125,
-            ambient: Vec3::new(0.025, 0.024, 0.036),
+            ambient: Vec3::new(0.006, 0.006, 0.009),
             light_gain: 4.6,
             light_radius: 0.3,
             shadow_samples: 64,
@@ -168,11 +168,11 @@ fn actors_of(level: &Level) -> Vec<Actor> {
 /// the same point lights without shadows plus a little ambient.
 fn mesh_lighting(lights: &[PointLight], ambient: Vec3) -> MeshLighting {
     MeshLighting {
-        ambient: 0.4 + (ambient.x + ambient.y + ambient.z) / 3.0,
+        ambient: 0.08 + (ambient.x + ambient.y + ambient.z) / 3.0,
         sun_dir: Vec3::new(0.3, -0.4, 0.85)
             .normalized()
             .unwrap_or(Vec3::ZERO),
-        sun: 0.7,
+        sun: 0.25,
         points: lights
             .iter()
             .map(|l| MeshLight {
@@ -223,7 +223,7 @@ impl LevelRenderer {
         let bake_cfg = BakeConfig {
             luxel_size: cfg.luxel_size,
             ambient: cfg.ambient,
-            bounce_gain: 0.18,
+            bounce_gain: 0.08,
             light_radius: cfg.light_radius,
             shadow_samples: cfg.shadow_samples,
             ..BakeConfig::default()

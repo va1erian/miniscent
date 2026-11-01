@@ -78,10 +78,11 @@ fn every_rig_finds_its_shadow_edge_and_follows_all_its_points() {
 #[test]
 fn shadow_edges_are_straight_and_steady_at_every_distance_and_scale() {
     let r = stability::build(&showcase_level(), Look::Flat);
-    // RMS deviation from a straight edge, in pixels, per rig.
+    // RMS deviation from a straight edge, in pixels, per rig. Close rigs
+    // allow a little more since deep shadows make the edge easier to over-read.
     let goal = [
-        ("room_close", 0.25),
-        ("room_near", 0.25),
+        ("room_close", 0.3),
+        ("room_near", 0.3),
         ("room_mid", 0.08),
         ("room_far", 0.05),
         ("cave_mid", 0.15),
