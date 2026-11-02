@@ -8,7 +8,7 @@
 use mscent_texgen::ops::{STROKE_COORD, STROKE_RADIUS, Stroke};
 
 use super::{Tab, TexStudio};
-use crate::model::texdoc::Growth;
+use crate::model::texdoc::{Growth, STROKE_POINTS};
 
 /// The brush new strokes are drawn with.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -155,7 +155,7 @@ impl TexStudio {
             self.tool.drag = Some(drag);
             self.say(format!(
                 "this stroke holds {} points, the most there can be: it stops growing here",
-                mscent_texgen::ops::MAX_POINTS
+                STROKE_POINTS
             ));
         }
         if !last {

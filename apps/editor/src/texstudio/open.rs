@@ -27,7 +27,7 @@ pub(super) struct PendingOpen {
 }
 
 /// Reads and parses a recipe file, never holding more of it than the limit allows.
-pub(super) fn read_recipe_file(path: &Path) -> Result<Recipe, String> {
+pub(crate) fn read_recipe_file(path: &Path) -> Result<Recipe, String> {
     let describe = |e: &dyn std::fmt::Display| format!("cannot open {}: {e}", path.display());
     let file = std::fs::File::open(path).map_err(|e| describe(&e))?;
     let mut bytes = Vec::new();

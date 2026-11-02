@@ -29,6 +29,7 @@ pub use eval::{Failure, Picture, Tab, Thumbs};
 use material::PendingBake;
 pub use material::SaveStart;
 use open::PendingOpen;
+pub(crate) use open::read_recipe_file;
 pub use paint::{Brush, Stroking};
 pub(crate) use save::{updated_manifest, write_atomic};
 use worker::Worker;

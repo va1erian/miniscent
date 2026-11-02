@@ -83,12 +83,12 @@ fn a_stroke_stops_growing_at_the_point_cap_and_stays_valid() {
     let mut d = doc();
     d.begin_stroke(0, brush(0.0, [0.5, 0.5])).expect("begins");
     let mut full = 0;
-    for i in 0..MAX_POINTS + 10 {
+    for i in 0..STROKE_POINTS + 10 {
         let x = if i % 2 == 0 { 0.5 } else { 0.52 };
         full += usize::from(d.extend_stroke([x, 0.5], false) == Growth::Full);
     }
     d.end_stroke();
-    assert_eq!(points(&d)[0].len(), MAX_POINTS);
+    assert_eq!(points(&d)[0].len(), STROKE_POINTS);
     assert!(full > 0, "the points past it are told so, none is added");
     let Some(ops::Value::Strokes(s)) = d.recipe().blocks[0].params.values().get(1) else {
         panic!("strokes");
@@ -149,6 +149,69 @@ fn growing_with_no_stroke_begun_or_a_point_out_of_range_does_nothing() {
     assert_eq!(d.extend_stroke([2.9, -1.9], true), Growth::Added);
     d.end_stroke();
     assert_eq!(d.extend_stroke([0.7, 0.5], true), Growth::Skipped, "ended");
+}
+
+/// A coordinate on the grid, from a counter, within `STROKE_COORD` and negative:
+/// the longest to write.
+fn long_coordinate(n: u32) -> f32 {
+    let k = n.wrapping_mul(2_654_435_761) % 8191 + 1;
+    -(k as f32) / 4096.0
+}
+
+#[test]
+fn points_sit_on_a_grid_and_a_full_stroke_is_one_line_that_reads_back_the_same() {
+    let mut d = doc();
+    d.begin_stroke(0, brush(0.0, [0.123_456_79, 1.0 / 3.0]))
+        .expect("begins");
+    let mut n = 0;
+    while points(&d)[0].len() < STROKE_POINTS && n < 4 * STROKE_POINTS as u32 {
+        d.extend_stroke([long_coordinate(n), long_coordinate(n + 7_000_000)], false);
+        n += 1;
+    }
+    d.end_stroke();
+    let kept = &points(&d)[0];
+    assert_eq!(kept.len(), STROKE_POINTS, "the stroke filled");
+    assert!(
+        kept.iter().flatten().all(|c| (c * 4096.0).fract() == 0.0),
+        "every coordinate is a multiple of 1/4096"
+    );
+    assert_eq!(
+        kept[0],
+        [506.0 / 4096.0, 1365.0 / 4096.0],
+        "the first point too"
+    );
+    let text = recipe::write(d.recipe());
+    let longest = text.lines().map(str::len).max().unwrap_or(0);
+    assert!(longest <= recipe::MAX_LINE, "a line of {longest} bytes");
+    let back = recipe::read(text.as_bytes()).expect("a file the editor wrote loads");
+    assert_eq!(&back, d.recipe(), "and is the same recipe");
+}
+
+#[test]
+fn the_undo_history_is_bounded_by_what_it_holds_and_the_newest_steps_stay() {
+    use crate::model::texdoc::{HISTORY, HISTORY_BYTES};
+    let mut d = doc();
+    let long = Stroke {
+        points: (0..STROKE_POINTS)
+            .map(|i| [(i % 64) as f32 / 64.0, (i / 64) as f32 / 64.0])
+            .collect(),
+        ..brush(0.0, [0.0, 0.0])
+    };
+    let strokes = 3 * HISTORY / 4;
+    for _ in 0..strokes {
+        d.begin_stroke(0, long.clone()).expect("room");
+        d.end_stroke();
+    }
+    let held: usize = d.past.iter().map(|s| s.bytes).sum();
+    assert!(held <= HISTORY_BYTES, "{held} bytes of history");
+    assert!(
+        (2..strokes).contains(&d.past.len()),
+        "the oldest went, not everything: {} steps",
+        d.past.len()
+    );
+    assert_eq!(d.stroke_count(0), strokes);
+    assert!(d.undo());
+    assert_eq!(d.stroke_count(0), strokes - 1, "the newest step is there");
 }
 
 #[test]

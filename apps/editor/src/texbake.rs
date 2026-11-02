@@ -7,9 +7,10 @@ use std::path::Path;
 
 use mscent_render::manifest;
 use mscent_render::png_encode::encode_png;
-use mscent_texgen::{Maps, bake, recipe};
+use mscent_render::recipe_texture::EXTENSION;
+use mscent_texgen::{Maps, bake};
 
-use crate::texstudio::{updated_manifest, write_atomic};
+use crate::texstudio::{read_recipe_file, updated_manifest, write_atomic};
 
 fn grey(values: &[u8]) -> Vec<u32> {
     values
@@ -27,14 +28,20 @@ fn write_png(path: &Path, maps: &Maps, pixels: &[u32]) -> Result<(), String> {
 /// Writes `name.png` and whichever of `name_n.png`, `name_h.png` and
 /// `name_s.png` the recipe has, where `name` is the recipe file's stem.
 pub fn run(recipe_path: &Path, dir: &Path) -> Result<(), String> {
-    let bytes =
-        std::fs::read(recipe_path).map_err(|e| format!("{}: {e}", recipe_path.display()))?;
-    let recipe = recipe::read(&bytes).map_err(|e| format!("{}: {e}", recipe_path.display()))?;
-    let maps = bake(&recipe, recipe.size).map_err(|e| format!("{}: {e}", recipe_path.display()))?;
+    let recipe = read_recipe_file(recipe_path)?;
     let name = recipe_path
         .file_stem()
         .ok_or_else(|| format!("{}: no file name", recipe_path.display()))?
         .to_string_lossy();
+    // Before anything is written: the name goes into file names and a manifest.
+    if !manifest::name_is_valid(&name) {
+        return Err(format!(
+            "{}: {name:?} cannot be a material's name",
+            recipe_path.display()
+        ));
+    }
+    refuse_shadowing(recipe_path, dir, &name)?;
+    let maps = bake(&recipe, recipe.size).map_err(|e| format!("{}: {e}", recipe_path.display()))?;
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     write_png(&dir.join(format!("{name}.png")), &maps, &maps.albedo)?;
     if let Some(normals) = &maps.normals {
@@ -47,6 +54,31 @@ pub fn run(recipe_path: &Path, dir: &Path) -> Result<(), String> {
         write_png(&dir.join(format!("{name}_s.png")), &maps, &grey(specular))?;
     }
     list_in_manifest(dir, &name, recipe.gloss)
+}
+
+/// A recipe of the same name in `dir` wins over the PNGs about to be written, so
+/// the pictures would never be the material. The recipe being baked is no such
+/// recipe when it is that very file.
+fn refuse_shadowing(recipe_path: &Path, dir: &Path, name: &str) -> Result<(), String> {
+    let there = dir.join(format!("{name}{EXTENSION}"));
+    if !there.try_exists().unwrap_or(true) {
+        return Ok(());
+    }
+    let same = match (
+        std::fs::canonicalize(recipe_path),
+        std::fs::canonicalize(&there),
+    ) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    };
+    if same {
+        return Ok(());
+    }
+    Err(format!(
+        "{} exists and is loaded instead of the PNGs this would write: remove it, or bake \
+         into another directory",
+        there.display()
+    ))
 }
 
 /// A directory with a manifest is one a game reads, whose manifest is the whole
@@ -118,6 +150,57 @@ op 2 1 1 out-specular
             .expect("wall");
         assert_eq!(wall.gloss, 33);
         assert_eq!(wall.texture.texel(0, 0), 0xff00_ff00);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    const FLAT: &str = "miniscent-recipe 1\nsize 16 16\nop 0 0 1 flat\nop 0 1 1 out-albedo\n";
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("mscent-bake-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        dir
+    }
+
+    fn files_in(dir: &Path) -> usize {
+        std::fs::read_dir(dir).map_or(0, Iterator::count)
+    }
+
+    #[test]
+    fn a_name_that_cannot_be_a_material_writes_nothing() {
+        let dir = scratch("name");
+        let out = dir.join("out");
+        std::fs::create_dir_all(&out).expect("dir");
+        for bad in ["Wall.mst", "a_n.mst", "con.mst", "-x.mst"] {
+            let source = dir.join(bad);
+            std::fs::write(&source, FLAT).expect("write");
+            assert!(run(&source, &out).is_err(), "{bad}");
+        }
+        assert_eq!(files_in(&out), 0, "no PNG was left behind");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_over_the_size_limit_is_refused_without_being_held() {
+        let dir = scratch("big");
+        let source = dir.join("big.mst");
+        std::fs::write(&source, vec![b' '; mscent_texgen::recipe::MAX_FILE + 1]).expect("write");
+        assert!(run(&source, &dir.join("out")).is_err());
+        assert!(!dir.join("out").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_recipe_of_that_name_already_in_the_directory_is_said_so_and_nothing_is_written() {
+        let dir = scratch("stale");
+        let source = dir.join("wall.mst");
+        std::fs::write(&source, FLAT).expect("write");
+        let out = dir.join("out");
+        std::fs::create_dir_all(&out).expect("dir");
+        std::fs::write(out.join("wall.mst"), "an older one").expect("write");
+        let why = run(&source, &out).expect_err("refused");
+        assert!(why.contains("wall.mst") && why.contains("instead"), "{why}");
+        assert_eq!(files_in(&out), 1, "only the older recipe");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

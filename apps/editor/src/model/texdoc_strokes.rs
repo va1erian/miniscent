@@ -4,8 +4,39 @@
 //! first point.
 
 use mscent_texgen::ops::{self, MAX_POINTS, MAX_STROKES, ParamKind, STROKE_COORD, Stroke};
+use mscent_texgen::recipe::MAX_LINE;
 
 use super::{Live, TexDoc};
+
+/// Points are kept on a grid of this many to the tile (a step under a texel of the
+/// largest tile), so a file stays small and a coordinate is a few digits.
+const GRID: f32 = 4096.0;
+/// The most characters a point takes in a recipe: two coordinates of the grid
+/// within `STROKE_COORD`, the longest `-0.00048828125`, a comma and a space.
+const POINT_CHARS: usize = 2 * 14 + 2;
+/// Room for a stroke line's own numbers before its points.
+const LINE_HEAD: usize = 128;
+/// The most points a stroke holds. A stroke is one line of the recipe and the
+/// reader refuses a line past `MAX_LINE`, so this many always fit one, and a file
+/// the editor wrote always loads. Under the operator's `MAX_POINTS`, which no
+/// rounding of coordinates could fit in a line.
+pub const STROKE_POINTS: usize = {
+    let fits = (MAX_LINE - LINE_HEAD) / POINT_CHARS;
+    if fits < MAX_POINTS { fits } else { MAX_POINTS }
+};
+
+/// A coordinate on the grid.
+fn snapped(c: f32) -> f32 {
+    (c * GRID).round() / GRID
+}
+
+/// A stroke with every point on the grid.
+fn snapped_stroke(mut stroke: Stroke) -> Stroke {
+    for point in &mut stroke.points {
+        *point = point.map(snapped);
+    }
+    stroke
+}
 
 /// A new point must be this far from the last one, as a share of the brush
 /// radius, so a long stroke stays small however finely the pointer reports.
@@ -66,7 +97,8 @@ impl TexDoc {
     /// changes nothing.
     pub fn begin_stroke(&mut self, block: usize, stroke: Stroke) -> Result<(), String> {
         let index = self.strokes_param(block)?;
-        if !ops::stroke_fits(&stroke) {
+        let stroke = snapped_stroke(stroke);
+        if !ops::stroke_fits(&stroke) || stroke.points.len() > STROKE_POINTS {
             return Err("that brush cannot be drawn with".to_string());
         }
         if self.stroke_count(block) >= MAX_STROKES {
@@ -102,6 +134,7 @@ impl TexDoc {
         else {
             return Growth::Skipped;
         };
+        let point = point.map(snapped);
         if !point.iter().all(|c| STROKE_COORD.contains(c)) {
             return Growth::Skipped;
         }
@@ -112,7 +145,7 @@ impl TexDoc {
                 return Growth::Skipped;
             }
         }
-        if stroke.points.len() >= MAX_POINTS {
+        if stroke.points.len() >= STROKE_POINTS {
             return Growth::Full;
         }
         stroke.points.push(point);

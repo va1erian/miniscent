@@ -15,8 +15,30 @@ use mscent_texgen::image::Size;
 use mscent_texgen::ops::{self, OpSpec, Params, Role, Value};
 use mscent_texgen::recipe::{Block, MAX_BLOCKS, Recipe};
 
-/// Undo steps kept; each is a copy of the page, which is small.
-const HISTORY: usize = 256;
+/// Undo steps kept at most.
+pub(crate) const HISTORY: usize = 256;
+/// What the undo steps may hold together, estimated. A step is a copy of the page,
+/// and a page of strokes is not small: a stroke list is copied whole when it grows
+/// while an earlier step still shares it, so 256 steps of a file at its size limit
+/// would be hundreds of megabytes. Past this the oldest steps go first.
+pub(crate) const HISTORY_BYTES: usize = 64 * 1024 * 1024;
+/// What a block, with its parameters, is estimated to take besides its strokes.
+const BLOCK_BYTES: usize = 256;
+
+/// About how much memory a recipe takes, as far as undo is concerned: the strokes
+/// are what can be large.
+fn estimate(recipe: &Recipe) -> usize {
+    let value = |v: &Value| match v {
+        Value::Strokes(list) => list
+            .iter()
+            .map(|s| std::mem::size_of::<ops::Stroke>() + std::mem::size_of_val(&s.points[..]))
+            .sum(),
+        Value::Text(text) => text.len(),
+        _ => 0,
+    };
+    let block = |b: &Block| BLOCK_BYTES + b.params.values().iter().map(value).sum::<usize>();
+    recipe.blocks.iter().map(block).sum()
+}
 
 /// What is wrong with a page: the first problem, for reading, and every block
 /// that has one, for marking.
@@ -31,6 +53,8 @@ pub struct PageError {
 struct Snapshot {
     recipe: Recipe,
     selected: Option<usize>,
+    /// [`estimate`] of the recipe, taken once.
+    bytes: usize,
 }
 
 /// The value a drag is changing, so that a whole drag is one undo step.
@@ -175,16 +199,25 @@ impl TexDoc {
         Snapshot {
             recipe: self.recipe.clone(),
             selected: self.selected,
+            bytes: estimate(&self.recipe),
         }
     }
 
-    /// Keeps the state before an edit for undo, and forgets anything to redo.
+    /// Keeps the state before an edit for undo, and forgets anything to redo. The
+    /// oldest steps go when there are too many or they hold too much; the newest
+    /// always stays.
     fn checkpoint(&mut self) {
-        if self.past.len() >= HISTORY {
-            self.past.remove(0);
-        }
         self.past.push(self.snapshot());
         self.future.clear();
+        let mut held: usize = self.past.iter().map(|s| s.bytes).sum();
+        let mut oldest = 0;
+        while self.past.len() - oldest > 1
+            && (self.past.len() - oldest > HISTORY || held > HISTORY_BYTES)
+        {
+            held -= self.past[oldest].bytes;
+            oldest += 1;
+        }
+        self.past.drain(..oldest);
     }
 
     fn changed(&mut self) {
@@ -407,7 +440,7 @@ pub fn clamp_to_page(x: i32, y: i32, w: u16) -> (u16, u16) {
 
 #[path = "texdoc_strokes.rs"]
 mod strokes;
-pub use strokes::Growth;
+pub use strokes::{Growth, STROKE_POINTS};
 
 #[cfg(test)]
 #[path = "texdoc_tests.rs"]

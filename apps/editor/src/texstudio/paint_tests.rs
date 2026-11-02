@@ -3,7 +3,8 @@
 
 use std::sync::Arc;
 
-use mscent_texgen::ops::{MAX_POINTS, MAX_STROKES, Stroke, Value};
+use crate::model::texdoc::STROKE_POINTS;
+use mscent_texgen::ops::{MAX_STROKES, Stroke, Value};
 
 use super::tests::{set_page, settle, studio};
 use super::*;
@@ -181,7 +182,7 @@ fn a_stroke_stops_at_the_most_points_and_says_so_once_without_failing() {
     });
     s.paint(Stroking::Down([0.5, 0.5]));
     let mut told = 0;
-    for i in 0..MAX_POINTS + 200 {
+    for i in 0..STROKE_POINTS + 200 {
         let u = if i % 2 == 0 { 0.52 } else { 0.5 };
         s.paint(Stroking::Move([u + i as f32 * 1e-7, 0.5]));
         told += usize::from(
@@ -192,7 +193,7 @@ fn a_stroke_stops_at_the_most_points_and_says_so_once_without_failing() {
     }
     s.paint(Stroking::Up([0.5, 0.5]));
     assert_eq!(told, 1, "once, not at every move after");
-    assert_eq!(strokes(&s)[0].points.len(), MAX_POINTS);
+    assert_eq!(strokes(&s)[0].points.len(), STROKE_POINTS);
     let (picture, _) = settle(&mut s);
     assert!(
         picture.is_some() && s.trouble().1.is_none(),
