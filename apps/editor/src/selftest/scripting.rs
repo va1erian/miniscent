@@ -86,7 +86,7 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         "the brush is the mover 'door'",
     );
 
-    // A marker from the tool, named.
+    // A marker, placed as the tool's click places it, and named.
     let spot = probe
         .state()
         .borrow_mut()

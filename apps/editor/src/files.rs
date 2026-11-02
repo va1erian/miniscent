@@ -17,6 +17,11 @@ pub fn save(doc: &Document, path: &Path) -> Result<String, String> {
     let level = doc
         .to_level()
         .map_err(|e| format!("cannot save: a brush is invalid ({e:?})"))?;
+    // Flipping a brush can bring two names back together; a file with them
+    // would not load again, so the level on disk stays as it was.
+    level
+        .check_labels()
+        .map_err(|e| format!("cannot save: fix the names first ({e:?})"))?;
     let bytes = format::write(&level);
     let tmp = path.with_extension("msl.tmp");
     std::fs::write(&tmp, &bytes).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;

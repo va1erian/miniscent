@@ -3,7 +3,8 @@
 //! [`ScriptWatcher`] reloads them while the game runs.
 
 use crate::session::GameSession;
-use mscent_script::{MAX_SOURCE, ScriptError, Source};
+pub use mscent_script::MAX_SOURCE;
+use mscent_script::{ScriptError, Source};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 

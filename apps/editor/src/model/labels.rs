@@ -2,10 +2,13 @@
 //! uses them. Every change is checked against the rules a saved level must meet
 //! before it is applied, so the document stays one that can be saved.
 
+use std::path::Path;
 use std::time::{Duration, Instant};
 
+use miniscent_game::scripts::MAX_SOURCE;
+
 use super::command::Command;
-use super::document::{GroupDef, LabelDef};
+use super::document::{Document, GroupDef, Id, LabelDef};
 use super::state::{EditorState, Selection};
 use mscent_world::Op;
 
@@ -37,6 +40,20 @@ fn join_tags(tags: &[String]) -> String {
     tags.join(", ")
 }
 
+/// A member's fields show the group's tags, so they replace them. A brush that
+/// is only joining says nothing about the tags already there, so it adds.
+fn set_group_tags(group: &mut GroupDef, tags: Vec<String>, member: bool) {
+    if member {
+        group.tags = tags;
+        return;
+    }
+    for tag in tags {
+        if !group.tags.contains(&tag) {
+            group.tags.push(tag);
+        }
+    }
+}
+
 /// A label with neither name nor tag is no label.
 fn label_of(name: &str, tags: &str) -> Option<LabelDef> {
     let name = name.trim();
@@ -48,6 +65,30 @@ fn label_of(name: &str, tags: &str) -> Option<LabelDef> {
         name: (!name.is_empty()).then(|| name.to_string()),
         tags,
     })
+}
+
+/// A file past the limit would be refused anyway, and this runs on the UI thread.
+fn read_script(path: &Path) -> Option<String> {
+    let len = std::fs::metadata(path).ok()?.len();
+    if len > MAX_SOURCE as u64 {
+        return None;
+    }
+    std::fs::read_to_string(path).ok()
+}
+
+impl Document {
+    /// The command that puts each new piece in the mover group of the brush it
+    /// was cut from, so cutting a door leaves no part of it behind as world. One
+    /// command for all of them: each would otherwise undo the one before.
+    pub(super) fn pieces_join_movers(&self, joins: &[(Id, Id)]) -> Option<Command> {
+        let before = self.groups().to_vec();
+        let mut after = before.clone();
+        for (source, piece) in joins {
+            let group = after.iter_mut().find(|g| g.brushes.contains(source));
+            group.into_iter().for_each(|g| g.brushes.push(*piece));
+        }
+        (after != before).then_some(Command::SetGroups { before, after })
+    }
 }
 
 impl EditorState {
@@ -136,6 +177,9 @@ impl EditorState {
             return false;
         }
         let before: Vec<GroupDef> = self.doc.groups().to_vec();
+        let member = before
+            .iter()
+            .any(|g| g.name == name && g.brushes.contains(&brush));
         let mut after = before.clone();
         after
             .iter_mut()
@@ -143,7 +187,7 @@ impl EditorState {
         if !name.is_empty() {
             if let Some(group) = after.iter_mut().find(|g| g.name == name) {
                 group.brushes.push(brush);
-                group.tags = split_tags(tags);
+                set_group_tags(group, split_tags(tags), member);
             } else {
                 after.push(GroupDef {
                     name: name.to_string(),
@@ -189,7 +233,7 @@ impl EditorState {
             return;
         }
         let path = self.doc.level_path().map(|p| p.with_extension("st"));
-        self.script.text = path.and_then(|p| std::fs::read_to_string(p).ok());
+        self.script.text = path.and_then(|p| read_script(&p));
         self.script.read_at = Some(Instant::now());
     }
 
@@ -221,7 +265,7 @@ impl EditorState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Document, EntityKind};
+    use crate::model::EntityKind;
 
     fn state() -> EditorState {
         let mut st = EditorState::new(Document::new());
@@ -330,6 +374,93 @@ mod tests {
         draft(&mut st, "", "");
         assert!(st.apply_draft());
         assert_eq!(st.doc.groups()[0].brushes, [a]);
+    }
+
+    #[test]
+    fn joining_a_group_keeps_its_tags_and_a_member_can_replace_them() {
+        let mut st = state();
+        let (a, b) = (
+            st.add_box([1.0; 3], [2.0; 3]).unwrap(),
+            st.add_box([3.0; 3], [4.0; 3]).unwrap(),
+        );
+        st.selection = Some(Selection::Brush(a));
+        draft(&mut st, "gate", "doors");
+        assert!(st.apply_draft());
+        st.selection = Some(Selection::Brush(b));
+        draft(&mut st, "gate", "");
+        assert!(st.apply_draft());
+        assert_eq!(st.doc.groups()[0].tags, ["doors"]);
+        draft(&mut st, "gate", "east");
+        assert!(st.apply_draft());
+        assert_eq!(st.doc.groups()[0].tags, ["east"]);
+    }
+
+    #[test]
+    fn a_level_whose_names_clash_is_not_saved_over_the_file() {
+        let mut st = state();
+        let brush = st.add_box([1.0; 3], [2.0; 3]).unwrap();
+        st.selection = Some(Selection::Brush(brush));
+        draft(&mut st, "door", "");
+        assert!(st.apply_draft());
+        // As a subtract brush it is no mover, which frees the name.
+        assert!(st.flip_selected());
+        let marker = st.place_entity(EntityKind::Marker, [3.0, 3.0, 3.0]);
+        st.selection = Some(Selection::Entity(marker));
+        draft(&mut st, "door", "");
+        assert!(st.apply_draft());
+        st.selection = Some(Selection::Brush(brush));
+        assert!(st.flip_selected());
+
+        let path = std::env::temp_dir().join(format!("mscent-clash-{}.msl", std::process::id()));
+        std::fs::write(&path, b"what was there").unwrap();
+        let why = crate::files::save(&st.doc, &path).unwrap_err();
+        assert!(why.contains("names"), "{why}");
+        assert_eq!(std::fs::read(&path).unwrap(), b"what was there");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn undo_refills_the_fields() {
+        let mut st = state();
+        let id = st.add_box([1.0; 3], [2.0; 3]).unwrap();
+        st.selection = Some(Selection::Brush(id));
+        assert!(st.make_mover());
+        assert_eq!(st.sync_draft().0, "mover_1");
+        assert!(st.undo());
+        assert_eq!(st.sync_draft().0, "");
+    }
+
+    #[test]
+    fn cutting_a_mover_keeps_every_piece_in_it_and_undo_restores_it() {
+        let mut st = state();
+        let (a, b) = (
+            st.add_box([0.0, 0.0, 0.0], [2.0, 2.0, 2.0]).unwrap(),
+            st.add_box([3.0, 0.0, 0.0], [5.0, 2.0, 2.0]).unwrap(),
+        );
+        for id in [a, b] {
+            st.selection = Some(Selection::Brush(id));
+            draft(&mut st, "gate", "");
+            assert!(st.apply_draft());
+        }
+        // The cutter crosses both, so both leave pieces, in one command.
+        let cutter = st.add_box([1.0, 0.5, -1.0], [4.0, 1.5, 3.0]).unwrap();
+        st.selection = Some(Selection::Brush(cutter));
+        assert!(st.carve_selected());
+        let group = &st.doc.groups()[0];
+        let kept = st.doc.brushes().iter().filter(|b| b.op == Op::Add).count();
+        assert!(group.brushes.len() > 2, "{group:?}");
+        assert_eq!(group.brushes.len(), kept, "no piece left behind as world");
+        assert!(st.undo());
+        assert_eq!(st.doc.groups()[0].brushes, [a, b]);
+    }
+
+    #[test]
+    fn a_script_past_the_limit_is_not_read() {
+        let dir = std::env::temp_dir().join(format!("mscent-label-big-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("l.st"), vec![b' '; MAX_SOURCE + 1]).unwrap();
+        assert_eq!(read_script(&dir.join("l.st")), None);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

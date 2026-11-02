@@ -49,11 +49,13 @@ impl LevelScene {
 }
 
 impl Scene for LevelScene {
+    /// The reload comes last: a restart clears the screen of the notice that
+    /// says a script did not load.
     fn restart(&mut self) {
-        self.reload_script();
         if let Some(s) = self.built.session_mut() {
             s.restart();
         }
+        self.reload_script();
     }
 
     fn step(&mut self, dt: Duration, events: &[Event], stats: FrameStats) -> bool {

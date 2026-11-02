@@ -150,6 +150,7 @@ impl EditorState {
         self.cancel_drag();
         let ok = self.history.undo(&mut self.doc);
         self.drop_stale_selection();
+        self.draft.filled_for = None;
         self.message = if ok { "Undo" } else { "Nothing to undo" }.into();
         ok
     }
@@ -158,6 +159,7 @@ impl EditorState {
         self.cancel_drag();
         let ok = self.history.redo(&mut self.doc);
         self.drop_stale_selection();
+        self.draft.filled_for = None;
         self.message = if ok { "Redo" } else { "Nothing to redo" }.into();
         ok
     }
