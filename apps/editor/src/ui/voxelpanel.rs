@@ -168,6 +168,9 @@ impl VoxelPanel {
 pub fn apply(st: &mut EditorState, prop: VoxelProp) -> bool {
     match prop {
         VoxelProp::Op(i) => {
+            // A new dab keeps what was grown, and starts no path from an old one.
+            st.commit_pending();
+            st.voxel.path = None;
             st.voxel.op = VoxelOp::ALL[i.min(VoxelOp::ALL.len() - 1)];
             st.voxel.generator = None;
             false

@@ -258,6 +258,10 @@ impl Panel {
 
 /// Applies a panel edit to the model; whether anything changed.
 pub fn apply(st: &mut EditorState, prop: Prop) -> bool {
+    // Editing what was grown keeps it: an edit's undo step must start from it.
+    if !matches!(prop, Prop::Voxel(_)) {
+        st.commit_pending();
+    }
     match prop {
         Prop::Op(i) => st.edit_selected_brush(|b| {
             b.op = if i == 0 { Op::Add } else { Op::Subtract };

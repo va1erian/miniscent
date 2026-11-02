@@ -208,3 +208,62 @@ fn fill_pours_a_field_into_the_selected_volume_as_one_undo_step() {
     assert!(st.undo());
     assert_eq!(volumes(&st), carved);
 }
+
+#[test]
+fn undo_with_a_held_result_only_takes_that_away() {
+    let mut st = room_state();
+    stroke(&mut st, VoxelOp::Carve, &[at_wall(0.0)]);
+    let depth = st.history.depth();
+    let carved = volumes(&st);
+    st.voxel.generator = Some(Kind::Mushrooms);
+    assert!(st.begin_stroke(on_floor(-5.0, -5.0), StrokeKeys::default()));
+    st.finish_stroke();
+    assert!(st.pending());
+    assert!(st.undo());
+    assert!(!st.pending());
+    assert_eq!(st.history.depth(), depth, "the carve is still a step");
+    assert_eq!(volumes(&st), carved, "and still there");
+}
+
+#[test]
+fn a_generation_that_makes_nothing_holds_nothing_and_says_why() {
+    let mut st = room_state();
+    st.voxel.generator = Some(Kind::Mushrooms);
+    let away = Ray {
+        origin: mscent_math::Vec3d::new(0.0, 0.0, 3.0),
+        dir: mscent_math::Vec3d::new(0.0, 0.0, 0.0),
+    };
+    assert!(st.begin_stroke(away, StrokeKeys::default()));
+    st.finish_stroke();
+    assert!(!st.pending());
+    assert!(st.doc.volumes().next().is_none());
+    assert!(!st.message.contains("Commit"), "{}", st.message);
+}
+
+#[test]
+fn undoing_a_tunnel_click_forgets_where_it_got_to() {
+    let mut st = room_state();
+    stroke(&mut st, VoxelOp::Tunnel, &[at_wall(0.0)]);
+    stroke(&mut st, VoxelOp::Tunnel, &[at_wall(1.0)]);
+    assert!(st.voxel.path.is_some());
+    assert!(st.undo());
+    assert!(st.voxel.path.is_none());
+}
+
+#[test]
+fn working_on_in_a_view_keeps_what_was_grown() {
+    use crate::model::{Pointer, View};
+    let mut st = room_state();
+    st.voxel.generator = Some(Kind::Mushrooms);
+    let depth = st.history.depth();
+    assert!(st.begin_stroke(on_floor(0.0, 0.0), StrokeKeys::default()));
+    st.finish_stroke();
+    assert!(st.pending());
+    st.pointer_down(Pointer {
+        view: View::Top,
+        pos: [20.0, 20.0],
+        px: 0.1,
+    });
+    assert!(!st.pending());
+    assert_eq!(st.history.depth(), depth + 1);
+}

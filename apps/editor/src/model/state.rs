@@ -160,7 +160,12 @@ impl EditorState {
     }
 
     pub fn undo(&mut self) -> bool {
+        // A held generation is not a step yet: taking it away is all this press does.
+        if self.drop_pending() {
+            return true;
+        }
         self.cancel_drag();
+        self.voxel.path = None;
         let ok = self.history.undo(&mut self.doc);
         self.drop_stale_selection();
         self.draft.filled_for = None;
@@ -169,7 +174,11 @@ impl EditorState {
     }
 
     pub fn redo(&mut self) -> bool {
+        if self.drop_pending() {
+            return true;
+        }
         self.cancel_drag();
+        self.voxel.path = None;
         let ok = self.history.redo(&mut self.doc);
         self.drop_stale_selection();
         self.draft.filled_for = None;

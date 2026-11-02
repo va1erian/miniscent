@@ -97,6 +97,7 @@ impl Editor {
                 st.redo();
             }
             cmd::DELETE => {
+                st.commit_pending();
                 st.delete_selected();
             }
             cmd::FLIP => {
@@ -177,6 +178,8 @@ impl Editor {
     }
 
     pub(super) fn save_path(&mut self, path: PathBuf) {
+        // What is on screen is what is saved, with an undo step to say so.
+        self.state.borrow_mut().commit_pending();
         let doc = self.state.borrow().doc.clone();
         let message = match files::save(&doc, &path) {
             Ok(msg) => {
@@ -200,6 +203,7 @@ impl Editor {
     /// F5: play the level as it is, as soon as the preview has caught up.
     /// Lighting still being baked arrives during the game.
     fn play_command(&mut self) {
+        self.state.borrow_mut().commit_pending();
         let doc = self.state.borrow().doc.clone();
         if self.studio.playable_now(&doc) {
             self.begin_play();

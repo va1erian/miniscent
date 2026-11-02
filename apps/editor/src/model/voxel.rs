@@ -131,6 +131,13 @@ impl EditorState {
         self.stroke.as_ref().is_some_and(|s| !s.ready)
     }
 
+    /// Whether a generation is still being computed or rolled.
+    pub fn rolling(&self) -> bool {
+        self.stroke
+            .as_ref()
+            .is_some_and(|s| s.held.is_some() && !s.ready)
+    }
+
     /// Whether a generated result waits for Commit.
     pub fn pending(&self) -> bool {
         self.stroke.as_ref().is_some_and(|s| s.ready)
@@ -175,7 +182,12 @@ impl EditorState {
 
     /// A finished stroke is recorded; a finished generation waits for Commit.
     fn settle_stroke(&mut self) {
-        let grown = self.stroke.as_mut().and_then(|s| {
+        // A generation that made nothing has nothing to hold, and its note stands.
+        let made = self
+            .stroke
+            .as_ref()
+            .is_some_and(|s| s.before.is_some() || self.doc.brush(s.new_id).is_some());
+        let grown = self.stroke.as_mut().filter(|_| made).and_then(|s| {
             s.ready = s.held.is_some();
             match s.held {
                 Some((_, Request::Grow { kind, .. })) => Some(kind.name()),
@@ -222,6 +234,16 @@ impl EditorState {
         true
     }
 
+    /// Takes the held generation away, if there is one.
+    pub(super) fn drop_pending(&mut self) -> bool {
+        if !self.pending() {
+            return false;
+        }
+        self.cancel_stroke();
+        self.message = "Dropped the generated result".into();
+        true
+    }
+
     /// Rolls the held generation again with `seed`.
     pub fn reroll_to(&mut self, seed: u32) -> bool {
         let Some((ray, Request::Grow { kind, .. })) = self.stroke.as_ref().and_then(|s| s.held)
@@ -243,6 +265,8 @@ impl EditorState {
             return false;
         };
         s.job.end();
+        // Whatever point it reached is no longer where a path stands.
+        self.voxel.path = None;
         match s.before {
             Some(before) => self.doc.replace_brush(&before),
             None => {

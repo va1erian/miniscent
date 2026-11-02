@@ -158,6 +158,8 @@ impl EditorState {
 
     /// Button down. Returns whether anything visible changed.
     pub fn pointer_down(&mut self, p: Pointer) -> bool {
+        // Working on in a 2D view keeps what was grown, which it may be about to move.
+        self.commit_pending();
         self.drag = None;
         let snapped = [self.snap(p.pos[0]), self.snap(p.pos[1])];
         match self.tool {

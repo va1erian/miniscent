@@ -143,4 +143,17 @@ fn generator(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         !st.pending() && st.history.depth() == steps + 1,
         "Commit records one undo step",
     );
+    drop(st);
+    // Saving what is on screen keeps it, with an undo step to say so.
+    pane.push_click(click(0.45, 0.5));
+    pump(stage, 2);
+    pane.push_drag(drag(0.45, 0.5, true));
+    pump(stage, 12);
+    let file = run.dir.join("held.msl");
+    stage.emit(Msg::SavePath(file));
+    let st = state.borrow();
+    run.check(
+        !st.pending() && st.history.depth() == steps + 2,
+        "saving keeps a held result as one undo step",
+    );
 }

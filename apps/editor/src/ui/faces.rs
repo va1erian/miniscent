@@ -68,6 +68,8 @@ impl Editor {
             let seed = st.voxel.seed.wrapping_add_signed(notches.signum());
             st.reroll_to(seed);
             st.message = format!("Seed {}", st.voxel.seed);
+        } else if st.rolling() {
+            // The next roll is on its way, and would come out another size.
         } else if st.tool == Tool::Voxel && notches != 0 {
             let r = st.voxel.radius * WHEEL_STEP.powi(notches);
             st.voxel.radius = r.clamp(MIN_RADIUS, MAX_RADIUS);
