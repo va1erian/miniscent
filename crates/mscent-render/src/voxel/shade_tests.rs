@@ -307,3 +307,65 @@ fn a_far_chunk_keeps_its_bump_mapping() {
         .count();
     assert!(differing > 500, "only {differing} pixels show the bump");
 }
+
+/// How many neighbouring pixels jump by more than a texture's own grain does, on a
+/// ball of rock in flat light. A hard cut between two projections shows here.
+#[test]
+fn projections_fade_into_each_other_with_no_hard_cut() {
+    use crate::voxel::{VertexLight, VoxelScene};
+    use mscent_world::voxel::VoxelWorld;
+    let brushes = vec![room()];
+    let mut volume =
+        Volume::new(Op::Add, 1, CellSize::Quarter, [-16, -16, -16], [2, 2, 2]).expect("valid");
+    let shape = volume.clone();
+    let mut ctx = Context::new(&shape, &brushes);
+    let ball = Prim::sphere(v(0.0, 0.0, 1.0), 2.0).expect("valid");
+    apply_dab(&mut volume, &mut ctx, &ball, DabOp::Add { material: 0 });
+    let level = Level {
+        brushes,
+        volumes: vec![volume],
+        ..Default::default()
+    };
+    let bsp = mscent_world::compile(&level.csg_brushes()).expect("compiles");
+    let world = VoxelWorld::build(&level, &level.static_brushes(), &bsp);
+    let scene = VoxelScene::new(world, bsp.leaves().len(), |_, m| {
+        let lit = VertexLight {
+            color: Vec3::new(256.0, 256.0, 256.0),
+            dir: Vec3::new(0.0, 0.0, 1.0),
+        };
+        vec![lit; m.vertices.len()]
+    });
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures");
+    let rock = crate::load_texture(&dir, "rock").expect("rock");
+    let mut pixels = Vec::new();
+    for y in 0..rock.height() as i32 {
+        for x in 0..rock.width() as i32 {
+            pixels.push(rock.texel(x, y));
+        }
+    }
+    let plain = crate::Texture::new(rock.width(), rock.height(), pixels)
+        .expect("texture")
+        .filtered();
+    let fb = voxel_frame(&scene, &plain, &[crate::SpecTable::new(0)]);
+    let (w, h) = (fb.width() as usize, fb.height() as usize);
+    let px = fb.pixels();
+    let lum = |p: u32| i32::from((p & 255) as u8);
+    let count = |limit: i32| {
+        let mut jumps = 0;
+        for y in 0..h - 1 {
+            for x in 0..w - 1 {
+                let at = px[y * w + x];
+                if at == 0xff00_0000 {
+                    continue;
+                }
+                for n in [px[y * w + x + 1], px[(y + 1) * w + x]] {
+                    jumps += usize::from(n != 0xff00_0000 && (lum(at) - lum(n)).abs() > limit);
+                }
+            }
+        }
+        jumps
+    };
+    // A hard cut gave 39 here. Rock's own grain stays well under this step.
+    let jumps = count(10);
+    assert!(jumps < 15, "{jumps} hard jumps");
+}

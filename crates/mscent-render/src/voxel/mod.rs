@@ -69,6 +69,24 @@ const DEEP_LIGHT: f32 = 0.6;
 /// Texels per world unit of a voxel surface.
 pub(crate) const TEXELS_PER_UNIT: f32 = 1.0 / DEFAULT_SCALE;
 
+/// How far ahead the dominant axis of a normal must be, as a share of itself, for
+/// a surface to take one projection alone. Inside this band two fade together.
+pub(crate) const SEAM_BAND: f32 = 0.12;
+/// A vertex's axis when it lies in that band: its triangles go the blended way,
+/// so that no fade is cut off at the edge of a plain triangle.
+const IN_SEAM: u8 = 3;
+
+/// The two largest parts of `n`, by axis, and how far the first leads the second.
+pub(crate) fn seam_of(n: Vec3) -> (u8, u8, f32) {
+    let a = [n.x.abs(), n.y.abs(), n.z.abs()];
+    let first = dominant_axis(n);
+    let i = usize::from(first);
+    let (p, q) = ((i + 1) % 3, (i + 2) % 3);
+    let second = if a[p] >= a[q] { p } else { q };
+    let lead = (a[i] - a[second]) / a[i].max(1e-6);
+    (first, second as u8, lead)
+}
+
 /// The axis that textures a surface facing `n`.
 fn dominant_axis(n: Vec3) -> u8 {
     let (ax, ay, az) = (n.x.abs(), n.y.abs(), n.z.abs());
@@ -104,14 +122,16 @@ impl LodData {
         let axis: Vec<u8> = mesh
             .vertices
             .iter()
-            .map(|v| dominant_axis(v.normal))
+            .map(|v| {
+                let (first, _, lead) = seam_of(v.normal);
+                if lead < SEAM_BAND { IN_SEAM } else { first }
+            })
             .collect();
         let dir_t = mesh
             .vertices
             .iter()
-            .zip(&axis)
             .zip(&light)
-            .map(|((v, &a), l)| tangent_dir(v, a, l.dir))
+            .map(|(v, l)| tangent_dir(v, dominant_axis(v.normal), l.dir))
             .collect();
         Self {
             material: vertex_materials(mesh),

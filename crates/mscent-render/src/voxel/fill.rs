@@ -6,7 +6,7 @@ use super::blend::fill_blended;
 use super::list::{ListedChunk, SUBPIXEL, VoxelList};
 use super::shader::{Plane3, VoxelShader};
 use super::tri::{Corner, Gradient, area, clip_near, covers_a_pixel, each_row};
-use super::{LodData, TEXELS_PER_UNIT, VoxelScene, axis_map};
+use super::{IN_SEAM, LodData, TEXELS_PER_UNIT, VoxelScene, axis_map};
 use crate::camera::Camera;
 use crate::dynlight::DynLight;
 use crate::framebuffer::Framebuffer;
@@ -164,7 +164,7 @@ fn add_dynamic(color: Vec3, pos: Vec3, normal: Vec3, mask: u8, lights: &[DynLigh
 fn plain_look(tri: &Tri) -> Option<(u8, u8)> {
     let d = tri.data;
     let [a, b, c] = tri.index;
-    let axis = *d.axis.get(a)?;
+    let axis = d.axis.get(a).copied().filter(|&x| x != IN_SEAM)?;
     let material = *d.material.get(a)?;
     (d.axis.get(b) == Some(&axis)
         && d.axis.get(c) == Some(&axis)

@@ -3,9 +3,11 @@
 //! The axis is chosen per pixel from the interpolated normal, so two projections
 //! meet along the line where the surface really turns from one to the other. That
 //! line is the shape's own and smooth; a choice per corner follows the voxel grid,
-//! and draws squares around anything round. A dither across the triangle would
-//! also turn any pattern on the surface to noise. Two materials meet the same way,
-//! at the middle of the triangle, with a narrow dither to take off the stair-step.
+//! and draws squares around anything round. In a narrow band around the line the
+//! two fade together, as a hard cut shows on anything with contrast, and a dither
+//! would turn a pattern to noise. The band fetches twice, on these triangles alone.
+//! Two materials meet at the middle of the triangle, with a narrow dither to take
+//! off the stair-step.
 //!
 //! They shade as their neighbours do, or they would show as patches on anything
 //! glossy. With no one tangent frame, the light and the half vector are stepped in
@@ -16,7 +18,7 @@ use mscent_math::Vec3;
 
 use super::fill::FillContext;
 use super::tri::{Corner, Gradient, each_row};
-use super::{TEXELS_PER_UNIT, axis_map, dominant_axis};
+use super::{SEAM_BAND, TEXELS_PER_UNIT, axis_map, seam_of};
 use crate::bump::{FLAT_NORMAL, bump_gain, view_normal};
 use crate::framebuffer::Framebuffer;
 use crate::lighting_shader::{
@@ -50,8 +52,8 @@ struct Frame {
 
 impl Frame {
     #[inline]
-    fn facing(n: Vec3) -> Self {
-        let (u, v) = axis_map(dominant_axis(n));
+    fn of(axis: u8) -> Self {
+        let (u, v) = axis_map(axis);
         Self { u, v }
     }
 
@@ -200,7 +202,10 @@ pub(super) fn fill_blended(
                 depth[slot] = iz;
                 let f = i as f32;
                 let surface = n0 + dn * f;
-                let axes = Frame::facing(surface);
+                let (first, second, lead) = seam_of(surface);
+                let axes = Frame::of(first);
+                // How much of the second projection shows: half where they meet.
+                let fade = (lead < SEAM_BAND).then(|| 0.5 * (1.0 - lead / SEAM_BAND));
                 let picked = if one_material {
                     &look[0]
                 } else {
@@ -210,15 +215,23 @@ pub(super) fn fill_blended(
                     &look[pick_corner(w, t)]
                 };
                 let coords = axes.coords(p0 + dp * f);
+                // The two normal maps do not agree either, so relief fades to flat
+                // at the line, where both sides then give the same.
+                let relief = fade.map_or(scale, |m| scale * (1.0 - 2.0 * m));
                 let shading = frame
                     .as_ref()
-                    .map(|s| s.shade(picked, axes, surface, coords, f, scale));
+                    .map(|s| s.shade(picked, axes, surface, coords, f, relief));
                 let (gain, spec) = shading.unwrap_or((1.0, 0.0));
                 let mut k = (l0 + dl * f) * gain;
                 if k.x.max(k.y).max(k.z) > KNEE {
                     k = Vec3::new(soft_limit(k.x), soft_limit(k.y), soft_limit(k.z));
                 }
-                let mut out = mul_rgb3(picked.texel(coords), k, dither_of(px, y));
+                let mut texel = picked.texel(coords);
+                if let Some(m) = fade {
+                    let other = picked.texel(Frame::of(second).coords(p0 + dp * f));
+                    texel = lerp_rgb(texel, other, (m * 256.0) as u32);
+                }
+                let mut out = mul_rgb3(texel, k, dither_of(px, y));
                 if spec > MIN_SPEC {
                     out = add_spec(out, k, spec * SPEC_GAIN);
                 }
@@ -276,6 +289,16 @@ impl SpanFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_normal_near_the_line_between_axes_is_in_the_band() {
+        let (first, second, lead) = seam_of(Vec3::new(0.5, 0.48, 0.1));
+        assert_eq!((first, second), (0, 1));
+        assert!(lead < SEAM_BAND);
+        let (first, _, lead) = seam_of(Vec3::new(0.1, 0.2, 0.9));
+        assert_eq!(first, 2);
+        assert!(lead >= SEAM_BAND);
+    }
 
     #[test]
     fn a_clear_lead_takes_no_dither() {

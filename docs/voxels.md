@@ -250,6 +250,8 @@ overloaded view therefore loses distant detail first, and frame time stays bound
   is edited**. Triplanar blending would cost three texture fetches a pixel, which the budget cannot pay.
 - **Seams and material borders:** a triangle whose vertices disagree on axis chooses the axis per pixel
   from the interpolated normal, so two projections meet along the line where the surface really turns.
+  In a narrow band around that line the two fade together, with relief fading to flat, which costs a
+  second fetch there and no hard cut on anything with contrast.
   Two materials meet at the middle of the triangle, with a narrow 4x4 ordered dither to take off the stair-step.
   Only those triangles pay. A dither across the whole triangle was tried first: it turned spots on a cap to
   noise, and drew squares around anything round, because it followed the voxel grid.
