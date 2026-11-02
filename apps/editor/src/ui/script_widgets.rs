@@ -15,8 +15,8 @@ use xui::backend::Result as XuiResult;
 use xui::geometry::Rect;
 use xui::prelude::*;
 use xui::widget::{Fill, ListView, Tabs};
+use xui_blitz::{BlitzView, BlitzViewEvent};
 use xui_code_editor::{Editor as CodeEditor, FontConfig, Options};
-use xui_litehtml::{HtmlView, HtmlViewEvent};
 
 use super::app::Msg;
 use super::guide_html;
@@ -50,7 +50,7 @@ fn script_msg(m: ScriptMsg) -> Msg {
 #[derive(Default)]
 pub struct PaneWidgets {
     pub code: Handle<CodeEditor<Msg>>,
-    pub(super) guide: Handle<HtmlView<Msg>>,
+    pub(super) guide: Handle<BlitzView<Msg>>,
     pub(super) tabs: Handle<Tabs<Msg>>,
     pub(super) problems: Handle<ListView<Msg>>,
     pub(super) detail: Handle<MultilineEdit<Msg>>,
@@ -88,19 +88,21 @@ fn code_editor(ui: &Ui<Msg>, shared: Shared) -> XuiResult<CodeEditor<Msg>> {
 
 /// The guide's page. A click on one of its links asks for an example, and
 /// nothing else a page can report does anything but copy what is selected.
-fn guide_view(ui: &Ui<Msg>) -> XuiResult<HtmlView<Msg>> {
-    HtmlView::new(
-        ui,
-        Rect::default(),
-        String::new(),
+fn guide_view(ui: &Ui<Msg>) -> XuiResult<BlitzView<Msg>> {
+    let example =
+        |href: &str| guide_html::example_of(href).map(|i| script_msg(ScriptMsg::Example(i)));
+    BlitzView::builder(
         || script_msg(ScriptMsg::GuideFrame),
-        |event| match event {
-            HtmlViewEvent::LinkClicked(href) => {
-                guide_html::example_of(&href).map(|i| script_msg(ScriptMsg::Example(i)))
-            }
-            HtmlViewEvent::CopyRequested(text) => Some(script_msg(ScriptMsg::Copy(text))),
+        move |event| match event {
+            // Our links have a scheme of their own, which the view may report as
+            // one it cannot open. Either way only `example_of` can act on one.
+            BlitzViewEvent::LinkClicked(href) => example(&href),
+            BlitzViewEvent::LaunchUrl { url, .. } => example(&url),
+            BlitzViewEvent::CopyRequested(text) => Some(script_msg(ScriptMsg::Copy(text))),
+            _ => None,
         },
     )
+    .build(ui, Rect::default())
 }
 
 impl PaneWidgets {
@@ -217,7 +219,7 @@ impl PaneWidgets {
         let made = guide_html::render(&page, &theme);
         let view = self.guide.get();
         view.set_background(guide_html::background(&theme));
-        view.load(made.html);
+        view.load_html(made.html, "about:blank");
         *self.examples.borrow_mut() = made.examples;
     }
 

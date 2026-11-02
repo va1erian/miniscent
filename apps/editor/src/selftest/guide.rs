@@ -107,3 +107,38 @@ pub(super) fn in_window(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         "snapshot of the guide's window",
     );
 }
+
+/// The guide on a scaled display, going from page to page as a reader does.
+pub(super) fn scaled(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
+    stage.emit(Msg::Menu(cmd::GUIDE));
+    stage.emit(Msg::Script(ScriptMsg::Float(true)));
+    stage.emit(Msg::Menu(cmd::GUIDE));
+    pump(stage, 2);
+    let Some(window) = probe.script_window() else {
+        return run.check(false, "the pane has its own window");
+    };
+    for (topic, name) in [(0, "start"), (1, "names"), (3, "doors"), (7, "reference")] {
+        stage.emit(Msg::Script(ScriptMsg::Topic(topic)));
+        let end = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < end {
+            let _ = window.capture();
+            stage.emit(Msg::Script(ScriptMsg::GuideFrame));
+            pump(stage, 1);
+            if probe.guide_ready() {
+                break;
+            }
+        }
+        pump(stage, 5);
+        let _ = window.capture();
+        stage.emit(Msg::Script(ScriptMsg::GuideFrame));
+        pump(stage, 2);
+        let shot = window
+            .capture()
+            .map(|img| img.save_png(run.dir.join(format!("{name}.png"))));
+        run.check(
+            matches!(shot, Ok(Ok(()))),
+            &format!("snapshot of the {name} page"),
+        );
+    }
+    stage.emit(Msg::Script(ScriptMsg::Float(false)));
+}

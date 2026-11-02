@@ -271,7 +271,7 @@ impl ScriptPane {
 
     /// Draws what the guide has laid out.
     pub fn guide_frame(&self) {
-        self.widgets().guide.get().invalidate();
+        self.widgets().guide.get().update();
     }
 
     /// Puts text the guide has selected on the clipboard.

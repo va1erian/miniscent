@@ -1,4 +1,4 @@
-//! A page of the guide as one HTML document, for `xui-litehtml` to lay out.
+//! A page of the guide as one HTML document, for `xui-blitz` to lay out.
 //!
 //! The page is made here and shown by a single view, so it costs the window's
 //! re-flow nothing, where the same words as separate widgets cost 100 ms. All
@@ -48,20 +48,23 @@ fn style(theme: &Theme) -> String {
         ("#a626a4", "#2e7d32", "#6a737d", "#b35900")
     };
     format!(
-        "body {{ margin: 10px 14px; font-family: 'Segoe UI'; font-size: 14px; \
+        "body {{ margin: 10px 14px; font-family: 'Segoe UI', sans-serif; font-size: 14px; \
          line-height: 1.45; color: {text}; background-color: {bg}; }}\n\
          h1 {{ font-size: 22px; margin: 4px 0 10px 0; }}\n\
          h2 {{ font-size: 17px; margin: 16px 0 6px 0; }}\n\
          p {{ margin: 6px 0; }}\n\
          ul, ol {{ margin: 6px 0; padding-left: 24px; }}\n\
          li {{ margin: 3px 0; }}\n\
-         code {{ font-family: Consolas; font-size: 13px; background-color: {surface}; }}\n\
-         pre {{ font-family: Consolas; font-size: 13px; margin: 8px 0 2px 0; \
-         padding: 8px 10px; background-color: {surface}; border: 1px solid {border}; }}\n\
+         code {{ font-family: Consolas, monospace; font-size: 13px; background-color: {surface}; }}\n\
+         pre {{ font-family: Consolas, monospace; font-size: 13px; margin: 8px 0 4px 0; \
+         padding: 8px 10px; background-color: {surface}; }}\n\
          a {{ color: {accent}; }}\n\
          p.act {{ margin: 2px 0 10px 0; font-size: 12px; }}\n\
-         p.row {{ margin: 3px 0; }}\n\
-         span.sel {{ font-family: Consolas; font-size: 13px; color: {accent}; }}\n\
+         table {{ border-collapse: collapse; width: 100%; margin: 4px 0 10px 0; }}\n\
+         td {{ padding: 3px 8px; vertical-align: middle; line-height: 20px; \
+         border: 1px solid {border}; }}\n\
+         td.sel {{ width: 280px; font-family: Consolas, monospace; font-size: 13px; \
+         color: {accent}; }}\n\
          .k {{ color: {keyword}; }} .f {{ color: {accent}; }} .s {{ color: {string}; }}\n\
          .c {{ color: {comment}; }} .n {{ color: {number}; }}\n",
         text = hex(theme.text),
@@ -193,7 +196,14 @@ pub(super) fn render(page: &Page, theme: &Theme) -> HtmlPage {
     escape_into(&mut html, &page.title);
     html.push_str("</h1>\n");
     let mut examples = Vec::new();
+    let mut in_table = false;
     for block in &page.blocks {
+        // Rows in a run are one table, which anything else ends.
+        let is_row = matches!(block, Block::Row(..));
+        if is_row != in_table {
+            html.push_str(if is_row { "<table>\n" } else { "</table>\n" });
+            in_table = is_row;
+        }
         match block {
             Block::Heading(text) => html.push_str(&format!("<h2>{}</h2>\n", inline(text))),
             Block::Text(text) => html.push_str(&format!("<p>{}</p>\n", inline(text))),
@@ -207,13 +217,16 @@ pub(super) fn render(page: &Page, theme: &Theme) -> HtmlPage {
                 examples.push(format!("{code}\n"));
             }
             Block::Row(selector, help) => {
-                html.push_str("<p class=\"row\"><span class=\"sel\">");
+                html.push_str("<tr><td class=\"sel\">");
                 escape_into(&mut html, selector);
-                html.push_str("</span> ");
+                html.push_str("</td><td>");
                 escape_into(&mut html, help);
-                html.push_str("</p>\n");
+                html.push_str("</td></tr>\n");
             }
         }
+    }
+    if in_table {
+        html.push_str("</table>\n");
     }
     html.push_str("</body></html>");
     HtmlPage { html, examples }
@@ -280,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn reference_rows_are_lines_and_the_page_follows_the_theme() {
+    fn reference_rows_are_a_table_and_the_page_follows_the_theme() {
         let rows = vec![
             Block::Heading("Zone".into()),
             Block::Row("a:".into(), "one".into()),
@@ -289,8 +302,10 @@ mod tests {
         ];
         let light = render(&page(rows.clone()), &Theme::light());
         let dark = render(&page(rows), &Theme::dark());
-        assert_eq!(light.html.matches("class=\"row\"").count(), 2);
-        assert!(light.html.contains("<span class=\"sel\">b:</span> two"));
+        assert_eq!(light.html.matches("<tr>").count(), 2);
+        assert_eq!(light.html.matches("<table>").count(), 1);
+        assert_eq!(light.html.matches("</table>").count(), 1);
+        assert!(light.html.contains("<td class=\"sel\">b:</td><td>two</td>"));
         assert!(light.html.contains(&hex(Theme::light().input_background)));
         assert!(dark.html.contains(&hex(Theme::dark().input_background)));
         assert_ne!(light.html, dark.html);

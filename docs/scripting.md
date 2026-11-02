@@ -448,7 +448,7 @@ another program is followed, or offered as a choice if there are edits in the wa
 decision to have no script editor: placing a door and then leaving the program to wire it was the weak
 step in the loop.
 
-The pane sits under the views or in a window of its own, and only its widgets differ: a widget cannot move between windows, so each place has its own over one model, and moving starts the code editor's undo over. Play closes the window until it ends, since the game takes the keyboard and pointer through the main window. The guide is one `xui-litehtml` view showing a page of HTML: as separate widgets a page cost 100 ms on every re-flow, on a window whose labels ask for one whenever their text changes, and a view is one widget that measures nothing, with the page laid out on its own thread and only when it is on show (a re-flow takes 3.1 ms with the guide open, as with the pane alone, in `--ui-timing`).
+The pane sits under the views or in a window of its own, and only its widgets differ: a widget cannot move between windows, so each place has its own over one model, and moving starts the code editor's undo over. Play closes the window until it ends, since the game takes the keyboard and pointer through the main window. The guide is one `xui-blitz` view showing a page of HTML: as separate widgets a page cost 100 ms on every re-flow, on a window whose labels ask for one whenever their text changes, and a view is one widget that measures nothing, with the page laid out on its own thread and only when it is on show (a re-flow takes 3.1 ms with the guide open, as with the pane alone, in `--ui-timing`).
 
 **Basic entities.** Script > Add entity places a door, lift, wave and so on. Each is ordinary level content
 (named brushes, zones and markers) and a few lines added to the script, mostly calls into
@@ -466,10 +466,7 @@ crate, as the guide needs nothing more and every feature is one more thing to es
 (escaped, coloured from the window's theme, examples coloured as the code editor colours them) and the view lays it out.
 Each example has an "Insert in script" link, a link `insert:N` the editor answers by putting the Nth example of the page above the
 caret's line; no other link does anything, and the view fetches nothing: its images and style sheets are not loaded, and the page
-has none. A view in each place the pane can be, as for the other widgets. The view's font family must be a single name
-(`Consolas`, not `Consolas, monospace`): litehtml hands the shaper the whole list. `xui-litehtml` is retired upstream
-in favour of `xui-blitz`, which needs Stylo; it builds here with MSVC and any C++17 compiler (no libclang) and is used
-at the rev already pinned. It is in `apps/editor` only.
+has none. A view in each place the pane can be, as for the other widgets. The view is `xui-blitz`, at the rev already pinned, in `apps/editor` only. It was tried after `xui-litehtml`, which measures text at 96 dpi and paints it at the display's, so words drifted on a scaled display and monospace text lost its grid, and which reused one page's fonts on the next. Blitz is pure Rust, so no C++ compiler is needed. It costs 147 crates and takes the editor's binary from 7.9 to 16.5 MB, with no change the timing can tell.
 
 ## Not covered
 
