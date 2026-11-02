@@ -26,6 +26,8 @@
 //! * [`ChunkMesh::clustered`] (`lod.rs`): level of detail without cracks.
 //! * [`AirMask`] (`connectivity.rs`): which chunk faces air joins.
 //! * [`VoxelWorld`] (`world.rs`): every volume of a level meshed against its BSP.
+//! * [`CellIndex`] (`index.rs`) and the queries in `query.rs`: the triangles of a
+//!   box, and whether a point is solid, for collision.
 //! * `wire.rs`: the level file's section for volumes.
 
 mod block;
@@ -33,8 +35,10 @@ mod chunk;
 mod connectivity;
 mod context;
 mod dab;
+mod index;
 mod lod;
 mod prim;
+mod query;
 mod surface;
 mod volume;
 pub(crate) mod wire;
@@ -42,6 +46,8 @@ mod world;
 
 #[cfg(test)]
 mod dab_tests;
+#[cfg(test)]
+mod query_tests;
 #[cfg(test)]
 mod resolve_tests;
 #[cfg(test)]
@@ -57,6 +63,7 @@ pub use chunk::{Chunk, ChunkData};
 pub use connectivity::{AirMask, Face};
 pub use context::Context;
 pub use dab::{DabOp, apply_dab, fill};
+pub use index::{CellIndex, INDEX_EDGE};
 pub use lod::Lod;
 pub use prim::Prim;
 pub use surface::{ChunkMesh, Mesher, VoxelVertex};

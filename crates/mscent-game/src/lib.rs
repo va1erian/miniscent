@@ -89,3 +89,5 @@ mod script_prop_tests;
 mod script_tests;
 #[cfg(test)]
 mod test_util;
+#[cfg(test)]
+mod voxel_tests;

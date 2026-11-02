@@ -2,8 +2,9 @@
 //! game runs on. Dynamic state (player, enemies) is created from it by
 //! [`crate::Game`], so a restart never has to reload the level.
 
-use mscent_collide::MoverShape;
-use mscent_math::Vec3;
+use mscent_collide::{MoverShape, MoverSolid, Solids};
+use mscent_math::{Vec3, Vec3d};
+use mscent_world::voxel::VoxelWorld;
 use mscent_world::{Bsp, CsgError, Entity, LabelError, Level, compile};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -124,6 +125,9 @@ pub enum LoadError {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Arena {
     pub bsp: Bsp,
+    /// The surfaces of the level's voxel volumes, which collision sweeps with
+    /// the BSP. Empty for a level without volumes.
+    pub voxels: VoxelWorld,
     pub player_start: Vec3,
     pub player_yaw: f32,
     pub goals: Vec<Goal>,
@@ -136,6 +140,17 @@ pub struct Arena {
 }
 
 impl Arena {
+    /// What collision sweeps: the BSP, the voxel surfaces and `movers`.
+    pub fn solids<'a>(&'a self, movers: &'a [MoverSolid]) -> Solids<'a> {
+        Solids::new(&self.bsp, movers).with_voxels(&self.voxels)
+    }
+
+    /// True if `p` is inside rock: BSP solid, or a voxel volume's rock. Movers
+    /// are not counted.
+    pub fn is_solid(&self, p: Vec3d) -> bool {
+        self.solids(&[]).is_solid(p)
+    }
+
     /// Compiles the brushes and places every entity. The first `PlayerStart`
     /// wins; at least one goal is required. Never panics on hostile levels.
     pub fn from_level(level: &Level) -> Result<Self, LoadError> {
@@ -151,6 +166,8 @@ impl Arena {
     fn build(level: &Level, goal_required: bool) -> Result<Self, LoadError> {
         level.check_labels().map_err(LoadError::Labels)?;
         let bsp = compile(&level.csg_brushes()).map_err(LoadError::Csg)?;
+        let voxels = VoxelWorld::build(level, &level.static_brushes(), &bsp);
+        let world = Solids::new(&bsp, &[]).with_voxels(&voxels);
         let mut start = None;
         let (mut goals, mut lights, mut enemies) = (Vec::new(), Vec::new(), Vec::new());
         let (mut markers, mut zones) = (Vec::new(), Vec::new());
@@ -162,7 +179,7 @@ impl Arena {
             }
             match *e {
                 Entity::PlayerStart { pos, yaw } => {
-                    check_open(&bsp, pos, i)?;
+                    check_open(&world, pos, i)?;
                     start.get_or_insert((pos, yaw));
                 }
                 Entity::Light {
@@ -177,7 +194,7 @@ impl Arena {
                     intensity,
                 }),
                 Entity::Enemy { pos, kind } => {
-                    check_open(&bsp, pos, i)?;
+                    check_open(&world, pos, i)?;
                     things[i] = Some(Thing::Enemy(enemies.len()));
                     enemies.push(EnemySpawn { pos, kind });
                 }
@@ -200,6 +217,7 @@ impl Arena {
         }
         Ok(Self {
             bsp,
+            voxels,
             player_start,
             player_yaw,
             goals,
@@ -251,8 +269,8 @@ fn movers_of(level: &Level) -> Vec<MoverSpec> {
     level.mover_groups.iter().map(spec).collect()
 }
 
-fn check_open(bsp: &Bsp, pos: Vec3, index: usize) -> Result<(), LoadError> {
-    if bsp.is_solid(pos.to_f64()) {
+fn check_open(world: &Solids, pos: Vec3, index: usize) -> Result<(), LoadError> {
+    if world.is_solid(pos.to_f64()) {
         Err(LoadError::SpawnInSolid(index))
     } else {
         Ok(())
