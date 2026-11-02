@@ -11,6 +11,7 @@ use crate::texture::Texture;
 pub(super) struct Walk<'a> {
     scene: &'a Scene,
     list: &'a mut PolyList,
+    chunks: &'a mut Vec<u32>,
     cam: &'a Camera,
     frustum: Frustum,
     eye: Vec3,
@@ -24,6 +25,7 @@ impl<'a> Walk<'a> {
     pub(super) fn new(
         scene: &'a Scene,
         list: &'a mut PolyList,
+        chunks: &'a mut Vec<u32>,
         cam: &'a Camera,
         eye: Vec3,
         visible: Vec<bool>,
@@ -37,6 +39,7 @@ impl<'a> Walk<'a> {
         Self {
             scene,
             list,
+            chunks,
             cam,
             frustum: cam.frustum(),
             eye,
@@ -97,6 +100,9 @@ impl<'a> Walk<'a> {
     fn list_leaf(&mut self, leaf: LeafId) {
         if !self.visible.get(leaf.0 as usize).copied().unwrap_or(false) {
             return;
+        }
+        if let Some(list) = self.scene.voxels.leaf_chunks.get(leaf.0 as usize) {
+            self.chunks.extend_from_slice(list);
         }
         let Some(list) = self.scene.leaf_faces.get(leaf.0 as usize) else {
             return;

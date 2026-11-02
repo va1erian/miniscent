@@ -34,6 +34,7 @@ pub mod specular;
 pub mod texture;
 pub mod tiles;
 pub mod uv_luxel;
+pub mod voxel;
 
 pub use camera::{Camera, Frustum, ScreenPoint};
 pub use draw2d::{Sprite, blit, draw_text, fill_rect, stroke_rect, text_size};
@@ -42,7 +43,7 @@ pub use framebuffer::Framebuffer;
 pub use jobs::JobPool;
 pub use level::{
     Actor, ActorKind, BakeCache, BakeReport, BakedLight, BuildConfig, BuildError, Compiled,
-    Effects, LevelRenderer, MoverPose, Overlay, Quality, Source, View,
+    Effects, LevelRenderer, MoverPose, Overlay, Quality, Source, View, VoxelChange,
 };
 pub use lighting_shader::{FaceLight, LightingShader, UvToLuxel};
 pub use lightmap_mips::LightMips;

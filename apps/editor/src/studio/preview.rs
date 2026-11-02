@@ -114,6 +114,7 @@ impl Studio {
             return Err(format!("Cannot play: {e}"));
         }
         self.play_pending = true;
+        self.refresh |= self.live_dirty;
         Ok(())
     }
 
@@ -126,11 +127,18 @@ impl Studio {
             return;
         }
         self.empty = false;
+        self.poll_live(out);
         self.watch_script();
         self.watch_materials();
         let changed = self.wanted.as_ref() != Some(doc);
         if changed {
             self.changed_at = Instant::now();
+        }
+        if changed && self.mode == Mode::Edit && self.try_live(doc) {
+            return;
+        }
+        if self.live_job.is_some() {
+            return;
         }
         self.start_preview(doc, changed, out);
         self.start_bake(doc, out);
@@ -175,7 +183,7 @@ impl Studio {
     /// replaced: only a finished bake's lighting is fetched.
     fn start_preview(&mut self, doc: &Document, changed: bool, out: &mut Tick) {
         let wanted = (changed && self.mode == Mode::Edit) || self.refresh;
-        if self.preview_job.is_some() || !wanted {
+        if self.preview_job.is_some() || !wanted || self.stroking {
             return;
         }
         self.refresh = false;
@@ -191,6 +199,7 @@ impl Studio {
         let waiting = self.bake_job.is_some()
             || self.preview_job.is_some()
             || self.refresh
+            || self.stroking
             // The bake's end would ask for the preview that just failed, and
             // that would bake again. A new document or table clears this.
             || self.error.is_some()
@@ -241,6 +250,8 @@ impl Studio {
         self.error = None;
         self.light = built.light;
         self.light_key = built.light_key;
+        self.live_dirty = false;
+        self.live_bsp = Some(std::sync::Arc::new(built.renderer().scene().bsp().clone()));
         self.built_materials = built.materials;
         let why = built.unplayable().map(str::to_string);
         self.script_watch.files = built.watch.clone();

@@ -169,7 +169,9 @@ impl Editor {
             row()
                 .gap(2)
                 .children((tool_button(6), tool_button(7), tool_button(8))),
-            row().gap(2).children((tool_button(9), tool_button(10))),
+            row()
+                .gap(2)
+                .children((tool_button(9), tool_button(10), tool_button(11))),
         ));
         let op_button = |i: usize| {
             let (tip, glyph) = OPS[i];
@@ -332,6 +334,8 @@ F5 plays it.
     }
 }
 
+mod tick;
+
 #[cfg(test)]
 mod keys_tests;
 #[cfg(test)]
@@ -406,6 +410,12 @@ impl App for Editor {
             Msg::Escape => {
                 if self.studio.mode == Mode::Play {
                     self.end_play(Some("Back in the editor"));
+                } else {
+                    let mut st = self.state.borrow_mut();
+                    st.cancel_drag();
+                    st.end_path();
+                    drop(st);
+                    self.refresh();
                 }
                 self.drop_picked_kit();
                 return;

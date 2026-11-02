@@ -67,6 +67,16 @@ pub struct Click {
     pub alt: bool,
 }
 
+/// Where the pointer went with the left button held, on the picture.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PaneDrag {
+    pub nx: f32,
+    pub ny: f32,
+    pub aspect: f32,
+    /// The button came up here.
+    pub released: bool,
+}
+
 /// Look state shared between the node's event handler and its owner.
 #[derive(Default)]
 struct Shared {
@@ -74,6 +84,11 @@ struct Shared {
     events: RefCell<Vec<PEvent>>,
     placeholder: RefCell<String>,
     clicks: RefCell<Vec<Click>>,
+    drags: RefCell<Vec<PaneDrag>>,
+    /// The left button is held for a drag on the picture.
+    left: Cell<bool>,
+    /// Wheel notches since the last look.
+    wheel: Cell<i32>,
     /// Play wants the pointer locked for as long as the pane is up.
     grab: Cell<bool>,
     /// A `PointerDelta` arrived for this lock, so the backend really locks and
@@ -181,6 +196,22 @@ impl<M: 'static> View3d<M> {
         std::mem::take(&mut *self.shared.clicks.borrow_mut())
     }
 
+    /// The left-button drags on the picture since the last call.
+    pub fn take_drags(&self) -> Vec<PaneDrag> {
+        std::mem::take(&mut *self.shared.drags.borrow_mut())
+    }
+
+    /// Wheel notches since the last call.
+    pub fn take_wheel(&self) -> i32 {
+        self.shared.wheel.replace(0)
+    }
+
+    /// Queues a drag as if it came from the user (scripted runs).
+    #[allow(dead_code, reason = "used by the self-test and unit tests")]
+    pub fn push_drag(&self, d: PaneDrag) {
+        self.shared.drags.borrow_mut().push(d);
+    }
+
     /// Queues a click as if it came from the user (scripted runs).
     #[allow(dead_code, reason = "used by the self-test and unit tests")]
     pub fn push_click(&self, c: Click) {
@@ -255,20 +286,11 @@ fn handle<M: 'static>(
         } => {
             ui.focus(id);
             let picks = |right| {
-                let b = ui.bounds(id);
-                let img = shared.image.borrow();
-                let img = img.as_ref()?;
-                let r = fit(
-                    Rect::new(0, 0, b.width(), b.height()),
-                    img.width(),
-                    img.height(),
-                );
-                let (w, h) = (r.width().max(1) as f32, r.height().max(1) as f32);
-                let (nx, ny) = ((x - r.left) as f32 / w, (y - r.top) as f32 / h);
-                ((0.0..=1.0).contains(&nx) && (0.0..=1.0).contains(&ny)).then_some(Click {
+                let (nx, ny, aspect) = on_picture(ui, id, shared, x, y)?;
+                Some(Click {
                     nx,
                     ny,
-                    aspect: w / h,
+                    aspect,
                     right,
                     ctrl: modifiers.ctrl,
                     alt: modifiers.alt,
@@ -296,6 +318,10 @@ fn handle<M: 'static>(
                     }
                     if let Some(c) = picks(false) {
                         shared.clicks.borrow_mut().push(c);
+                        if !shared.grab.get() {
+                            ui.set_capture(id);
+                            shared.left.set(true);
+                        }
                     }
                     push(PEvent::MouseButton {
                         button: PButton::Left,
@@ -305,7 +331,7 @@ fn handle<M: 'static>(
                 _ => {}
             }
         }
-        Event::MouseUp { button, .. } => match button {
+        Event::MouseUp { button, x, y, .. } => match button {
             MouseButton::Right => {
                 look.set(None);
                 shared.looking.set(false);
@@ -314,13 +340,27 @@ fn handle<M: 'static>(
                     ui.set_pointer_lock(id, false);
                 }
             }
-            MouseButton::Left => push(PEvent::MouseButton {
-                button: PButton::Left,
-                pressed: false,
-            }),
+            MouseButton::Left => {
+                if shared.left.replace(false) {
+                    ui.release_capture();
+                    push_drag(ui, id, shared, x, y, true);
+                }
+                push(PEvent::MouseButton {
+                    button: PButton::Left,
+                    pressed: false,
+                });
+            }
             _ => {}
         },
+        Event::MouseWheel { delta, .. } => {
+            shared
+                .wheel
+                .set(shared.wheel.get() + (delta as i32).signum());
+        }
         Event::MouseMove { x, y, .. } => {
+            if shared.left.get() {
+                push_drag(ui, id, shared, x, y, false);
+            }
             if let Some((lx, ly)) = look.get() {
                 look.set(Some((x, y)));
                 if !shared.delta_seen.get() {
@@ -365,6 +405,14 @@ fn handle<M: 'static>(
         }
         Event::KillFocus | Event::CaptureChanged => {
             look.set(None);
+            if shared.left.replace(false) {
+                shared.drags.borrow_mut().push(PaneDrag {
+                    nx: -1.0,
+                    ny: -1.0,
+                    aspect: 1.0,
+                    released: true,
+                });
+            }
             shared.looking.set(false);
             if !shared.grab.get() {
                 ui.set_pointer_lock(id, false);
@@ -373,6 +421,50 @@ fn handle<M: 'static>(
         }
         _ => {}
     }
+}
+
+/// Where `(x, y)` falls on the picture, with the picture's aspect, if it does.
+fn on_picture<M: 'static>(
+    ui: &Ui<M>,
+    id: WidgetId,
+    shared: &Shared,
+    x: i32,
+    y: i32,
+) -> Option<(f32, f32, f32)> {
+    let b = ui.bounds(id);
+    let img = shared.image.borrow();
+    let img = img.as_ref()?;
+    let r = fit(
+        Rect::new(0, 0, b.width(), b.height()),
+        img.width(),
+        img.height(),
+    );
+    let (w, h) = (r.width().max(1) as f32, r.height().max(1) as f32);
+    let (nx, ny) = ((x - r.left) as f32 / w, (y - r.top) as f32 / h);
+    ((0.0..=1.0).contains(&nx) && (0.0..=1.0).contains(&ny)).then_some((nx, ny, w / h))
+}
+
+fn push_drag<M: 'static>(
+    ui: &Ui<M>,
+    id: WidgetId,
+    shared: &Shared,
+    x: i32,
+    y: i32,
+    released: bool,
+) {
+    let place = on_picture(ui, id, shared, x, y);
+    // Off the picture a stroke waits, but its end must still arrive.
+    let (nx, ny, aspect) = match place {
+        Some(p) => p,
+        None if released => (-1.0, -1.0, 1.0),
+        None => return,
+    };
+    shared.drags.borrow_mut().push(PaneDrag {
+        nx,
+        ny,
+        aspect,
+        released,
+    });
 }
 
 /// The largest centred rectangle of the image's aspect that fits `b`.
@@ -396,18 +488,5 @@ impl<M: 'static> Placeable<M> for View3d<M> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn virtual_keys_map_to_platform_keys() {
-        // Which position W maps to depends on the active layout.
-        assert!(matches!(platform_key(Key::W), Some(PKey::Char(_))));
-        assert_eq!(platform_key(Key::from_code(0x35)), Some(PKey::Char('5')));
-        assert!(!is_fly_key(Key::B));
-        assert_eq!(platform_key(Key::ESCAPE), Some(PKey::Escape));
-        assert_eq!(platform_key(Key::F5), Some(PKey::F(5)));
-        assert_eq!(platform_key(Key::LEFT), Some(PKey::Left));
-        assert_eq!(platform_key(Key::from_code(0xFF)), None);
-    }
-}
+#[path = "view3d_tests.rs"]
+mod tests;

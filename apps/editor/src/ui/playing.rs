@@ -1,64 +1,12 @@
-//! The frame tick and going in and out of Instant Play.
+//! Going in and out of Instant Play.
 
 use super::app::Editor;
 use super::script_pane::ScriptMsg;
-use crate::studio::{Mode, Preview};
+use crate::studio::Preview;
 
 impl Editor {
-    /// One UI tick: forwards the active pane's input to the render thread
-    /// and shows the newest frame it finished. Nothing here waits.
-    pub(super) fn advance(&mut self) {
-        // Esc or focus loss ended the pointer lock: the cursor is back, so
-        // Play ends rather than running with a free cursor.
-        if self.studio.mode == Mode::Play && self.play.get().take_lock_lost() {
-            self.end_play(Some("Back in the editor"));
-        }
-        let pane = if self.studio.mode == Mode::Play {
-            self.play.get()
-        } else {
-            self.pane3d()
-        };
-        let events = pane.take_events();
-        let clicks = pane.take_clicks();
-        let size = pane.size();
-        let state = self.state.clone();
-        let tick = self.studio.tick(&events, size, &state.borrow().doc);
-        self.follow_materials();
-        self.push_log(&tick.log);
-        if let Some(s) = &tick.status {
-            self.state.borrow_mut().message = s.clone();
-            self.set_status(s);
-        }
-        if let Some(text) = &tick.blank {
-            self.pane3d().show_text(text);
-        }
-        self.show_preview(self.studio.preview(&state.borrow().doc));
-        if tick.play_now {
-            self.begin_play();
-        }
-        if tick.left_play {
-            self.end_play(None);
-        }
-        if let Some(f) = tick.frame {
-            let target = match f.mode {
-                Mode::Play => self.play.get(),
-                Mode::Edit => self.pane3d(),
-            };
-            target.set_rgba(f.w, f.h, f.rgba);
-        }
-        if self.studio.mode == Mode::Edit {
-            self.sync_script();
-            if !clicks.is_empty() {
-                for click in clicks {
-                    self.pick_click(click);
-                }
-                self.refresh();
-            }
-        }
-    }
-
     /// Says on the status bar how far the picture has caught up.
-    fn show_preview(&self, preview: Preview) {
+    pub(super) fn show_preview(&self, preview: Preview) {
         if self.preview.replace(preview) != preview {
             self.status.get().set_text(3, preview.label());
         }
@@ -68,6 +16,7 @@ impl Editor {
     /// script's edits go to its file first, since that is what the game reads.
     /// Lighting still being baked arrives during the game.
     pub(super) fn play_command(&mut self) {
+        self.state.borrow_mut().commit_pending();
         let doc = self.state.borrow().doc.clone();
         let has_script = !self.state.borrow().script.text().is_empty();
         let mut new_script = false;
@@ -94,7 +43,7 @@ impl Editor {
         }
         if new_script {
             self.studio.script_changed();
-        } else if self.studio.is_current(&doc) {
+        } else if self.studio.playable_now(&doc) {
             self.begin_play();
             return;
         }

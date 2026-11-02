@@ -1,16 +1,20 @@
-//! Sweeping a sphere through the BSP's solid cells.
+//! Sweeping a sphere through the BSP's solid cells and the voxel surfaces.
 //!
 //! The tree is walked front to back, pruning every subtree the swept capsule
 //! cannot reach. Each solid leaf reached is rebuilt as a convex cell from the
 //! planes on the path, and the exact cell sweep (faces pushed out by the
-//! radius, rounded edges, rounded vertices) picks the earliest contact.
+//! radius, rounded edges, rounded vertices) picks the earliest contact. The
+//! voxel triangles are swept with the same contact model (`voxel.rs`) and the
+//! earlier of the two wins.
 
 use crate::cell::{Cell, CellPlane};
 use crate::mover::MoverSolid;
 use crate::prim::Contact;
 use crate::tuning::{PRUNE_MARGIN, SKIN};
+use crate::voxel;
 use mscent_math::{Vec3, Vec3d};
 use mscent_world::bsp::MAX_DEPTH;
+use mscent_world::voxel::VoxelWorld;
 use mscent_world::{Bsp, Child, LeafKind};
 
 /// Outcome of a sphere sweep, in `f32` runtime precision.
@@ -31,10 +35,12 @@ pub struct Trace {
     pub mover: Option<usize>,
 }
 
-/// Everything solid: the world and the movers at their current poses.
+/// Everything solid: the world, its voxel surfaces if it has any, and the
+/// movers at their current poses.
 #[derive(Clone, Copy, Debug)]
 pub struct Solids<'a> {
     bsp: &'a Bsp,
+    voxels: Option<&'a VoxelWorld>,
     movers: &'a [MoverSolid],
     skip: Option<usize>,
 }
@@ -43,9 +49,39 @@ impl<'a> Solids<'a> {
     pub fn new(bsp: &'a Bsp, movers: &'a [MoverSolid]) -> Self {
         Self {
             bsp,
+            voxels: None,
             movers,
             skip: None,
         }
+    }
+
+    /// The same, with the surfaces of voxel volumes solid too. `voxels` must
+    /// have been built against `bsp`.
+    #[must_use]
+    pub fn with_voxels(self, voxels: &'a VoxelWorld) -> Self {
+        Self {
+            voxels: Some(voxels),
+            ..self
+        }
+    }
+
+    /// The same world with other movers.
+    pub(crate) fn over<'b>(self, movers: &'b [MoverSolid]) -> Solids<'b>
+    where
+        'a: 'b,
+    {
+        Solids {
+            bsp: self.bsp,
+            voxels: self.voxels,
+            movers,
+            skip: None,
+        }
+    }
+
+    /// True if `p` is inside the world: BSP solid, or rock of a voxel volume.
+    /// Movers are not counted.
+    pub fn is_solid(&self, p: Vec3d) -> bool {
+        self.bsp.is_solid(p) || self.voxels.is_some_and(|v| v.is_solid(p))
     }
 
     /// The same, ignoring one mover.
@@ -112,7 +148,7 @@ pub(crate) fn sweep_sphere_d(solids: Solids, from: Vec3d, to: Vec3d, radius: f64
     if !from.is_finite() || !to.is_finite() || !radius.is_finite() || radius < 0.0 {
         return TraceD::blocked(from);
     }
-    if bsp.is_solid(from) {
+    if solids.is_solid(from) {
         return TraceD::blocked(from);
     }
     let mut walk = Walk {
@@ -126,6 +162,7 @@ pub(crate) fn sweep_sphere_d(solids: Solids, from: Vec3d, to: Vec3d, radius: f64
     };
     walk.visit(bsp.root(), 0);
     let (best, d) = (walk.best, walk.d);
+    let best = nearest_voxel(solids, from, d, radius, best);
     let (best, mover) = nearest_mover(solids, from, to, d, radius, best);
     match best {
         None => TraceD {
@@ -147,6 +184,22 @@ pub(crate) fn sweep_sphere_d(solids: Solids, from: Vec3d, to: Vec3d, radius: f64
             mover,
         },
     }
+}
+
+/// The earlier of `world` and the first contact with a voxel surface.
+fn nearest_voxel(
+    solids: Solids,
+    from: Vec3d,
+    d: Vec3d,
+    radius: f64,
+    world: Option<Contact>,
+) -> Option<Contact> {
+    let Some(voxels) = solids.voxels else {
+        return world;
+    };
+    let limit = world.map_or(1.0, |b| b.t);
+    let found = voxel::sweep(voxels, from, d, radius, limit);
+    found.filter(|c| world.is_none_or(|b| c.t < b.t)).or(world)
 }
 
 /// The earliest contact once movers are counted, and which mover it is on.

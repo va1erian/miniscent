@@ -12,6 +12,7 @@ use xui::widget::{Edit, GroupBox, HasText};
 use super::Msg;
 use super::facepanel::FacePanel;
 use super::material_list::MaterialChoices;
+use super::voxelpanel::{VoxelPanel, VoxelProp, apply as apply_voxel};
 use crate::model::entity::{entity_name, params, pos, set_param, with_pos};
 use crate::model::{EditorState, Shape, Tool};
 
@@ -46,6 +47,8 @@ pub enum Prop {
     TagsText(String),
     /// The Apply button: the name and tags become the selection's.
     ApplyNames,
+    /// A change in the Voxel tool's section.
+    Voxel(VoxelProp),
 }
 
 const AXES: [&str; 3] = ["X", "Y", "Z"];
@@ -77,6 +80,7 @@ pub struct Panel {
     name: Handle<Edit<Msg>>,
     tags: Handle<Edit<Msg>>,
     uses: Handle<Label<Msg>>,
+    pub voxel: VoxelPanel,
     /// What the name and tag fields last showed, so typing is not overwritten.
     shown_names: std::cell::RefCell<(String, String)>,
     pub face: FacePanel,
@@ -108,6 +112,7 @@ impl Panel {
         let names = self.name.get().id() == id || self.tags.get().id() == id;
         numbers
             || names
+            || self.voxel.owns(id)
             || self.face.owns(id)
             || self.op.get().id() == id
             || self.material.get().id() == id
@@ -251,6 +256,7 @@ impl Panel {
         ));
         scroll(column().padding(8).gap(8).children((
             label("Nothing selected").bind(&self.what),
+            group("Voxel tool", self.voxel.layout()).bind(&self.voxel.group),
             group("Script names", names).bind(&self.names_group),
             group("Brush", brush).bind(&self.brush_group),
             self.face.layout(self.ui.clone()),
@@ -283,13 +289,18 @@ impl Panel {
     /// Shows the selection in the fields and enables only the relevant ones.
     pub fn sync(&self, st: &mut EditorState) {
         self.sync_names(st);
+        self.voxel.sync(st, |id, visible| self.show(id, visible));
         let brush = st.selected_brush();
         let ent = st.selected_entity();
         let text = match (brush, ent) {
             (Some(b), _) => {
                 let index = st.doc.brush_index(b.id).map_or(0, |i| i + 1);
                 let op = if b.op == Op::Add { "add" } else { "subtract" };
-                let shape = if b.is_box() { "box" } else { "convex" };
+                let shape = match (b.is_volume(), b.is_box()) {
+                    (true, _) => "voxel volume",
+                    (_, true) => "box",
+                    _ => "convex",
+                };
                 format!("Brush {index} of {} ({op} {shape})", st.doc.brushes().len())
             }
             (_, Some(e)) => entity_name(&e.entity).to_string(),
@@ -340,6 +351,10 @@ impl Panel {
 
 /// Applies a panel edit to the model; whether anything changed.
 pub fn apply(st: &mut EditorState, prop: Prop) -> bool {
+    // Editing what was grown keeps it: an edit's undo step must start from it.
+    if !matches!(prop, Prop::Voxel(_)) {
+        st.commit_pending();
+    }
     match prop {
         Prop::Op(i) => st.edit_selected_brush(|b| {
             b.op = if i == 0 { Op::Add } else { Op::Subtract };
@@ -373,6 +388,7 @@ pub fn apply(st: &mut EditorState, prop: Prop) -> bool {
             false
         }
         Prop::ApplyNames => st.apply_draft(),
+        Prop::Voxel(prop) => apply_voxel(st, prop),
     }
 }
 

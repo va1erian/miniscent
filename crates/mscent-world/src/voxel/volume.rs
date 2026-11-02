@@ -7,6 +7,7 @@ use mscent_math::Vec3d;
 use super::chunk::Chunk;
 use super::{CHUNK_EDGE, MAX_CHUNKS_PER_AXIS};
 use crate::brush::{Brush, BrushError, Op};
+use crate::materials::NO_DRAW;
 use crate::polytope::MAX_COORD;
 
 /// Edge length of a cell. Each is a multiple of the brush snap grid, so a
@@ -188,9 +189,12 @@ impl Volume {
     }
 
     /// The brush that clears this volume's box from the BSP: a subtract brush
-    /// at the volume's place in the order. An [`Op::Add`] volume has none.
+    /// at the volume's place in the order, whose faces are never drawn. An
+    /// [`Op::Add`] volume has none.
     pub fn shell(&self) -> Option<Result<Brush, BrushError>> {
         let (lo, hi) = self.bounds();
-        (self.op() == Op::Subtract).then(|| Brush::cuboid(lo, hi, Op::Subtract, self.order()))
+        (self.op() == Op::Subtract).then(|| {
+            Brush::cuboid(lo, hi, Op::Subtract, self.order()).map(|b| b.with_material(NO_DRAW))
+        })
     }
 }

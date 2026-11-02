@@ -953,6 +953,7 @@ dependencies = [
 name = "mscent-bench"
 version = "0.1.0"
 dependencies = [
+ "mscent-collide",
  "mscent-math",
  "mscent-world",
 ]

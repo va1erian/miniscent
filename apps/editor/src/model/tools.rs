@@ -155,7 +155,7 @@ impl EditorState {
     /// Removes the selected brush's volume from every brush it overlaps and
     /// deletes it, leaving convex pieces (Hammer's Carve).
     pub fn carve_selected(&mut self) -> bool {
-        let Some(cutter) = self.selected_brush().cloned() else {
+        let Some(cutter) = self.selected_brush().filter(|b| !b.is_volume()).cloned() else {
             self.message = "Select a brush to carve with".into();
             return false;
         };

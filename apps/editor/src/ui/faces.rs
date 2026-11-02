@@ -5,10 +5,16 @@ use mscent_render::BuildConfig;
 
 use super::app::Editor;
 use super::facepanel::FaceMsg;
-use super::view3d::Click;
+use super::view3d::{Click, PaneDrag};
 use crate::model::Tool;
 use crate::model::facetex::FaceEdit;
 use crate::model::pick::{self, view_ray};
+use crate::model::stroke::StrokeKeys;
+
+/// Radius of a sculpting dab, and what one wheel notch does to it.
+pub(super) const MIN_RADIUS: f64 = 0.25;
+pub(super) const MAX_RADIUS: f64 = 8.0;
+const WHEEL_STEP: f64 = 1.15;
 
 impl Editor {
     /// A button or field of the face section.
@@ -36,6 +42,41 @@ impl Editor {
         }
     }
 
+    /// The left button moved or came up on the 3D picture: a stroke follows it.
+    pub(super) fn pane_drag(&mut self, drag: PaneDrag) {
+        let mut st = self.state.borrow_mut();
+        if !st.stroking() {
+            return;
+        }
+        let view = self.studio.fly_camera().view();
+        let fov = BuildConfig::default().fov_y;
+        if drag.nx >= 0.0
+            && let Some(ray) = view_ray(&view, fov, drag.nx, drag.ny, drag.aspect)
+        {
+            st.stroke_ray(ray);
+        }
+        if drag.released {
+            st.end_stroke();
+        }
+    }
+
+    /// The wheel over the 3D picture sets the Voxel tool's radius.
+    pub(super) fn pane_wheel(&mut self, notches: i32) {
+        let mut st = self.state.borrow_mut();
+        if st.pending() && notches != 0 {
+            // A held generation: the wheel rolls another seed.
+            let seed = st.voxel.seed.wrapping_add_signed(notches.signum());
+            st.reroll_to(seed);
+            st.message = format!("Seed {}", st.voxel.seed);
+        } else if st.rolling() {
+            // The next roll is on its way, and would come out another size.
+        } else if st.tool == Tool::Voxel && notches != 0 {
+            let r = st.voxel.radius * WHEEL_STEP.powi(notches);
+            st.voxel.radius = r.clamp(MIN_RADIUS, MAX_RADIUS);
+            st.message = format!("Radius {:.2}", st.voxel.radius);
+        }
+    }
+
     /// A press on the 3D picture. The Select tool selects the brush under it;
     /// the face tool picks, copies (Alt + left) or pastes (Alt + right).
     pub(super) fn pick_click(&mut self, click: Click) {
@@ -45,6 +86,19 @@ impl Editor {
             return;
         };
         let mut st = self.state.borrow_mut();
+        if st.tool == Tool::Voxel {
+            if !click.right {
+                st.begin_stroke(
+                    ray,
+                    StrokeKeys {
+                        swap: click.ctrl,
+                        build_up: click.alt,
+                        ..Default::default()
+                    },
+                );
+            }
+            return;
+        }
         if st.tool == Tool::Select {
             if !click.right {
                 st.select_brush_at(&ray);
@@ -55,7 +109,7 @@ impl Editor {
             return;
         }
         if click.alt {
-            let hit = pick::pick_face(&st.doc, &ray);
+            let hit = pick::pick_visible_face(&st.doc, &ray);
             match (hit, click.right) {
                 (Some(h), false) => {
                     st.copy_face(h.face);

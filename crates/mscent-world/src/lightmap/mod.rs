@@ -12,13 +12,18 @@
 pub mod atlas;
 mod bake;
 mod bounce;
+mod cell_sites;
+mod cells;
+mod cells_bounce;
 mod filter;
 mod layout;
+mod occluders;
 mod parallel;
 pub mod ray;
 mod soft;
 pub mod store;
 pub mod uv;
+mod voxel_rays;
 
 #[cfg(test)]
 mod review_tests;
@@ -28,9 +33,14 @@ mod soft_tests;
 mod store_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod voxel_light_tests;
 
 pub use atlas::{Atlas, AtlasError, PADDING, Rect};
-pub use bake::{FaceGrid, Lightmap, MAX_SHADOW_SAMPLES, bake, bake_cancellable};
+pub use bake::{FaceGrid, Lightmap, MAX_SHADOW_SAMPLES, bake, bake_cancellable, bake_in};
+pub use cell_sites::{CellKey, CellSites, shape_key};
+pub use cells::{CellLighting, CellRecord, RECORD_BYTES, light_cells};
+pub use occluders::Occluders;
 pub use uv::{FaceProjection, MAX_FACE_LUXELS};
 
 use mscent_math::Vec3;

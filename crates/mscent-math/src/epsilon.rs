@@ -16,9 +16,41 @@ pub const PLANE_EPSILON_F32: f32 = 1.0e-3;
 /// floating point.
 pub const SNAP_GRID: f64 = 0.125;
 
+/// The least a voxel vertex's smoothed normal must agree with its own cell's, as
+/// a cosine, to be believed: less, and the reach spanned a thin sheet.
+pub const VOXEL_NORMAL_MIN_AGREEMENT: f32 = 0.3;
+
+/// The cosine past which the two count as one normal, and the cell's own stands.
+pub const VOXEL_NORMAL_SAME: f32 = 0.9995;
+
 /// How far, in cells, a voxel surface sinks behind the brush faces it meets at
 /// the border of a volume, so the two never fight and never leave a gap.
 pub const VOXEL_SEAM_BIAS_CELLS: f64 = 1.0 / 16.0;
+
+/// How close to a BSP plane a voxel triangle's corner counts as on both sides
+/// of it, when deciding whether air can see the triangle. Well below the seam
+/// bias of the smallest cell, so a surface sunk behind a brush face stays buried.
+pub const VOXEL_BURIED_MARGIN: f64 = 1.0e-3;
+
+/// Fraction of a shadow ray, at each end, where a voxel triangle does not count
+/// as a hit. A ray starts a fixed bias off the surface it lights and ends at a
+/// lamp, so only a surface touching an end could reach into this band.
+pub const OCCLUDER_RAY_MARGIN: f64 = 1.0e-6;
+
+/// Slack on the edges of a voxel triangle in a shadow ray test, in barycentric
+/// units. A ray through the shared edge of two triangles must hit one of them,
+/// or light would leak through the seams of a mesh.
+pub const OCCLUDER_EDGE_SLACK: f64 = 1.0e-9;
+
+/// A ray whose determinant against a triangle is smaller than this runs in its
+/// plane and misses it. The determinant is unnormalised: ray length times
+/// twice the triangle's area.
+pub const OCCLUDER_PARALLEL: f64 = 1.0e-12;
+
+/// How far, in cells, a voxel cell's light is taken from the surface: its
+/// shadow rays start this far along the normal, as a luxel's start the
+/// normal bias off its wall.
+pub const VOXEL_LIGHT_LIFT_CELLS: f32 = 1.5;
 
 /// Vectors shorter than this are treated as zero when normalizing, so a
 /// degenerate input yields `None` instead of NaN or infinity.
@@ -66,3 +98,9 @@ pub const DECAL_DEPTH_BIAS: f32 = 2.0e-3;
 
 /// Above this cosine two rotations are close enough to blend linearly.
 pub const SLERP_LINEAR_COS: f32 = 0.9995;
+
+/// How near a bounce's contact point must be to a voxel surface for that
+/// surface's own normal to be used, not the six axis probes: four probe
+/// distances, so a contact the bisection left a hair off the rock still finds
+/// it, while a brush wall that merely shares the volume's box does not.
+pub const PARTICLE_VOXEL_NORMAL_REACH: f32 = 0.2;

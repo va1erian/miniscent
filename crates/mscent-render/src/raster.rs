@@ -74,14 +74,14 @@ impl ScreenVert {
 
 /// Screen-linear attributes along a row.
 #[derive(Clone, Copy)]
-struct Attr {
-    iz: f32,
-    uz: f32,
-    vz: f32,
+pub(crate) struct Attr {
+    pub iz: f32,
+    pub uz: f32,
+    pub vz: f32,
 }
 
 impl Attr {
-    fn advance(self, g: Attr, n: f32) -> Attr {
+    pub(crate) fn advance(self, g: Attr, n: f32) -> Attr {
         Attr {
             iz: self.iz + g.iz * n,
             uz: self.uz + g.uz * n,
@@ -89,7 +89,7 @@ impl Attr {
         }
     }
 
-    fn at(self, x: i32, y: i32) -> SpanEnd {
+    pub(crate) fn at(self, x: i32, y: i32) -> SpanEnd {
         // Interpolated 1/z stays positive inside a clipped polygon; the floor
         // only guards against rounding at the near plane.
         let iz = self.iz.max(1e-12);
@@ -295,7 +295,7 @@ fn vertical_gradient(pts: &[ScreenVert]) -> Option<Attr> {
 /// Texels per pixel at a span centre, and the mip level that follows from it:
 /// the largest texel step per pixel along x or y, with level 0 kept up to 1.5
 /// texels per pixel so nearby surfaces stay sharp.
-fn mip_level(tex: &Texture, centre: Attr, gx: Attr, gy: Option<Attr>) -> (u32, f32) {
+pub(crate) fn mip_level(tex: &Texture, centre: Attr, gx: Attr, gy: Option<Attr>) -> (u32, f32) {
     let inv = 1.0 / centre.iz.max(1e-12);
     let (u, v) = (centre.uz * inv, centre.vz * inv);
     let step = |g: Attr| {
@@ -399,21 +399,21 @@ fn draw_row<S: SpanShader>(
     }
 }
 
-struct Span {
-    x: usize,
-    n: usize,
-    ea: SpanEnd,
-    eb: SpanEnd,
-    iz0: f32,
-    diz: f32,
-    level: u32,
+pub(crate) struct Span {
+    pub x: usize,
+    pub n: usize,
+    pub ea: SpanEnd,
+    pub eb: SpanEnd,
+    pub iz0: f32,
+    pub diz: f32,
+    pub level: u32,
     /// Filtered texture: sample bilinearly, from the span's mip level.
-    smooth: bool,
+    pub smooth: bool,
 }
 
 /// Inner loop: texel fetch, depth test and shade for one span. Returns the
 /// number of pixels written.
-fn span_pixels<S: SpanShader>(
+pub(crate) fn span_pixels<S: SpanShader>(
     color: &mut [u32],
     depth: &mut [f32],
     s: &Span,

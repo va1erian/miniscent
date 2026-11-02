@@ -177,11 +177,15 @@ fn a_bad_table_on_a_draft_picture_settles_and_a_good_one_recovers() {
     let bakes = |s: &Studio| s.cache().lock().expect("cache").bakes();
     let end = Instant::now() + Duration::from_secs(60);
     while !studio.is_current(&doc) {
+        // A bake starts in the tick a preview arrives once the document has been
+        // quiet long enough, and a slow machine gets there. Stay within the wait.
+        studio.changed_at = Instant::now();
         studio.tick(&[], PANE, &doc);
         assert!(Instant::now() < end, "no preview");
         std::thread::sleep(Duration::from_millis(2));
     }
     assert_eq!(studio.light, Light::Draft);
+    assert!(studio.bake_job.is_none());
 
     // No bake is in flight: it fails once and nothing starts.
     studio.materials().replace(MaterialTable::new());

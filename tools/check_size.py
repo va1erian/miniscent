@@ -13,7 +13,8 @@ import os
 import subprocess
 import sys
 
-BUDGET_BYTES = 1_600_000
+# 1.6 MB until voxel volumes, which took the game from 1,576,960 to 1,885,184 bytes.
+BUDGET_BYTES = 2_200_000
 WARN_FRACTION = 0.8
 
 

@@ -235,3 +235,37 @@ fn a_border_vertex_is_named_the_same_from_both_sides() {
         global_cell([1, 0, 0], [-1, 3, 4])
     );
 }
+
+/// A round hole cut in a flat top leaves a crease finer than the grid. Read over
+/// one cell, the normal turns sharply there from vertex to vertex, and the light
+/// baked from it draws the triangulation around the hole.
+#[test]
+fn normals_turn_gradually_across_a_crease() {
+    let mut v = add_volume([2, 2, 2]);
+    let mut ctx = Context::new(&v.clone(), &[]);
+    let top = Prim::cuboid(Vec3d::new(1.0, 1.0, 1.0), Vec3d::new(7.0, 7.0, 4.0)).expect("valid");
+    apply_dab(&mut v, &mut ctx, &top, DabOp::Add { material: 1 });
+    let hole = Prim::sphere(Vec3d::new(4.03, 3.97, 4.6), 1.6).expect("valid");
+    apply_dab(&mut v, &mut ctx, &hole, DabOp::Carve);
+    let mut turns: Vec<f32> = Vec::new();
+    for (_, m) in mesh_all(&v, &[]) {
+        for t in &m.triangles {
+            for k in 0..3 {
+                let (a, b) = (t[k], t[(k + 1) % 3]);
+                let (a, b) = (m.vertices[usize::from(a)], m.vertices[usize::from(b)]);
+                // The rim alone: the box's own corners are meant to be hard.
+                let near = |p: mscent_math::Vec3| {
+                    let (x, y) = (p.x - 4.03, p.y - 3.97);
+                    (x * x + y * y).sqrt() < 2.2 && p.z > 3.0
+                };
+                if near(a.pos) && near(b.pos) {
+                    turns.push(a.normal.dot(b.normal));
+                }
+            }
+        }
+    }
+    assert!(turns.len() > 100, "{}", turns.len());
+    let worst = turns.iter().copied().fold(1.0f32, f32::min);
+    // 0.68 with the normal read over one cell alone.
+    assert!(worst > 0.8, "worst turn across an edge has cosine {worst}");
+}
