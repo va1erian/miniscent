@@ -205,6 +205,11 @@ impl Studio {
         }
     }
 
+    /// What identifies the full lightmap of the picture.
+    pub fn light_key(&self) -> u64 {
+        self.light_key
+    }
+
     /// The material table: replacing it updates the picture, keeping the light.
     pub fn materials(&self) -> &SharedMaterials {
         &self.materials
@@ -449,4 +454,4 @@ mod tests;
 #[cfg(test)]
 mod texture_tests;
 #[cfg(test)]
-mod tick_costs;
+pub(crate) mod tick_costs;

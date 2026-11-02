@@ -51,6 +51,14 @@ pub(super) fn menus(m: &mut xui::widget::MenuScope<'_>) {
     m.submenu(MenuId::new(103), "&Play", |p| {
         p.item(cmd::PLAY, "&Play   F5");
     });
+    m.submenu(MenuId::new(104), "&Texture", |t| {
+        t.item(cmd::TEX_OPEN, "Texture &Studio");
+        t.item(cmd::TEX_CLOSE, "&Back to the level   Esc");
+        t.separator();
+        t.item(cmd::TEX_NEW, "&New material...");
+        t.item(cmd::TEX_APPLY, "&Apply to the level");
+        t.item(cmd::TEX_SAVE, "&Save material   Ctrl+S");
+    });
 }
 
 impl Editor {

@@ -1,0 +1,298 @@
+//! What the workspace's messages and menu commands do.
+
+use mscent_texgen::ops::{self, Value};
+use xui::prelude::*;
+use xui::widget::{HasText, Placeable};
+
+use super::dialogs;
+use super::{MENU_DELETE, MENU_DUPLICATE, TexMsg};
+use crate::texstudio::SaveStart;
+use crate::ui::app::{Editor, Msg, cmd};
+
+impl Editor {
+    /// Opens the workspace on the first material, if nothing is open yet.
+    pub(in crate::ui) fn tex_open(&mut self) {
+        self.tex.studio.borrow_mut().set_open(true);
+        self.work_host.get().set_visible(false);
+        self.tex.set_visible(true);
+        let first = {
+            let studio = self.tex.studio.borrow();
+            let open = studio.doc().is_some();
+            let rows = studio.rows();
+            rows.first().filter(|_| !open).map(|r| r.name.clone())
+        };
+        if let Some(name) = first {
+            self.tex.studio.borrow_mut().open_material(&name);
+        }
+        self.tex.page.get().focus();
+        self.tex_refresh();
+    }
+
+    /// Back to the level, which was never touched. The recipes stay open.
+    pub(in crate::ui) fn tex_close(&mut self) {
+        self.tex.studio.borrow_mut().set_open(false);
+        self.tex.set_visible(false);
+        self.work_host.get().set_visible(true);
+        self.pane3d().focus();
+        self.state.borrow_mut().message = "Back in the level".to_string();
+        self.refresh();
+    }
+
+    /// Shows the model in the workspace's widgets, and its message if it has one.
+    fn tex_refresh(&mut self) {
+        if let Err(e) = self.tex.sync() {
+            self.push_log(&[format!("ERROR: texture studio panels: {e:?}")]);
+        }
+        self.sync_tex_menu();
+    }
+
+    /// Commands that act on the level are off while the workspace is up, and undo
+    /// and redo say what the recipe's history can do.
+    pub(in crate::ui) fn sync_tex_menu(&self) {
+        let open = self.tex.is_open();
+        let menu = self.menu.get();
+        // Nothing else sets these, so closing has to put them back.
+        for id in [
+            cmd::NEW,
+            cmd::OPEN,
+            cmd::SHOWCASE,
+            cmd::SAVE,
+            cmd::SAVE_AS,
+            cmd::PLAY,
+            cmd::MAKE_MOVER,
+            cmd::FIT,
+            cmd::RESET_CAMERA,
+            cmd::LAYOUT_CLASSIC,
+            cmd::LAYOUT_QUAD,
+            cmd::LEVEL_SETTINGS,
+            cmd::TEX_OPEN,
+        ] {
+            menu.set_enabled(id, !open);
+        }
+        // `refresh` sets these from the level's selection, just before this.
+        for id in [
+            cmd::FLIP,
+            cmd::FORWARD,
+            cmd::BACK,
+            cmd::CARVE,
+            cmd::SLICE,
+            cmd::SLICE_SIDE,
+            cmd::EXTRUDE,
+            cmd::EXTRUDE_IN,
+        ] {
+            if open {
+                menu.set_enabled(id, false);
+            }
+        }
+        for id in [cmd::TEX_CLOSE, cmd::TEX_NEW, cmd::TEX_APPLY, cmd::TEX_SAVE] {
+            menu.set_enabled(id, open);
+        }
+        if !open {
+            return;
+        }
+        let studio = self.tex.studio.borrow();
+        let doc = studio.doc();
+        menu.set_enabled(cmd::UNDO, doc.is_some_and(|d| d.can_undo()));
+        menu.set_enabled(cmd::REDO, doc.is_some_and(|d| d.can_redo()));
+        menu.set_enabled(cmd::DELETE, doc.is_some_and(|d| d.selected().is_some()));
+    }
+
+    /// One UI tick for the workspace. Nothing here waits.
+    pub(in crate::ui) fn tex_advance(&mut self) {
+        if !self.tex.studio.borrow().needs_ticks() {
+            return;
+        }
+        let tick = self.tex.studio.borrow_mut().tick();
+        if tick.cleared {
+            self.tex.preview.get().show_text("Working...");
+            self.tex.page.get().set_thumbs(Vec::new());
+            self.tex.caption.get().set_text("");
+        }
+        let changed = tick.message.is_some() || tick.cleared;
+        if let Some(picture) = tick.picture {
+            self.tex.show_picture(picture);
+        }
+        if let Some(thumbs) = tick.thumbs {
+            self.tex.show_thumbs(thumbs);
+        }
+        if let Some(message) = tick.message {
+            self.state.borrow_mut().message = message.clone();
+            self.set_status(&message);
+        }
+        let generation = self.studio.materials().generation();
+        if let Err(e) = self.tex.follow_table(generation) {
+            self.push_log(&[format!("ERROR: material list: {e:?}")]);
+        }
+        if changed {
+            self.tex_refresh();
+        } else {
+            self.tex.sync_trouble();
+        }
+    }
+
+    /// A shortcut or menu command while the workspace is up. Those that are not the
+    /// workspace's do nothing: they never reach the level.
+    pub(in crate::ui) fn tex_menu(&mut self, id: MenuId, ui: &Ui<Msg>) {
+        match id {
+            cmd::UNDO => {
+                self.tex.studio.borrow_mut().undo();
+            }
+            cmd::REDO => {
+                self.tex.studio.borrow_mut().redo();
+            }
+            cmd::DELETE => self.tex_edit(TexMsg::Delete),
+            cmd::SAVE | cmd::TEX_SAVE => self.tex_save(ui),
+            cmd::TEX_APPLY => self.tex_edit(TexMsg::Apply),
+            cmd::TEX_NEW => self.tex_ask_new(ui),
+            cmd::TEX_CLOSE => {
+                self.tex_close();
+                return;
+            }
+            _ => {}
+        }
+        self.tex_refresh();
+    }
+
+    fn tex_ask_new(&mut self, ui: &Ui<Msg>) {
+        if let Some((name, side)) = dialogs::ask_new(ui) {
+            self.tex_edit(TexMsg::Create { name, side });
+        }
+    }
+
+    fn tex_save(&mut self, ui: &Ui<Msg>) {
+        let start = self.tex.studio.borrow_mut().save();
+        if let SaveStart::NeedsConsent(name) = start
+            && dialogs::ask_overwrite(ui, &name)
+        {
+            let mut studio = self.tex.studio.borrow_mut();
+            studio.consent(&name);
+            studio.save();
+        }
+    }
+
+    /// A message from the workspace.
+    pub(in crate::ui) fn tex_message(&mut self, msg: TexMsg, ui: &Ui<Msg>) {
+        match msg {
+            TexMsg::AskNew => self.tex_ask_new(ui),
+            TexMsg::Save => self.tex_save(ui),
+            other => self.tex_edit(other),
+        }
+        self.tex_refresh();
+    }
+
+    fn tex_page_menu(&self, x: i32, y: i32, cell: (u16, u16), block: Option<usize>) {
+        let (Some(menu), Some(host)) = (&self.tex.menu, self.tex.host.try_get()) else {
+            return;
+        };
+        self.tex.menu_cell.set(cell);
+        if block.is_some() {
+            self.tex.studio.borrow_mut().edit(|d| {
+                d.select(block);
+                Ok(())
+            });
+        }
+        menu.set_enabled(MENU_DELETE, block.is_some());
+        menu.set_enabled(MENU_DUPLICATE, block.is_some());
+        // Bounds are relative to the parent: the workspace's panel is at the
+        // window's level, and the page is directly in it.
+        let ui = host.ui();
+        let page = Placeable::id(&*self.tex.page.get());
+        let (outer, inner) = (ui.bounds(host.id()), ui.bounds(page));
+        menu.show_context(outer.left + inner.left + x, outer.top + inner.top + y);
+    }
+
+    fn tex_edit(&mut self, msg: TexMsg) {
+        if let TexMsg::PageMenu { x, y, cell, block } = msg {
+            return self.tex_page_menu(x, y, cell, block);
+        }
+        if let TexMsg::Param { index, value, .. } = &msg {
+            self.tex.params.show_value(*index, value);
+        }
+        if let TexMsg::Gloss { value, .. } = &msg {
+            self.tex.gloss_slider.get().set_value(f64::from(*value));
+            self.tex.gloss_field.get().set_value(f64::from(*value));
+        }
+        let mut studio = self.tex.studio.borrow_mut();
+        match msg {
+            TexMsg::Open(name) => studio.open_material(&name),
+            TexMsg::Create { name, side } => {
+                if let Err(why) = studio.create(&name, side) {
+                    studio.say(why);
+                }
+            }
+            TexMsg::Select(block) => {
+                studio.edit(|d| {
+                    d.select(block);
+                    Ok(())
+                });
+            }
+            TexMsg::Move { block, x, y } => {
+                studio.edit(|d| d.move_block(block, x, y));
+            }
+            TexMsg::Resize { block, w } => {
+                studio.edit(|d| d.resize(block, w));
+            }
+            TexMsg::Add { op, cell } => {
+                if let Some(spec) = ops::all().nth(op) {
+                    studio.edit(|d| d.add(spec, cell.0, cell.1));
+                }
+            }
+            TexMsg::Delete => {
+                studio.edit(|d| match d.selected() {
+                    Some(block) => d.delete(block),
+                    None => Ok(()),
+                });
+            }
+            TexMsg::Duplicate => {
+                studio.edit(|d| match d.selected() {
+                    Some(block) => d.duplicate(block).map(|_| ()),
+                    None => Ok(()),
+                });
+            }
+            TexMsg::Param {
+                block,
+                index,
+                value,
+                live,
+            } => {
+                studio.edit(|d| d.set_param(block, index, value, live));
+                studio.note_drag(live);
+            }
+            TexMsg::Channel {
+                block,
+                index,
+                channel,
+                value,
+            } => {
+                studio.edit(|d| {
+                    let values = d.recipe().blocks.get(block).map(|b| b.params.values());
+                    let current = values.and_then(|v| v.get(index));
+                    let Some(Value::Color(mut colour)) = current.cloned() else {
+                        return Ok(());
+                    };
+                    if let Some(slot) = colour.get_mut(channel) {
+                        *slot = value;
+                    }
+                    d.set_param(block, index, Value::Color(colour), false)
+                });
+                studio.note_drag(false);
+            }
+            TexMsg::ClearStrokes { block, index } => {
+                studio.edit(|d| d.clear_strokes(block, index));
+            }
+            TexMsg::Gloss { value, live } => {
+                studio.edit(|d| {
+                    d.set_gloss(value, live);
+                    Ok(())
+                });
+                studio.note_drag(live);
+            }
+            TexMsg::Tab(tab) => studio.set_tab(tab),
+            TexMsg::Tiled(tiled) => studio.set_tiled(tiled),
+            TexMsg::Apply => {
+                studio.apply();
+            }
+            TexMsg::AskNew | TexMsg::Save | TexMsg::PageMenu { .. } => {}
+        }
+    }
+}

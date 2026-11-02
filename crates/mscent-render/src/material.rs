@@ -40,6 +40,20 @@ impl MaterialTable {
         Some(id)
     }
 
+    /// Puts `material` in the slot of its name, or in a new one at the end, and
+    /// says which; `None` when the table is full. Clones of the table keep what
+    /// they had, so a preview drawing with one is not disturbed.
+    pub fn install(&mut self, material: Material) -> Option<MaterialId> {
+        match self.find(&material.name) {
+            Some(id) => {
+                let slot = self.materials.get_mut(usize::from(id.0))?;
+                *slot = Some(Arc::new(material));
+                Some(id)
+            }
+            None => self.add(material),
+        }
+    }
+
     /// Reserve the next id for nothing; `None` when the table is full. Faces
     /// that still use it draw the scene's grey fallback.
     pub fn add_retired(&mut self) -> Option<MaterialId> {

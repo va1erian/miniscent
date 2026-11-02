@@ -15,7 +15,9 @@ cargo run --release -p miniscent-game -- --bench --frames 200
 # level editor (the only xui user); XUI_SNAPSHOT=<dir> renders it headlessly
 cargo run --release -p mscent-editor
 cargo run --release -p mscent-editor -- --showcase
-# scripted editor session: load, edit, save, reload, four views, play, Esc, edit again
+# scripted editor session: load, edit, save, reload, four views, play, Esc, edit again,
+# and the Texture Studio (docs/texture-studio.md, on the Texture menu): build a recipe,
+# read its pixels, undo, apply to the level, save and load it back; PNGs in <dir>/texture
 cargo run --release -p mscent-editor -- --selftest target/shots/editor
 
 # gate

@@ -23,8 +23,9 @@ pub struct Maps {
     pub specular: Option<Vec<u8>>,
 }
 
+/// A stored channel as the renderer's 8 bits.
 #[inline]
-fn byte(v: u16) -> u8 {
+pub fn byte(v: u16) -> u8 {
     ((u32::from(v) * 255 + 32767) / 65535) as u8
 }
 
@@ -79,7 +80,7 @@ pub fn normals_from_height(image: &Image, strength: f32) -> Vec<u32> {
 }
 
 /// The strength on the page's `out-height`.
-fn normal_strength(recipe: &Recipe, block: usize) -> f32 {
+pub fn normal_strength(recipe: &Recipe, block: usize) -> f32 {
     let values = recipe.blocks.get(block).map(|b| b.params.values());
     values.and_then(|v| v.first()).map_or(0.0, |v| match v {
         Value::Float(s) => *s,

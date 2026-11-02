@@ -9,6 +9,7 @@ use super::view3d::View3d;
 use crate::materials::SharedMaterials;
 use crate::model::EditorState;
 use crate::studio::Preview;
+use crate::texstudio::TexStudio;
 
 /// What a scripted run reads and drives from outside the editor.
 pub struct Probe {
@@ -17,6 +18,9 @@ pub struct Probe {
     pub(super) play: Rc<View3d<Msg>>,
     pub(super) preview: Rc<Cell<Preview>>,
     pub(super) materials: SharedMaterials,
+    pub(super) light_key: Rc<Cell<u64>>,
+    pub(super) tex: Rc<RefCell<TexStudio>>,
+    pub(super) tex_preview: Rc<super::texstudio::TexPreview>,
 }
 
 impl Editor {
@@ -28,6 +32,9 @@ impl Editor {
             play: self.play.get(),
             preview: self.preview.clone(),
             materials: self.studio.materials().clone(),
+            light_key: self.light_key.clone(),
+            tex: self.tex.studio.clone(),
+            tex_preview: self.tex.preview.get(),
         }
     }
 }
@@ -51,6 +58,21 @@ impl Probe {
     /// The last status message.
     pub fn message(&self) -> String {
         self.state.borrow().message.clone()
+    }
+
+    /// What identifies the full lightmap in the picture, as of the last tick.
+    pub fn light_key(&self) -> u64 {
+        self.light_key.get()
+    }
+
+    /// The Texture Studio's model.
+    pub fn tex(&self) -> Rc<RefCell<TexStudio>> {
+        self.tex.clone()
+    }
+
+    /// The pixels on the Texture Studio's preview (width, height, RGBA).
+    pub fn tex_pixels(&self) -> Option<(u32, u32, Vec<u8>)> {
+        self.tex_preview.pixels()
     }
 
     /// The Instant Play pane (covers the work area while playing).
