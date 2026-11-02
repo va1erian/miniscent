@@ -5,7 +5,7 @@
 //! at the top-left, +X right and +Y down, with pixel centres at half
 //! integers.
 
-use mscent_math::{Mat4, Vec3};
+use mscent_math::{Mat4, Vec3, Vec4};
 
 /// Largest accepted framebuffer side.
 pub const MAX_SIDE: u32 = 8192;
@@ -121,6 +121,39 @@ impl Camera {
         let aspect = self.width as f32 / self.height as f32;
         // Construction validated the parameters, so the fallback is unreachable.
         Mat4::perspective(self.fov_y, aspect, self.near, self.far).unwrap_or(Mat4::IDENTITY)
+    }
+
+    /// World to clip space for a GPU, drawing what [`Camera::project`] does.
+    /// Depth runs from 1 at the near plane to 0 at the far one, linear in `1/z`
+    /// like the software z-buffer, and is clipped to that range.
+    pub fn gpu_clip_matrix(&self) -> Mat4 {
+        let f = self.focal();
+        let (a, k) = self.gpu_depth_terms();
+        let projection = Mat4 {
+            cols: [
+                Vec4::new(2.0 * f / self.width as f32, 0.0, 0.0, 0.0),
+                Vec4::new(0.0, 2.0 * f / self.height as f32, 0.0, 0.0),
+                Vec4::new(0.0, 0.0, k, -1.0),
+                Vec4::new(0.0, 0.0, a, 0.0),
+            ],
+        };
+        projection * self.view
+    }
+
+    /// The software z-buffer's `1/z` for a depth drawn with
+    /// [`Camera::gpu_clip_matrix`]; 0.0, nothing drawn, stays 0.0.
+    pub fn inv_z_of_gpu_depth(&self, depth: f32) -> f32 {
+        if depth <= 0.0 {
+            return 0.0;
+        }
+        let (a, k) = self.gpu_depth_terms();
+        (depth + k) / a
+    }
+
+    /// `a` and `k` of `depth = a / z - k`, which meets 1 at near and 0 at far.
+    fn gpu_depth_terms(&self) -> (f32, f32) {
+        let range = self.far - self.near;
+        (self.near * self.far / range, self.near / range)
     }
 
     /// Frustum planes in camera space.

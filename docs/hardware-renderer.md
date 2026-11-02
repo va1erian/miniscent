@@ -1,6 +1,6 @@
 # Hardware renderer: plan
 
-Status: accepted, M14.1 done and the rest not started ([status.md](status.md)). Figures
+Status: accepted, M14.1 and M14.2 done and the rest not started ([status.md](status.md)). Figures
 under "Measured" were run for this plan; all others are targets to measure. The work
 items are in [work-items.md](work-items.md) as M14.
 
@@ -90,9 +90,10 @@ and these are the arguments against:
 - **Newer drivers.** Its README requires `VK_KHR_dynamic_rendering` and its FAQ asks for
   fresh drivers. The reference machine's HD 620 was not checked against this.
 
-The build enables `vulkan`, `wgsl` and `std`, with default features off. M14.2 tries
-shipping shaders without the WGSL front end and adopts that if it saves over 300 KB
-without hurting how the shaders read.
+The build enables `vulkan`, `wgsl` and `std`, with default features off. WGSL stays, on
+measurement: on the probe, leaving out every front end saves 2 KB (3,416,064 bytes
+against 3,418,112), since wgpu links naga's validator either way, and SPIR-V costs 262
+KB more (3,680,256).
 
 Vulkan-only removes the GL constraints: storage buffers are available, so per-face data
 can live in one rather than in every vertex. Compute and bindless textures are still
@@ -110,8 +111,8 @@ crates/mscent-gpu      NEW: the hardware renderer; depends on math, world, rende
   `Arc<Window>`, so this crate needs no exception.
 - `mscent-render` does not gain a wgpu dependency, and its CPU path stays untouched
   for LazyOS.
-- A `hardware` cargo feature on `apps/game` brings it in, on by default in desktop
-  builds and turned on by the editor.
+- The editor depends on it from M14.4. A `hardware` cargo feature on `apps/game` brings
+  it into the game at M14.7, on by default in desktop builds.
 
 ### Three seams
 
@@ -200,7 +201,7 @@ Each of these carries a software fact over unchanged, so there is less to reconc
 
 | Fact | GPU choice |
 |---|---|
-| Depth is `1/z`, 0.0 means nothing drawn, the test is `iz > depth` | `Depth32Float`, cleared to 0.0, compare `Greater`, with projected depth `near/z`. This is reversed Z, already the best GPU layout, and reading it back is one division |
+| Depth is `1/z`, 0.0 means nothing drawn, the test is `iz > depth` | `Depth32Float`, cleared to 0.0, compare `Greater`, with depth running from 1 at near to 0 at far and linear in `1/z`. This is reversed Z, already the best GPU layout, and clips at far as software does. Reading it back is one division (`Camera::inv_z_of_gpu_depth`) |
 | Colour maths is in display space, on 8 bits, and 256 means full light | A non-sRGB target, so the hardware does no conversion. Light in `Rgba16Float` on the same 256 scale |
 | Mips are box-filtered by `mips.rs` and `lightmap_mips.rs` | Upload those levels, so there is no second mip generator and the GPU's own is never called |
 | `dither_of` is an integer hash of the screen position | The same hash in WGSL, on `u32` |
@@ -341,7 +342,7 @@ Each case makes two checks:
 
 There are no stored images. Each run draws both from current code, so a change to one
 side fails until the other follows. On failure the test writes `sw.png`, `hw.png` and
-`diff.png` to `target/parity/` and prints the path.
+`diff.png` to `parity/` under cargo's test directory, `target/tmp`, and prints the path.
 
 One further test asserts that `ParticleDraws` come out byte-identical. Nothing else is
 needed for the simulation, since `Game::step` does not read the renderer.
@@ -353,16 +354,18 @@ No new job. Two lines go in the existing `check` job in
 test. Runners have no GPU, so it uses Mesa's lavapipe, a CPU Vulkan driver:
 
 ```yaml
-      - run: sudo apt-get install -y mesa-vulkan-drivers
+      - run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
       - run: cargo test --workspace
         env:
           MSCENT_REQUIRE_GPU: "1" # no adapter is a failure here, a skip elsewhere
 ```
 
-Target: under 2 minutes added to a cold run and 1 to a cached one, covering the wgpu
-build, the package install and 15 small draws. If lavapipe costs more or proves flaky,
-the fallback is to take those two lines out and rely on the local run below. Parity must
-not be what makes CI slow.
+Measured in a `rust:1.98` container with no build cache, on the dev machine: 6 s for the
+package and 32 s to build the crate with its dependencies and run its tests, of which the
+parity test is 0.8 s. A GitHub runner has fewer cores, so target under 2 minutes added
+to a cold run and 1 to a cached one. If it costs more or proves flaky, the fallback is to
+take those lines out and rely on the local run below. Parity must not be what makes CI
+slow.
 
 ### Locally
 
@@ -408,7 +411,7 @@ test is a looser limit.
 | Build | Budget | Why |
 |---|---|---|
 | `--no-default-features --features desktop` (software only) | 2.2 MB, unchanged | LazyOS and the original constraint |
-| Default (with `hardware`) | Set at M14.2 from measurement; about 5.7 MB expected | Recorded in that PR, as the script's header requires |
+| Default (with `hardware`) | Set when the game first links `mscent-gpu`, at M14.7; about 5.7 MB expected | Recorded in that PR, as the script's header requires. Until then the game does not link it, and a budget would measure nothing |
 
 The editor has no size budget, and already carries more than this.
 
@@ -440,8 +443,8 @@ A GPU that cannot hold native size renders smaller and scales up, using the exis
   support on the reference machine has not been tried.
 - **The pane's paint.** Readback gets the frame to the UI thread quickly, but the software
   canvas may then be the slowest part at 4K. Unmeasured; M14.4 finds out.
-- **Mesa in CI.** Assumed, not tried: wgpu and lavapipe on `ubuntu-latest`, at usable
-  speed. M14.2 proves it, with the fallback under "In CI".
+- **Mesa in CI.** Run in a container here, not yet on `ubuntu-latest`, whose Mesa is a
+  different version. The fallback is under "In CI".
 - **Tolerance as a loophole.** Filtering, 16-pixel span subdivision against exact
   perspective, and per-span against per-pixel level of detail all differ slightly, so
   limits can't be zero. Mitigated by block error and the failing check. Software is the

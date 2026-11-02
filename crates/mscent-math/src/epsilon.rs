@@ -117,3 +117,18 @@ pub const TEXTURE_MIN_EDGE_RAMP: f32 = 1.0e-6;
 /// Length under which a random vector in the unit square is too short to give a
 /// scratch a direction it can be trusted to normalize to.
 pub const SCRATCH_MIN_DIRECTION: f32 = 0.05;
+
+/// The most the hardware renderer's frame may differ from the software one's,
+/// as a mean over its pixels, in levels of 255 per colour channel.
+pub const PARITY_MEAN_LEVELS: f32 = 1.5;
+
+/// The same, over the worst 8x8 block: a shadow or highlight that moved shows
+/// here, when a mean over the frame would average it away.
+pub const PARITY_BLOCK_LEVELS: f32 = 3.0;
+
+/// The same for `1/z`, as a mean relative difference.
+pub const PARITY_DEPTH_RELATIVE: f32 = 1.0e-3;
+
+/// How much `1/z` may jump between neighbouring pixels, relative to the nearer,
+/// before they count as an edge that the two renderers may fairly place apart.
+pub const PARITY_EDGE_DEPTH: f32 = 0.02;

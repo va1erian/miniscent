@@ -310,7 +310,7 @@ pub fn eye_of(cam: &Camera) -> Vec3 {
 
 /// Light scale (256 = full) from the face orientation: floors bright,
 /// ceilings dark, walls in between with a slight tilt by axis.
-fn orientation_light(face: &Face) -> u32 {
+pub fn orientation_light(face: &Face) -> u32 {
     let n = face.plane.normal;
     let v = 170.0 + n.z.max(0.0) * 86.0 + n.z.min(0.0) * 30.0 + n.x.abs() * 30.0;
     v.clamp(0.0, 512.0) as u32

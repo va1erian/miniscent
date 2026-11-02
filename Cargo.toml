@@ -12,6 +12,7 @@ mscent-math = { path = "crates/mscent-math" }
 mscent-world = { path = "crates/mscent-world" }
 mscent-collide = { path = "crates/mscent-collide" }
 mscent-render = { path = "crates/mscent-render" }
+mscent-gpu = { path = "crates/mscent-gpu" }
 mscent-game = { path = "crates/mscent-game" }
 mscent-platform = { path = "crates/mscent-platform" }
 mscent-script = { path = "crates/mscent-script" }
@@ -53,4 +54,7 @@ codegen-units = 1
 [profile.release.package.mscent-render]
 opt-level = 3
 [profile.release.package.mscent-math]
+opt-level = 3
+# Reading a frame back is a loop over every pixel.
+[profile.release.package.mscent-gpu]
 opt-level = 3
