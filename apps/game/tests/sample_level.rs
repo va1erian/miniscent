@@ -45,3 +45,26 @@ fn the_packed_facility_matches_its_text() {
     let _ = std::fs::remove_file(&packed);
     assert!(same, "pack facility.txt again: see the top of that file");
 }
+
+#[test]
+fn the_packed_monument_matches_its_text() {
+    let packed = std::env::temp_dir().join(format!("mscent-facing-{}.msl", std::process::id()));
+    game(&[
+        "--pack-level".as_ref(),
+        asset("facing.txt").as_os_str(),
+        packed.as_os_str(),
+    ]);
+    let same = std::fs::read(&packed).unwrap() == std::fs::read(asset("facing.msl")).unwrap();
+    let _ = std::fs::remove_file(&packed);
+    assert!(same, "pack facing.txt again: see the top of that file");
+}
+
+#[test]
+fn the_monument_has_no_vista_warnings() {
+    let text = game(&[
+        "--level".as_ref(),
+        asset("facing.msl").as_os_str(),
+        "--check".as_ref(),
+    ]);
+    assert!(!text.contains("warning:"), "{text}");
+}

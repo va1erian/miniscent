@@ -369,16 +369,12 @@ fn scene_bounds(
 }
 
 /// World position of the camera, recovered from its view transform
-/// (`p_cam = R p + t` gives `eye = -R^T t`).
+/// (`p_cam = R p + t` gives `eye = -R^T t`). It reads `R` straight from the
+/// transform: differences of transformed points lose it far from the origin,
+/// where a vista's room may be, and the eye lands metres away.
 pub fn eye_of(cam: &Camera) -> Vec3 {
-    let t = cam.world_to_camera(Vec3::ZERO);
-    let col = |axis: Vec3| cam.world_to_camera(axis) - t;
-    let (cx, cy, cz) = (
-        col(Vec3::new(1.0, 0.0, 0.0)),
-        col(Vec3::new(0.0, 1.0, 0.0)),
-        col(Vec3::new(0.0, 0.0, 1.0)),
-    );
-    Vec3::new(-cx.dot(t), -cy.dot(t), -cz.dot(t))
+    let view = cam.view();
+    -(view.rotation().transpose().mul_vec(view.translation()))
 }
 
 /// Light scale (256 = full) from the face orientation: floors bright,
