@@ -58,6 +58,9 @@ hardware (`lazyos/docs/compat/kabylake/hw-survey/03-cpuinfo.txt`).
 - **Textures from recipes.** Stock materials ship as recipes that the game runs at load, in the
   manner of .kkrieger, edited in the editor's Texture Studio ([texture-studio.md](texture-studio.md)).
   Renderer depends on `mscent-texgen` for this.
+- **Viewport surfaces.** Levels see out into larger worlds through viewport faces and layered
+  skies built from ordinary brushes and voxels ([viewports.md](viewports.md)). Not a portal system:
+  a view never recurses and nothing passes through.
 - **TexInfo.** Faces map textures with a Hammer-style per-plane `TexInfo` (axes, shift, scale,
   rotation, flips, fit, justify), not a fixed planar projection; level format version 2 stores it.
 - **Stock xui.** The editor builds against upstream xui (rev `0b1b7ef`, which has the monitor-change fix, pointer lock and F5 to F12 keys); nothing is vendored. The game has no xui dependency.
@@ -192,7 +195,6 @@ trace channel instead of printed markers, and paths from `libs/fhs`.
 ## Open questions
 
 - Should voxel volumes join the requirements? Design proposed in [voxels.md](voxels.md).
-- Should levels see out into a larger world? Viewport surfaces and layered skies are proposed in [viewports.md](viewports.md).
 - Is a weapon in scope? Enemies need some way to be handled; work item M6.5
   assumes a single primary-fire weapon and nothing else.
 - Does "point" in the game-element list mean point lights, as assumed here?

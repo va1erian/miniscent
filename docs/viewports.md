@@ -1,8 +1,9 @@
 # Viewport surfaces: plan
 
-Status: draft, nothing here is implemented. Time and size figures are targets
-to measure, not results. The work items below move to
-[work-items.md](work-items.md) as M13 once this is accepted.
+Status: built. Work items are in [work-items.md](work-items.md#m13-viewport-surfaces),
+evidence in [status.md](status.md#m13-viewport-surfaces), measurements in
+[perf/vistas.md](perf/vistas.md). "What it started from" and "Risks" stand as written
+before the work began.
 
 ## Goal
 
@@ -25,7 +26,7 @@ Not in scope:
 - Light coming in from the sky (see "Later").
 - A hardware path, or prebaked cubemaps.
 
-## What exists today
+## What it started from
 
 | Fact | Where | What it means here |
 |---|---|---|
@@ -39,7 +40,7 @@ Not in scope:
 | `NO_DRAW = 0xFFFF` is a material that is not a texture | [materials.rs](../crates/mscent-world/src/materials.rs) | Reserved ids work, and need no new face data |
 | A shot with no face under it has no impact and no scorch | `surface_at`, `face_at` in [shots.rs](../apps/game/src/session/shots.rs) | Keeping viewport faces out of `Scene::faces` gives the right behaviour for free |
 | `FAR` is 400 and `MAX_FOG_DEPTH` is 1000 | level/mod.rs, [entity.rs](../crates/mscent-world/src/entity.rs) | A view needs its own far plane and fog limit |
-| Luxels default to 0.125 units, the atlas is at most 1024x8192 (8.4 M), and an overfull atlas coarsens the **whole level** | `BakeConfig` in [lightmap/mod.rs](../crates/mscent-world/src/lightmap/mod.rs) | One 400-unit box wants 61 M luxels. A big view would blur the play space. This is the largest trap here |
+| Luxels default to 0.125 units, the atlas is at most 1024x8192 (8.4 M), and an overfull atlas coarsens the **whole level** | `BakeConfig` in [lightmap/mod.rs](../crates/mscent-world/src/lightmap/mod.rs) | A face is capped at 128 luxels a side, so one 400-unit box takes about 98 k, but a view of many faces can fill the atlas and blur the play space. This is the largest trap here |
 | `lamp_light` and mesh lighting use every lamp, without shadows | [compiled.rs](../crates/mscent-render/src/level/compiled.rs), `mesh_lighting` | A huge lamp in a view would light enemies in the play space |
 | Mips and bilinear sampling force alpha to 255, and the recipes made RGB at 128x128 | [mips.rs](../crates/mscent-render/src/mips.rs), `texture.rs:368`, the recipe `Maps` in [pack.rs](../crates/mscent-texgen/src/pack.rs) | Cutout textures need an alpha path and a recipe output |
 | `lightpanel` is the only emissive material, chosen by id | `face_shader` in [fill.rs](../crates/mscent-render/src/level/fill.rs) | Self-lit sky materials follow that precedent, without a lightmap |
@@ -131,12 +132,12 @@ scale 16 (cells of 1/8 in an 18-unit room) measured by the `scale_lightmap` exam
 
 | Scale | `f` | Faces | Atlas luxels | Voxel cell records | Chunks | Bake |
 |---|---|---|---|---|---|---|
-| 1 | 8 | 22 | 70 688 | 116 085 | 1280 | 844 ms |
-| 16 | 1 | 22 | 63 120 | 29 579 | 192 | 224 ms |
+| 1 | 8 | 22 | 70 688 | 100 477 | 1280 | 754 ms |
+| 16 | 1 | 22 | 63 120 | 26 146 | 192 | 197 ms |
 
 The atlas is the same because both rooms' big faces reach the 128-luxel cap, one at
 2.25 units a luxel and the other at 0.14, which both look 2.25 units wide. The
-saving is in the voxel cells (3.9 times fewer) and the bake (3.8 times quicker). At
+saving is in the voxel cells (3.8 times fewer) and the bake (3.8 times quicker). At
 scale 1 a range wider than 256 units cannot exist at all: a volume is at most 16
 chunks of 16 cells a side, and a level at most 65 536 chunks.
 
@@ -367,16 +368,22 @@ layers full it does nothing and says so.
 
 ## Costs and budget
 
-The reference machine still holds 60 fps with every feature on. Targets to measure at
-640x360, one worker:
+The reference machine must still hold 60 fps with every feature on. The targets at
+640x360, one worker, and what the dev machine measured ([perf/vistas.md](perf/vistas.md));
+nothing here has run on the i3-7100U:
 
-| Step | Target |
-|---|---|
-| No viewport face in view | Adds one empty-list check. `frame_bench` unchanged |
-| Filling viewport faces plus resolve | Under 0.3 ms at full-screen hole (`simd.rs` if needed) |
-| Flood and listing, per layer | Under 0.3 ms for a room of 64 brushes |
-| Layer pixels | No dearer than a flat-shaded wall for self-lit, than a Low wall for lit |
-| Lightmap | A 100-unit lit room under 5 % of the atlas (at 0.125 it would take 46 %) |
+| Step | Target | Measured |
+|---|---|---|
+| No viewport face in view | Adds one empty-list check. `frame_bench` unchanged | Unchanged: 1.34 to 1.36 ms against 1.38 to 1.39 on `main` |
+| Filling viewport faces plus resolve | Under 0.3 ms at full-screen hole | Not separated. A whole frame looking at the sky, with no layers, takes 0.83 to 0.86 ms |
+| Flood and listing, per layer | Under 0.3 ms for a room of 64 brushes | Not separated |
+| Layer pixels | First no dearer than a Low wall; changed to the frame's quality, see below | The sky alone costs what a wall does at High, 6.7 to 7.0 ms against 6.8 to 7.0. At the gate 10.1 to 10.3 ms against 7.2 to 7.3, 1.4 times |
+| Lightmap | A lit room under 5 % of the atlas | A 288-unit room of 22 faces takes 70 688 luxels, 0.84 % |
+
+Layers were to shade at Low to save time. They shade at the frame's quality instead, so
+far geometry has its bump, specular and shadows, and the demo pays 1.4 times a wall for
+it at the gate. At Low the same pose costs about 1.9 times a Low wall, because that wall
+is cheap and the layers still draw 275 000 pixels and 13 168 triangles over it.
 
 Hole pixels replace main-scene pixels, so a mostly sky view has fewer brush pixels to
 pay for. `SceneStats` gains `vista_pixels` and `vista_faces`, shown beside the existing
@@ -424,21 +431,6 @@ Pixel reads through the renderer, as everywhere else:
 - Format: round trip, versions 1 to 4 still load, tag 7 in an old version rejected, bit
   flips and out-of-range fields never panic. A slot above 7 or a NaN `parallax` is an
   `Err`. A duplicate slot and layer: the first counts, like `Entity::World`.
-
-## Work items
-
-| ID | Item | Deps | Size | Done when |
-|---|---|---|---|---|
-| M13.1 | World: `VIEW_FIRST`, `Entity::VistaLayer` as tag 7, format version 5, level text, islands | M2.6 | M | Round trip; hostile files return errors; v1 to v4 load; islands agree with a flood on generated levels |
-| M13.2 | Renderer: viewport face list, resolve, second depth plane, single-layer vista of lit faces, camera line, island flood | M13.1 | L | The tests above on occlusion, parallax, workers and islands; no-viewport levels identical; `check_frame_cost.py` before and after |
-| M13.3 | Bake: coarse luxels by island, lamps split by island, self-lit faces without luxels | M13.1 | M | The lamp and luxel-size tests; old caches still load; the atlas figure recorded |
-| M13.4 | Masked textures: alpha plane and mips, second span loop, RGBA generator, the four materials | M13.2 | M | Alpha tests; opaque textures use unchanged code and pixels; a texture sheet committed; frame cost compared |
-| M13.5 | Layers, `spin`, `pan`, per-layer fog, `Effects` time, stats | M13.2, M13.4 | M | Layer tests; a replay trace unchanged; screenshots stable at time 0 |
-| M13.6 | Editor: entity tool and panel, View entries in the material lists, warnings, New Vista, 3D view shows the sky | M13.3, M13.5 | M | `--selftest` builds a vista, paints a wall, plays it, reads a sky pixel, and undoes to the same picture |
-| M13.7 | `assets/levels/facing.txt` demo with the Monument recipe, flythrough script, measurements in `docs/perf/` | M13.6 | S | Holds budget on the dev machine; `crawl` and `stability` checked; screenshots in the PR |
-
-M13.2, M13.3 and M13.4 can run side by side. M13.2 alone already gives a working
-single-layer view, usable from level text.
 
 ## Later
 
