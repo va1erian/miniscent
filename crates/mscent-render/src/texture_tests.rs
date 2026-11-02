@@ -14,7 +14,12 @@ fn rgb(r: u8, g: u8, b: u8) -> u32 {
 fn assets_load_and_texels_read_back() {
     let table = MaterialTable::load_dir(&textures_dir()).unwrap();
     let names: Vec<&str> = table.materials.iter().map(|m| m.name.as_str()).collect();
-    assert_eq!(names, ["brick", "floor", "lightpanel", "metal", "rock"]);
+    // Levels store these ids: the first five must never move, whatever is added.
+    assert_eq!(
+        names[..5],
+        ["brick", "floor", "lightpanel", "metal", "rock"]
+    );
+    assert_eq!(names, mscent_world::materials::NAMES);
 
     // Expected values were read with an independent decoder (PIL).
     let brick = &table.get(table.find("brick").unwrap()).unwrap().texture;
