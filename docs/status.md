@@ -99,10 +99,13 @@ one. Reported by the user from a real Windows session, and what was done:
 - **Threaded Instant Play.** Play runs on a render thread (`studio/worker.rs`): input goes in over a
   bounded `try_send` channel, frames come out through a one-slot mailbox read with `try_lock`, stale
   frames are dropped, and a slow scene lowers the adaptive resolution instead of stalling the UI. A
-  panic in the scene is caught and reported. `studio/tests.rs`: with a scene that needs 100 ms per
-  frame, 200 UI ticks had a worst tick of 6.7 microseconds (mean 1.3); the scene made 6 frames and
-  the UI showed 6. `studio/race_tests.rs` covers start and stop races. Not verified: responsiveness
-  of a real window under load.
+  panic in the scene is caught and reported. `studio/tests.rs`: 200 UI ticks run while the test holds
+  a frame open, so a tick that waited for it is caught with no clock (release: p90 1 microsecond,
+  worst 2.5); uncollected frames are replaced by the newest. `studio/cache_lock_tests.rs` does the
+  same for preview and bake jobs by holding the cache lock. Tick cost is asserted at the 90th
+  percentile (`studio/tick_costs.rs`), as a single worst case measures the scheduler.
+  `studio/race_tests.rs` covers start and stop races. Not verified: responsiveness of a real window
+  under load.
 - **Hammer-style UV controls.** See the next section.
 
 Not verified: any real window, keyboard or multi-monitor use, the AVX2 paths on the i3-7100U, any

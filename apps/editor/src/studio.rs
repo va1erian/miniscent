@@ -424,3 +424,5 @@ mod race_tests;
 mod tests;
 #[cfg(test)]
 mod texture_tests;
+#[cfg(test)]
+mod tick_costs;
