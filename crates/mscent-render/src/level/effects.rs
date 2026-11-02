@@ -17,4 +17,8 @@ pub struct Effects<'a> {
     /// Where each mover is, by its order in the level. A mover with no entry
     /// is drawn as authored.
     pub poses: &'a [MoverPose],
+    /// Seconds of the game's own clock, for what a vista layer does over time
+    /// (spin and pan). It only moves cameras and textures, never the simulation;
+    /// not finite or below zero counts as 0, which is also the default.
+    pub vista_time: f32,
 }

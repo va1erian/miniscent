@@ -62,4 +62,13 @@ pub(super) const OPS: &[OpSpec] = &[
         kernel: pass_on,
         cost: Cost::Flat(0.0),
     },
+    OpSpec {
+        name: "out-alpha",
+        group: "Flow",
+        inputs: exactly(1),
+        params: &[],
+        role: Role::Output(Channel::Alpha),
+        kernel: pass_on,
+        cost: Cost::Flat(0.0),
+    },
 ];

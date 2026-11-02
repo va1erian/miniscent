@@ -112,6 +112,7 @@ const GOLDEN: &[(&str, u64)] = &[
     ("out-albedo", 0x30fa03c261f1b0d2),
     ("out-height", 0x30fa03c261f1b0d2),
     ("out-specular", 0x30fa03c261f1b0d2),
+    ("out-alpha", 0x30fa03c261f1b0d2),
 ];
 
 #[test]

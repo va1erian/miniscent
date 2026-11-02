@@ -13,6 +13,16 @@ pub struct Rect {
     pub h: u32,
 }
 
+impl Rect {
+    /// The place of a face with no luxels: it takes no room and has no gutter.
+    pub const EMPTY: Rect = Rect {
+        x: 0,
+        y: 0,
+        w: 0,
+        h: 0,
+    };
+}
+
 /// Why packing failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AtlasError {
@@ -83,8 +93,35 @@ impl Atlas {
         })
     }
 
+    /// Like [`Self::pack`], but a size of `(0, 0)` is a face with no luxels: it
+    /// gets [`Rect::EMPTY`] and costs nothing. An atlas of nothing is one row.
+    pub fn pack_sparse(
+        sizes: &[(u32, u32)],
+        width: u32,
+        max_height: u32,
+    ) -> Result<Self, AtlasError> {
+        let live: Vec<usize> = (0..sizes.len()).filter(|&i| sizes[i] != (0, 0)).collect();
+        let live_sizes: Vec<(u32, u32)> = live.iter().map(|&i| sizes[i]).collect();
+        // The packer numbers only the faces it was given; report the caller's.
+        let renumber = |e| match e {
+            AtlasError::TooWide(i) => AtlasError::TooWide(live[i]),
+            AtlasError::BadSize(i) => AtlasError::BadSize(live[i]),
+            AtlasError::TooTall => AtlasError::TooTall,
+        };
+        let packed = Self::pack(&live_sizes, width, max_height).map_err(renumber)?;
+        let mut rects = vec![Rect::EMPTY; sizes.len()];
+        for (&i, &r) in live.iter().zip(&packed.rects) {
+            rects[i] = r;
+        }
+        Ok(Self {
+            width,
+            height: packed.height.max(1),
+            rects,
+        })
+    }
+
     /// A layout from stored parts: `None` unless every rectangle is
-    /// non-empty and, with its gutter, inside the atlas.
+    /// [`Rect::EMPTY`] or non-empty and, with its gutter, inside the atlas.
     pub fn from_parts(width: u32, height: u32, rects: Vec<Rect>) -> Option<Self> {
         let fits = |pos: u32, len: u32, max: u32| {
             len > 0
@@ -96,7 +133,7 @@ impl Atlas {
         };
         let ok = rects
             .iter()
-            .all(|r| fits(r.x, r.w, width) && fits(r.y, r.h, height));
+            .all(|r| *r == Rect::EMPTY || (fits(r.x, r.w, width) && fits(r.y, r.h, height)));
         ok.then_some(Self {
             width,
             height,
@@ -121,7 +158,12 @@ impl Atlas {
     pub fn debug_ppm(&self) -> Vec<u8> {
         let (w, h) = (self.width as usize, self.height as usize);
         let mut px = vec![[0u8; 3]; w * h];
-        for (i, r) in self.rects.iter().enumerate() {
+        for (i, r) in self
+            .rects
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| **r != Rect::EMPTY)
+        {
             let colour = rect_colour(i);
             for y in r.y - PADDING..r.y + r.h + PADDING {
                 for x in r.x - PADDING..r.x + r.w + PADDING {

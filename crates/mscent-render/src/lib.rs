@@ -4,6 +4,7 @@
 //! Lighting plugs in through [`shade::SpanShader`]; BSP traversal and the
 //! worker threads are layered on top of [`raster::draw_polygon`].
 
+mod alpha;
 pub mod bump;
 pub mod camera;
 pub mod clip;
@@ -26,6 +27,7 @@ pub mod particles;
 pub mod png;
 pub mod png_encode;
 pub mod raster;
+mod raster_masked;
 pub mod recipe_texture;
 pub mod resolution;
 pub mod scene;
@@ -38,6 +40,7 @@ pub mod tiles;
 pub mod uv_luxel;
 pub mod voxel;
 
+pub use alpha::AlphaSampler;
 pub use camera::{Camera, Frustum, ScreenPoint};
 pub use draw2d::{Sprite, blit, draw_text, fill_rect, stroke_rect, text_size};
 pub use dynlight::{DynLight, MAX_DYN_LIGHTS};

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use mscent_world::lightmap::{CellSites, Lightmap, PointLight};
 
 use super::setup::{mesh_lighting, spec_tables};
+use super::vista;
 use super::{Actor, BuildConfig, FAR, NEAR, View, VoxelChange, compiled, movers, overlay};
 use crate::camera::Camera;
 use crate::lighting_shader::UvToLuxel;
@@ -25,13 +26,16 @@ pub struct LevelAssets {
     pub(super) uv_maps: Vec<Option<UvToLuxel>>,
     pub(super) spec: Vec<SpecTable>,
     pub(super) lighting: MeshLighting,
-    /// The level's lamps, for voxel surfaces made after the build.
+    /// Every lamp, and those of the play space, for voxel surfaces made after
+    /// the build: a layer's room is lit by its own lamps and the play space not.
     voxel_lights: Vec<PointLight>,
+    play_lights: Vec<PointLight>,
     /// The cells the lightmap holds records for.
     voxel_sites: CellSites,
     actors: Vec<Actor>,
     pub(super) meshes: overlay::ActorMeshes,
     pub(super) mover_faces: Vec<movers::MoverFaces>,
+    pub(super) vistas: vista::Vistas,
     cfg: BuildConfig,
 }
 
@@ -46,9 +50,12 @@ impl LevelAssets {
         let compiled::Parts {
             bsp,
             faces,
+            holes,
+            vistas,
             mover_ranges,
             portals,
-            lights,
+            lights: all_lights,
+            play_lights: lights,
             actors,
             cfg,
             voxels,
@@ -58,7 +65,8 @@ impl LevelAssets {
         // The game path pays for smooth texture sampling; the raw
         // rasterizer benchmark does not.
         let voxels = compiled::lit_voxels(voxels, bsp.leaves().len(), &sites, &lightmap);
-        let scene = Scene::with_voxels(bsp, faces, portals, materials.filtered(), voxels);
+        let scene = Scene::with_voxels(bsp, faces, portals, materials.filtered(), voxels)
+            .with_holes(&holes);
         let uv_maps = (0..scene.faces().len())
             .map(|i| {
                 let proj = lightmap.projections().get(i)?;
@@ -81,8 +89,10 @@ impl LevelAssets {
             .collect();
         Self {
             mover_faces,
+            vistas,
             lighting: mesh_lighting(&lights, cfg.ambient),
-            voxel_lights: lights,
+            voxel_lights: all_lights,
+            play_lights: lights,
             voxel_sites: sites,
             actors,
             meshes: overlay::ActorMeshes::new(),
@@ -101,20 +111,24 @@ impl LevelAssets {
 
     /// Changes voxel surfaces under the same brushes, between two frames.
     pub fn apply_voxels(&mut self, change: VoxelChange) {
-        let (lights, ambient) = (&self.voxel_lights, self.cfg.ambient);
+        let ambient = self.cfg.ambient;
         let leaves = self.scene.bsp().leaves().len();
         let (sites, lightmap) = (&self.voxel_sites, &self.lightmap);
-        self.scene.update_voxels(|voxels| match change {
-            VoxelChange::Chunks(list) => {
-                voxels.apply(list, |mesh| compiled::lamp_light(mesh, lights, ambient));
-            }
-            VoxelChange::All(world) => {
-                *voxels = voxels.remade(*world, leaves, |mesh| {
-                    compiled::lamp_light(mesh, lights, ambient)
-                });
-            }
-            VoxelChange::Restore(world) => {
-                *voxels = compiled::lit_voxels(*world, leaves, sites, lightmap);
+        let (all, play, vistas) = (&self.voxel_lights, &self.play_lights, &self.vistas);
+        self.scene.update_voxels(|voxels, bsp| {
+            let lamps = |pos| vistas.lamps_at(bsp, pos, all, play);
+            match change {
+                VoxelChange::Chunks(list) => {
+                    voxels.apply(list, |mesh| compiled::lamp_light(mesh, lamps, ambient));
+                }
+                VoxelChange::All(world) => {
+                    *voxels = voxels.remade(*world, leaves, |mesh| {
+                        compiled::lamp_light(mesh, lamps, ambient)
+                    });
+                }
+                VoxelChange::Restore(world) => {
+                    *voxels = compiled::lit_voxels(*world, leaves, sites, lightmap);
+                }
             }
         });
     }

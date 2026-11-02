@@ -35,6 +35,7 @@ fn quad(axis: usize, at: f32, a: (f32, f32), b: (f32, f32), sign: f32) -> LightF
     LightFace {
         vertices: vec![pt(a.0, b.0), pt(a.1, b.0), pt(a.1, b.1), pt(a.0, b.1)],
         normal: v3(n[0], n[1], n[2]),
+        density: Default::default(),
     }
 }
 
@@ -112,6 +113,7 @@ fn degenerate_and_hostile_faces_error() {
     let line = LightFace {
         vertices: vec![v3(0.0, 0.0, 0.0); 3],
         normal: v3(0.0, 0.0, 1.0),
+        density: Default::default(),
     };
     assert!(project_face(&line, 0, 8.0).is_err());
 }

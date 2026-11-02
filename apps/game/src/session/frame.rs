@@ -1,6 +1,7 @@
 //! Making a picture of the session: the camera for this frame, then the world,
 //! its effects and what goes over them.
 
+use mscent_collide::STEP_HZ;
 use mscent_game::Screen;
 use mscent_game::fx::combat::ViewKick;
 use mscent_math::{Quat, Vec3};
@@ -46,6 +47,13 @@ impl GameSession {
         }
     }
 
+    /// Seconds of play for what a vista does over time: the fixed steps simulated
+    /// so far plus the part of the next one, never a wall clock, so a scripted
+    /// shot is the same every run. It stands still while the game does.
+    fn vista_time(&self) -> f32 {
+        ((self.game.ticks as f64 + f64::from(self.stepper.alpha())) / STEP_HZ as f64) as f32
+    }
+
     /// Draws the current state at `width` x `height`: world, HUD, feedback
     /// and menus. `None` when the size is zero or the pose is invalid.
     pub fn render(&mut self, width: u32, height: u32) -> Option<&Framebuffer> {
@@ -77,10 +85,12 @@ impl GameSession {
             }
             None => self.draws.clear(),
         }
+        let vista_time = self.vista_time();
         let effects = Effects {
             particles: Some((&self.draws, &self.bank)),
             lights: self.fx.lights(self.renderer.scene()),
             poses: &poses,
+            vista_time,
         };
         let input = FrameInput {
             view: &view,

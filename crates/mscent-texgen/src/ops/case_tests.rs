@@ -172,7 +172,7 @@ fn case(name: &str) -> Option<Vec<(&'static str, Value)>> {
         "slope" => vec![("strength", f(12.0))],
         // These only pass their input on: the graph never runs their kernels, and
         // what they must do is give it back.
-        "store" | "out-albedo" | "out-specular" => Vec::new(),
+        "store" | "out-albedo" | "out-specular" | "out-alpha" => Vec::new(),
         "out-height" => vec![("normal_strength", f(8.0))],
         _ => return None,
     })
@@ -340,6 +340,7 @@ const GOLDEN: &[(&str, u64)] = &[
     ("out-albedo", 0xb2aa8fbdd9e99f96),
     ("out-height", 0xb2aa8fbdd9e99f96),
     ("out-specular", 0xb2aa8fbdd9e99f96),
+    ("out-alpha", 0xb2aa8fbdd9e99f96),
 ];
 
 #[test]

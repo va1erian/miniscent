@@ -385,6 +385,26 @@ Design in [voxels.md](voxels.md). The game builds the volumes' surfaces and coll
 | Merge with `main` | Done | Numbered M11 because M9 is particles and M10 scripting. Scripting took section 4 and version 3, so volumes moved to section 5 and version 4 |
 | Pre-PR review | Done | Fixed, with tests: the editor moved a volume in the CSG order on save (`model/csg_order_tests.rs`); a volume tied with a brush's order loaded; Smooth gave new solid a stale material (that test failed with the fix turned off); shapes past the range of brushes could overflow to NaN. `--dump-level` refuses volumes rather than lose them. Left for M11.3 and written into its done-when: carved rock in a `Subtract` volume shows material 0, and touching volumes do not see each other. Left: the first dab after a snapshot copies the chunk table (at most 4096 entries, once per snapshot, not measured) |
 
+## M13 Viewport surfaces
+
+Design in [viewports.md](viewports.md), measurements in [perf/vistas.md](perf/vistas.md). Nothing has been measured on the i3-7100U. The demo is `assets/levels/facing.txt` and `.msl`, with the flythrough `apps/game/scripts/facing.txt`.
+
+| ID | Status | Evidence |
+|---|---|---|
+| M13.1 | Done | `materials.rs` (`VIEW_FIRST`, `view_slot`), `Entity::VistaLayer` as tag 7, format version 5, `vista` in level text, `islands.rs`. `islands_tests`, `format_tests`: round trip, older versions load, hostile files return errors |
+| M13.2 | Done | `scene/holes.rs`, `level/vista.rs`, `framebuffer.rs` (`open_view`, `next_view_layer`, `close_view`). `tests/vista.rs`: occlusion, parallax, workers, islands; a level with no viewport face is unchanged |
+| M13.3 | Done | `LuxelDensity` on `LightFace`, `Atlas::pack_sparse`, remote lamps left out of mesh and voxel light. `tests/vista_light.rs` |
+| M13.4 | Done | `alpha.rs`, `raster_masked.rs`. `tests/masked.rs`. The four materials were first PNGs from `gen_textures.py`; M13.9 made them recipes |
+| M13.5 | Done | `spin`, `pan`, per-layer fog, `vista_time` in `level/effects.rs`, `SceneStats` figures. `tests/vista_motion.rs`, `tests/vista_alloc.rs` |
+| M13.6 | Done | `model/vista.rs`, `selftest/vista.rs`, View rows in `ui/material_list.rs`, Edit > New Vista, `vista_check.rs`, `apps/game/tests/vista_check.rs` |
+| M13.7 | Done | The demo. Looking at it found stars through the arena floor when tilted: `eye_of` lost precision far from the origin (`the_eye_is_recovered_far_from_the_origin`). `tests/vista_stability.rs` holds shimmer at the gate to its bounds; `tests/crawl.rs` was not extended to a far room |
+| M13.8 | Done | Layers shade at the frame's quality and draw voxels; `vista_scale.rs`, `x16` in level text, `voxel/mountains.rs`, Edit > New mountains. `tests/vista_voxels.rs`, `tests/vista_shadow.rs`: the floor behind a far tower reads 122 lit and 8 in shadow, at every scale. `default_workers` was already every hardware thread, with nothing in the game or editor lowering it, so it did not change |
+| M13.9 | Done | `Channel::Alpha`, `out-alpha`, `Maps.alpha`, bleed in `bake`, `encode_png_rgba`, `assets/textures/sky-*.mst`, `texstudio/alpha_tests.rs`. `CellSize::Two` and `Four`, wire codes 4 and 5. `the_shipped_stock_is_far_inside_the_directory_limits`, `a_neighbour_is_left_out_of_a_dots_search_only_when_it_cannot_reach`, `a_range_is_massifs_with_foothills_and_a_few_peaks_not_a_field_of_spikes`, `coarse_cells_still_close_the_surface_and_reach_the_peak`. Screenshots at 1, 6 and 10 s were looked at: no seams, cracks or pop in those stills |
+| Merge with `main` | Done | The Texture Studio landed during the work. `gen_textures.py` is gone, so the skies became recipes; `dots` was made about 4 times faster with the same bytes, which is what made 512 px stars affordable |
+| Pre-PR review | Done | Fixed, with tests: `Heights::at` read the next row past a column's end and could overflow before a column; `x` scales past 4096 were accepted; widening the panel's fields for a vista layer also widened every other entity's. Also, a layer's walk no longer allocates `hole_drawn`, and `Level::player_start` replaces two copies. A `mountains` line tied with a later brush was reported and is no bug: `from_text` ends in the binary reader, which refuses it |
+
+Known and left: at Low on one worker the gate costs about 1.9 times a Low wall. `VISTA_VOXEL_TRIS` is soft, because cells on a chunk's border never merge, so a denser level can pass it. The mountains have one material and no snowline, so they read a little uniform. A voxel face with a cutout texture ignores the alpha. Sky recipes add about 170 ms to every level's load. The Studio has no tab for alpha alone; selecting the `out-alpha` block shows the mask. `vista_warnings` compiles the level again on each preview build, off the UI thread. A voxel vertex in a solid leaf of a layer's room takes the play space's lamps until the next bake. `Holes::new` clones its faces once per build. The stock names are listed in `LISTING_ORDER`, the Studio's `STOCK`, `materials.txt` and the test fixture.
+
 ## M14 Hardware renderer
 
 Design in [hardware-renderer.md](hardware-renderer.md). The GPU draws the sky and flat faces, offscreen; nothing but tests and `gpu_shot` use it yet.

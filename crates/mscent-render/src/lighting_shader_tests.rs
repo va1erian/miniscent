@@ -53,6 +53,7 @@ pub(super) fn baked() -> Lightmap {
     let face = LightFace {
         vertices: wall().iter().map(|v| v.pos).collect(),
         normal: Vec3::new(0.0, 0.0, 1.0),
+        density: Default::default(),
     };
     let lamp = PointLight {
         position: Vec3::new(-1.5, 0.0, 0.0),

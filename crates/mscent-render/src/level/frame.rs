@@ -56,10 +56,13 @@ impl LevelRenderer {
         let frame = self.frame_for(&mut slot, fb.width(), fb.height())?;
         let mut stats = assets.scene.list_frame_voxels(
             &cam,
-            None,
             &mut frame.faces,
             &mut frame.voxels.candidates,
+            &mut frame.holes,
         );
+        let size = (fb.width(), fb.height());
+        let time = effects.vista_time;
+        stats.vista_faces = self.list_vistas(view, size, &frame.holes, time, &mut frame.layers);
         frame
             .voxels
             .prepare(assets.scene.voxels(), &cam, eye_of(&cam), |leaf| {
@@ -73,11 +76,14 @@ impl LevelRenderer {
                 })
             });
         stats.voxel_triangles = frame.voxels.triangles;
+        stats.vista_triangles = frame.layers.iter().map(|l| l.voxel_triangles()).sum();
         self.list_movers(&cam, effects.poses, &mut frame.movers);
         self.list_actors(&cam, actors, lights, frame);
         let (faces, meshes, movers) = (&frame.faces, &frame.actors, &frame.movers);
         let voxels = &frame.voxels;
+        let (holes, layers) = (&frame.holes, &frame.layers);
         let (pixels, spans) = (AtomicU32::new(0), AtomicU32::new(0));
+        let vista_pixels = AtomicU32::new(0);
         let eye = eye_of(&cam);
         let texture_of = |id: u16| assets.scene.texture_of(id);
         let voxel_fill = FillContext {
@@ -100,15 +106,23 @@ impl LevelRenderer {
             let vox = fill_voxels(band, voxels, &voxel_fill);
             let st = self.fill_level(band, faces, quality, eye, lights);
             assets.meshes.fill(band, meshes, assets.fog());
+            // Last of the solid things, so it shades only what they left showing.
+            let sky = self.fill_vistas(band, holes, layers, quality);
             if let Some((draws, bank)) = effects.particles {
                 draw_particles(band, draws, bank);
             }
-            pixels.fetch_add(moved.pixels + vox.pixels + st.pixels, Ordering::Relaxed);
-            spans.fetch_add(moved.spans + vox.spans + st.spans, Ordering::Relaxed);
+            vista_pixels.fetch_add(sky.pixels, Ordering::Relaxed);
+            let drawn = moved.pixels + vox.pixels + st.pixels + sky.pixels;
+            pixels.fetch_add(drawn, Ordering::Relaxed);
+            spans.fetch_add(
+                moved.spans + vox.spans + st.spans + sky.spans,
+                Ordering::Relaxed,
+            );
         });
         frame.tiles.composite(fb).ok()?;
         stats.pixels = pixels.into_inner();
         stats.spans = spans.into_inner();
+        stats.vista_pixels = vista_pixels.into_inner();
         Some(stats)
     }
 }

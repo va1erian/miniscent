@@ -1,0 +1,18 @@
+miniscent-recipe 1
+size 512 512
+gloss 0
+# Cover: fractal noise, thresholded to a soft edge and held below full alpha so
+# the sheet thins the stars and the planet instead of hiding them.
+op 0 0 1 noise freq_x=3 freq_y=3 octaves=5 persistence=0.55 seed=41
+op 0 1 1 range in_low=0.4 in_high=0.72 out_high=0.9
+op 0 2 1 store name=cover
+op 0 3 1 out-alpha
+# Colour: grey-blue shadow to white by density, with a finer noise breaking up
+# the flat tops.
+op 3 0 1 load name=cover
+op 4 0 1 noise freq_x=8 freq_y=7 octaves=3 persistence=0.55 seed=42 color0=0.55,0.55,0.55
+op 1 1 1 flat color=0.6,0.66,0.8
+op 2 1 1 flat color=0.98,0.98,1
+op 3 1 2 merge mode=multiply
+op 1 2 3 mask
+op 1 3 1 out-albedo

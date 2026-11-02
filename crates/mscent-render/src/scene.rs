@@ -17,6 +17,8 @@
 //! can skip covered work. When the eye is inside solid space there is no
 //! sensible portal flood, so every leaf counts as visible.
 
+mod holes;
+mod pan;
 mod prep;
 mod reach;
 mod surface;
@@ -27,7 +29,7 @@ pub use reach::LightReach;
 pub use surface::Surface;
 
 use mscent_math::{Aabb, DPlane, Vec3};
-use mscent_world::{Bsp, Face, LeafKind, Portals};
+use mscent_world::{Bsp, Face, Islands, LeafId, LeafKind, Portals};
 
 use crate::camera::Camera;
 use crate::framebuffer::Framebuffer;
@@ -59,6 +61,12 @@ pub struct SceneStats {
     pub spans: u32,
     /// Voxel triangles submitted.
     pub voxel_triangles: u32,
+    /// Pixels drawn through viewport faces; `pixels` counts them too.
+    pub vista_pixels: u32,
+    /// Faces listed for the layers of the vistas in view.
+    pub vista_faces: u32,
+    /// Voxel triangles submitted for the layers of the vistas in view.
+    pub vista_triangles: u32,
 }
 
 /// A compiled level ready to draw.
@@ -73,6 +81,7 @@ pub struct Scene {
     node_bounds: Vec<Aabb>,
     portal_info: Vec<PortalInfo>,
     voxels: VoxelScene,
+    holes: holes::Holes,
 }
 
 impl Scene {
@@ -102,7 +111,8 @@ impl Scene {
             })
             .collect();
         let leaf_faces = prep::leaf_faces(bsp.leaves().len(), &faces);
-        let node_bounds = bounds_with_voxels(&bsp, &leaf_faces, &polys, &voxels);
+        let holes = holes::Holes::default();
+        let node_bounds = scene_bounds(&bsp, &leaf_faces, &polys, &voxels, &holes);
         let portal_info = portals
             .portals()
             .iter()
@@ -127,7 +137,27 @@ impl Scene {
             node_bounds,
             portal_info,
             voxels,
+            holes,
         }
+    }
+
+    /// This scene with viewport faces, each paired with its slot. Like voxels,
+    /// they count towards the bounds of their leaves: a room walled only by them
+    /// has no faces of its own, and the walk would cull it.
+    pub(crate) fn with_holes(mut self, faces: &[(Face, u8)]) -> Self {
+        self.holes = holes::Holes::new(self.bsp.leaves().len(), faces);
+        self.refresh_bounds();
+        self
+    }
+
+    fn refresh_bounds(&mut self) {
+        self.node_bounds = scene_bounds(
+            &self.bsp,
+            &self.leaf_faces,
+            &self.polys,
+            &self.voxels,
+            &self.holes,
+        );
     }
 
     pub fn voxels(&self) -> &VoxelScene {
@@ -135,10 +165,9 @@ impl Scene {
     }
 
     /// Changes the voxel surfaces under a level whose brushes stay as they are.
-    pub(crate) fn update_voxels(&mut self, change: impl FnOnce(&mut VoxelScene)) {
-        change(&mut self.voxels);
-        self.node_bounds =
-            bounds_with_voxels(&self.bsp, &self.leaf_faces, &self.polys, &self.voxels);
+    pub(crate) fn update_voxels(&mut self, change: impl FnOnce(&mut VoxelScene, &Bsp)) {
+        change(&mut self.voxels, &self.bsp);
+        self.refresh_bounds();
     }
 
     pub fn bsp(&self) -> &Bsp {
@@ -198,30 +227,32 @@ impl Scene {
         texture: Option<&Texture>,
         list: &mut PolyList,
     ) -> SceneStats {
-        self.list_frame_voxels(cam, texture, list, &mut Vec::new())
+        let lists = walk::Lists {
+            faces: Some(list),
+            chunks: &mut Vec::new(),
+            holes: None,
+            pan: None,
+        };
+        self.list_all(cam, texture, lists)
     }
 
     /// [`Self::list_frame`], replacing `chunks` with the voxel chunks of the
-    /// visible leaves, nearest first.
+    /// visible leaves, nearest first, and `holes` with the viewport faces.
     pub(crate) fn list_frame_voxels(
         &self,
         cam: &Camera,
-        texture: Option<&Texture>,
         list: &mut PolyList,
         chunks: &mut Vec<u32>,
+        holes: &mut PolyList,
     ) -> SceneStats {
-        list.clear();
-        let stats = self.visible_set(cam, chunks);
-        for &fi in &stats.drawn {
-            let (Some(face), Some(poly)) =
-                (self.faces.get(fi as usize), self.polys.get(fi as usize))
-            else {
-                continue;
-            };
-            let tex = texture.unwrap_or_else(|| self.texture_of(face.material));
-            list.push(cam, poly, tex, fi);
-        }
-        stats
+        holes.clear();
+        let lists = walk::Lists {
+            faces: Some(list),
+            chunks,
+            holes: Some(holes),
+            pan: None,
+        };
+        self.list_all(cam, None, lists)
     }
 
     /// What `cam` can see, with no rasterizer in it: the faces in the returned
@@ -229,7 +260,25 @@ impl Scene {
     /// visible leaves in `chunks`, nearest first. A renderer does its own
     /// clipping and projection from here.
     pub fn visible_set(&self, cam: &Camera, chunks: &mut Vec<u32>) -> SceneStats {
-        chunks.clear();
+        let lists = walk::Lists {
+            faces: None,
+            chunks,
+            holes: None,
+            pan: None,
+        };
+        self.list_all(cam, None, lists)
+    }
+
+    fn list_all(
+        &self,
+        cam: &Camera,
+        texture: Option<&Texture>,
+        mut lists: walk::Lists<'_>,
+    ) -> SceneStats {
+        if let Some(faces) = lists.faces.as_deref_mut() {
+            faces.clear();
+        }
+        lists.chunks.clear();
         let eye = eye_of(cam);
         let leaf = self.bsp.leaf_at_f32(eye);
         let visible = if self.bsp.leaf_kind(leaf) == LeafKind::Empty {
@@ -237,7 +286,48 @@ impl Scene {
         } else {
             vec![true; self.bsp.leaves().len()]
         };
-        let mut w = walk::Walk::new(self, chunks, cam, eye, visible);
+        let mut w = walk::Walk::new(self, lists, cam, eye, visible, texture);
+        w.visit(self.bsp.root());
+        w.finish()
+    }
+
+    /// Lists a vista layer's faces from `cam`, replacing `list`: only leaves of
+    /// `island`, seen through the screen `window`. An eye that parallax has
+    /// carried out of the island sees all of it, and culling does the rest; the
+    /// whole-level answer a frame gives for an eye in solid would show other rooms.
+    /// `pan` is how many texels the layer's self-lit faces have scrolled, with
+    /// storage for the shifted vertices; `None` lists every face as authored.
+    /// `chunks` gets the voxel chunks of the visible leaves of the island, which
+    /// is why another room's voxels never show.
+    pub(crate) fn list_layer(
+        &self,
+        cam: &Camera,
+        islands: &Islands,
+        island: u32,
+        window: [f32; 4],
+        (list, chunks): (&mut PolyList, &mut Vec<u32>),
+        pan: Option<([f32; 2], &mut Vec<Vertex>)>,
+    ) -> SceneStats {
+        list.clear();
+        chunks.clear();
+        let eye = eye_of(cam);
+        let leaf = self.bsp.leaf_at_f32(eye);
+        let mut visible = if islands.island_of(leaf) == Some(island) {
+            visible::visible_through(self, cam, eye, leaf, window)
+        } else {
+            vec![true; self.bsp.leaves().len()]
+        };
+        // A flood out of budget also says "everything".
+        for (id, seen) in (0u32..).zip(&mut visible) {
+            *seen = *seen && islands.island_of(LeafId(id)) == Some(island);
+        }
+        let lists = walk::Lists {
+            faces: Some(list),
+            chunks,
+            holes: None,
+            pan: pan.map(|(texels, scratch)| pan::Pan { texels, scratch }),
+        };
+        let mut w = walk::Walk::new(self, lists, cam, eye, visible, None);
         w.visit(self.bsp.root());
         w.finish()
     }
@@ -277,13 +367,18 @@ impl Scene {
     }
 }
 
-fn bounds_with_voxels(
+fn scene_bounds(
     bsp: &Bsp,
     leaf_faces: &[Vec<u32>],
     polys: &[Vec<Vertex>],
     voxels: &VoxelScene,
+    holes: &holes::Holes,
 ) -> Vec<Aabb> {
     let mut boxes = prep::leaf_boxes(leaf_faces, polys);
+    let hole_boxes = prep::leaf_boxes(&holes.leaf_holes, &holes.polys);
+    for (slot, hole) in boxes.iter_mut().zip(hole_boxes) {
+        *slot = slot.union(hole);
+    }
     for (slot, list) in boxes.iter_mut().zip(&voxels.leaf_chunks) {
         for chunk in list
             .iter()
@@ -296,16 +391,12 @@ fn bounds_with_voxels(
 }
 
 /// World position of the camera, recovered from its view transform
-/// (`p_cam = R p + t` gives `eye = -R^T t`).
+/// (`p_cam = R p + t` gives `eye = -R^T t`). It reads `R` straight from the
+/// transform: differences of transformed points lose it far from the origin,
+/// where a vista's room may be, and the eye lands metres away.
 pub fn eye_of(cam: &Camera) -> Vec3 {
-    let t = cam.world_to_camera(Vec3::ZERO);
-    let col = |axis: Vec3| cam.world_to_camera(axis) - t;
-    let (cx, cy, cz) = (
-        col(Vec3::new(1.0, 0.0, 0.0)),
-        col(Vec3::new(0.0, 1.0, 0.0)),
-        col(Vec3::new(0.0, 0.0, 1.0)),
-    );
-    Vec3::new(-cx.dot(t), -cy.dot(t), -cz.dot(t))
+    let view = cam.view();
+    -(view.rotation().transpose().mul_vec(view.translation()))
 }
 
 /// Light scale (256 = full) from the face orientation: floors bright,

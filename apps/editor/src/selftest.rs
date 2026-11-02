@@ -33,6 +33,7 @@ mod texture_paint;
 mod texture_stock;
 mod texture_tutorial;
 mod timing;
+mod vista;
 mod voxel;
 
 /// Ticks the UI `n` times, 16 ms apart, so the render thread's frames arrive
@@ -127,6 +128,12 @@ pub fn run(dir: &Path) -> i32 {
         (1280.0, 800.0),
         voxel::script,
     );
+    let vistas = run_theme(
+        &dir.join("vista"),
+        Theme::light(),
+        (1280.0, 800.0),
+        vista::script,
+    );
     // Text is measured apart from how it is painted, which only shows when scaled.
     let scaled = run_at(
         &dir.join("guide-scaled"),
@@ -145,6 +152,7 @@ pub fn run(dir: &Path) -> i32 {
         .max(voxels)
         .max(textures)
         .max(tutorial)
+        .max(vistas)
 }
 
 fn run_theme(

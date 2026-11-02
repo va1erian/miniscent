@@ -54,14 +54,21 @@ impl Rect {
 
 /// Visibility flags per leaf, indexed by leaf id.
 pub(super) fn visible_leaves(scene: &Scene, cam: &Camera, eye: Vec3, start: LeafId) -> Vec<bool> {
+    let screen = [0.0, 0.0, cam.width() as f32, cam.height() as f32];
+    visible_through(scene, cam, eye, start, screen)
+}
+
+/// [`visible_leaves`] through the screen window `[x0, y0, x1, y1]`.
+pub(super) fn visible_through(
+    scene: &Scene,
+    cam: &Camera,
+    eye: Vec3,
+    start: LeafId,
+    [x0, y0, x1, y1]: [f32; 4],
+) -> Vec<bool> {
     let leaf_count = scene.bsp.leaves().len();
     let mut seen: Vec<Option<Rect>> = vec![None; leaf_count];
-    let screen = Rect {
-        x0: 0.0,
-        y0: 0.0,
-        x1: cam.width() as f32,
-        y1: cam.height() as f32,
-    };
+    let screen = Rect { x0, y0, x1, y1 };
     let Some(slot) = seen.get_mut(start.0 as usize) else {
         return vec![true; leaf_count];
     };

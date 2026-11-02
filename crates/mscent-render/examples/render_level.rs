@@ -63,10 +63,12 @@ impl Shots {
         let png = encode_png(WIDTH, HEIGHT, fb.pixels()).expect("encode");
         std::fs::write(self.out.join(format!("{name}.png")), png).expect("write png");
         println!(
-            "{name}: {:?} {ms:.1} ms, {} faces, {} pixels",
+            "{name}: {:?} {ms:.1} ms, {} faces, {} pixels, {} vista faces, {} vista pixels",
             quality,
             stats.drawn.len(),
-            stats.pixels
+            stats.pixels,
+            stats.vista_faces,
+            stats.vista_pixels
         );
     }
 }

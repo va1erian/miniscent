@@ -20,6 +20,11 @@ fn stock_texture<'a>(table: &'a MaterialTable, name: &str) -> &'a Texture {
     &table.get(table.find(name).unwrap()).unwrap().texture
 }
 
+/// The four sky materials, which are self-lit cutouts and make no height or normals.
+fn is_sky(name: &str) -> bool {
+    name.starts_with("sky-")
+}
+
 fn solid(name: &str) -> Material {
     Material {
         name: name.to_string(),
@@ -44,21 +49,38 @@ fn assets_load_and_texels_read_back() {
             "cap",
             "coral",
             "stem",
-            "wax"
+            "wax",
+            "sky-stars",
+            "sky-clouds",
+            "sky-ridge",
+            "sky-planet"
         ]
     );
 
     for name in names {
         let (tex, maps) = (stock_texture(&table, name), baked(name));
-        assert_eq!((tex.width(), tex.height()), (128, 128), "{name}");
-        assert_eq!((tex.width(), tex.height()), (maps.width, maps.height));
-        let heights = maps.heights.as_ref().unwrap();
+        let (w, h) = (maps.width, maps.height);
+        assert_eq!((tex.width(), tex.height()), (w, h), "{name}");
+        // The sky materials are self-lit and have no relief to read back.
+        assert_eq!(tex.has_heights(), !is_sky(name), "{name}");
         // Corners, an interior texel and a texel on the other side of a tile.
-        for (x, y) in [(0, 0), (5, 7), (127, 127), (64, 3), (3, 64)] {
-            let i = y as usize * 128 + x as usize;
+        for (x, y) in [(0, 0), (5, 7), (w - 1, h - 1), (64, 3), (3, 64)] {
+            let i = (y * w + x) as usize;
+            let (x, y) = (x as i32, y as i32);
             assert_eq!(tex.texel(x, y), maps.albedo[i], "{name} albedo {x},{y}");
-            assert_eq!(tex.height_at(x, y), Some(heights[i]), "{name} height");
+            let height = maps.heights.as_ref().map(|heights| heights[i]);
+            assert_eq!(tex.height_at(x, y), height, "{name} height");
         }
+    }
+    // Cutouts keep their alpha, and the opaque ones keep no plane.
+    for (name, masked) in [
+        ("sky-stars", false),
+        ("sky-clouds", true),
+        ("sky-ridge", true),
+        ("sky-planet", true),
+        ("brick", false),
+    ] {
+        assert_eq!(stock_texture(&table, name).is_masked(), masked, "{name}");
     }
     // The recipes differ, so reading the wrong file would show.
     assert_ne!(
@@ -72,6 +94,10 @@ fn normal_maps_decode_to_unit_vectors() {
     let table = MaterialTable::load_dir(&textures_dir()).unwrap();
     for (_, m) in table.iter() {
         let tex = &m.texture;
+        if is_sky(&m.name) {
+            assert!(!tex.has_normals() && !tex.has_heights(), "{}", m.name);
+            continue;
+        }
         assert!(tex.has_normals() && tex.has_heights(), "{}", m.name);
         let mut tilted = false;
         for y in 0..128 {
@@ -122,6 +148,10 @@ fn only_metal_and_floor_have_a_mask() {
     for (_, m) in table.iter() {
         let expected = matches!(m.name.as_str(), "metal" | "floor");
         let masked = m.texture.spec_mean() < 1.0;
+        if is_sky(&m.name) {
+            assert!(!masked, "{} has no mask", m.name);
+            continue;
+        }
         assert_eq!(
             masked,
             expected,
@@ -195,10 +225,12 @@ fn a_retired_id_holds_its_place_and_finds_nothing() {
 }
 
 /// Saved levels and the voxel generators store these ids, and only the first five
-/// are checked when a level is built.
+/// are checked when a level is built. The sky materials are held the same way.
 #[test]
-fn the_living_materials_keep_their_ids_in_the_real_manifest() {
-    use mscent_world::materials::{BARK, CAP, CORAL, STEM, WAX};
+fn the_living_and_sky_materials_keep_their_ids_in_the_real_manifest() {
+    use mscent_world::materials::{
+        BARK, CAP, CORAL, SKY_CLOUDS, SKY_PLANET, SKY_RIDGE, SKY_STARS, STEM, WAX,
+    };
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures");
     let table = MaterialTable::load_dir(&dir).expect("loads");
     for (id, name) in [
@@ -207,7 +239,32 @@ fn the_living_materials_keep_their_ids_in_the_real_manifest() {
         (CORAL, "coral"),
         (STEM, "stem"),
         (WAX, "wax"),
+        (SKY_STARS, "sky-stars"),
+        (SKY_CLOUDS, "sky-clouds"),
+        (SKY_RIDGE, "sky-ridge"),
+        (SKY_PLANET, "sky-planet"),
     ] {
         assert_eq!(table.find(name), Some(MaterialId(id)), "{name}");
     }
+}
+
+#[test]
+fn filtering_a_table_keeps_each_materials_coverage() {
+    let cut = Texture::new(2, 2, vec![0xff11_2233; 4])
+        .unwrap()
+        .with_alpha(vec![0, 0, 255, 255])
+        .unwrap();
+    let mut table = MaterialTable::new();
+    let id = table
+        .add(Material {
+            name: "cut".into(),
+            gloss: 0,
+            texture: cut,
+        })
+        .unwrap();
+    let filtered = table.clone().filtered();
+    let t = &filtered.get(id).unwrap().texture;
+    assert!(t.is_masked());
+    assert_eq!(t.alpha_sampler(1).unwrap().nearest(0, 0), 127);
+    assert!(!table.get(id).unwrap().texture.is_filtered());
 }

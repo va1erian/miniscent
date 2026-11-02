@@ -318,6 +318,10 @@ fn entities(pen: &mut Pen, scene: &Scene) {
                     1.0,
                 );
             }
+            Entity::VistaLayer { .. } => {
+                let col = Color::rgb(170, 120, 220);
+                pen.canvas.stroke_ellipse(c, r, r, col, 2.0 * pen.s);
+            }
             Entity::Marker { .. } => {
                 let col = Color::rgb(230, 190, 70);
                 let i = r as i32;

@@ -1,0 +1,10 @@
+# Monument flythrough: down the platform towards the gate, a look up at the planet,
+# a turn across the towers and a look back. Parallax shows on the way, the sky's
+# spin and the clouds' drift while the ship stands still.
+at 0.2s hold W for 3.0s
+at 5.0s mouse 0 -160 over 0.5s
+at 8.0s mouse 0 160 over 0.5s
+at 9.0s mouse 300 0 over 0.8s
+at 11.0s mouse -600 0 over 1.2s
+at 14.0s mouse 300 0 over 0.8s
+at 15.0s hold S for 2.0s

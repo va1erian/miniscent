@@ -1,0 +1,39 @@
+miniscent-recipe 1
+size 512 256
+gloss 0
+# Two mountain lines, far and light behind near and dark: opaque below a ridge, clear
+# above. A noise with no cells down the tile varies only along it, so it is a height
+# line that repeats at the seam. A hard edge (`stripes` with no cycles across, so it
+# has no seam) is moved up and down by that line, as `distort` reads its map as a
+# shift, which leaves the ridge an exact anti-aliased edge. The shift wraps over the
+# top and bottom of the tile, so the two edges after it put back the clear sky and the
+# solid ground it would have spoilt.
+# Far line.
+op 0 0 1 stripes cycles_x=0 cycles_y=1 duty=0.42 color0=1,1,1 color1=0,0,0
+op 1 0 1 noise freq_x=3 freq_y=0 octaves=4 persistence=0.5 seed=71
+op 0 1 2 distort amount=0.3
+op 2 1 1 stripes cycles_x=0 cycles_y=1 duty=0.8 color0=1,1,1 color1=0,0,0
+op 0 2 3 merge mode=max
+op 3 2 1 stripes cycles_x=0 cycles_y=1 duty=0.2 color0=1,1,1 color1=0,0,0
+op 0 3 4 merge mode=multiply
+op 0 4 1 store name=far
+# Near line.
+op 6 0 1 stripes cycles_x=0 cycles_y=1 duty=0.58 color0=1,1,1 color1=0,0,0
+op 7 0 1 noise freq_x=7 freq_y=0 octaves=5 persistence=0.55 seed=72
+op 6 1 2 distort amount=0.3
+op 8 1 1 stripes cycles_x=0 cycles_y=1 duty=0.8 color0=1,1,1 color1=0,0,0
+op 6 2 3 merge mode=max
+op 9 2 1 stripes cycles_x=0 cycles_y=1 duty=0.2 color0=1,1,1 color1=0,0,0
+op 6 3 4 merge mode=multiply
+op 6 4 1 store name=near
+# Cover is both lines.
+op 0 5 1 load name=far
+op 1 5 1 load name=near
+op 0 6 2 merge mode=max
+op 0 7 1 out-alpha
+# Colour: pale blue far, near navy, each streaked down the tile like forest and scree.
+op 0 8 1 noise freq_x=40 freq_y=0 octaves=2 seed=73 color0=0.3,0.38,0.56 color1=0.43,0.51,0.69
+op 1 8 1 noise freq_x=60 freq_y=0 octaves=2 seed=74 color0=0.02,0.03,0.07 color1=0.08,0.1,0.18
+op 2 8 1 load name=near
+op 0 9 3 mask
+op 0 10 1 out-albedo

@@ -165,6 +165,22 @@ Design and what was built in [texture-studio.md](texture-studio.md). All done.
 | M12.10 | Stock recipes for all five materials with `out-specular` for `metal` and `floor` (closes M5.7), retire `gen_textures.py`; a compressing PNG encoder if file size needs it | M12.7 | M | Side-by-side contact sheet reviewed by the owner; full test suite passes, with snapshot changes explained; CI checks that committed PNGs equal the recipe output; assets size recorded |
 | M12.11 | Game builds materials from recipes at load | M12.10 | M | Decided on measured numbers: binary size against the budget, load time against the 67 ms PNG decode noted in `build.rs` |
 
+## M13 Viewport surfaces
+
+Design in [viewports.md](viewports.md); status in [status.md](status.md#m13-viewport-surfaces). All done. Levels with no viewport face draw the same pixels.
+
+| ID | Item | Deps | Size | Done when |
+|---|---|---|---|---|
+| M13.1 | World: `VIEW_FIRST`, `Entity::VistaLayer` as tag 7, format version 5, level text, islands | M2.6 | M | Round trip; hostile files return errors; v1 to v4 load; islands agree with a flood on generated levels |
+| M13.2 | Renderer: viewport face list, resolve, second depth plane, single-layer vista of lit faces, camera line, island flood | M13.1 | L | The tests in viewports.md on occlusion, parallax, workers and islands; no-viewport levels identical; `check_frame_cost.py` before and after |
+| M13.3 | Bake: coarse luxels by island, lamps split by island, self-lit faces without luxels | M13.1 | M | The lamp and luxel-size tests; old caches still load; the atlas figure recorded |
+| M13.4 | Masked textures: alpha plane and mips, second span loop, the four materials | M13.2 | M | Alpha tests; opaque textures use unchanged code and pixels; frame cost compared |
+| M13.5 | Layers, `spin`, `pan`, per-layer fog, `Effects` time, stats | M13.2, M13.4 | M | Layer tests; a replay trace unchanged; screenshots stable at time 0 |
+| M13.6 | Editor: entity tool and panel, View entries in the material lists, warnings, New Vista, 3D view shows the sky | M13.3, M13.5 | M | `--selftest` builds a vista, paints a wall, plays it, reads a sky pixel, and undoes to the same picture |
+| M13.7 | `assets/levels/facing.txt` demo with the Monument recipe, flythrough script | M13.6 | S | Holds budget on the dev machine; `crawl` and `stability` checked |
+| M13.8 | Layers at the frame's quality, voxels in layers, scale in level text and the editor, `mountains`, New mountains | M13.7, M11.4 | L | Shadows read from pixels at every scale; a range at scale 16 bakes less than at scale 1; `default_workers` checked |
+| M13.9 | Sky materials as recipes, `out-alpha`, Studio preview of a mask; demo mountains in budget | M13.8, M12.11 | M | The sky PNGs are gone; masked recipes load, preview and save; the demo stays under `VISTA_VOXEL_TRIS` across its platform |
+
 ## M14 Hardware renderer
 
 Design in [hardware-renderer.md](hardware-renderer.md).

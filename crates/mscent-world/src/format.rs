@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! magic   "MSLV"           4 bytes
-//! version u16              currently 4 (1 to 3 are still read)
+//! version u16              currently 5 (1 to 4 are still read)
 //! flags   u16              reserved, must be 0
 //! count   u32              number of sections (<= MAX_SECTIONS)
 //! section*: id u32, len u32, payload[len]
@@ -14,7 +14,8 @@
 //! reserved for compiled data, which the loader skips because it recompiles
 //! from brushes; `4` labels (`format_labels.rs`, version 3, written only when
 //! there are any); `5` voxel volumes (`voxel/wire.rs`, version 4, likewise).
-//! Unknown section ids are skipped for forward compatibility.
+//! Unknown section ids are skipped for forward compatibility. Entity tag `7`, a
+//! vista layer, is version 5; an older file with it is rejected.
 //! Brushes are stored as raw planes and rebuilt through [`Brush::new`], so a
 //! hostile file cannot smuggle in an invalid brush. Version 2 follows each
 //! brush's planes with one TexInfo record per plane (`texinfo.rs`, 47 bytes);
@@ -34,7 +35,7 @@ use crate::voxel::wire::{check_orders, read_volumes, write_volumes};
 use mscent_math::{DPlane, Vec3d};
 
 pub const MAGIC: [u8; 4] = *b"MSLV";
-pub const VERSION: u16 = 4;
+pub const VERSION: u16 = 5;
 /// Oldest version [`read`] still accepts.
 const MIN_VERSION: u16 = 1;
 pub const MAX_FILE_BYTES: usize = 64 << 20;
@@ -50,6 +51,8 @@ const SEC_VOLUMES: u32 = 5;
 const LABELS_VERSION: u16 = 3;
 /// First version whose volumes section the reader understands.
 const VOLUMES_VERSION: u16 = 4;
+/// First version whose entities may be vista layers (tag 7).
+const VISTA_VERSION: u16 = 5;
 
 /// Smallest brush record: op, order, material, plane count.
 const BRUSH_HEAD: usize = 1 + 4 + 2 + 4;
@@ -147,6 +150,7 @@ fn write_entities(entities: &[Entity]) -> Vec<u8> {
             Entity::World { .. } => 4,
             Entity::Marker { .. } => 5,
             Entity::Zone { .. } => 6,
+            Entity::VistaLayer { .. } => 7,
         });
         put_vec3(&mut out, e.pos());
         match *e {
@@ -169,6 +173,27 @@ fn write_entities(entities: &[Entity]) -> Vec<u8> {
             } => {
                 put_f32(&mut out, fog_start);
                 put_f32(&mut out, fog_end);
+            }
+            Entity::VistaLayer {
+                centre,
+                slot,
+                layer,
+                parallax,
+                spin,
+                pan,
+                fog_start,
+                fog_end,
+                fog_color,
+                ..
+            } => {
+                put_vec3(&mut out, centre);
+                out.extend_from_slice(&[slot, layer]);
+                put_f32(&mut out, parallax);
+                put_vec3(&mut out, spin);
+                pan.iter().for_each(|&v| put_f32(&mut out, v));
+                put_f32(&mut out, fog_start);
+                put_f32(&mut out, fog_end);
+                put_u32(&mut out, fog_color);
             }
         }
     }
@@ -202,7 +227,7 @@ pub fn read(data: &[u8]) -> Result<Level, FormatError> {
         let body = c.take(len)?;
         match id {
             SEC_BRUSHES => store(&mut brushes, id, read_brushes(body, version))?,
-            SEC_ENTITIES => store(&mut entities, id, read_entities(body))?,
+            SEC_ENTITIES => store(&mut entities, id, read_entities(body, version))?,
             SEC_LABELS if version >= LABELS_VERSION => store(&mut labels, id, read_labels(body))?,
             SEC_VOLUMES if version >= VOLUMES_VERSION => {
                 store(&mut volumes, id, read_volumes(body))?;
@@ -302,12 +327,12 @@ fn read_brush(c: &mut Cursor, version: u16) -> Result<Brush, FormatError> {
     Brush::new_textured(&planes, &infos, op, order).map_err(FormatError::Brush)
 }
 
-fn read_entities(body: &[u8]) -> Result<Vec<Entity>, FormatError> {
+fn read_entities(body: &[u8], version: u16) -> Result<Vec<Entity>, FormatError> {
     let mut c = Cursor::new(body);
     let n = read_count(&mut c, MAX_ENTITIES, ENTITY_MIN)?;
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        let e = read_entity(&mut c)?;
+        let e = read_entity(&mut c, version)?;
         if !e.is_valid() {
             return Err(FormatError::BadEntity);
         }
@@ -319,7 +344,7 @@ fn read_entities(body: &[u8]) -> Result<Vec<Entity>, FormatError> {
     Ok(out)
 }
 
-fn read_entity(c: &mut Cursor) -> Result<Entity, FormatError> {
+fn read_entity(c: &mut Cursor, version: u16) -> Result<Entity, FormatError> {
     let tag = c.u8()?;
     let pos = c.vec3()?;
     Ok(match tag {
@@ -344,6 +369,18 @@ fn read_entity(c: &mut Cursor) -> Result<Entity, FormatError> {
         6 => Entity::Zone {
             pos,
             half: c.vec3()?,
+        },
+        7 if version >= VISTA_VERSION => Entity::VistaLayer {
+            pos,
+            centre: c.vec3()?,
+            slot: c.u8()?,
+            layer: c.u8()?,
+            parallax: c.f32()?,
+            spin: c.vec3()?,
+            pan: [c.f32()?, c.f32()?],
+            fog_start: c.f32()?,
+            fog_end: c.f32()?,
+            fog_color: c.u32()?,
         },
         other => return Err(FormatError::BadEntityTag(other)),
     })

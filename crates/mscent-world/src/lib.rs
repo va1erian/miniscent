@@ -49,6 +49,7 @@ mod format_labels;
 mod format_wire;
 pub mod r#gen;
 pub mod gen_level;
+pub mod islands;
 pub mod labels;
 pub mod level_builder;
 pub mod level_text;
@@ -58,21 +59,25 @@ pub mod polytope;
 pub mod portals;
 pub mod showcase;
 pub mod texinfo;
+pub mod vista_check;
+pub mod vista_scale;
 pub mod voxel;
 
 pub use brush::{Brush, BrushError, Op};
 pub use bsp::{Bsp, BspError, Child, Leaf, LeafId, LeafKind, Node, NodeId, Region};
 pub use csg::{CsgError, compile};
-pub use entity::{Entity, Level};
+pub use entity::{Entity, Level, MAX_VISTA_FOG, MAX_VISTA_LAYERS};
 pub use faces::{Face, brush_faces, extract_faces};
 pub use format::FormatError;
 pub use r#gen::{GenParams, generate, room_centers};
 pub use gen_level::generate_level;
+pub use islands::Islands;
 pub use labels::{EntityLabel, LabelError, MoverGroup};
 pub use level_builder::LevelBuilder;
 pub use portals::{Portal, Portals};
 pub use showcase::showcase_level;
 pub use texinfo::TexInfo;
+pub use vista_check::{VistaWarning, vista_warnings};
 
 #[cfg(test)]
 mod brush_tests;
@@ -85,7 +90,11 @@ mod format_tests;
 #[cfg(test)]
 mod gen_tests;
 #[cfg(test)]
+mod islands_tests;
+#[cfg(test)]
 mod labels_tests;
+#[cfg(test)]
+mod level_text_mountains_tests;
 #[cfg(test)]
 mod level_text_tests;
 #[cfg(test)]

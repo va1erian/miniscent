@@ -3,8 +3,8 @@
 //! `assets/textures/materials.txt` decides every id, and may list more materials
 //! after these. It must keep the five in [`NAMES`] where they are: the renderer
 //! checks those names when it builds a level, so a mismatch is reported there.
-//! The living materials the voxel generators grow come after them, and their ids
-//! are held to the manifest by a test.
+//! The living materials the voxel generators grow and the four sky materials come
+//! after them, and their ids are held to the manifest by a test.
 
 /// Red brick walls.
 pub const BRICK: u16 = 0;
@@ -28,9 +28,48 @@ pub const STEM: u16 = 8;
 /// Honey-coloured comb wax.
 pub const WAX: u16 = 9;
 
+/// A tiling starfield with faint nebula: the backdrop of a sky room. Opaque.
+pub const SKY_STARS: u16 = 10;
+/// Soft-edged cloud, a cutout for a later layer.
+pub const SKY_CLOUDS: u16 = 11;
+/// A mountain line, opaque below the ridge and clear above it.
+pub const SKY_RIDGE: u16 = 12;
+/// An Earth-like disc, clear outside it.
+pub const SKY_PLANET: u16 = 13;
+
+/// The first of the four stock sky materials.
+pub const FIRST_SKY: u16 = SKY_STARS;
+/// The last of the sky materials.
+pub const LAST_SKY: u16 = SKY_PLANET;
+
 /// A face with this material is never drawn or lit: the shell of a voxel volume,
 /// where the voxel surface closes in front of it. Not a texture.
 pub const NO_DRAW: u16 = u16::MAX;
+
+/// The material of viewport slot 0. A face with `VIEW_FIRST + slot` collides like
+/// any wall but is drawn as a hole onto that slot's vista, not as a texture.
+pub const VIEW_FIRST: u16 = 0xFFF0;
+/// How many viewport slots there are, so ids `VIEW_FIRST..VIEW_FIRST + VIEW_SLOTS`.
+pub const VIEW_SLOTS: u8 = 8;
+
+/// The viewport slot a material id stands for, or `None` for a texture and for
+/// [`NO_DRAW`], which sits just above the slots.
+pub const fn view_slot(material: u16) -> Option<u8> {
+    if material >= VIEW_FIRST && material - VIEW_FIRST < VIEW_SLOTS as u16 {
+        Some((material - VIEW_FIRST) as u8)
+    } else {
+        None
+    }
+}
+
+/// The material id of viewport `slot`, or `None` when the slot is out of range.
+pub const fn view_material(slot: u8) -> Option<u16> {
+    if slot < VIEW_SLOTS {
+        Some(VIEW_FIRST + slot as u16)
+    } else {
+        None
+    }
+}
 
 /// Whether a shot carves voxel rock of this material. Rock breaks; the made
 /// materials do not. A table of the game's own materials, not level data.
@@ -38,5 +77,41 @@ pub const fn is_destructible(material: u8) -> bool {
     material as u16 == ROCK
 }
 
+/// Whether a face of this material draws flat at full brightness and gets no
+/// luxels, so a sky room of any size costs no atlas and no rays. A table of the
+/// game's own materials, like [`is_destructible`]. `LIGHTPANEL` stays out of it:
+/// it is lit as before, so existing pixels hold.
+pub const fn is_self_lit(material: u16) -> bool {
+    material >= FIRST_SKY && material <= LAST_SKY
+}
+
 /// Stock texture names in id order.
 pub const NAMES: [&str; 5] = ["brick", "floor", "lightpanel", "metal", "rock"];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn view_slots_cover_exactly_eight_ids_below_no_draw() {
+        assert_eq!(view_slot(0xFFEF), None);
+        assert_eq!(view_slot(0xFFF0), Some(0));
+        assert_eq!(view_slot(0xFFF7), Some(7));
+        assert_eq!(view_slot(0xFFF8), None);
+        assert_eq!(view_slot(NO_DRAW), None);
+        assert_eq!(view_slot(BRICK), None);
+        for slot in 0..VIEW_SLOTS {
+            assert_eq!(view_slot(view_material(slot).unwrap()), Some(slot));
+        }
+        assert_eq!(view_material(VIEW_SLOTS), None);
+    }
+
+    #[test]
+    fn only_the_four_sky_materials_are_self_lit() {
+        let lit: Vec<u16> = (0..=20).filter(|&m| is_self_lit(m)).collect();
+        assert_eq!(lit, [10, 11, 12, 13]);
+        for m in [LIGHTPANEL, BRICK, WAX, VIEW_FIRST, NO_DRAW] {
+            assert!(!is_self_lit(m), "{m}");
+        }
+    }
+}

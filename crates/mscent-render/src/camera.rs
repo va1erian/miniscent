@@ -96,6 +96,11 @@ impl Camera {
         self.height as f32 * 0.5 / (self.fov_y * 0.5).tan()
     }
 
+    /// The world to camera transform.
+    pub fn view(&self) -> &Mat4 {
+        &self.view
+    }
+
     /// World point in camera space.
     pub fn world_to_camera(&self, p: Vec3) -> Vec3 {
         self.view.transform_point(p).xyz()
