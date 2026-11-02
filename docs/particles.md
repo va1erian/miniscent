@@ -239,6 +239,104 @@ Not built, and needed before this design is finished:
   explosion can lower the internal resolution for a while after it ends. Not measured.
 - **Moving large sprites to the half-res layer** arrives with the layer, in M9.6.
 
+## What was built (M9.5)
+
+A face within reach of a light and facing it gets the lit variant of `LightingShader`, as designed;
+every other face runs the code it ran before. `DynLight` (`dynlight.rs`) is a point light that has
+been placed in a level: `place` floods the portals from its leaf once and keeps the leaves and the
+faces it reaches (`Scene::light_reach`, `scene/reach.rs`), so a frame tests one bit per face. The
+renderer takes the lights as a read-only slice, `LevelRenderer::render_with_effects(.., &Effects {
+particles, lights })`, and `render_with_particles` is that with no lights. `CombatFx` owns the
+lights (`fx/lights.rs`), fades them on the particle clock, and hands them out with
+`CombatFx::lights(scene)`. `Game` never sees them.
+
+Measured with `cargo run --release -p mscent-render --example light_bench` (new; 640x360, one
+thread, High, dev machine). The camera is 3 units from a wall that fills the frame, which is 14400
+spans, with 1, 2 or 4 lights in front of it; the figures are the frame time with the lights minus
+the frame time without, and the same per span:
+
+| Lights | Bright (colour 1.0, 0.8, 0.5) | Dim (5% of that) |
+|---|---|---|
+| none | 5.76 ms | 5.80 ms |
+| 1 | +0.28 ms, 19 ns per span | +0.21 ms, 15 ns per span |
+| 2 | +0.63 ms, 44 ns per span | +0.26 ms, 18 ns per span |
+| 4 | +0.98 ms, 68 ns per span | +0.35 ms, 25 ns per span |
+
+**The estimate of 100 to 150 us was wrong.** One light across the whole screen is 0.2 to 0.3 ms,
+about twice that, and four bright ones are about 1 ms. The dim column is the light's own cost: the
+sum at both span ends and the add across the span. The bright column pays more because the sum
+pushes pixels over the knee of `soft_limit`, which divides three times per pixel (baked bright
+pools pay that too). I did not run it with the roll-off removed, so that split is an inference. At
+the 5x guess for the reference machine this is 1.4 ms for one light and 5 ms for four bright ones,
+in the worst case of every pixel on screen lit. A flash covers part of the view for 0.1 to 0.25 s,
+so a frame is usually far below that, but the case is not measured. The screen-space fallback was
+221 us for all lights, so at four bright lights over the whole screen this is about four times
+worse; I did not switch to it, and M9.6 should look at the peak frame of `Blast` before deciding.
+
+**No cost with no light.** Every number here is the dev machine, and the runs were interleaved with
+a build of 7b4692d made for the purpose:
+
+- `light_bench --lights 0`, which goes through `LevelRenderer` and the lightmap shader: 5.768,
+  6.094, 6.679 and 5.798 ms at 7b4692d against 5.745, 6.318, 5.942 and 5.824 ms now (four pairs,
+  best of nine batches each; the spread is the machine's).
+- `frame_bench` (`cargo run --release -p mscent-render --example frame_bench -- --batches 11`),
+  three pairs: 1.423, 1.424, 1.426 ms before and 1.446, 1.438, 1.435 ms after, about 1% slower in
+  every pair. That bench draws through `Scene::render` and calls none of the code changed here, so
+  this is not a shader cost, but I did not find what it is.
+- The scripted flythrough PNGs at 2, 12 and 24 s (`--screenshot .. --script
+  apps/game/scripts/flythrough.txt --shots-at 2,12,24`) are byte-identical to 7b4692d's.
+- Allocations: 478 a frame at 160x90 on one worker with one drone, before, with no light, and with
+  two lights alive (`tests/dyn_light_alloc.rs`). Placing a second light into a `DynLight` that
+  held one allocates nothing.
+
+Where the code differs from the design above:
+
+- **The flood runs when the light is first drawn, not at the spawn.** A spawn has no scene (bolts
+  land inside `CombatFx::advance`, which holds only the BSP), so `CombatFx::lights(scene)` places
+  new lights, once each. It is per light, not per frame, and the bit sets are reused between
+  lights. The flood crosses a portal only if the light is on the right side of it and the portal's
+  box is within the radius; each leaf is visited once. A light in solid reaches nothing.
+- **A face is marked as well as a leaf**: in a reached leaf, in front of the light, and within the
+  radius of its plane. The frame never looks at leaves for walls.
+- **Meshes are tested by the leaf their centre is in**, so a drone beside a wall from a light is
+  not lit through it (`an_enemy_behind_a_wall_from_the_light_is_not_lit`). A mesh sees one
+  brightness, the mean of the colour, as the level's own lights do.
+- **A flash on a wall is lifted off it**: 0.6 units along the normal (0.5 for a drone), halved
+  twice if that lands in solid. At 0.05 off, `N.L` against that wall is near zero.
+- **Falloff is the mesh formula**, `(1 - d / radius)^2 * N.L`. A colour of 1.0 adds one plain
+  texture colour at point-blank range; the roll-off ends at about 1.17 of the texture, so a flash
+  cannot blow a wall out.
+- **Bump follows the baked light.** The dynamic light joins `col[]` before the bump gain, which is
+  computed from the baked light direction, so relief under a flash does not follow the flash.
+  Specular is not driven by it. Faces without a lightmap (light panels) take no dynamic light.
+- **Over the limit the dimmest gives way**, by current strength (colour sum times the fade), and
+  the new light competes: one dimmer than every light alive is dropped. `set_quality` drops the
+  dimmest at once when the limit falls.
+- **Lights age on the particle clock** with the same cap of four ticks per call, and fade as the
+  square of the time left. The session does not advance effects while paused, so lights freeze
+  with the particles. That is tested on `CombatFx` (`advance(0)` changes nothing) and not through a
+  paused `GameSession`.
+- **Recipes**: drone explosion radius 12, 0.25 s, colour (3.0, 1.8, 0.9); surface hit radius 4,
+  0.1 s, (1.0, 0.8, 0.5); drone hit radius 4, 0.1 s, (0.6, 0.95, 1.1). The explosion started at
+  1.5 and was doubled because the walls of the showcase room, 5 or more units from it, hardly
+  changed in a screenshot. At 3.0 the largest change of any channel in that frame (an explosion 3
+  units ahead of the camera, particles left out) is 19 of 255. No player has judged any of this,
+  and the effect on far brick is still subtle.
+- **Not built**: bolt-head lights, `Blast`, the half-res layer, shake, overlay (M9.6).
+
+Evidence: `face_points_tests.rs` (the formula, the four-light cap, hostile values, span steps),
+`dynlight_tests.rs` (reach through a split room and a corridor, the radius bound, hostile
+values), `fx_lights_tests.rs` (fade, limits, eviction, lift, replay), `tests/dyn_light_alloc.rs`,
+and `apps/game/tests/dynamic_lights.rs` on real pixels: a light brightens the wall facing it and
+changes nothing behind the viewer; a wall behind a wall is unchanged to the pixel, while the same
+light on the near side changes more than 10000 pixels; a mesh is lit and nothing outside it moves;
+a light that has faded out or never lit changes no pixel and matches `render_with_particles`;
+hostile lights do not panic; 1, 2, 3 and 8 workers give identical pixels with a light, two drones
+and an explosion's particles; the recipes spawn the lights above, at the arrival of the bolt and
+not at the muzzle. Mutating the shader or the mesh path to ignore the lights made the matching
+tests fail. Not tested: a real window, the i3-7100U, or a kill through a full session with the
+light on screen.
+
 ## Design overview
 
 ```
@@ -546,6 +644,9 @@ crates/mscent-game/src/fx/
   emit.rs      shapes, delayed queue, density
   collide.rs   the three collision levels and their limits
   effects.rs   Effect, Emitter and the recipe tables; effects_surface.rs for the material rows
+  lights.rs    the dynamic lights of combat: slots, fade, eviction
+crates/mscent-render/src/
+  dynlight.rs  DynLight: a placed light; face_points.rs the per-face light; scene/reach.rs the flood
 ```
 
 ## Work items
@@ -557,7 +658,7 @@ crates/mscent-game/src/fx/
 | M9.2 | **Done.** Pools, classes, emitters, 60 Hz tick, collision levels | M9.1 | M | Zero allocation per frame; same seed gives identical particles; hostile arguments never panic; particles never end in solid under `Bounce` |
 | M9.3 | **Done.** Bolts and hits: `Event::Shot`, `Hitscan.normal`, beams, `material_at`, surface rows; remove the tracer | M9.2 | M | Enemy shot behind a wall draws no pixels (the old tracer failed this); each material gives its own output; the replay test is unchanged |
 | M9.4 | **Done**, without the adaptive multiplier. Budget: costs, probes, tiers, `keep`, Quality rows | M9.2 | M | A frame at 100 full-screen sprites stays within 10% of budget, Essential is untouched, and a scripted run is pixel-identical twice |
-| M9.5 | Dynamic lights: per-face shader variant, reach flood, mesh lights | M9.3 | M | No cost when no light is active (frame bench unchanged); wall behind a wall stays unlit; per-span cost measured |
+| M9.5 | **Done.** Dynamic lights: per-face shader variant, reach flood, mesh lights | M9.3 | M | No cost when no light is active (frame bench unchanged); wall behind a wall stays unlit; per-span cost measured |
 | M9.6 | Drone explosion and `Blast`, half-res layer, shake, overlay | M9.4, M9.5 | L | `fx_gallery` contact sheets looked at by a person; peak cost of `Blast` reported at 640x360 |
 | M9.7 | Scorch decals: blended polygon raster, ring of 64, depth bias | M9.3 | S | Decal stays on its face from several angles without z-fighting |
 | M9.8 | `Effect::Shatter` and material rows | M9.6 | S | Gallery shows each material; a 1000-unit box stays within pool and budget |

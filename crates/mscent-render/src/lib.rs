@@ -8,6 +8,8 @@ pub mod bump;
 pub mod camera;
 pub mod clip;
 pub mod draw2d;
+pub mod dynlight;
+mod face_points;
 pub mod font;
 pub mod framebuffer;
 pub mod inflate;
@@ -33,11 +35,12 @@ pub mod uv_luxel;
 
 pub use camera::{Camera, Frustum, ScreenPoint};
 pub use draw2d::{Sprite, blit, draw_text, fill_rect, stroke_rect, text_size};
+pub use dynlight::{DynLight, MAX_DYN_LIGHTS};
 pub use framebuffer::Framebuffer;
 pub use jobs::JobPool;
 pub use level::{
     Actor, ActorKind, BakeCache, BakeReport, BakedLight, BuildConfig, BuildError, Compiled,
-    LevelRenderer, Overlay, Quality, Source, View,
+    Effects, LevelRenderer, Overlay, Quality, Source, View,
 };
 pub use lighting_shader::{FaceLight, LightingShader, UvToLuxel};
 pub use lightmap_mips::LightMips;

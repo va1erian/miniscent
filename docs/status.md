@@ -144,16 +144,20 @@ generated at runtime. Findings and changes:
 - `cargo test --workspace` passes (one run saw `bake_cache::concurrent_writers_in_one_process_leave_a_valid_file`
   fail under full-workspace load; it passed alone and on rerun, so it is timing sensitive).
 
-## Combat particles (M9.1 to M9.4, `docs/particles.md`)
+## Combat particles (M9.1 to M9.5, `docs/particles.md`)
 
 Shots are world-space now: a bolt with a muzzle flash, an impact chosen by the struck material
 (`Scene::surface_at`), sparks on a drone, and a drone explosion on a kill. They are depth tested, so
 a shot behind a wall draws nothing (`apps/game/tests/combat_fx.rs`), and the screen-space tracer and
 the HUD muzzle rectangle are gone. `Game` emits `Event::Shot` and never reads the effects. A pixel
 budget per Quality thins Cosmetic and then Normal particles and never Essential ones, so fill is
-bounded and a script gives the same picture on any machine. Not there yet: the budget's adaptive
-multiplier; dynamic light (M9.5); `Blast` and the half-res layer (M9.6); decals (M9.7). Recipe values
-are starting points that no player has judged.
+bounded and a script gives the same picture on any machine. Explosions and hits cast a short-lived
+point light (at most 4, 2 and 1 at High, Medium and Low) on the walls and drones they reach but not
+through walls; the renderer takes them as a slice (`render_with_effects`) and with none the frame is
+byte-identical to before. Full-screen cost is 0.2 to 0.3 ms for one light and up to about 1 ms for
+four, more than the 100 to 150 us estimated. Not there yet: the budget's adaptive multiplier;
+`Blast` and the half-res layer (M9.6); decals (M9.7). Recipe values are starting points that no
+player has judged.
 
 ## Parallel frames by default (M9.0, the groundwork of `docs/particles.md`)
 

@@ -21,6 +21,7 @@ mod collect;
 pub mod collide;
 pub mod combat;
 pub mod emit;
+pub mod lights;
 mod pool;
 pub mod recipes;
 
