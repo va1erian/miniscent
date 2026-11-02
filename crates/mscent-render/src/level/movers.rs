@@ -78,7 +78,7 @@ impl LevelRenderer {
     pub(super) fn list_movers(&self, cam: &Camera, poses: &[MoverPose], list: &mut MoverList) {
         list.polys.clear();
         list.faces.clear();
-        for (i, mover) in self.mover_faces.iter().enumerate() {
+        for (i, mover) in self.assets.mover_faces.iter().enumerate() {
             let pose = poses.get(i).copied().unwrap_or(MoverPose::AUTHORED);
             // View is along -Z, so all of it is behind the eye past this.
             if cam.world_to_camera(pose.to_world(mover.centre)).z > mover.radius {

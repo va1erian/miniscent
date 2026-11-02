@@ -4,7 +4,7 @@
 use mscent_game::Screen;
 use mscent_game::fx::combat::ViewKick;
 use mscent_math::{Quat, Vec3};
-use mscent_render::{Effects, Framebuffer, View, simd};
+use mscent_render::{Effects, FrameInput, FrameRenderer, Framebuffer, View, simd};
 
 use super::GameSession;
 use crate::drawn::{actors_of, mover_poses_of};
@@ -82,14 +82,13 @@ impl GameSession {
             lights: self.fx.lights(self.renderer.scene()),
             poses: &poses,
         };
-        let drawn = self.renderer.render_with_effects(
-            &mut fb,
-            &view,
-            self.quality,
-            &actors,
-            None,
-            &effects,
-        );
+        let input = FrameInput {
+            view: &view,
+            quality: self.quality,
+            actors: &actors,
+            effects,
+        };
+        let drawn = self.renderer.draw(&mut fb, &input);
         if drawn.is_some() {
             if self.kick.white > 0 {
                 simd::lerp_toward(fb.pixels_mut(), WHITE, self.kick.white);

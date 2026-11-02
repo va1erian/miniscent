@@ -37,22 +37,25 @@ impl LevelRenderer {
         frame: &mut FrameState,
     ) {
         if !lights.iter().any(DynLight::is_lit) {
-            self.meshes
-                .list(cam, actors, &self.lighting, &mut frame.actors);
+            self.assets
+                .meshes
+                .list(cam, actors, &self.assets.lighting, &mut frame.actors);
             return;
         }
         let lighting = frame.lit.get_or_insert_with(|| {
-            let mut copy = self.lighting.clone();
+            let mut copy = self.assets.lighting.clone();
             copy.points.reserve(MAX_DYN_LIGHTS);
             copy
         });
         let lit = LitActors {
-            scene: &self.scene,
+            scene: &self.assets.scene,
             lights,
             lighting,
-            base: self.lighting.points.len(),
+            base: self.assets.lighting.points.len(),
         };
-        self.meshes.list_lit(cam, actors, lit, &mut frame.actors);
+        self.assets
+            .meshes
+            .list_lit(cam, actors, lit, &mut frame.actors);
     }
 
     pub(super) fn fill_level(
@@ -63,9 +66,11 @@ impl LevelRenderer {
         eye: Vec3,
         lights: &[DynLight],
     ) -> DrawStats {
-        self.scene.fill_frame(fb, list, None, &mut |i, face| {
-            self.face_shader(i, face, eye, quality, lights)
-        })
+        self.assets
+            .scene
+            .fill_frame(fb, list, None, &mut |i, face| {
+                self.face_shader(i, face, eye, quality, lights)
+            })
     }
 
     /// The lit shader of a face, seen from `eye` in the space the face was
@@ -83,23 +88,24 @@ impl LevelRenderer {
         if face.material == LIGHTPANEL {
             return flat(EMISSIVE);
         }
-        let map = self.uv_maps.get(i).copied().flatten();
+        let map = self.assets.uv_maps.get(i).copied().flatten();
         let Some(map) = map else {
             return flat(UNLIT);
         };
         let fl = FaceLight {
-            lightmap: &self.lightmap,
-            mips: &self.light_mips,
+            lightmap: &self.assets.lightmap,
+            mips: &self.assets.light_mips,
             face: i,
             map,
-            texture: self.scene.texture_of(face.material),
+            texture: self.assets.scene.texture_of(face.material),
             fog,
             bump: quality != Quality::Low,
         };
         let table = self
+            .assets
             .spec
             .get(usize::from(face.material))
-            .or(self.spec.last());
+            .or(self.assets.spec.last());
         let spec = table
             .filter(|t| quality == Quality::High && t.is_visible())
             .and_then(|t| LightingShader::with_specular(fl, eye, t));

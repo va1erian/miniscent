@@ -1,35 +1,29 @@
-//! The front-to-back BSP walk that lists a frame's polygons in draw order.
+//! The front-to-back BSP walk that finds a frame's faces, in draw order.
 
 use mscent_math::{Aabb, Vec3};
 use mscent_world::{Child, LeafId};
 
 use super::Scene;
 use crate::camera::{Camera, Frustum};
-use crate::raster::PolyList;
-use crate::texture::Texture;
 
 pub(super) struct Walk<'a> {
     scene: &'a Scene,
-    list: &'a mut PolyList,
     chunks: &'a mut Vec<u32>,
     cam: &'a Camera,
     frustum: Frustum,
     eye: Vec3,
     visible: Vec<bool>,
     drawn: Vec<bool>,
-    texture: Option<&'a Texture>,
     stats: super::SceneStats,
 }
 
 impl<'a> Walk<'a> {
     pub(super) fn new(
         scene: &'a Scene,
-        list: &'a mut PolyList,
         chunks: &'a mut Vec<u32>,
         cam: &'a Camera,
         eye: Vec3,
         visible: Vec<bool>,
-        texture: Option<&'a Texture>,
     ) -> Self {
         let stats = super::SceneStats {
             leaves_visible: visible.iter().filter(|&&v| v).count() as u32,
@@ -38,14 +32,12 @@ impl<'a> Walk<'a> {
         };
         Self {
             scene,
-            list,
             chunks,
             cam,
             frustum: cam.frustum(),
             eye,
             visible,
             drawn: vec![false; scene.faces.len()],
-            texture,
             stats,
         }
     }
@@ -118,20 +110,13 @@ impl<'a> Walk<'a> {
     }
 
     fn list_face(&mut self, fi: u32) {
-        let (Some(face), Some(poly)) = (
-            self.scene.faces.get(fi as usize),
-            self.scene.polys.get(fi as usize),
-        ) else {
+        let Some(face) = self.scene.faces.get(fi as usize) else {
             return;
         };
         // Faces point into empty space; the eye behind one sees its back.
         if face.plane.signed_distance(self.eye.to_f64()) <= 0.0 {
             return;
         }
-        let tex = self
-            .texture
-            .unwrap_or_else(|| self.scene.texture_of(face.material));
-        self.list.push(self.cam, poly, tex, fi);
         self.stats.drawn.push(fi);
     }
 }

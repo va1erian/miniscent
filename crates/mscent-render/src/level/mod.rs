@@ -9,47 +9,44 @@
 //! chosen by [`Quality`], distance fog, a sky gradient behind everything,
 //! the level's enemy and goal meshes and an optional HUD.
 
+mod assets;
 mod cache;
 mod compiled;
 mod effects;
 mod fill;
+mod frame;
 mod movers;
 mod overlay;
 mod setup;
 mod shader;
 pub mod view;
 
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Mutex, PoisonError};
 
 use mscent_math::Vec3;
-use mscent_world::lightmap::{CellSites, Lightmap, LightmapError, PointLight};
+use mscent_world::lightmap::{Lightmap, LightmapError};
 use mscent_world::materials;
 use mscent_world::voxel::{RemeshedChunk, VoxelWorld};
 use mscent_world::{CsgError, Level};
 
 use crate::camera::Camera;
-use crate::dynlight::MAX_DYN_LIGHTS;
 use crate::framebuffer::Framebuffer;
-use crate::lighting_shader::UvToLuxel;
-use crate::lightmap_mips::LightMips;
 use crate::material::{MaterialId, MaterialTable};
 use crate::mesh::MeshLighting;
-use crate::particles::{ParticleDraws, SpriteBank, draw_particles};
+use crate::particles::{ParticleDraws, SpriteBank};
 use crate::raster::PolyList;
-use crate::scene::{Scene, SceneStats, eye_of};
+use crate::scene::{Scene, SceneStats};
 use crate::shade::Fog;
-use crate::specular::SpecTable;
 use crate::tiles::TileRenderer;
-use crate::voxel::fill::{FillContext, fill_voxels};
 use crate::voxel::list::VoxelList;
 
+pub use assets::LevelAssets;
 pub use cache::{BakeCache, BakeReport, BakedLight, Source};
 pub use compiled::Compiled;
 pub use effects::Effects;
+pub use frame::{FrameInput, FrameRenderer};
 pub use movers::MoverPose;
 pub use overlay::{Actor, ActorKind, Overlay};
-use setup::{mesh_lighting, spec_tables};
 pub use view::View;
 
 /// Light scale of emissive surfaces (256 is the plain texture colour).
@@ -134,23 +131,9 @@ pub enum VoxelChange {
     Restore(Box<VoxelWorld>),
 }
 
-/// A level compiled, lit and ready to draw.
+/// The software renderer of a level.
 pub struct LevelRenderer {
-    scene: Scene,
-    lightmap: Arc<Lightmap>,
-    /// Pre-filtered lightmap levels, built with the renderer.
-    light_mips: LightMips,
-    uv_maps: Vec<Option<UvToLuxel>>,
-    spec: Vec<SpecTable>,
-    lighting: MeshLighting,
-    /// The level's lamps, for voxel surfaces made after the build.
-    voxel_lights: Vec<PointLight>,
-    /// The cells the lightmap holds records for.
-    voxel_sites: CellSites,
-    actors: Vec<Actor>,
-    meshes: overlay::ActorMeshes,
-    mover_faces: Vec<movers::MoverFaces>,
-    cfg: BuildConfig,
+    assets: LevelAssets,
     /// Band height and worker count of [`Self::render`].
     tiling: (u32, usize),
     frame: Mutex<Option<FrameState>>,
@@ -212,103 +195,45 @@ impl LevelRenderer {
         compiled.into_renderer(lightmap, materials)
     }
 
-    /// Builds the renderer from what [`Compiled`] prepared, with materials
-    /// [`check_materials`] accepted.
-    fn assemble(parts: compiled::Parts, lightmap: Arc<Lightmap>, materials: MaterialTable) -> Self {
-        let compiled::Parts {
-            bsp,
-            faces,
-            mover_ranges,
-            portals,
-            lights,
-            actors,
-            cfg,
-            voxels,
-            sites,
-        } = parts;
-        let spec = spec_tables(&materials);
-        // The game path pays for smooth texture sampling; the raw
-        // rasterizer benchmark does not.
-        let voxels = compiled::lit_voxels(voxels, bsp.leaves().len(), &sites, &lightmap);
-        let scene = Scene::with_voxels(bsp, faces, portals, materials.filtered(), voxels);
-        let uv_maps = (0..scene.faces().len())
-            .map(|i| {
-                let proj = lightmap.projections().get(i)?;
-                let face = scene.faces().get(i)?;
-                let verts = scene.polys().get(i)?;
-                UvToLuxel::from_vertices(proj, verts, scene.texture_of(face.material))
-            })
-            .collect();
-        let mover_faces = mover_ranges
-            .into_iter()
-            .map(|faces| {
-                let polys = scene.polys().get(faces.clone()).unwrap_or(&[]);
-                let (centre, radius) = movers::bounding_sphere(polys);
-                movers::MoverFaces {
-                    faces,
-                    centre,
-                    radius,
-                }
-            })
-            .collect();
+    /// The renderer of `assets`, which starts no threads until its first frame.
+    pub fn from_assets(assets: LevelAssets) -> Self {
         Self {
-            mover_faces,
-            lighting: mesh_lighting(&lights, cfg.ambient),
-            voxel_lights: lights,
-            voxel_sites: sites,
-            actors,
-            meshes: overlay::ActorMeshes::new(),
-            scene,
-            light_mips: LightMips::build(&lightmap),
-            lightmap,
-            uv_maps,
-            spec,
-            cfg,
+            assets,
             tiling: (TILE_ROWS, default_workers()),
             frame: Mutex::new(None),
         }
     }
 
+    /// The level again, for another renderer to take.
+    pub fn into_assets(self) -> LevelAssets {
+        self.assets
+    }
+
     pub fn scene(&self) -> &Scene {
-        &self.scene
+        self.assets.scene()
     }
 
     /// Changes voxel surfaces under the same brushes, between two frames.
     pub fn apply_voxels(&mut self, change: VoxelChange) {
-        let (lights, ambient) = (&self.voxel_lights, self.cfg.ambient);
-        let leaves = self.scene.bsp().leaves().len();
-        let (sites, lightmap) = (&self.voxel_sites, &self.lightmap);
-        self.scene.update_voxels(|voxels| match change {
-            VoxelChange::Chunks(list) => {
-                voxels.apply(list, |mesh| compiled::lamp_light(mesh, lights, ambient));
-            }
-            VoxelChange::All(world) => {
-                *voxels = voxels.remade(*world, leaves, |mesh| {
-                    compiled::lamp_light(mesh, lights, ambient)
-                });
-            }
-            VoxelChange::Restore(world) => {
-                *voxels = compiled::lit_voxels(*world, leaves, sites, lightmap);
-            }
-        });
+        self.assets.apply_voxels(change);
     }
 
     pub fn lightmap(&self) -> &Lightmap {
-        &self.lightmap
+        self.assets.lightmap()
     }
 
     pub fn config(&self) -> &BuildConfig {
-        &self.cfg
+        self.assets.config()
     }
 
     /// The level's own enemies and goal, at their spawn points.
     pub fn actors(&self) -> &[Actor] {
-        &self.actors
+        self.assets.actors()
     }
 
     /// The level's fog, for effects drawn in the same frame.
     pub fn fog(&self) -> Option<Fog> {
-        Fog::new(self.cfg.sky_bottom, self.cfg.fog_start, self.cfg.fog_end)
+        self.assets.fog()
     }
 
     /// Band height and worker count of later frames (workers are clamped to
@@ -320,7 +245,7 @@ impl LevelRenderer {
 
     /// The camera [`Self::render`] uses for this view and target size.
     pub fn camera(&self, view: &View, width: u32, height: u32) -> Option<Camera> {
-        view.camera(self.cfg.fov_y, NEAR, FAR, width, height)
+        self.assets.camera(view, width, height)
     }
 
     /// Draw one frame: visibility and projection once, then sky, level and
@@ -375,8 +300,7 @@ impl LevelRenderer {
 
     /// [`Self::render`] with `effects` in the same pass: movers where they are
     /// now, particles over the finished scene, and dynamic lights on the walls
-    /// and actors they reach. Of the lights only the first [`MAX_DYN_LIGHTS`]
-    /// count.
+    /// and actors they reach.
     pub fn render_with_effects(
         &self,
         fb: &mut Framebuffer,
@@ -386,68 +310,16 @@ impl LevelRenderer {
         hud: Option<&Overlay>,
         effects: &Effects,
     ) -> Option<SceneStats> {
-        let lights = &effects.lights[..effects.lights.len().min(MAX_DYN_LIGHTS)];
-        let cam = self.camera(view, fb.width(), fb.height())?;
-        let mut slot = self.frame.lock().unwrap_or_else(PoisonError::into_inner);
-        let frame = self.frame_for(&mut slot, fb.width(), fb.height())?;
-        let mut stats = self.scene.list_frame_voxels(
-            &cam,
-            None,
-            &mut frame.faces,
-            &mut frame.voxels.candidates,
-        );
-        frame
-            .voxels
-            .prepare(self.scene.voxels(), &cam, eye_of(&cam), |leaf| {
-                let lit = lights.iter().enumerate();
-                lit.fold(0u8, |m, (i, l)| {
-                    if l.is_lit() && l.reaches_leaf(leaf) {
-                        m | (1 << i)
-                    } else {
-                        m
-                    }
-                })
-            });
-        stats.voxel_triangles = frame.voxels.triangles;
-        self.list_movers(&cam, effects.poses, &mut frame.movers);
-        self.list_actors(&cam, actors, lights, frame);
-        let (faces, meshes, movers) = (&frame.faces, &frame.actors, &frame.movers);
-        let voxels = &frame.voxels;
-        let (pixels, spans) = (AtomicU32::new(0), AtomicU32::new(0));
-        let eye = eye_of(&cam);
-        let texture_of = |id: u16| self.scene.texture_of(id);
-        let voxel_fill = FillContext {
-            scene: self.scene.voxels(),
-            cam: &cam,
-            eye,
-            fog: self.fog(),
-            bump: quality != Quality::Low,
-            specular: quality == Quality::High,
-            lights,
-            spec: &self.spec,
-            texture_of: &texture_of,
+        let input = FrameInput {
+            view,
+            quality,
+            actors,
+            effects: *effects,
         };
-        frame.tiles.pass(&|band: &mut Framebuffer| {
-            band.clear_sky(self.cfg.sky_top, self.cfg.sky_bottom);
-            // First, so the z-buffer saves shading whatever a door covers.
-            let moved = self.fill_movers(band, movers, quality);
-            // Next, for the same reason: a voxel pixel costs less than a wall's.
-            let vox = fill_voxels(band, voxels, &voxel_fill);
-            let st = self.fill_level(band, faces, quality, eye, lights);
-            self.meshes.fill(band, meshes, self.fog());
-            if let Some((draws, bank)) = effects.particles {
-                draw_particles(band, draws, bank);
-            }
-            pixels.fetch_add(moved.pixels + vox.pixels + st.pixels, Ordering::Relaxed);
-            spans.fetch_add(moved.spans + vox.spans + st.spans, Ordering::Relaxed);
-        });
-        frame.tiles.composite(fb).ok()?;
-        drop(slot);
+        let stats = self.draw_frame(fb, &input)?;
         if let Some(o) = hud {
             overlay::draw_overlay(fb, o);
         }
-        stats.pixels = pixels.into_inner();
-        stats.spans = spans.into_inner();
         Some(stats)
     }
 

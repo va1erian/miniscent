@@ -6,9 +6,10 @@
 //!    leaves that can be seen ([`visible`]).
 //! 2. Walk the BSP front to back from the eye, skipping subtrees whose
 //!    bounds are outside the view frustum.
-//! 3. At each visible leaf, list its faces that face the eye, each face at
-//!    most once per frame even when it borders several leaves.
-//! 4. Fill the listed faces. Only this step depends on the rows being drawn,
+//! 3. At each visible leaf, take its faces that face the eye, each face at
+//!    most once per frame even when it borders several leaves. This far is
+//!    [`Scene::visible_set`], which any renderer can use.
+//! 4. Clip and project those faces, and fill them. Only this step depends on the rows being drawn,
 //!    so a frame in parallel bands lists once and fills per band.
 //!
 //! Front-to-back order does not change the picture (the z-buffer decides) but
@@ -210,6 +211,24 @@ impl Scene {
         chunks: &mut Vec<u32>,
     ) -> SceneStats {
         list.clear();
+        let stats = self.visible_set(cam, chunks);
+        for &fi in &stats.drawn {
+            let (Some(face), Some(poly)) =
+                (self.faces.get(fi as usize), self.polys.get(fi as usize))
+            else {
+                continue;
+            };
+            let tex = texture.unwrap_or_else(|| self.texture_of(face.material));
+            list.push(cam, poly, tex, fi);
+        }
+        stats
+    }
+
+    /// What `cam` can see, with no rasterizer in it: the faces in the returned
+    /// `drawn`, front to back and facing the eye, and the voxel chunks of the
+    /// visible leaves in `chunks`, nearest first. A renderer does its own
+    /// clipping and projection from here.
+    pub fn visible_set(&self, cam: &Camera, chunks: &mut Vec<u32>) -> SceneStats {
         chunks.clear();
         let eye = eye_of(cam);
         let leaf = self.bsp.leaf_at_f32(eye);
@@ -218,7 +237,7 @@ impl Scene {
         } else {
             vec![true; self.bsp.leaves().len()]
         };
-        let mut w = walk::Walk::new(self, list, chunks, cam, eye, visible, texture);
+        let mut w = walk::Walk::new(self, chunks, cam, eye, visible);
         w.visit(self.bsp.root());
         w.finish()
     }
