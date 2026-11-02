@@ -5,10 +5,12 @@
 //! recorded input trace replays to the same result.
 
 use crate::arena::Arena;
-use crate::enemy::Enemy;
+use crate::combat::Sphere;
+use crate::enemy::{Enemy, Faction};
 use crate::input::Input;
 use crate::mover::{Mover, spawn_movers};
 use crate::player::{PLAYER_RADIUS, Player};
+use crate::prop::{Prop, UseState};
 use crate::script::{ScriptEnd, ScriptState};
 use crate::weapon::Weapon;
 use mscent_collide::{FixedStepper, MoverSolid, STEP_HZ, Solids};
@@ -52,6 +54,14 @@ pub enum Event {
     ScriptLost,
     /// A script spawned enemy `i`.
     EnemySpawned(usize),
+    /// A script placed prop `i`.
+    PropSpawned(usize),
+    /// The player's shot struck prop `i`.
+    PropHit(usize),
+    PropDestroyed(usize),
+    PropPicked(usize),
+    /// The player finished holding the use key on prop `i`.
+    PropUsed(usize),
 }
 
 #[derive(Clone, Debug)]
@@ -68,6 +78,13 @@ pub struct Game {
     pub movers: Vec<Mover>,
     /// Parallel to `movers`: what they collide as, at their current poses.
     pub solids: Vec<MoverSolid>,
+    pub props: Vec<Prop>,
+    /// The usable prop in reach, if any.
+    pub(crate) use_target: Option<usize>,
+    pub(crate) use_state: UseState,
+    /// How many enemies are on the player's side, so a level with none pays
+    /// nothing for working out who fights whom.
+    pub(crate) friendlies: usize,
     pub(crate) events: Vec<Event>,
     /// The loaded script, not yet started; a restart runs a copy of it.
     pub(crate) script_program: Option<Box<Vm<Game>>>,
@@ -93,6 +110,10 @@ impl Game {
             hurt_steps: 0,
             movers,
             solids,
+            props: Vec::new(),
+            use_target: None,
+            use_state: UseState::default(),
+            friendlies: 0,
             events: Vec::new(),
             script_program: None,
             vm: None,
@@ -108,6 +129,10 @@ impl Game {
         self.player = player;
         self.enemies = enemies;
         (self.movers, self.solids) = spawn_movers(&self.arena);
+        self.props.clear();
+        self.use_target = None;
+        self.use_state = UseState::default();
+        self.friendlies = 0;
         self.weapon = Weapon::default();
         self.phase = Phase::Playing;
         self.ticks = 0;
@@ -147,7 +172,7 @@ impl Game {
         if self.phase != Phase::Playing {
             // A test can still look at how the level ended.
             if self.script_test_mode {
-                self.run_script(self.events.len());
+                self.run_script(self.events.len(), input);
             }
             return;
         }
@@ -159,7 +184,7 @@ impl Game {
         self.fire(input);
         self.run_enemies();
         self.run_movers();
-        self.run_script(mark);
+        self.run_script(mark, input);
         self.check_end();
     }
 
@@ -170,11 +195,20 @@ impl Game {
         }
         let (origin, dir) = (self.player.pos(), self.player.forward());
         let solids = Solids::new(&self.arena.bsp, &self.solids);
-        let shot = self.weapon.fire(solids, origin, dir, &mut self.enemies);
+        let enemies = &mut self.enemies;
+        let shot = self
+            .weapon
+            .fire(solids, origin, dir, enemies, &mut self.props);
         let Some(shot) = shot else { return };
         self.events.push(Event::PlayerFired);
         if let Some(i) = shot.mover {
             self.events.push(Event::MoverHit(i));
+        }
+        if let Some(i) = shot.prop {
+            self.events.push(Event::PropHit(i));
+            if shot.prop_destroyed {
+                self.events.push(Event::PropDestroyed(i));
+            }
         }
         if let Some(i) = shot.hit {
             self.events.push(Event::EnemyHit(i));
@@ -185,6 +219,9 @@ impl Game {
     }
 
     fn run_enemies(&mut self) {
+        if self.friendlies > 0 {
+            return self.run_enemy_factions();
+        }
         let target = crate::combat::Sphere {
             centre: self.player.pos(),
             radius: PLAYER_RADIUS,
@@ -201,6 +238,92 @@ impl Game {
                 self.events.push(Event::PlayerHurt(dmg));
             }
         }
+    }
+
+    /// Each enemy goes after the nearest opponent within its sight. That is a
+    /// search per enemy per step, paid only once a script has made one friendly.
+    fn run_enemy_factions(&mut self) {
+        for i in 0..self.enemies.len() {
+            let target = self.nearest_opponent(i);
+            let solids = Solids::new(&self.arena.bsp, &self.solids);
+            let sphere = target.map(|t| self.target_sphere(t));
+            let Some(enemy) = self.enemies.get_mut(i) else {
+                continue;
+            };
+            let damage = enemy.step_toward(solids, sphere.as_ref());
+            if enemy.fired {
+                self.events.push(Event::EnemyFired(i));
+            }
+            if let (Some(damage), Some(target)) = (damage, target) {
+                self.hurt_target(target, damage);
+            }
+        }
+    }
+
+    /// `None` is the player; `Some(j)` is enemy `j`. The outer `None` is no one.
+    fn nearest_opponent(&self, i: usize) -> Option<Option<usize>> {
+        let me = self.enemies.get(i)?;
+        let hostile = me.faction == Faction::Hostile;
+        let range = me.sight_range();
+        let pos = me.pos();
+        let mut best = None;
+        let mut best_d = range * range;
+        if hostile {
+            let d = (self.player.pos() - pos).length_squared();
+            if d <= best_d {
+                best = Some(None);
+                best_d = d;
+            }
+        }
+        for (j, other) in self.enemies.iter().enumerate() {
+            if j != i && other.alive() && other.faction != me.faction {
+                let d = (other.pos() - pos).length_squared();
+                if d < best_d {
+                    best = Some(Some(j));
+                    best_d = d;
+                }
+            }
+        }
+        best
+    }
+
+    fn target_sphere(&self, target: Option<usize>) -> Sphere {
+        match target.and_then(|j| self.enemies.get(j)) {
+            Some(enemy) => enemy.sphere(),
+            None => Sphere {
+                centre: self.player.pos(),
+                radius: PLAYER_RADIUS,
+            },
+        }
+    }
+
+    fn hurt_target(&mut self, target: Option<usize>, damage: i32) {
+        match target {
+            None => {
+                self.player.damage(damage);
+                self.hurt_steps = HURT_FLASH_STEPS;
+                self.events.push(Event::PlayerHurt(damage));
+            }
+            Some(j) => {
+                if let Some(enemy) = self.enemies.get_mut(j) {
+                    self.events.push(Event::EnemyHit(j));
+                    if enemy.damage(damage) {
+                        self.events.push(Event::EnemyKilled(j));
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn set_enemy_faction(&mut self, i: usize, faction: Faction) {
+        if let Some(enemy) = self.enemies.get_mut(i) {
+            enemy.faction = faction;
+        }
+        let friendly = self
+            .enemies
+            .iter()
+            .filter(|e| e.faction == Faction::Friendly);
+        self.friendlies = friendly.count();
     }
 
     /// Death outranks the goal: dying on the same step as arriving loses.
@@ -239,8 +362,10 @@ impl Game {
             .fold(f32::MAX, f32::min)
     }
 
+    /// The enemies still against the player, as the HUD counts them.
     pub fn enemies_alive(&self) -> usize {
-        self.enemies.iter().filter(|e| e.alive()).count()
+        let against = |e: &&Enemy| e.alive() && e.faction == Faction::Hostile;
+        self.enemies.iter().filter(against).count()
     }
 }
 

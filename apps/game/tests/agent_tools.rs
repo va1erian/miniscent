@@ -65,10 +65,6 @@ mover vault_door brushes 1
 ";
 
 const SCRIPT: &str = "
-sw := defineEnemy: 'switch' base: 0.
-sw hp: 25.
-sw speed: 0.
-sw damage: 0.
 vault := mover: 'vault_door'.
 vault pose: 'open' move: (x: 0 y: 0 z: 18).
 (markers: 'vault_switch') do: [:m | spawn: 'switch' at: m tag: 'vault_switch'].
@@ -360,4 +356,93 @@ fn the_watcher_notices_changes_to_the_script_and_not_otherwise() {
     assert!(!watcher.changed(), "once");
     std::fs::remove_file(dir.path("level.st")).unwrap();
     assert!(watcher.changed(), "a deleted script is a change");
+}
+
+/// The keycard and terminal use cases as an agent would test them.
+const FACILITY: &str = "miniscent-level 1
+box subtract 0 1  -20 -20 -20  20 20 20
+box add 1 2  14 -3 -3  15 3 3
+player 0 0 0 0
+marker 5 5 0 0  name key_spot
+marker -6 0 0 0  name sec_terminal
+enemy 0 12 6 0  tag sec_drones
+enemy 2 12 6 0  tag sec_drones
+zone 14 0 0  3 3 3  name red_door_area
+mover red_door brushes 1
+";
+
+const FACILITY_SCRIPT: &str = "
+card := spawn: 'keycard' at: (marker: 'key_spot') tag: 'key'.
+card onPickup: [ player give: 'red'. say: 'Red keycard' ].
+autoDoor: 'red_door' travel: (x: 0 y: 0 z: 18) key: 'red'.
+terminal := spawn: 'terminal' at: (marker: 'sec_terminal') tag: 'term'.
+terminal onUse: [
+    (tagged: 'sec_drones') setFaction: 'friendly'.
+    say: 'Security override'.
+] hold: 2.
+";
+
+const FACILITY_TEST: &str = "
+door := mover: 'red_door'.
+flyTo: (x: 11 y: 0 z: 0).
+wait: 0.2.
+assert: door poseNow = 'closed' because: 'no key, no door'.
+assert: (player has: 'red') not because: 'the key is still lying there'.
+
+flyTo: (marker: 'key_spot').
+wait: 0.1.
+assert: (player has: 'red') because: 'touching the keycard picks it up'.
+
+flyTo: (x: 11 y: 0 z: 0).
+wait: 1.
+assert: door poseNow = 'open' because: 'the key opens the door'.
+
+flyTo: (x: 0 y: 0 z: 0).
+wait: 1.
+assert: door poseNow = 'closed' because: 'it closes behind the player'.
+
+teleport: (marker: 'sec_terminal') distance: 2.
+aimAt: (marker: 'sec_terminal').
+useFor: 1.
+assert: (tagged: 'sec_drones') alive = 2 because: 'both drones are still there'.
+wait: 0.1.
+useFor: 2.5.
+wait: 0.1.
+hurt := player hp.
+wait: 3.
+assert: player hp = hurt because: 'friendly drones do not shoot the player'.
+";
+
+#[test]
+fn the_keycard_and_the_terminal_work_end_to_end() {
+    let dir = Temp::new("facility");
+    let text = dir.write("level.txt", FACILITY);
+    let level = dir.path("level.msl");
+    assert!(
+        game(&["--pack-level", s(&text), s(&level)])
+            .status
+            .success()
+    );
+    dir.write("level.st", FACILITY_SCRIPT);
+    let test = dir.write("t.st", FACILITY_TEST);
+    let trace = dir.path("trace.jsonl");
+    let run = game(&[
+        "--level",
+        s(&level),
+        "--test",
+        s(&test),
+        "--trace",
+        s(&trace),
+    ]);
+    let text = out(&run);
+    assert!(run.status.success(), "{text}");
+    let log = std::fs::read_to_string(&trace).unwrap();
+    for wanted in [
+        r#""ev":"pickup""#,
+        r#""say":"Red keycard""#,
+        r#""ev":"used""#,
+        r#""say":"Security override""#,
+    ] {
+        assert!(log.contains(wanted), "{wanted} not in\n{log}");
+    }
 }

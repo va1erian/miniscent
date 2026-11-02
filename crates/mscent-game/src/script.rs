@@ -9,7 +9,8 @@
 
 use crate::arena::Thing;
 use crate::game::{Event, Game};
-use crate::script_api::{ENEMY, MOVER, PLAYER, natives};
+use crate::prop::{PropKind, built_in_kinds};
+use crate::script_api::{ENEMY, MOVER, PLAYER, PROP, natives};
 use mscent_math::rng::Rng;
 use mscent_script::{Host, NameCheck, ScriptError, Source, Value, Vm};
 
@@ -23,7 +24,7 @@ const RANDOM_SEED: u64 = 0x5CA1_AB1E;
 
 /// Functions written in the language that need the game's natives, so they
 /// cannot live in the script crate's own prelude.
-const GAME_LIBRARY: &str = "
+pub(crate) const GAME_LIBRARY: &str = "
 define waitArrived: m [ [m moving] whileTrue: [wait: 0.05] ]
 define waitDestroyed: g [ [g alive > 0] whileTrue: [wait: 0.1] ]
 ";
@@ -40,6 +41,10 @@ pub(crate) enum Trigger {
     Each(u16),
     /// The last living enemy with this tag died.
     All(u16),
+    PropPicked(u32),
+    PropUsed(u32),
+    PropHit(u32),
+    PropDestroyed(u32),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -66,6 +71,9 @@ pub(crate) struct ScriptState {
     pub tags: Vec<String>,
     /// Parallel to `Game::enemies`: the tags of each.
     pub enemy_tags: Vec<Vec<u16>>,
+    /// Parallel to `Game::props`: the tags of each.
+    pub prop_tags: Vec<Vec<u16>>,
+    pub prop_kinds: Vec<(String, PropKind)>,
     /// Enemy kinds a script can spawn, by name, with the base mesh kind.
     pub kinds: Vec<(String, u8, crate::EnemyStats)>,
     pub inventory: Vec<String>,
@@ -77,10 +85,14 @@ pub(crate) struct ScriptState {
     pub end: Option<ScriptEnd>,
     /// Test scripts only: fire is held until this tick.
     pub fire_until: u64,
+    /// Test scripts only: the use key is held until this tick.
+    pub use_until: u64,
     pub checks: Vec<crate::script_test_api::Check>,
     pub shots: Vec<String>,
     /// The tasks running each source's top level. The last is the test's.
     pub entry_tasks: Vec<u64>,
+    /// Events scripts raised while running, for handlers on the next step.
+    pub carried: Vec<Event>,
     /// Which handler each started task belongs to, so an error can end it.
     fired: Vec<(u64, usize)>,
 }
@@ -91,6 +103,8 @@ impl ScriptState {
             handlers: Vec::new(),
             tags: Vec::new(),
             enemy_tags: vec![Vec::new(); enemies],
+            prop_tags: Vec::new(),
+            prop_kinds: built_in_kinds(),
             kinds: vec![
                 ("drone".to_string(), 0, crate::stats_for(0)),
                 ("hunter".to_string(), 1, crate::stats_for(1)),
@@ -102,9 +116,11 @@ impl ScriptState {
             rng: Rng::new(RANDOM_SEED),
             end: None,
             fire_until: 0,
+            use_until: 0,
             checks: Vec::new(),
             shots: Vec::new(),
             entry_tasks: Vec::new(),
+            carried: Vec::new(),
             fired: Vec::new(),
         }
     }
@@ -192,7 +208,9 @@ impl Game {
             self.vm = None;
             return;
         };
+        let before = self.events.len();
         self.script.entry_tasks = vm.start(self);
+        self.carry_events(before);
         self.drain_errors(&mut vm);
         self.vm = Some(vm);
     }
@@ -263,18 +281,30 @@ impl Game {
 
     /// The script's part of a step: zones, then a task for every handler of an
     /// event since `mark`, then every task that is due.
-    pub(crate) fn run_script(&mut self, mark: usize) {
+    pub(crate) fn run_script(&mut self, mark: usize, input: &crate::Input) {
         let Some(mut vm) = self.vm.take() else {
             return;
         };
         self.update_zones();
+        self.update_props(input);
+        let carried = std::mem::take(&mut self.script.carried);
         let events = self.events.get(mark..).map(<[Event]>::to_vec);
-        for event in events.unwrap_or_default() {
+        for event in carried.into_iter().chain(events.unwrap_or_default()) {
             self.start_handlers(&mut vm, event);
         }
+        let before = self.events.len();
         vm.step(self);
+        self.carry_events(before);
         self.drain_errors(&mut vm);
         self.vm = Some(vm);
+    }
+
+    /// What scripts just raised reach handlers next step, so no script can make
+    /// a loop inside one step, and the host may take the events in between.
+    fn carry_events(&mut self, from: usize) {
+        if let Some(raised) = self.events.get(from..) {
+            self.script.carried.extend_from_slice(raised);
+        }
     }
 
     fn update_zones(&mut self) {
@@ -308,6 +338,14 @@ impl Game {
             }
             Event::MoverHit(i) => self.fire_trigger(vm, Trigger::Hit(i as u32), handle(MOVER, i)),
             Event::EnemyKilled(i) => self.enemy_died(vm, i),
+            Event::PropPicked(i) => {
+                self.fire_trigger(vm, Trigger::PropPicked(i as u32), handle(PROP, i))
+            }
+            Event::PropUsed(i) => {
+                self.fire_trigger(vm, Trigger::PropUsed(i as u32), handle(PROP, i))
+            }
+            Event::PropHit(i) => self.fire_trigger(vm, Trigger::PropHit(i as u32), handle(PROP, i)),
+            Event::PropDestroyed(i) => self.prop_destroyed(vm, i),
             _ => {}
         }
     }
@@ -321,6 +359,18 @@ impl Game {
             .get(enemy)
             .cloned()
             .unwrap_or_default();
+        for tag in tags {
+            self.fire_trigger(vm, Trigger::Each(tag), subject);
+            if self.tag_alive(tag) == 0 {
+                self.fire_trigger(vm, Trigger::All(tag), subject);
+            }
+        }
+    }
+
+    fn prop_destroyed(&mut self, vm: &mut Vm<Game>, prop: usize) {
+        let subject = Value::Handle(PROP, prop as u32);
+        self.fire_trigger(vm, Trigger::PropDestroyed(prop as u32), subject);
+        let tags = self.script.prop_tags.get(prop).cloned().unwrap_or_default();
         for tag in tags {
             self.fire_trigger(vm, Trigger::Each(tag), subject);
             if self.tag_alive(tag) == 0 {

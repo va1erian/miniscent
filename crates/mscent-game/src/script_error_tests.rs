@@ -65,15 +65,12 @@ fn a_bad_request_is_an_error_on_the_calling_line_not_a_game_state() {
             "must not be negative",
         ),
         ("player moveTo: 'closed' in: 1.", "for a mover"),
-        ("(mover: 'door') hp.", "player or an enemy"),
+        ("(mover: 'door') hp.", "hp is for the player"),
         ("(mover: 'door') onEnter: [ ].", "for a zone"),
         ("3 alive.", "tagged group or an enemy"),
         ("markers: 'nothing_like_this'.", "no markers named"),
         ("mover: 'do' , 'oor'.", "no mover named"),
-        (
-            "spawn: 'dragon' at: (x: 0 y: 0 z: 0) tag: 't'.",
-            "no enemy kind",
-        ),
+        ("spawn: 'dragon' at: (x: 0 y: 0 z: 0) tag: 't'.", "no kind"),
         (
             "spawn: 'drone' at: (x: 100 y: 0 z: 0) tag: 't'.",
             "solid rock",

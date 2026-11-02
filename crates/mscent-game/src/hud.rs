@@ -31,6 +31,8 @@ pub struct HudModel {
     pub speed: u32,
     pub hurt: bool,
     pub phase: Phase,
+    /// Something usable is in reach; how far along holding the key is.
+    pub use_prompt: Option<f32>,
 }
 
 impl HudModel {
@@ -43,6 +45,7 @@ impl HudModel {
             speed: g.player.body.vel.length() as u32,
             hurt: g.hurt_steps > 0,
             phase: g.phase,
+            use_prompt: g.use_prompt(),
         }
     }
 
@@ -89,6 +92,9 @@ pub fn draw_hud(fb: &mut Framebuffer, m: &HudModel) {
         m.speed
     );
     draw_text(fb, MARGIN, MARGIN, &info, WHITE, 1);
+    if let Some(progress) = m.use_prompt {
+        draw_use_prompt(fb, progress);
+    }
 }
 
 fn draw_crosshair(fb: &mut Framebuffer) {
@@ -132,5 +138,24 @@ fn goal_text(distance: f32) -> String {
         "-".to_string()
     } else {
         (distance as u32).to_string()
+    }
+}
+
+/// "HOLD G" under the crosshair, with a bar while it is held.
+fn draw_use_prompt(fb: &mut Framebuffer, progress: f32) {
+    let (w, h) = (fb.width() as i32, fb.height() as i32);
+    let label = "HOLD G";
+    let (cx, y) = (w / 2, h / 2 + 24);
+    draw_text(fb, cx - 18, y, label, WHITE, 1);
+    if progress > 0.0 {
+        fill_rect(fb, cx - 30, y + 12, 60, 4, 0xff30_3030);
+        fill_rect(
+            fb,
+            cx - 30,
+            y + 12,
+            (60.0 * progress) as u32,
+            4,
+            0xff40_e0f0,
+        );
     }
 }

@@ -60,6 +60,11 @@ fn event_fields(game: &Game, event: &Event) -> Option<String> {
         Event::ZoneEntered(i) => named("enter", "zone", "zone", i),
         Event::ZoneLeft(i) => named("exit", "zone", "zone", i),
         Event::EnemySpawned(i) => named("spawned", "who", "enemy", i),
+        Event::PropSpawned(i) => named("spawned", "who", "prop", i),
+        Event::PropHit(i) => named("hit", "who", "prop", i),
+        Event::PropDestroyed(i) => named("destroyed", "who", "prop", i),
+        Event::PropPicked(i) => named("pickup", "who", "prop", i),
+        Event::PropUsed(i) => named("used", "who", "prop", i),
     })
 }
 

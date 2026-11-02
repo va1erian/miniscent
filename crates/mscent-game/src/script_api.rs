@@ -22,6 +22,8 @@ pub(crate) const ENEMY: u8 = 4;
 pub(crate) const GROUP: u8 = 5;
 pub(crate) const PLAYER: u8 = 6;
 pub(crate) const KIND: u8 = 7;
+pub(crate) const PROP: u8 = 8;
+pub(crate) const PROP_KIND: u8 = 9;
 
 pub(crate) type Res = Result<Flow, String>;
 
@@ -48,9 +50,6 @@ pub fn natives() -> Vec<(&'static str, Native<Game>)> {
         ("onArrived:", |g, _, r, a| {
             handler(g, Trigger::Arrived(mover_of(r)? as u32), a, false)
         }),
-        ("onHit:", |g, _, r, a| {
-            handler(g, Trigger::Hit(mover_of(r)? as u32), a, false)
-        }),
         ("onEnter:", |g, _, r, a| {
             handler(g, Trigger::ZoneEnter(zone_of(r)?), a, false)
         }),
@@ -64,6 +63,7 @@ pub fn natives() -> Vec<(&'static str, Native<Game>)> {
         ("x:y:z:", vector),
     ];
     table.extend_from_slice(script_world::NATIVES);
+    table.extend_from_slice(crate::script_props::NATIVES);
     table
 }
 

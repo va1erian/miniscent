@@ -43,7 +43,7 @@ switches onAllDestroyed: [
 Pick up a keycard. `autoDoor:` is ordinary script in the shared library, not an engine feature:
 
 ```smalltalk
-card := spawn: 'red_keycard' at: (marker: 'red_key') tag: 'key'.
+card := spawn: 'keycard' at: (marker: 'red_key') tag: 'key'.
 card onPickup: [
     player give: 'red'.
     say: 'Red keycard'.
@@ -126,15 +126,15 @@ Hack a terminal to turn enemies friendly, and tune a new enemy. The hold time an
 engine behaviour; the consequence is script:
 
 ```smalltalk
-kind := defineProp: 'terminal'.
+kind := defineProp: 'console'.
 kind mesh: 'terminal'.
-kind radius: 1.
+kind radius: 1.5.
 
 sentry := defineEnemy: 'sentry' base: 0.
 sentry hp: 80.
 sentry speed: 0.
 
-terminal := spawn: 'terminal' at: (marker: 'sec_terminal') tag: 'term'.
+terminal := spawn: 'console' at: (marker: 'sec_terminal') tag: 'term'.
 terminal onUse: [
     (tagged: 'sec_drones') setFaction: 'friendly'.
     (tagged: 'sec_turrets') disable.
@@ -350,15 +350,15 @@ mover for `onArrived:` and `onHit:`, the player for a zone.
 otherwise spawn nothing and wait forever. `tagged:` accepts any name, since a tag can come into being with
 a spawn, so it has no load-time check.
 
-The rows for spawned things and factions, and `defineProp:`, are not built yet (M9.8). `say:` goes to the console until the HUD shows it.
+`spawn:at:tag:` takes any enemy kind (`drone`, `hunter`, or from `defineEnemy:base:`) or prop kind (`switch`, `keycard`, `terminal`, `crate`, or from `defineProp:`). A name is one kind or the other. A prop does only what its script asks: it can be shot if it has health or an `onHit:`, picked up if it has an `onPickup:`, used if it has an `onUse:hold:`. Props are not solid. `say:` shows on the HUD and on the console.
 
 `defineEnemy:base:` setters write the fields of `EnemyStats`, so most tuning needs no rebuild. A new AI
 state does need one: `enemy.rs` stays Rust, because it runs at 120 Hz for every enemy and sight rays are
 expensive. Scripts choose behaviour; they do not run per-step AI.
 
-Two kit additions come with this surface. A **use key** (`F`, since `E` is roll) adds `Input::use_`.
-**Factions** change `Enemy::step`, which today only ever targets the player: a friendly needs to choose
-among hostiles, with sight checks staggered across steps so the cost stays flat.
+Two kit additions come with this surface. A **use key** (`G`, since `E` is roll and `F` is thrust) adds
+`Input::use_key`. **Factions** let an enemy go after the nearest opponent within its sight, which is a search
+per enemy per step, paid only once a script has made one friendly.
 
 ### Determinism and safety
 

@@ -81,6 +81,7 @@ pub fn random_trace(seed: u64, len: usize) -> Vec<Input> {
             yaw: axis(),
             roll: axis(),
             fire: false,
+            use_key: false,
         })
         .collect()
 }

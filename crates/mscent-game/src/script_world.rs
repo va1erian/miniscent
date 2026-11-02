@@ -5,8 +5,10 @@ use crate::game::Game;
 use crate::player::MAX_HEALTH;
 use crate::script::{ScriptEnd, Trigger};
 use crate::script_api::{
-    ENEMY, GROUP, KIND, MARKER, PLAYER, Res, handler, nil, number, one, point, string, val,
+    ENEMY, GROUP, KIND, MARKER, PLAYER, PROP, PROP_KIND, Res, handler, nil, number, one, point,
+    string, val,
 };
+use crate::script_props::{set_prop_hp, set_prop_radius, spawn_prop};
 use mscent_collide::STEP_HZ;
 use mscent_math::Vec3;
 use mscent_script::{Flow, Heap, Native, Value};
@@ -39,12 +41,20 @@ pub(crate) const NATIVES: &[(&str, Native<Game>)] = &[
     ("spawnAll:at:tag:", spawn_all),
     ("defineEnemy:base:", define_enemy),
     ("hp:", |g, h, r, a| {
+        if matches!(r, Value::Handle(PROP_KIND, _)) {
+            return set_prop_hp(g, h, r, a);
+        }
         set_stat(g, h, r, a, |s, v| s.max_hp = v as i32)
     }),
     ("speed:", |g, h, r, a| {
         set_stat(g, h, r, a, |s, v| s.speed = v)
     }),
-    ("radius:", |g, h, r, a| set_radius(g, h, r, a)),
+    ("radius:", |g, h, r, a| {
+        if matches!(r, Value::Handle(PROP_KIND, _)) {
+            return set_prop_radius(g, h, r, a);
+        }
+        set_radius(g, h, r, a)
+    }),
     ("sightRange:", |g, h, r, a| {
         set_stat(g, h, r, a, |s, v| s.sight_range = v)
     }),
@@ -92,11 +102,19 @@ impl Game {
         Ok((tags.len() - 1) as u16)
     }
 
+    /// Enemies and props with this tag still there.
     pub(crate) fn tag_alive(&self, tag: u16) -> usize {
-        self.tag_members(tag).count()
+        self.tag_enemies(tag).count() + self.tag_props(tag).count()
     }
 
-    fn tag_members(&self, tag: u16) -> impl Iterator<Item = usize> + '_ {
+    fn tag_props(&self, tag: u16) -> impl Iterator<Item = usize> + '_ {
+        let tags = self.script.prop_tags.iter().enumerate();
+        tags.filter(move |(_, t)| t.contains(&tag))
+            .map(|(i, _)| i)
+            .filter(|&i| self.props.get(i).is_some_and(|p| p.present))
+    }
+
+    pub(crate) fn tag_enemies(&self, tag: u16) -> impl Iterator<Item = usize> + '_ {
         let tags = self.script.enemy_tags.iter().enumerate();
         tags.filter(move |(_, t)| t.contains(&tag))
             .map(|(i, _)| i)
@@ -113,6 +131,7 @@ fn alive(g: &mut Game, _: &mut Heap, r: Value, _: &[Value]) -> Res {
     let count = match r {
         Value::Handle(GROUP, tag) => g.tag_alive(tag as u16),
         Value::Handle(ENEMY, i) => usize::from(g.enemies.get(i as usize).is_some_and(Enemy::alive)),
+        Value::Handle(PROP, i) => usize::from(g.props.get(i as usize).is_some_and(|p| p.present)),
         _ => return Err("alive is for a tagged group or an enemy".into()),
     };
     val(Value::Num(count as f32))
@@ -122,8 +141,13 @@ fn members(g: &mut Game, h: &mut Heap, r: Value, _: &[Value]) -> Res {
     let Value::Handle(GROUP, tag) = r else {
         return Err("members is for a tagged group".into());
     };
-    let list = g.tag_members(tag as u16);
-    let list = list.map(|i| Value::Handle(ENEMY, i as u32)).collect();
+    let enemies = g
+        .tag_enemies(tag as u16)
+        .map(|i| Value::Handle(ENEMY, i as u32));
+    let props = g
+        .tag_props(tag as u16)
+        .map(|i| Value::Handle(PROP, i as u32));
+    let list = enemies.chain(props).collect();
     h.new_array(list).map(Flow::Val)
 }
 
@@ -131,7 +155,8 @@ fn on_each_destroyed(g: &mut Game, _: &mut Heap, r: Value, args: &[Value]) -> Re
     let trigger = match r {
         Value::Handle(GROUP, tag) => Trigger::Each(tag as u16),
         Value::Handle(ENEMY, i) => Trigger::EnemyDied(i),
-        _ => return Err("onEachDestroyed: is for a tagged group or an enemy".into()),
+        Value::Handle(PROP, i) => Trigger::PropDestroyed(i),
+        _ => return Err("onEachDestroyed: is for a tagged group, an enemy or a prop".into()),
     };
     handler(g, trigger, args, false)
 }
@@ -146,28 +171,39 @@ fn on_all_destroyed(g: &mut Game, _: &mut Heap, r: Value, args: &[Value]) -> Res
 fn set_enabled(g: &mut Game, r: Value, on: bool) -> Res {
     match r {
         Value::Handle(GROUP, tag) => {
-            let list: Vec<usize> = g.tag_members(tag as u16).collect();
+            let list: Vec<usize> = g.tag_enemies(tag as u16).collect();
             for i in list {
                 g.enemies[i].enabled = on;
+            }
+            let list: Vec<usize> = g.tag_props(tag as u16).collect();
+            for i in list {
+                g.props[i].enabled = on;
             }
         }
         Value::Handle(ENEMY, i) => {
             let enemy = g.enemies.get_mut(i as usize).ok_or("no such enemy")?;
             enemy.enabled = on;
         }
-        _ => return Err("this message is for a tagged group or an enemy".into()),
+        Value::Handle(PROP, i) => {
+            let prop = g.props.get_mut(i as usize).ok_or("no such prop")?;
+            prop.enabled = on;
+        }
+        _ => return Err("this message is for a tagged group, an enemy or a prop".into()),
     }
     nil()
 }
 
 fn spawn_at(g: &mut Game, kind: &str, pos: Vec3, tag: u16) -> Result<Value, String> {
-    let found = g.script.kinds.iter().find(|(n, _, _)| n == kind);
-    let (base, stats) = found
-        .map(|(_, b, s)| (*b, *s))
-        .ok_or_else(|| format!("no enemy kind '{kind}'; defineEnemy:base: makes one"))?;
     if !pos.is_finite() || g.arena.bsp.is_solid(pos.to_f64()) {
         return Err(format!("cannot spawn '{kind}' inside solid rock"));
     }
+    if let Some(prop) = spawn_prop(g, kind, pos, tag) {
+        return prop;
+    }
+    let found = g.script.kinds.iter().find(|(n, _, _)| n == kind);
+    let (base, stats) = found
+        .map(|(_, b, s)| (*b, *s))
+        .ok_or_else(|| format!("no kind '{kind}'; defineEnemy:base: or defineProp: makes one"))?;
     let spawned = g.enemies.len().saturating_sub(g.arena.enemies.len());
     if spawned >= MAX_SPAWNED {
         return Err(format!(
@@ -228,7 +264,8 @@ fn define_enemy(g: &mut Game, h: &mut Heap, _: Value, args: &[Value]) -> Res {
         return Err("base: must be 0 (drone) or 1 (hunter)".into());
     }
     let kinds = &mut g.script.kinds;
-    if kinds.iter().any(|(n, _, _)| *n == name) {
+    let taken = g.script.prop_kinds.iter().any(|(n, _)| *n == name);
+    if taken || kinds.iter().any(|(n, _, _)| *n == name) {
         return Err(format!("kind '{name}' is already defined"));
     }
     if kinds.len() >= MAX_KINDS {
@@ -274,7 +311,8 @@ fn hp(g: &mut Game, _: &mut Heap, r: Value, _: &[Value]) -> Res {
     let hp = match r {
         Value::Handle(PLAYER, _) => g.player.health,
         Value::Handle(ENEMY, i) => g.enemies.get(i as usize).ok_or("no such enemy")?.hp,
-        _ => return Err("hp is for the player or an enemy".into()),
+        Value::Handle(PROP, i) => g.props.get(i as usize).ok_or("no such prop")?.hp,
+        _ => return Err("hp is for the player, an enemy or a prop".into()),
     };
     val(Value::Num(hp as f32))
 }
@@ -319,8 +357,9 @@ fn pos(g: &mut Game, h: &mut Heap, r: Value, _: &[Value]) -> Res {
     let p = match r {
         Value::Handle(PLAYER, _) => g.player.pos(),
         Value::Handle(ENEMY, i) => g.enemies.get(i as usize).ok_or("no such enemy")?.pos(),
+        Value::Handle(PROP, i) => g.props.get(i as usize).ok_or("no such prop")?.pos,
         Value::Handle(MARKER, _) => point(g, h, r)?,
-        _ => return Err("pos is for the player, an enemy or a marker".into()),
+        _ => return Err("pos is for the player, an enemy, a prop or a marker".into()),
     };
     let items = vec![Value::Num(p.x), Value::Num(p.y), Value::Num(p.z)];
     h.new_array(items).map(Flow::Val)

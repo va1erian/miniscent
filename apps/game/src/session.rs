@@ -16,13 +16,15 @@ use mscent_game::{
 use mscent_math::{Quat, Vec3};
 use mscent_platform::{Event, Key, MouseButton};
 use mscent_render::{
-    Actor, ActorKind, BakeCache, BuildConfig, BuildError, Framebuffer, LevelRenderer,
-    MaterialTable, MoverPose, Quality, View, draw_text, fill_rect,
+    BakeCache, BuildConfig, BuildError, Framebuffer, LevelRenderer, MaterialTable, Quality, View,
+    draw_text, fill_rect,
 };
 use mscent_world::Level;
 
 use crate::controls::Controls;
+use crate::drawn::{actors_of, mover_poses_of};
 use crate::feedback::Feedback;
+use crate::notices::Notices;
 use mscent_script::{ScriptError, Source};
 
 /// Radians of turn per pixel of mouse movement.
@@ -99,6 +101,7 @@ pub struct GameSession {
     hit: u32,
     kill: u32,
     feedback: Feedback,
+    notices: Notices,
 }
 
 /// Cheap interpolation between nearby orientations.
@@ -185,6 +188,7 @@ impl GameSession {
             hit: 0,
             kill: 0,
             feedback: Feedback::default(),
+            notices: Notices::default(),
         }
     }
 
@@ -251,6 +255,7 @@ impl GameSession {
         self.menu.press(MenuCommand::Select);
         (self.muzzle, self.hit, self.kill) = (0, 0, 0);
         self.feedback.clear();
+        self.notices.clear();
     }
 
     fn playing(&self) -> bool {
@@ -286,13 +291,15 @@ impl GameSession {
         }
     }
 
-    /// Until the HUD shows these (M9.8), the console does.
+    /// On screen for the player, and on the console for whoever is scripting.
     fn report_script(&mut self) {
         for message in self.game.take_messages() {
             eprintln!("script says: {message}");
+            self.notices.message(&message);
         }
         for error in self.game.take_script_errors() {
             eprintln!("script error: {error}");
+            self.notices.error(&error.to_string());
         }
     }
 
@@ -393,42 +400,6 @@ impl GameSession {
         }
     }
 
-    fn actors(&self) -> Vec<Actor> {
-        let alpha = self.stepper.alpha();
-        let eye = self.game.player.pos();
-        let spin = self.game.ticks as f32 * 0.02;
-        let goals = self.game.arena.goals.iter().map(|g| Actor {
-            kind: ActorKind::Goal,
-            pos: g.pos,
-            yaw: spin,
-        });
-        let enemies = self.game.enemies.iter().filter(|e| e.alive()).map(|e| {
-            let pos = e.body.prev_pos.lerp(e.body.pos, alpha);
-            let to = eye - pos;
-            Actor {
-                kind: ActorKind::Enemy,
-                pos,
-                yaw: to.y.atan2(to.x) - core::f32::consts::FRAC_PI_2,
-            }
-        });
-        goals.chain(enemies).collect()
-    }
-
-    fn mover_poses(&self) -> Vec<MoverPose> {
-        let alpha = self.stepper.alpha();
-        let movers = self.game.movers.iter();
-        movers
-            .map(|m| {
-                let pose = m.drawn_pose(alpha);
-                MoverPose {
-                    rot: pose.rot,
-                    pivot: pose.pivot.to_f32(),
-                    offset: pose.offset.to_f32(),
-                }
-            })
-            .collect()
-    }
-
     /// Draws the current state at `width` x `height`: world, HUD, feedback
     /// and menus. `None` when the size is zero or the pose is invalid.
     pub fn render(&mut self, width: u32, height: u32) -> Option<&Framebuffer> {
@@ -436,8 +407,9 @@ impl GameSession {
             self.fb = Some(Framebuffer::new(width, height)?);
         }
         let view = self.view();
-        let actors = self.actors();
-        let poses = self.mover_poses();
+        let alpha = self.stepper.alpha();
+        let actors = actors_of(&self.game, alpha);
+        let poses = mover_poses_of(&self.game, alpha);
         let mut fb = self.fb.take()?;
         let drawn = self
             .renderer
@@ -446,6 +418,7 @@ impl GameSession {
             let fov = self.renderer.config().fov_y;
             self.feedback.draw(&mut fb, &view, fov);
             self.draw_overlays(&mut fb);
+            self.notices.draw(&mut fb);
         }
         self.muzzle = self.muzzle.saturating_sub(1);
         self.hit = self.hit.saturating_sub(1);

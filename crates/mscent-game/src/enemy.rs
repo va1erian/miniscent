@@ -11,6 +11,13 @@ use mscent_collide::{Body, STEP_HZ, Solids, sweep_sphere};
 use mscent_math::Vec3;
 use mscent_math::rng::Rng;
 
+/// Which side an enemy is on. A friendly one fights the hostile ones.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Faction {
+    Hostile,
+    Friendly,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AiState {
     Patrol,
@@ -81,6 +88,7 @@ pub struct Enemy {
     pub fired: bool,
     /// A disabled enemy stays where it is, can still be shot, and does nothing.
     pub enabled: bool,
+    pub faction: Faction,
     stats: EnemyStats,
     lost_steps: u32,
     cooldown: u32,
@@ -106,6 +114,7 @@ impl Enemy {
             last_seen: None,
             fired: false,
             enabled: true,
+            faction: Faction::Hostile,
             stats,
             lost_steps: 0,
             cooldown: stats.attack_cooldown,
@@ -145,7 +154,17 @@ impl Enemy {
 
     /// One fixed step. Returns the damage dealt to the player this step.
     pub fn step<'a>(&mut self, solids: impl Into<Solids<'a>>, player: &Sphere) -> Option<i32> {
-        let bsp = solids.into();
+        self.step_toward(solids.into(), Some(player))
+    }
+
+    /// How far it can see, for choosing who to go after.
+    pub fn sight_range(&self) -> f32 {
+        self.stats.sight_range
+    }
+
+    /// One fixed step with `target` as what it is after, or nothing in reach.
+    /// Returns the damage dealt to the target this step.
+    pub(crate) fn step_toward(&mut self, bsp: Solids, target: Option<&Sphere>) -> Option<i32> {
         if !self.alive() {
             return None;
         }
@@ -156,6 +175,17 @@ impl Enemy {
             return None;
         }
         self.cooldown = self.cooldown.saturating_sub(1);
+        let Some(player) = target else {
+            // Nothing to go after: lose interest in the usual way, and patrol.
+            self.track(false, self.body.pos);
+            self.transition(false, f32::MAX);
+            match self.state {
+                AiState::Patrol => self.patrol(bsp),
+                AiState::Chase | AiState::Attack => self.chase(bsp),
+                AiState::Dead => {}
+            }
+            return None;
+        };
         let to_player = player.centre - self.body.pos;
         let dist = to_player.length();
         let sees =

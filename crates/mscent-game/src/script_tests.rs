@@ -96,10 +96,6 @@ fn switches() -> Vec<(Entity, &'static str, &'static [&'static str])> {
 }
 
 const SWITCH_SCRIPT: &str = "
-    sw := defineEnemy: 'switch' base: 0.
-    sw hp: 25.
-    sw speed: 0.
-    sw damage: 0.
     vault := mover: 'door'.
     vault pose: 'open' move: (x: 0 y: 0 z: 20).
     (markers: 'vault_switch') do: [:m | spawn: 'switch' at: m tag: 'vault_switch'].
@@ -113,7 +109,7 @@ const SWITCH_SCRIPT: &str = "
 #[test]
 fn shooting_several_things_opens_a_door() {
     let mut game = game_on(&level(switches()), SWITCH_SCRIPT);
-    assert_eq!(game.enemies.len(), 3);
+    assert_eq!(game.props.len(), 3);
     let fire = Input {
         fire: true,
         ..Input::default()
@@ -130,7 +126,7 @@ fn shooting_several_things_opens_a_door() {
     no_errors(&mut game);
     assert_eq!(game.take_messages(), ["0 left", "Vault unlocked"]);
     assert_eq!(door(&game), Some("open"));
-    assert_eq!(game.enemies_alive(), 0);
+    assert!(game.props.iter().all(|p| !p.present));
 }
 
 #[test]
@@ -408,4 +404,50 @@ fn a_clone_mid_wait_plays_on_the_same() {
     assert_eq!(game.enemies.len(), copy.enemies.len());
     assert_eq!(game.take_messages(), copy.take_messages());
     assert_eq!(game.player.pos(), copy.player.pos());
+}
+
+/// Every script in the design doc compiles against the real table of functions,
+/// so the doc cannot drift from the language. The language summary is skipped:
+/// its lines are fragments, not a script.
+#[test]
+fn the_examples_in_the_design_doc_all_compile() {
+    let doc = include_str!("../../../docs/scripting.md");
+    let mut table = crate::natives();
+    table.extend_from_slice(crate::test_natives());
+    let blocks = doc.split("```smalltalk").skip(1);
+    let mut compiled = 0;
+    for block in blocks.map(|b| b.split("```").next().unwrap_or("")) {
+        if block.contains("x := 3.") {
+            continue;
+        }
+        // The block that defines the library function must not get it twice.
+        let library = if block.contains("define autoDoor") {
+            ""
+        } else {
+            DOORS
+        };
+        let sources = [
+            Source {
+                name: "<game>",
+                text: crate::script::GAME_LIBRARY,
+            },
+            Source {
+                name: "doors.st",
+                text: library,
+            },
+            Source {
+                name: "doc",
+                text: block,
+            },
+        ];
+        let loaded = mscent_script::Vm::<Game>::load(&sources, &table, &[]);
+        assert!(
+            loaded.is_ok(),
+            "{block}
+{:?}",
+            loaded.err()
+        );
+        compiled += 1;
+    }
+    assert!(compiled >= 7, "only {compiled} examples found");
 }

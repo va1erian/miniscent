@@ -4,7 +4,7 @@
 
 use crate::combat::line_of_sight;
 use crate::game::{Game, Phase};
-use crate::script_api::{ENEMY, MARKER, MOVER, Res, ZONE, nil, number, one, point, string};
+use crate::script_api::{ENEMY, MARKER, MOVER, PROP, Res, ZONE, nil, number, one, point, string};
 use mscent_collide::{STEP_HZ, Solids};
 use mscent_math::{Quat, Vec3};
 use mscent_script::{Flow, Heap, Native, Value};
@@ -47,6 +47,7 @@ pub(crate) const NATIVES: &[(&str, Native<Game>)] = &[
     ("flyTo:", fly_to),
     ("aimAt:", aim_at),
     ("fireFor:", fire_for),
+    ("useFor:", use_for),
     ("shot:", shot),
     ("phase", phase),
 ];
@@ -56,6 +57,7 @@ impl Game {
     pub fn test_input(&self) -> crate::Input {
         crate::Input {
             fire: self.ticks < self.script.fire_until,
+            use_key: self.ticks < self.script.use_until,
             ..crate::Input::default()
         }
     }
@@ -84,6 +86,10 @@ impl Game {
             Value::Handle(ZONE, i) => {
                 let zone = self.arena.zones.get(i as usize).ok_or("no such zone")?;
                 Ok(zone.pos)
+            }
+            Value::Handle(PROP, i) => {
+                let prop = self.props.get(i as usize).ok_or("no such prop")?;
+                Ok(prop.pos)
             }
             Value::Handle(MARKER, _) => point(self, h, v),
             _ => point(self, h, v),
@@ -184,6 +190,12 @@ fn hold_ticks(g: &Game, h: &Heap, args: &[Value], what: &str) -> Result<(u64, f3
 fn fire_for(g: &mut Game, h: &mut Heap, _: Value, args: &[Value]) -> Res {
     let (until, seconds) = hold_ticks(g, h, args, "fireFor:")?;
     g.script.fire_until = until;
+    Ok(Flow::Wait(seconds))
+}
+
+fn use_for(g: &mut Game, h: &mut Heap, _: Value, args: &[Value]) -> Res {
+    let (until, seconds) = hold_ticks(g, h, args, "useFor:")?;
+    g.script.use_until = until;
     Ok(Flow::Wait(seconds))
 }
 

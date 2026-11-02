@@ -34,8 +34,10 @@ pub mod input;
 pub mod menu;
 pub mod mover;
 pub mod player;
+pub mod prop;
 pub mod script;
 mod script_api;
+mod script_props;
 pub mod script_test_api;
 mod script_world;
 pub mod weapon;
@@ -45,13 +47,14 @@ pub use arena::{
     ZoneSpec,
 };
 pub use combat::{Hitscan, Sphere, hitscan, line_of_sight, ray};
-pub use enemy::{AiState, Enemy, EnemyStats, stats_for};
+pub use enemy::{AiState, Enemy, EnemyStats, Faction, stats_for};
 pub use game::{Event, Game, Phase};
 pub use hud::{HudModel, draw_hud, draw_menu};
 pub use input::Input;
 pub use menu::{Menu, MenuAction, MenuCommand, Screen};
 pub use mover::{Mover, MoverError, WhenBlocked};
 pub use player::Player;
+pub use prop::{Prop, PropMesh};
 pub use script_api::natives;
 pub use script_test_api::Check;
 
@@ -75,6 +78,8 @@ mod mover_tests;
 mod player_tests;
 #[cfg(test)]
 mod script_error_tests;
+#[cfg(test)]
+mod script_prop_tests;
 #[cfg(test)]
 mod script_tests;
 #[cfg(test)]

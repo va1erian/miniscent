@@ -35,6 +35,7 @@ fn model(health: i32, hurt: bool) -> HudModel {
         speed: 12,
         hurt,
         phase: Phase::Playing,
+        use_prompt: None,
     }
 }
 
