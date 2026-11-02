@@ -258,10 +258,20 @@ overloaded view therefore loses distant detail first, and frame time stays bound
 - **Light:** colour and dominant direction interpolate perspective-correctly from the vertices. The
   values are attached to world points, so this cannot return the screen-space span crawl that the
   per-pixel lightmap work removed. `examples/crawl.rs` is extended to prove it.
-- **Bump and specular:** the tangent axes are the two world axes of the projection, so moving the
-  world direction into tangent space is a swizzle, and the existing bump and specular code applies, at
-  every level of detail: bump fades with distance by itself, and cutting it off at a chunk border drew a
-  hard line between textured and flat rock.
+- **Bump:** the tangent axes are the two world axes of the projection, so moving the world direction into
+  tangent space is a swizzle, and the existing bump code applies, at every level of detail: bump fades with
+  distance by itself, and cutting it off at a chunk border drew a hard line between textured and flat rock.
+- **Specular:** at High, the highlight is worked out per pixel in world space from the interpolated normal
+  (Phong). The projection's frame is skewed wherever the surface tilts from its axis, so a highlight measured
+  in it changed with a triangle's axis, and drew the triangles as hard-edged patches on anything glossy. Low and
+  Medium draw no highlight, and were never affected. Against the skewed sum it costs nothing that can be measured.
+- **Normals:** a vertex's normal is read over its cell and its neighbours, as one cell's gradient turns sharply
+  wherever the grid crosses a crease. That costs meshing about 13% (0.33 to 0.37 ms a chunk). A sheet too thin for
+  that reach, and a surface with no crease, keep the cell's own: a flat wall must not tilt near a brush it meets.
+- **Spots:** a large bright mark on a curved surface cannot be a projected image, which stretches it and cuts it
+  where projections meet. A cap's spots come from balls in a repeating table of distance (`voxel/solid.rs`), so
+  a surface of any shape cuts each in a round patch. It reads eight samples for each pixel of that material alone,
+  at every quality.
 
 ## Lighting
 
@@ -557,18 +567,18 @@ faces. The first frame of a view can run far over budget until the governor acts
 
 | What | Low | High |
 |---|---|---|
-| Cave, mean frame (worst about 21 ms at High) | 9.1 ms | 14.1 ms |
-| Cave, cost per screen pixel | 40 ns | 61 ns |
+| Cave, mean frame (worst 19 to 22 ms at High) | 9.3 to 11.0 ms | 11.7 to 13.2 ms |
+| Cave, cost per screen pixel | 41 to 48 ns | 51 to 57 ns |
 | Brush room, cost per screen pixel | 18 to 27 ns | 30 to 50 ns |
 
-The brush row moves between those ends from run to run on an idle machine, and the cause is not known, so
-compare ratios with care. Anything compiling in the background inflates all of these.
+Each row moves between its ends from run to run on an idle machine, the brush row most, and the cause is not
+known, so compare ratios with care. Anything compiling in the background inflates all of these.
 
-On this dense scene a voxel pixel at High costs 1.2 to 2 times a brush pixel, which **misses** the aim of no
+On this dense scene a voxel pixel at High costs about 1.1 to 1.3 times a brush pixel on the latest runs, which **misses** the aim of no
 more. Overdraw is 1.00, as chunks draw near first and covered spans are skipped, so it is not that. About 40 000
 triangles, past the 25 000 budget because level of detail cannot reduce this scene further, and spans of
 about 5 pixels against 16 for a wall, set the floor at Low. Keeping bump at every level of detail and fading
-projections together took High from 9.6 ms to 14.1 ms here: both were bought for the look, as a hard line at a chunk
+projections together raised High from 9.6 ms: both were bought for the look, as a hard line at a chunk
 border and a hard cut between projections were the alternatives. A level at or under the budget pays less; the
 generator showcases draw 5 000 to 24 000 triangles.
 

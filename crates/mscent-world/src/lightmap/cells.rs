@@ -36,8 +36,10 @@ const FILL_REACH: i32 = 2;
 /// A cell's light is read across this many cells around it. A record sits on a
 /// vertex and is stretched over whole triangles, so a shadow edge between two
 /// neighbours would draw as a hard facet; spread over a few cells it draws as a
-/// ramp, about what a luxel's bilinear fetch does for a wall.
-const FILTER_REACH: i32 = 1;
+/// ramp, about what a luxel's bilinear fetch does for a wall. One cell of reach was
+/// too little: where a shadow falls across a curve in one row of cells, that row's
+/// zigzag drew as a sawtooth along it.
+const FILTER_REACH: i32 = 2;
 /// How alike two normals must be for one cell to read another: the far side of a
 /// thin sheet or a sharp ridge is a different surface in different light.
 const FILTER_MIN_FACING: f32 = 0.25;
@@ -225,6 +227,10 @@ pub(super) fn filtered(
     for dz in -FILTER_REACH..=FILTER_REACH {
         for dy in -FILTER_REACH..=FILTER_REACH {
             for dx in -FILTER_REACH..=FILTER_REACH {
+                // A diamond, not a cube: as wide, for a fifth of the lookups.
+                if dx.abs() + dy.abs() + dz.abs() > FILTER_REACH {
+                    continue;
+                }
                 let Some(j) = sites.neighbour(i, [dx, dy, dz]).filter(|&j| j != i) else {
                     continue;
                 };

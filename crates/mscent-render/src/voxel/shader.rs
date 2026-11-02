@@ -1,7 +1,12 @@
 //! Light on a voxel triangle. Colour and light direction belong to its vertices,
 //! attached to world points and interpolated perspective-correctly, so a shadow
 //! edge cannot slide with the span grid. The tangent frame of a plain triangle is
-//! two world axes, so the bump and specular maths of faces applies unchanged.
+//! two world axes, so the bump maths of faces applies unchanged.
+//!
+//! The highlight is the one thing worked out per pixel, from the interpolated
+//! normal and in world space. That frame is skewed wherever the surface tilts away
+//! from its axis, so a highlight measured in it changes with the triangle's axis,
+//! and draws the triangulation on anything glossy.
 
 use mscent_math::Vec3;
 
@@ -30,13 +35,41 @@ impl Plane3 {
     }
 }
 
+/// What a highlight is worked out from, as planes over the triangle. Empty when
+/// a quality draws none.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Gloss {
+    pub to_light: Plane3,
+    pub pos: Plane3,
+    pub normal: Plane3,
+    pub eye: Vec3,
+    pub u: Vec3,
+    pub v: Vec3,
+}
+
+/// The half vector between the light and the eye, both from world points.
+#[inline]
+pub(super) fn world_half(to_light: Vec3, pos: Vec3, eye: Vec3) -> Vec3 {
+    let l = to_light.normalized().unwrap_or(FLAT_NORMAL);
+    half_vector(l, (eye - pos).normalized().unwrap_or(FLAT_NORMAL))
+}
+
+/// How much of `map`, a normal in the texture's frame, faces the half vector `h`,
+/// on a surface facing `surface` and textured along `u` and `v`. Both vectors are
+/// interpolated: this takes them back to unit length at about one multiply each.
+#[inline]
+pub(super) fn gloss_dot(map: Vec3, h: Vec3, surface: Vec3, u: Vec3, v: Vec3) -> f32 {
+    let h = h * (1.5 - 0.5 * h.dot(h));
+    let surface = surface * (1.5 - 0.5 * surface.dot(surface));
+    map.x * h.dot(u) - map.y * h.dot(v) + map.z * h.dot(surface)
+}
+
 /// The light of one plain triangle.
 pub(crate) struct VoxelShader<'a, const SPEC: bool> {
     pub light: Plane3,
     /// Light direction in the texture frame, when the bump needs it.
     pub dir: Plane3,
-    /// Direction to the eye in the texture frame, for specular.
-    pub view: Plane3,
+    pub gloss: Gloss,
     pub normals: Option<NormalView<'a>>,
     pub spec: Option<&'a SpecTable>,
     pub fog: Option<Fog>,
@@ -46,6 +79,8 @@ pub(crate) struct VoxelShader<'a, const SPEC: bool> {
     pub ddir: Vec3,
     pub half0: Vec3,
     pub dhalf: Vec3,
+    pub surface0: Vec3,
+    pub dsurface: Vec3,
     pub bump_scale: f32,
     pub x0: i32,
     pub y0: i32,
@@ -75,16 +110,19 @@ impl<const SPEC: bool> SpanShader for VoxelShader<'_, SPEC> {
             );
             self.dir0 = a;
             self.ddir = (b - a) * inv;
-            if SPEC {
-                let half = |d: Vec3, v: Vec3| {
-                    let l = d.normalized().unwrap_or(FLAT_NORMAL);
-                    half_vector(l, v.normalized().unwrap_or(FLAT_NORMAL))
-                };
-                let h0 = half(a, self.view.value(start.x, start.y, start.depth));
-                let h1 = half(b, self.view.value(end.x, end.y, end.depth));
-                self.half0 = h0;
-                self.dhalf = (h1 - h0) * inv;
-            }
+        }
+        if SPEC {
+            let g = &self.gloss;
+            let ends = [start, end].map(|e| {
+                let at = |p: &Plane3| p.value(e.x, e.y, e.depth);
+                let h = world_half(at(&g.to_light), at(&g.pos), g.eye);
+                let n = at(&g.normal).normalized().unwrap_or(FLAT_NORMAL);
+                (h, n)
+            });
+            self.half0 = ends[0].0;
+            self.dhalf = (ends[1].0 - ends[0].0) * inv;
+            self.surface0 = ends[0].1;
+            self.dsurface = (ends[1].1 - ends[0].1) * inv;
         }
         if let Some(fog) = self.fog {
             self.fog0 = fog.amount(start.depth);
@@ -109,8 +147,11 @@ impl<const SPEC: bool> SpanShader for VoxelShader<'_, SPEC> {
         }
         let mut out = mul_rgb3(texel, k, dither_of(self.x0 + i as i32, self.y0));
         if let Some(table) = self.spec.filter(|_| SPEC) {
-            let h = self.half0 + self.dhalf * f;
-            let s = table.response(n.dot(h) * (1.5 - 0.5 * h.dot(h)));
+            let (h, surface) = (
+                self.half0 + self.dhalf * f,
+                self.surface0 + self.dsurface * f,
+            );
+            let s = table.response(gloss_dot(n, h, surface, self.gloss.u, self.gloss.v));
             if s > MIN_SPEC {
                 out = add_spec(out, k, s * SPEC_GAIN);
             }

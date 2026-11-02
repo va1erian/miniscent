@@ -16,6 +16,13 @@ pub const PLANE_EPSILON_F32: f32 = 1.0e-3;
 /// floating point.
 pub const SNAP_GRID: f64 = 0.125;
 
+/// The least a voxel vertex's smoothed normal must agree with its own cell's, as
+/// a cosine, to be believed: less, and the reach spanned a thin sheet.
+pub const VOXEL_NORMAL_MIN_AGREEMENT: f32 = 0.3;
+
+/// The cosine past which the two count as one normal, and the cell's own stands.
+pub const VOXEL_NORMAL_SAME: f32 = 0.9995;
+
 /// How far, in cells, a voxel surface sinks behind the brush faces it meets at
 /// the border of a volume, so the two never fight and never leave a gap.
 pub const VOXEL_SEAM_BIAS_CELLS: f64 = 1.0 / 16.0;

@@ -1,4 +1,5 @@
-//! Triangles whose corners disagree on texture axis or material.
+//! Triangles whose corners disagree on texture axis or material, and those of a
+//! material with spots, which this path alone draws.
 //!
 //! The axis is chosen per pixel from the interpolated normal, so two projections
 //! meet along the line where the surface really turns from one to the other. That
@@ -10,13 +11,15 @@
 //! off the stair-step.
 //!
 //! They shade as their neighbours do, or they would show as patches on anything
-//! glossy. With no one tangent frame, the light and the half vector are stepped in
-//! world space and moved into the pixel's frame. It costs a few dot products more
-//! on these triangles alone.
+//! glossy: the highlight is the same sum as a plain triangle's. With no one tangent
+//! frame, the light is stepped in world space and moved into the pixel's frame. It
+//! costs a few dot products more on these triangles alone.
 
 use mscent_math::Vec3;
 
 use super::fill::FillContext;
+use super::shader::{gloss_dot, world_half};
+use super::solid::{SPOT_COLOR, Spots, spots_of};
 use super::tri::{Corner, Gradient, each_row};
 use super::{SEAM_BAND, TEXELS_PER_UNIT, axis_map, seam_of};
 use crate::bump::{FLAT_NORMAL, bump_gain, view_normal};
@@ -26,7 +29,7 @@ use crate::lighting_shader::{
 };
 use crate::raster::{DrawStats, SPAN_LEN};
 use crate::shade::lerp_rgb;
-use crate::specular::{SpecTable, half_vector};
+use crate::specular::SpecTable;
 use crate::texture::{LodSampler, NormalView, Texture};
 
 /// Thresholds of the ordered dither, as fractions of 16.
@@ -41,6 +44,7 @@ struct Look<'a> {
     smooth: bool,
     normals: Option<NormalView<'a>>,
     spec: Option<&'a SpecTable>,
+    spots: Option<&'static Spots>,
 }
 
 /// The two axes that texture a surface facing a given way.
@@ -146,6 +150,7 @@ pub(super) fn fill_blended(
             smooth: tex.is_filtered(),
             normals: tex.normal_view().filter(|_| ctx.bump && scale > 0.0),
             spec: table.filter(|t| ctx.specular && t.is_visible()),
+            spots: spots_of(material),
         }
     });
     let (iz0, izx, izy) = grad.plane([c[0].iz, c[1].iz, c[2].iz]);
@@ -157,6 +162,7 @@ pub(super) fn fill_blended(
     let weight = grad.plane3(c.map(|k| k.weight));
     let fog = ctx.fog;
     let eye = ctx.eye;
+    let focal = ctx.cam.focal();
     let shades = look.iter().any(|l| l.normals.is_some() || l.spec.is_some());
     let band = fb.row_range();
     let width = fb.width() as i32;
@@ -179,11 +185,7 @@ pub(super) fn fill_blended(
             // Only what a corner will read: most far triangles read none of it.
             let frame = shades.then(|| {
                 let (d0, d1) = (lit_dir.value(x, y, za), lit_dir.value(x + n, y, zb));
-                let half = |d: Vec3, p: Vec3| {
-                    let to_light = d.normalized().unwrap_or(FLAT_NORMAL);
-                    half_vector(to_light, (eye - p).normalized().unwrap_or(FLAT_NORMAL))
-                };
-                let (h0, h1) = (half(d0, p0), half(d1, p1));
+                let (h0, h1) = (world_half(d0, p0, eye), world_half(d1, p1, eye));
                 SpanFrame {
                     d0,
                     dd: (d1 - d0) * inv,
@@ -230,6 +232,10 @@ pub(super) fn fill_blended(
                 if let Some(m) = fade {
                     let other = picked.texel(Frame::of(second).coords(p0 + dp * f));
                     texel = lerp_rgb(texel, other, (m * 256.0) as u32);
+                }
+                if let Some(spots) = picked.spots {
+                    let cover = spots.coverage(p0 + dp * f, 1.0 / (focal * iz));
+                    texel = lerp_rgb(texel, SPOT_COLOR, (cover * 256.0) as u32);
                 }
                 let mut out = mul_rgb3(texel, k, dither_of(px, y));
                 if spec > MIN_SPEC {
@@ -279,8 +285,9 @@ impl SpanFrame {
             gain = bump_gain(n, axes.to_tangent(self.d0 + self.dd * f, surface));
         }
         let spec = look.spec.map_or(0.0, |table| {
-            let h = axes.to_tangent(self.h0 + self.dh * f, surface);
-            table.response(n.dot(h) * (1.5 - 0.5 * h.dot(h)))
+            let h = self.h0 + self.dh * f;
+            let unit = surface.normalized().unwrap_or(FLAT_NORMAL);
+            table.response(gloss_dot(n, h, unit, axes.u, axes.v))
         });
         (gain, spec)
     }

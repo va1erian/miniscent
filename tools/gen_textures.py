@@ -190,14 +190,11 @@ def ramp(t, a, b):
 
 
 def cap():
-    """A toadstool's skin: red with cream warts, big enough to read at a distance."""
-    near, _ = worley(70, 11)
-    wart = 1 - smooth_step(2.4, 3.8, near)
+    """A toadstool's skin. Its spots are not here: a projected image stretches and
+    cuts them on a curved cap, so the renderer draws them from the volume."""
     # Broad mottling only: fine grain under a bump map reads as noise on a cap.
     mottle = tile_noise(2, 4)
-    skin = ramp(mottle, (0.50, 0.08, 0.05), (0.80, 0.20, 0.09))
-    a = skin * (1 - wart[..., None]) + np.array((0.93, 0.87, 0.70)) * wart[..., None]
-    return a, 0.35 + 0.05 * mottle + 0.5 * wart, 2.0
+    return ramp(mottle, (0.50, 0.08, 0.05), (0.80, 0.20, 0.09)), 0.35 + 0.05 * mottle, 2.0
 
 
 def stem():

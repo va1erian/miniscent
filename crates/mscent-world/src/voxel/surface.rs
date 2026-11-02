@@ -10,10 +10,11 @@
 //! surface continues past the box on every side, behind the brush faces it
 //! meets there. That overlap is what leaves no gap between the two.
 
+use mscent_math::epsilon::{VOXEL_NORMAL_MIN_AGREEMENT, VOXEL_NORMAL_SAME};
 use mscent_math::{Aabb, Vec3, Vec3d};
 
 use super::CHUNK_EDGE;
-use super::block::{Block, block_index, fill_block};
+use super::block::{BLOCK_EDGE, Block, block_index, fill_block};
 use super::connectivity::{AirMask, air_mask};
 use super::context::Context;
 use super::volume::Volume;
@@ -43,6 +44,11 @@ pub(super) const fn cell_index(c: [i32; 3]) -> usize {
     let e = CELL_EDGE as i32;
     ((c[0] + 2) + (c[1] + 2) * e + (c[2] + 2) * e * e) as usize
 }
+
+/// Weights along an axis of the smoothed normal: a slope along it, and a blur
+/// across it. Both are a cell's own difference spread over its neighbours.
+const SLOPE: [f32; 4] = [-1.0, -1.0, 1.0, 1.0];
+const BLUR: [f32; 4] = [1.0, 3.0, 3.0, 1.0];
 
 /// One vertex of a chunk's surface.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -266,9 +272,40 @@ impl Build<'_> {
         });
         VoxelVertex {
             pos: self.position(c, &corners),
-            normal: cell_normal(&corners),
+            normal: self.smooth_normal(c, cell_normal(&corners)),
             cell: c.map(|v| v as i8),
         }
+    }
+
+    /// The normal read over a cell and its neighbours. One cell's gradient turns
+    /// sharply wherever the grid crosses a crease, and light baked from it then
+    /// draws the triangulation around every hole. Samples past the padding repeat
+    /// the last, so both chunks that hold a cell read the same ones. A sheet about
+    /// as thin as this reach has its two sides cancel, and keeps `narrow`. So does
+    /// a surface with no crease to smooth: a flat wall's reach runs into the ring,
+    /// where the surface slides behind the brush it meets, and it must not tilt.
+    fn smooth_normal(&self, c: [i32; 3], narrow: Vec3) -> Vec3 {
+        let sample = |x: i32, y: i32, z: i32| {
+            let at = |v: i32, axis: usize| (c[axis] + v - 1).clamp(-2, BLOCK_EDGE as i32 - 3);
+            f32::from(self.block.density[block_index(at(x, 0), at(y, 1), at(z, 2))])
+        };
+        let mut gradient = Vec3::ZERO;
+        for z in 0..4 {
+            for y in 0..4 {
+                for x in 0..4 {
+                    let d = sample(x as i32, y as i32, z as i32);
+                    gradient.x += d * SLOPE[x] * BLUR[y] * BLUR[z];
+                    gradient.y += d * BLUR[x] * SLOPE[y] * BLUR[z];
+                    gradient.z += d * BLUR[x] * BLUR[y] * SLOPE[z];
+                }
+            }
+        }
+        (-gradient)
+            .normalized()
+            .filter(|wide| {
+                (VOXEL_NORMAL_MIN_AGREEMENT..VOXEL_NORMAL_SAME).contains(&wide.dot(narrow))
+            })
+            .unwrap_or(narrow)
     }
 
     /// World position: the mean of the crossings on the cell's edges. It goes

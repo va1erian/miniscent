@@ -8,7 +8,7 @@
 //!   projected. [`flood`] prunes what a cave's own rock hides.
 //! * [`fill`]: back-face rejection and a fill whose shared edges cannot leak or
 //!   double-draw. [`shader`] lights the plain case and [`blend`] the triangles
-//!   whose corners disagree on texture.
+//!   whose corners disagree on texture, or that carry the [`solid`] spots.
 
 pub(crate) mod blend;
 pub(crate) mod fill;
@@ -16,6 +16,7 @@ mod flood;
 pub(crate) mod list;
 pub use list::MAX_VOXEL_TRIS;
 pub(crate) mod shader;
+mod solid;
 mod tri;
 
 use std::collections::HashMap;
@@ -369,5 +370,7 @@ impl VoxelScene {
 mod fill_tests;
 #[cfg(test)]
 mod flood_tests;
+#[cfg(test)]
+mod look_tests;
 #[cfg(test)]
 mod shade_tests;

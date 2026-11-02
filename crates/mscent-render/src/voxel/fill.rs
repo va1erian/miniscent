@@ -4,7 +4,8 @@ use mscent_math::Vec3;
 
 use super::blend::fill_blended;
 use super::list::{ListedChunk, SUBPIXEL, VoxelList};
-use super::shader::{Plane3, VoxelShader};
+use super::shader::{Gloss, Plane3, VoxelShader};
+use super::solid::has_spots;
 use super::tri::{Corner, Gradient, area, clip_near, covers_a_pixel, each_row};
 use super::{IN_SEAM, LodData, TEXELS_PER_UNIT, VoxelScene, axis_map};
 use crate::camera::Camera;
@@ -165,7 +166,7 @@ fn plain_look(tri: &Tri) -> Option<(u8, u8)> {
     let d = tri.data;
     let [a, b, c] = tri.index;
     let axis = d.axis.get(a).copied().filter(|&x| x != IN_SEAM)?;
-    let material = *d.material.get(a)?;
+    let material = d.material.get(a).copied().filter(|&m| !has_spots(m))?;
     (d.axis.get(b) == Some(&axis)
         && d.axis.get(c) == Some(&axis)
         && d.material.get(b) == Some(&material)
@@ -278,33 +279,26 @@ fn fill_plain(
         rate,
     };
     if let Some(table) = table {
-        let (u, w) = (u_axis, v_axis);
-        let view = grad.plane3(over_z(c, |k| {
-            let v = ctx.eye - k.pos;
-            let n = tri_normal(c);
-            Vec3::new(v.dot(u), -v.dot(w), v.dot(n))
-        }));
-        let mut shader = make_shader::<true>(light, dir, view, normals, Some(table), ctx.fog);
+        let gloss = Gloss {
+            to_light: grad.plane3(over_z(c, |k| k.world_dir)),
+            pos: grad.plane3(over_z(c, |k| k.pos)),
+            normal: grad.plane3(over_z(c, |k| k.normal)),
+            eye: ctx.eye,
+            u: u_axis,
+            v: v_axis,
+        };
+        let mut shader = make_shader::<true>(light, dir, gloss, normals, Some(table), ctx.fog);
         fill_rows(fb, c, &base, &mut shader, stats);
     } else {
-        let mut shader =
-            make_shader::<false>(light, dir, Plane3::default(), normals, None, ctx.fog);
+        let mut shader = make_shader::<false>(light, dir, Gloss::default(), normals, None, ctx.fog);
         fill_rows(fb, c, &base, &mut shader, stats);
     }
-}
-
-/// The triangle's facing, which is near enough its vertices' for the eye vector.
-fn tri_normal(c: &[Corner; 3]) -> Vec3 {
-    (c[1].pos - c[0].pos)
-        .cross(c[2].pos - c[0].pos)
-        .normalized()
-        .unwrap_or(Vec3::new(0.0, 0.0, 1.0))
 }
 
 fn make_shader<'a, const SPEC: bool>(
     light: Plane3,
     dir: Plane3,
-    view: Plane3,
+    gloss: Gloss,
     normals: Option<crate::texture::NormalView<'a>>,
     spec: Option<&'a SpecTable>,
     fog: Option<Fog>,
@@ -312,7 +306,7 @@ fn make_shader<'a, const SPEC: bool>(
     VoxelShader {
         light,
         dir,
-        view,
+        gloss,
         normals,
         spec,
         fog,
@@ -322,6 +316,8 @@ fn make_shader<'a, const SPEC: bool>(
         ddir: Vec3::ZERO,
         half0: Vec3::ZERO,
         dhalf: Vec3::ZERO,
+        surface0: Vec3::ZERO,
+        dsurface: Vec3::ZERO,
         bump_scale: 1.0,
         x0: 0,
         y0: 0,
