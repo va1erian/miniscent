@@ -10,6 +10,7 @@ use mscent_math::{Aabb, Vec3};
 
 use super::connectivity::AirMask;
 use super::context::Context;
+use super::index::CellIndex;
 use super::lod::Lod;
 use super::surface::{ChunkMesh, Mesher, VoxelVertex};
 use super::volume::Volume;
@@ -30,6 +31,8 @@ pub struct VoxelChunk {
     pub lods: [ChunkMesh; 3],
     /// Empty leaves its triangles touch, sorted and unique.
     pub leaves: Vec<LeafId>,
+    /// `lods[0]`'s triangles by cell, for collision.
+    pub index: CellIndex,
 }
 
 /// The chunks of one volume as a grid, for flooding through its air.
@@ -44,6 +47,10 @@ pub struct VolumeGeometry {
     pub origin: Vec3,
     /// World size of a chunk.
     pub chunk_size: f32,
+    /// Whether each chunk's air (as the BSP sees it) lies in rock, parallel to
+    /// [`Self::table`]. It answers "is this point solid" where no surface is
+    /// near enough to say, such as the middle of a mass of rock.
+    pub rock: Vec<bool>,
 }
 
 impl VolumeGeometry {
@@ -92,10 +99,13 @@ impl VoxelWorld {
         let count = usize::from(cx) * usize::from(cy) * usize::from(cz);
         let (mut air, mut table) = (Vec::with_capacity(count), Vec::with_capacity(count));
         let margin = buried_margin(volume);
+        let mut rock = Vec::with_capacity(count);
         for z in 0..cz {
             for y in 0..cy {
                 for x in 0..cx {
-                    let mesh = mesher.mesh(volume, ctx, [x, y, z]);
+                    let coord = [x, y, z];
+                    let mesh = mesher.mesh(volume, ctx, coord);
+                    rock.push(mesh.is_some() && probe_rock(volume, mesher, bsp, coord));
                     air.push(mesh.as_ref().map_or(AirMask::NONE, |m| m.air));
                     table.push(mesh.map_or(NO_CHUNK, |m| self.add_chunk(m, bsp, margin)));
                 }
@@ -108,6 +118,7 @@ impl VoxelWorld {
             table,
             origin: lo.to_f32(),
             chunk_size: (volume.cell().units() * super::CHUNK_EDGE as f64) as f32,
+            rock,
         }
     }
 
@@ -144,6 +155,7 @@ impl VoxelWorld {
                     volume: *v,
                     coord: c,
                     air: mesh.air,
+                    rock: probe_rock(volume, &mesher, bsp, c),
                     chunk: finish_chunk(&mesh, bsp, margin).map(Arc::new),
                 });
             }
@@ -165,6 +177,9 @@ impl VoxelWorld {
             };
             if let Some(slot) = volume.air.get_mut(i) {
                 *slot = r.air;
+            }
+            if let Some(slot) = volume.rock.get_mut(i) {
+                *slot = r.rock;
             }
             let old = volume.table.get(i).copied().unwrap_or(NO_CHUNK);
             let id = match (old, r.chunk) {
@@ -196,6 +211,8 @@ pub struct RemeshedChunk {
     pub volume: usize,
     pub coord: [u16; 3],
     pub air: AirMask,
+    /// See [`VolumeGeometry::rock`].
+    pub rock: bool,
     pub chunk: Option<Arc<VoxelChunk>>,
 }
 
@@ -211,6 +228,7 @@ fn empty_mesh() -> ChunkMesh {
 
 fn empty_chunk() -> VoxelChunk {
     VoxelChunk {
+        index: CellIndex::build(&empty_mesh()),
         lods: [empty_mesh(), empty_mesh(), empty_mesh()],
         leaves: Vec::new(),
     }
@@ -227,6 +245,7 @@ fn finish_chunk(mesh: &ChunkMesh, bsp: &Bsp, margin: f64) -> Option<VoxelChunk> 
     leaves.dedup();
     let [half, quarter] = [full.clustered(Lod::Half), full.clustered(Lod::Quarter)];
     Some(VoxelChunk {
+        index: CellIndex::build(&full),
         lods: [full, half, quarter],
         leaves,
     })
@@ -310,4 +329,28 @@ fn touch_air(
             air
         }
     }
+}
+
+/// Samples of a chunk's block tried by [`probe_rock`], per axis.
+const PROBES: [i32; 3] = [2, 8, 14];
+
+/// Whether the field is solid where the BSP is air in chunk `coord`, judged at
+/// the first of 27 samples the BSP leaves open. A chunk whose air is all in one
+/// piece of the field, as a chunk with no surface is, is then told correctly
+/// even when brush solid covers part of it. `mesher` still holds the chunk's
+/// samples. A chunk with no open sample has no air to ask about.
+fn probe_rock(volume: &Volume, mesher: &Mesher, bsp: &Bsp, coord: [u16; 3]) -> bool {
+    let first = coord.map(|c| i32::from(c) * super::CHUNK_EDGE as i32);
+    for z in PROBES {
+        for y in PROBES {
+            for x in PROBES {
+                let local = [x, y, z];
+                let at = [0, 1, 2].map(|a| first[a] + local[a]);
+                if !bsp.is_solid(volume.lattice.position(at)) {
+                    return mesher.solid_at(local);
+                }
+            }
+        }
+    }
+    false
 }

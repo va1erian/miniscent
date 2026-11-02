@@ -102,6 +102,9 @@ pub struct Studio {
     live_bsp: Option<std::sync::Arc<mscent_world::Bsp>>,
     /// A stroke is running.
     stroking: bool,
+    /// The picture has surfaces the game session built with it does not: it
+    /// collides with what the last preview compiled.
+    live_dirty: bool,
     /// Batches meshed so far.
     live_count: usize,
 }
@@ -121,6 +124,7 @@ impl Studio {
             live_job: None,
             live_bsp: None,
             stroking: false,
+            live_dirty: false,
             live_count: 0,
             bake_job: None,
             wanted: None,
@@ -151,6 +155,12 @@ impl Studio {
     /// Whether the picture was made from `doc`, so Play can start on it now.
     pub fn is_current(&self, doc: &Document) -> bool {
         self.built_doc.as_ref() == Some(doc)
+    }
+
+    /// Whether Play can start on what is up right now. After a live edit it needs
+    /// one more preview, as a game collides with what that compiles.
+    pub fn playable_now(&self, doc: &Document) -> bool {
+        self.is_current(doc) && !self.live_dirty
     }
 
     /// Render threads still running, including ones told to stop.

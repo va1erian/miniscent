@@ -201,7 +201,7 @@ impl Editor {
     /// Lighting still being baked arrives during the game.
     fn play_command(&mut self) {
         let doc = self.state.borrow().doc.clone();
-        if self.studio.is_current(&doc) {
+        if self.studio.playable_now(&doc) {
             self.begin_play();
             return;
         }

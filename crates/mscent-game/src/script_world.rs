@@ -194,7 +194,7 @@ fn set_enabled(g: &mut Game, r: Value, on: bool) -> Res {
 }
 
 fn spawn_at(g: &mut Game, kind: &str, pos: Vec3, tag: u16) -> Result<Value, String> {
-    if !pos.is_finite() || g.arena.bsp.is_solid(pos.to_f64()) {
+    if !pos.is_finite() || g.arena.is_solid(pos.to_f64()) {
         return Err(format!("cannot spawn '{kind}' inside solid rock"));
     }
     if let Some(prop) = spawn_prop(g, kind, pos, tag) {

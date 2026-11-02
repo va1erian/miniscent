@@ -103,6 +103,15 @@ impl Mesher {
         Some(self.extract(volume, c))
     }
 
+    /// Whether the last chunk meshed has solid at `local`, a sample of its
+    /// block (each coordinate `-2..=17`); anything else is not solid.
+    pub(super) fn solid_at(&self, local: [i32; 3]) -> bool {
+        let inside = local
+            .iter()
+            .all(|c| (-2..CHUNK_EDGE as i32 + 2).contains(c));
+        inside && self.block.density[block_index(local[0], local[1], local[2])] >= 0
+    }
+
     /// The resolved samples of the last chunk meshed.
     #[cfg(test)]
     pub(super) fn block(&self) -> &Block {

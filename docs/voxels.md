@@ -1,6 +1,6 @@
 # Voxel volumes: design
 
-Status: M11.1 and M11.2 are done (field, dabs, meshing, level of detail, connectivity, level file); the game and editor load and keep volumes but do not draw or edit them yet. Work items are [M11](work-items.md#m11-voxel-volumes).
+Status: M11.1, M11.2 and M11.6 are done (field, dabs, meshing, level of detail, connectivity, level file, collision); the game collides with volumes but does not draw them, and the editor loads and keeps them but does not draw or edit them yet. Work items are [M11](work-items.md#m11-voxel-volumes).
 
 Brushes are good at architecture and bad at anything that grows. This design adds a second kind of
 geometry for hives, coral, mushrooms, trees, cave systems, stalactites and alien interiors, painted
@@ -301,8 +301,36 @@ with the primitives in `prim.rs`. This is the same contact model as `cell.rs`, s
 from a brush floor onto voxel rock meets no invisible lip**. Prototype cost, on a plain scan with no
 index: 5.5 µs a sweep at radius 0.5.
 
-The fuzz test in `tests/fuzz.rs` is extended to random levels with volumes, asserting the same two
-properties: the sphere never ends within its radius of solid, and never crosses a surface.
+As built (M11.6):
+
+- `Solids::with_voxels(&VoxelWorld)` adds the volumes; a plain `&Bsp` still converts, with none.
+  `Arena` builds and holds the `VoxelWorld` and hands out `Arena::solids(movers)` and
+  `Arena::is_solid(p)`, which every sweep, the spawn checks and the script's placement checks use.
+  The particle system (`fx`) still asks the BSP alone: its hit tests are cosmetic and budgeted per tick.
+- The triangles are the full-detail mesh with buried ones already dropped, so what is drawn is what is hit.
+  `crates/mscent-collide/src/voxel.rs` does the sweep. Triangles are **one-sided**, like the faces of a
+  cell: only the side the winding points to stops a sphere, and only while it moves against the normal.
+  A sphere embedded in a surface can therefore always leave it, and a centre wholly behind a face (in
+  the rock) is ignored by it. Edges and vertices are tested for every triangle that has them, so an open
+  boundary left by a dropped triangle costs no contact.
+- `VoxelChunk::index` is a `CellIndex` (`voxel/index.rs`): 8x8x8 cells over the mesh's own bounds, at
+  most 2 KiB and 16 four-byte entries per triangle, and none (a scan of every triangle) if a mesh would
+  need more. `VoxelWorld::for_each_chunk_in` finds the chunks a box touches, then `triangles_in` the
+  triangles of the cells it touches, each once.
+- **Solid is the sign of the nearest surface**, not a ray count: a ray parity test breaks where buried
+  triangles were dropped. `VoxelWorld::is_solid` finds the nearest drawn triangle within two chunks and
+  says solid if the point is behind it (against the blended vertex normals at that point, so a ridge
+  agrees with both its faces). Where nothing is that near, a per-chunk verdict recorded at build time
+  (`VolumeGeometry::rock`, the field's sign at the first of 27 samples the BSP leaves open) answers.
+  A point is solid if the BSP says so or this does; both are pure functions of the level's bytes.
+  Known limit: a chunk whose air the BSP splits into pieces of different sign, with nothing drawn in it,
+  gets one verdict.
+
+The fuzz test in `tests/fuzz.rs` is extended to random levels with volumes (a carved `Subtract` volume
+in a wall and an `Add` volume of growths in a room), asserting the same two properties: the sphere never
+ends within its radius of solid, and never crosses a surface. The voxel part is judged by the distance to
+the drawn triangles, by brute force over a plain hash grid in `tests/fuzz/volumes.rs`, which shares no
+code with the index or the contact maths. With the voxels left out of `Solids`, both new tests fail.
 
 The editor's `pick_face` is also blocked by voxels in front of a face, so face picking stays honest.
 
@@ -458,6 +486,24 @@ noisy: repeat runs moved these by up to about 25%.
 | The same cave in a level file | 0.84 MiB, 1.2 ms to read back |
 | Carve dab, with copy on write | r=1: about 20 µs, r=2: about 90 µs, r=4: about 500 µs, r=8: about 3 ms |
 | Smooth dab, with copy on write | r=1: about 37 µs, r=2: about 230 µs, r=4: about 1.6 ms, r=8: about 12 ms |
+
+Collision (M11.6), same scene, enclosed so every sweep starts in the cave's air, 2000 seeded positions
+and directions, best of 20 passes, from the same example:
+
+| What | Result |
+|---|---|
+| `VoxelWorld::build` (meshing, level of detail, index) | about 70 ms for 256 chunks |
+| Cell index | about 82 µs a chunk, 2.5 MiB for 220k triangles (12 bytes a triangle) |
+| Sweep at radius 0.5, one step of 0.1 | about 12 µs, of which about 8 µs is the start-in-rock test |
+| Sweep at radius 0.5, a move of 4 units | about 46 µs |
+| Sweep as a ray (radius 0), 0.1 and 4 units | about 8 µs and 28 µs |
+| `slide_move`, 10 units/s for one step, radius 0.5 | about 33 µs (up to four sweeps) |
+| `is_solid`, BSP and voxels | about 8 µs |
+| The same step with the BSP alone | 0.17 µs |
+
+The cave is far denser than a level: a chunk here holds about 860 triangles. At 120 steps a second one
+walking body costs about 4 ms a second, 0.4% of a core. The start test is the costliest part of a short
+sweep; it searches rings of index cells for the nearest triangle. Not measured on the i3-7100U.
 
 Drawing, from a throwaway prototype that M11.4 replaces with a real benchmark, on frames of 640x360
 from 40 air positions:

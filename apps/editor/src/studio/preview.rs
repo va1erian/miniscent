@@ -112,6 +112,7 @@ impl Studio {
             return Err(format!("Cannot play: {e}"));
         }
         self.play_pending = true;
+        self.refresh |= self.live_dirty;
         Ok(())
     }
 
@@ -231,6 +232,7 @@ impl Studio {
         self.error = None;
         self.light = built.light;
         self.light_key = built.light_key;
+        self.live_dirty = false;
         self.live_bsp = Some(std::sync::Arc::new(built.renderer().scene().bsp().clone()));
         let why = built.unplayable().map(str::to_string);
         self.script_watch.files = built.watch.clone();

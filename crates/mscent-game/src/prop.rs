@@ -7,7 +7,7 @@ use crate::combat::{Sphere, line_of_sight};
 use crate::game::{Event, Game};
 use crate::input::Input;
 use crate::player::PLAYER_RADIUS;
-use mscent_collide::{STEP_DT, Solids};
+use mscent_collide::STEP_DT;
 use mscent_math::Vec3;
 
 /// How a prop looks. The renderer has a mesh for each.
@@ -145,7 +145,7 @@ impl Game {
     /// The nearest usable prop the player can reach, is looking at and can see.
     fn usable_in_reach(&self) -> Option<usize> {
         let (p, forward) = (self.player.pos(), self.player.forward());
-        let solids = Solids::new(&self.arena.bsp, &self.solids);
+        let solids = self.arena.solids(&self.solids);
         let mut best: Option<(usize, f32)> = None;
         for (i, prop) in self.props.iter().enumerate() {
             if !(prop.present && prop.enabled && prop.use_hold.is_some()) {

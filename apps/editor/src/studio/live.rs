@@ -146,6 +146,7 @@ impl Studio {
                 }
                 self.error = None;
                 self.built_doc = Some(doc);
+                self.live_dirty = true;
             }
             Err(e) => {
                 // The normal path says the same thing with more care.

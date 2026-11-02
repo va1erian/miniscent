@@ -13,7 +13,7 @@ use crate::player::{PLAYER_RADIUS, Player};
 use crate::prop::{Prop, UseState};
 use crate::script::{ScriptEnd, ScriptState};
 use crate::weapon::Weapon;
-use mscent_collide::{FixedStepper, MoverSolid, STEP_HZ, Solids};
+use mscent_collide::{FixedStepper, MoverSolid, STEP_HZ};
 use mscent_math::Vec3;
 use mscent_script::Vm;
 
@@ -210,7 +210,7 @@ impl Game {
         let mark = self.events.len();
         self.ticks = self.ticks.saturating_add(1);
         self.hurt_steps = self.hurt_steps.saturating_sub(1);
-        let solids = Solids::new(&self.arena.bsp, &self.solids);
+        let solids = self.arena.solids(&self.solids);
         self.player.step(solids, input);
         self.fire(input);
         self.run_enemies();
@@ -225,7 +225,7 @@ impl Game {
             return;
         }
         let (origin, dir) = (self.player.pos(), self.player.forward());
-        let solids = Solids::new(&self.arena.bsp, &self.solids);
+        let solids = self.arena.solids(&self.solids);
         let enemies = &mut self.enemies;
         let shot = self
             .weapon
@@ -268,7 +268,7 @@ impl Game {
             centre: self.player.pos(),
             radius: PLAYER_RADIUS,
         };
-        let solids = Solids::new(&self.arena.bsp, &self.solids);
+        let solids = self.arena.solids(&self.solids);
         for (i, e) in self.enemies.iter_mut().enumerate() {
             let dmg = e.step(solids, &target);
             report_enemy_shot(&mut self.events, i, e, Struck::Player);
@@ -285,7 +285,7 @@ impl Game {
     fn run_enemy_factions(&mut self) {
         for i in 0..self.enemies.len() {
             let target = self.nearest_opponent(i);
-            let solids = Solids::new(&self.arena.bsp, &self.solids);
+            let solids = self.arena.solids(&self.solids);
             let sphere = target.map(|t| self.target_sphere(t));
             let Some(enemy) = self.enemies.get_mut(i) else {
                 continue;
@@ -333,7 +333,7 @@ impl Game {
     /// Whether enemy `j`, nearer than the player, is out of sight of `from` while
     /// the player is not, so a friendly behind a wall does not hide the player.
     fn player_shielded_by(&self, from: mscent_math::Vec3, j: usize) -> bool {
-        let solids = Solids::new(&self.arena.bsp, &self.solids);
+        let solids = self.arena.solids(&self.solids);
         let unseen = self
             .enemies
             .get(j)

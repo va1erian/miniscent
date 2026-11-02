@@ -119,6 +119,32 @@ fn undo_and_redo_go_by_the_live_path_too() {
 }
 
 #[test]
+fn play_after_a_live_edit_waits_for_a_session_that_collides_with_it() {
+    let (mut st, mut studio) = sculpted();
+    assert!(studio.playable_now(&st.doc));
+    st.begin_stroke(at_wall(1.0), StrokeKeys::default());
+    st.finish_stroke();
+    caught_up(&mut studio, &st.doc);
+    assert!(studio.is_current(&st.doc));
+    assert!(
+        !studio.playable_now(&st.doc),
+        "the session is a stroke behind"
+    );
+    studio.play_when_ready(&st.doc).expect("can play");
+    let end = Instant::now() + Duration::from_secs(30);
+    loop {
+        let tick = studio.tick(&[], PANE, &st.doc);
+        // A level with no start cannot play, and says so; either way it was built.
+        if tick.play_now || tick.status.is_some() {
+            break;
+        }
+        assert!(Instant::now() < end, "Play never came");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(studio.playable_now(&st.doc));
+}
+
+#[test]
 fn only_voxel_chunks_differing_can_take_the_live_path() {
     let (mut st, _studio) = sculpted();
     let base = st.doc.clone();
