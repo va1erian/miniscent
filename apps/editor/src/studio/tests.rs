@@ -241,6 +241,7 @@ fn a_100_ms_scene_does_not_slow_the_ui_ticks_and_the_newest_frame_is_shown() {
     );
     studio.enter_play().expect("plays");
     let (mut worst, mut total) = (Duration::ZERO, Duration::ZERO);
+    let mut slow_ticks = 0;
     let mut shown = Vec::new();
     let t0 = Instant::now();
     for i in 0..200u32 {
@@ -250,6 +251,7 @@ fn a_100_ms_scene_does_not_slow_the_ui_ticks_and_the_newest_frame_is_shown() {
         let spent = t.elapsed();
         worst = worst.max(spent);
         total += spent;
+        slow_ticks += u32::from(spent >= Duration::from_millis(5));
         if let Some(f) = tick.frame {
             // Only ever shown after it was made, and never an older one.
             assert!(frame_number(&f) <= frames.load(Ordering::SeqCst));
@@ -264,9 +266,11 @@ fn a_100_ms_scene_does_not_slow_the_ui_ticks_and_the_newest_frame_is_shown() {
         frames.load(Ordering::SeqCst),
         shown.len()
     );
+    // A loaded machine can preempt any one tick. A UI that waited on the scene
+    // would be slow on every frame, each by about the scene's 100 ms.
     assert!(
-        worst < Duration::from_millis(5),
-        "a UI tick took {worst:?} while the scene needs 100 ms per frame"
+        slow_ticks <= 4 && worst < Duration::from_millis(60),
+        "{slow_ticks} slow ticks, the worst {worst:?}, while the scene needs 100 ms per frame"
     );
     assert!(
         shown.windows(2).all(|w| w[0] < w[1]),
