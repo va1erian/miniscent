@@ -6,7 +6,7 @@ use std::path::Path;
 use xui::prelude::Ui;
 use xui::widget::MenuId;
 
-use super::app::{Editor, Msg};
+use super::app::{Editor, Msg, cmd};
 use super::discard_dialog::may_discard;
 use super::script_pane::ScriptMsg;
 use crate::files;
@@ -36,12 +36,19 @@ pub(super) const SAMPLE_MENU: [MenuId; SAMPLES.len()] = {
     ids
 };
 
+/// Whether `msg` puts another level's script in the buffer, which loses edits.
+/// The samples list's first row is its label, and opens nothing.
+pub(super) fn replaces_script(msg: &Msg) -> bool {
+    match msg {
+        Msg::OpenPath(_) => true,
+        Msg::Menu(id) => *id == cmd::NEW || *id == cmd::SHOWCASE || SAMPLE_MENU.contains(id),
+        Msg::Script(ScriptMsg::Sample(i)) => *i < SAMPLES.len(),
+        _ => false,
+    }
+}
+
 impl Editor {
     pub(super) fn script_message(&mut self, msg: ScriptMsg, ui: &Ui<Msg>) {
-        if matches!(msg, ScriptMsg::Sample(i) if i < SAMPLES.len()) && !self.script_may_go(ui) {
-            self.script.reset_sample_list();
-            return;
-        }
         match msg {
             ScriptMsg::Edited => self.script_edited(),
             ScriptMsg::Problem(row) => self.go_to_problem(row),
@@ -64,13 +71,17 @@ impl Editor {
         if opens_names(&text, code.caret()) {
             code.trigger_completion();
         }
-        self.state.borrow_mut().script.edited(text);
+        let mut st = self.state.borrow_mut();
+        st.script.edited(text);
+        self.panel.show_script_uses(&st);
     }
 
     /// Whether what is about to replace the script may: there are no edits to
     /// lose, or the user says so.
     pub(super) fn script_may_go(&self, ui: &Ui<Msg>) -> bool {
-        !self.state.borrow().script.dirty() || may_discard(ui)
+        // Not held across the dialog, whose loop may want the state.
+        let dirty = self.state.borrow().script.dirty();
+        !dirty || may_discard(ui)
     }
 
     /// Esc with a basic entity picked goes back to Select, placing nothing.
@@ -109,10 +120,14 @@ impl Editor {
         match sample.install(&files::samples_base()) {
             Ok(path) => {
                 self.open_path(&path);
-                self.state.borrow_mut().message = format!(
-                    "{}. F5 plays it. This copy is yours: opening the sample again starts over",
-                    sample.title
-                );
+                let mut st = self.state.borrow_mut();
+                // Otherwise the message says why it did not open.
+                if st.doc.level_path() == Some(path.as_path()) {
+                    st.message = format!(
+                        "{}. F5 plays it. This copy is yours: opening the sample again starts over",
+                        sample.title
+                    );
+                }
             }
             Err(e) => self.state.borrow_mut().message = e,
         }
@@ -166,6 +181,8 @@ impl Editor {
                 WidgetEdit::Append(added) => {
                     let end = code.text().chars().count();
                     code.replace(end, end, &added);
+                    // A key may have told the model the text without this yet.
+                    self.state.borrow_mut().script.edited(code.text());
                 }
             }
         }
@@ -177,5 +194,32 @@ impl Editor {
         let st = self.state.borrow();
         self.script.tick(&st);
         self.script.show_state(&st.script, &st);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_way_to_another_level_counts_and_nothing_else_does() {
+        for msg in [
+            Msg::Menu(cmd::NEW),
+            Msg::Menu(cmd::SHOWCASE),
+            Msg::Menu(SAMPLE_MENU[0]),
+            Msg::OpenPath("x.msl".into()),
+            Msg::Script(ScriptMsg::Sample(0)),
+        ] {
+            assert!(replaces_script(&msg));
+        }
+        for msg in [
+            Msg::Menu(cmd::SAVE),
+            Msg::Menu(cmd::OPEN),
+            Msg::Menu(KIT_MENU[0]),
+            Msg::Script(ScriptMsg::Sample(usize::MAX)),
+            Msg::Script(ScriptMsg::Edited),
+        ] {
+            assert!(!replaces_script(&msg));
+        }
     }
 }

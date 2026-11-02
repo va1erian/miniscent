@@ -112,6 +112,43 @@ fn a_door_in_a_room_running_the_other_way_turns_with_it() {
 }
 
 #[test]
+fn by_a_wall_what_goes_beside_a_door_stays_in_the_room() {
+    for kind in [KitKind::LockedDoor, KitKind::SwitchDoor, KitKind::Wave] {
+        let mut st = room();
+        assert!(st.place_kit(kind, [-15.0, 0.0, 1.0]));
+        let markers = st.doc.entities().iter().filter_map(|e| match e.entity {
+            Entity::Marker { pos, .. } => Some(pos),
+            _ => None,
+        });
+        for pos in markers {
+            assert!((-16.0..=16.0).contains(&pos.x), "{kind:?} {pos:?}");
+            assert!((-6.0..=6.0).contains(&pos.y), "{kind:?} {pos:?}");
+        }
+    }
+}
+
+#[test]
+fn among_stacked_rooms_a_door_fits_the_one_at_the_clicks_height() {
+    let mut st = EditorState::new(Document::new());
+    st.new_op = Op::Subtract;
+    st.add_box([-16.0, -6.0, 8.0], [16.0, 6.0, 20.0]).unwrap();
+    st.add_box([-8.0, -6.0, 0.0], [8.0, 6.0, 4.0]).unwrap();
+    assert!(st.place_kit(KitKind::Door, [0.0, 0.0, 12.0]));
+    let (lo, hi) = st
+        .doc
+        .brushes()
+        .iter()
+        .find(|b| b.op == Op::Add)
+        .unwrap()
+        .bounds();
+    assert_eq!(
+        (lo[2], hi[2]),
+        (8.0, 20.0),
+        "the upper room, though it is bigger"
+    );
+}
+
+#[test]
 fn outside_any_room_a_door_still_has_a_size() {
     let mut st = EditorState::new(Document::new());
     assert!(st.place_kit(KitKind::Door, [50.0, 50.0, 0.0]));

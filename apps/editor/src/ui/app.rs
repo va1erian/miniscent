@@ -16,6 +16,7 @@ use super::commands::menus;
 use super::keys::{OPS, TOOLS, key_name, shortcut};
 use super::layouts::{self, Arrangement, Disposition};
 use super::props::{Panel, apply};
+use super::script_actions::replaces_script;
 use super::script_pane::{ScriptMsg, ScriptPane};
 use super::toolbar::IconButton;
 use super::view3d::View3d;
@@ -346,15 +347,16 @@ impl App for Editor {
     type Msg = Msg;
 
     fn update(&mut self, msg: Msg, ui: &mut Ui<Msg>) {
+        if replaces_script(&msg) && !self.script_may_go(ui) {
+            self.script.reset_sample_list();
+            return;
+        }
         match msg {
             Msg::Menu(cmd::LEVEL_SETTINGS) => self.level_settings(ui),
             Msg::CloseRequested => {
                 if self.script_may_go(ui) {
-                    ui.close();
+                    ui.quit();
                 }
-                return;
-            }
-            Msg::Menu(cmd::NEW | cmd::SHOWCASE) | Msg::OpenPath(_) if !self.script_may_go(ui) => {
                 return;
             }
             Msg::Menu(id) => self.menu_command(id),
@@ -367,6 +369,11 @@ impl App for Editor {
             }
             Msg::Grid(i) => self.state.borrow_mut().grid = GRIDS[i.min(GRIDS.len() - 1)],
             Msg::Face(m) => self.face_message(m),
+            // No refresh: nothing in the level changed, and this is every key.
+            Msg::Script(ScriptMsg::Edited) => {
+                self.script_message(ScriptMsg::Edited, ui);
+                return;
+            }
             Msg::Script(m) => self.script_message(m, ui),
             Msg::Prop(p) => {
                 apply(&mut self.state.borrow_mut(), p);

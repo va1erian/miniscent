@@ -26,6 +26,7 @@ mod keys;
 mod materials;
 mod script_pane;
 mod scripting;
+mod timing;
 
 /// Ticks the UI `n` times, 16 ms apart, so the render thread's frames arrive
 /// and show before a snapshot.
@@ -65,6 +66,11 @@ impl Run {
 /// Everything the script reads back from the running editor.
 struct Holder {
     editor: Probe,
+}
+
+/// `--ui-timing`: prints what the UI thread's everyday work costs.
+pub fn ui_timing(dir: &Path) -> i32 {
+    run_theme(dir, Theme::light(), (1280.0, 800.0), timing::script)
 }
 
 /// Runs the script; returns the process exit code.

@@ -115,16 +115,20 @@ pub struct Plan {
 /// Size of a door or platform with no room to fit it to.
 const LONE_DOOR: f64 = 4.0;
 
-/// The smallest carved box around `p`, seen from above: a click in the top view
-/// says nothing about the height.
+/// The smallest carved box around `p`, seen from above.
 fn room_around(st: &EditorState, p: [f64; 3]) -> Option<Bounds> {
     let carved = st.doc.brushes().iter().filter(|b| b.op == Op::Subtract);
     let around = carved.map(|b| b.bounds()).filter(|(lo, hi)| {
         (0..2).all(|i| p[i] >= lo[i] && p[i] <= hi[i]) && (0..3).all(|i| lo[i] < hi[i])
     });
+    // A room at the click's height first: rooms can be stacked, and the height
+    // of a click in the top view is only the depth set for new things.
+    let elsewhere = |r: &Bounds| p[2] < r.0[2] || p[2] > r.1[2];
     around.min_by(|a, b| {
         let size = |r: &Bounds| (0..3).map(|i| r.1[i] - r.0[i]).product::<f64>();
-        size(a).total_cmp(&size(b))
+        elsewhere(a)
+            .cmp(&elsewhere(b))
+            .then(size(a).total_cmp(&size(b)))
     })
 }
 
@@ -228,13 +232,16 @@ fn lift_plan(p: [f64; 3], room: Option<Bounds>, name: &str) -> Plan {
     }
 }
 
-/// `p` raised or lowered to stay in the room, where something can stand on it.
+/// `p` moved to stay in the room, clear of its walls, where something can stand
+/// on it and be reached. An axis the room has no space on stays as it is.
 fn inside(p: [f64; 3], room: Option<Bounds>) -> [f64; 3] {
     let mut out = p;
-    if let Some((lo, hi)) = room
-        && hi[2] - lo[2] > 2.0
-    {
-        out[2] = p[2].clamp(lo[2] + 1.0, hi[2] - 1.0);
+    if let Some((lo, hi)) = room {
+        for i in 0..3 {
+            if hi[i] - lo[i] > 2.0 {
+                out[i] = p[i].clamp(lo[i] + 1.0, hi[i] - 1.0);
+            }
+        }
     }
     out
 }
@@ -307,8 +314,14 @@ fn plan(kind: KitKind, p: [f64; 3], room: Option<Bounds>, name: &str) -> Plan {
             mover: None,
             things: vec![
                 zone(spot, [6.0, 6.0, 3.0], name.to_string()),
-                marker([spot[0] - 3.0, spot[1], spot[2]], format!("{name}_spawn_1")),
-                marker([spot[0] + 3.0, spot[1], spot[2]], format!("{name}_spawn_2")),
+                marker(
+                    inside([spot[0] - 3.0, spot[1], spot[2]], room),
+                    format!("{name}_spawn_1"),
+                ),
+                marker(
+                    inside([spot[0] + 3.0, spot[1], spot[2]], room),
+                    format!("{name}_spawn_2"),
+                ),
             ],
             script: format!(
                 "\"Enemy wave: on the {name}_spawn markers, when the player walks in. Add markers for more.\"\nwave: '{name}' kind: 'drone'.\n"

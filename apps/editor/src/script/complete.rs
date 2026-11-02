@@ -331,7 +331,21 @@ mod tests {
     #[test]
     fn hostile_text_gets_an_answer_and_no_panic() {
         let cases = [
-            "", "'", "\"", "(((((", ")))", "[:", "é'é'", "define", "define [", "x :=",
+            "é := 1. pl",
+            "é x := mover: 'é",
+            "(é: 'é') é",
+            "define é: à [ ]\né",
+            "\u{1f600} := \u{1f600}. \u{1f600} a",
+            "",
+            "'",
+            "\"",
+            "(((((",
+            ")))",
+            "[:",
+            "é'é'",
+            "define",
+            "define [",
+            "x :=",
         ];
         for text in cases {
             for caret in 0..=text.chars().count() + 2 {

@@ -178,8 +178,7 @@ pub fn assigned_names(text: &str) -> Vec<String> {
     };
     for (i, _) in code.match_indices(":=") {
         let left = code[..i].trim_end();
-        let at = left.rfind(|c: char| !is_word(c)).map_or(0, |p| p + 1);
-        add(&left[at..]);
+        add(&left[left.trim_end_matches(is_word).len()..]);
     }
     for part in code.split(":").skip(1) {
         let word: String = part.chars().take_while(|c| is_word(*c)).collect();
@@ -310,6 +309,14 @@ mod tests {
     fn variables_are_read_from_assignments_and_blocks_but_not_from_text() {
         let got = assigned_names("a := 1. b:=2. \"c := 3\" 'd := 4'. x do: [:e | e]. a := 5.");
         assert_eq!(got, ["a", "b", "e"]);
+    }
+
+    #[test]
+    fn text_that_is_not_ascii_is_read_without_trouble() {
+        assert!(assigned_names("é := 1. aé := 2.").is_empty());
+        assert_eq!(assigned_names("é x := 1."), ["x"]);
+        assert!(defines("define é: à [ ]\n\"é\"\ndefine é [ ]").len() == 2);
+        assert!(quoted_after("é pose: 'é'", "pose:") == ["é"]);
     }
 
     #[test]

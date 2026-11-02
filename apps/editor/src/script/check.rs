@@ -2,7 +2,7 @@
 //! way `--check` does: compile, then run its top level on a real game. Only the
 //! newest text is checked, one job at a time, once the typing pauses.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::time::{Duration, Instant};
 
@@ -122,7 +122,11 @@ fn run(arena: Arena, sources: &[Source], script: &str) -> Vec<Problem> {
 
 /// The checker the UI tick drives.
 pub struct Checker {
-    job: Option<Receiver<Report>>,
+    /// `None` comes back when the level has an invalid brush, which the status
+    /// bar already reports, so what was known stands.
+    job: Option<Receiver<Option<Report>>>,
+    /// The level the library in the report was read for.
+    library_for: Option<Option<PathBuf>>,
     /// What the job running, or the last one, was given.
     checked: Option<(String, Document)>,
     /// What was last seen, and when it changed.
@@ -135,6 +139,7 @@ impl Default for Checker {
     fn default() -> Self {
         Checker {
             job: None,
+            library_for: None,
             checked: None,
             seen: None,
             changed_at: Instant::now(),
@@ -160,7 +165,7 @@ impl Checker {
 
     /// One tick. Returns whether the report changed. Never blocks.
     pub fn tick(&mut self, text: &str, doc: &Document) -> bool {
-        let changed = self.collect();
+        let mut changed = self.collect();
         let same =
             |x: &Option<(String, Document)>| x.as_ref().is_some_and(|(t, d)| t == text && d == doc);
         if !same(&self.seen) {
@@ -170,7 +175,7 @@ impl Checker {
         let first = self.checked.is_none();
         let settled = first || self.changed_at.elapsed() >= SETTLE;
         if self.job.is_none() && settled && !same(&self.checked) {
-            self.start(text, doc);
+            changed |= self.start(text, doc);
         }
         changed
     }
@@ -180,7 +185,11 @@ impl Checker {
             return false;
         };
         let report = match rx.try_recv() {
-            Ok(report) => report,
+            Ok(Some(report)) => report,
+            Ok(None) => {
+                self.job = None;
+                return false;
+            }
             Err(TryRecvError::Empty) => return false,
             Err(TryRecvError::Disconnected) => Report {
                 problems: vec![Problem {
@@ -198,22 +207,30 @@ impl Checker {
         changed
     }
 
-    fn start(&mut self, text: &str, doc: &Document) {
+    /// Starts a job, unless there is nothing to do: with no script and the
+    /// library already read, an edit to the level changes nothing here. Whether
+    /// the report changed by itself.
+    fn start(&mut self, text: &str, doc: &Document) -> bool {
         self.checked = Some((text.to_string(), doc.clone()));
-        let Ok(level) = doc.to_level() else {
-            // A brush is invalid; the status bar already says which.
-            return;
-        };
+        let path = doc.level_path().map(Path::to_path_buf);
+        if text.trim().is_empty() && self.library_for.as_ref() == Some(&path) {
+            let had_problems = !self.report.problems.is_empty();
+            self.report.problems.clear();
+            return had_problems;
+        }
+        self.library_for = Some(path.clone());
         let (tx, rx) = channel();
-        let (text, path) = (text.to_string(), doc.level_path().map(Path::to_path_buf));
+        let (text, doc) = (text.to_string(), doc.clone());
         let started = std::thread::Builder::new()
             .name("mscent-script-check".into())
             .spawn(move || {
-                let _ = tx.send(check(level, path.as_deref(), &text));
+                let report = doc.to_level().ok();
+                let _ = tx.send(report.map(|level| check(level, path.as_deref(), &text)));
             });
         if started.is_ok() {
             self.job = Some(rx);
         }
+        false
     }
 }
 
@@ -301,6 +318,22 @@ mod tests {
         ] {
             let _ = check(level(), None, text);
         }
+    }
+
+    #[test]
+    fn with_no_script_a_level_edit_starts_no_job_and_old_problems_go() {
+        let mut c = Checker::default();
+        let doc = Document::new();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !c.is_current("saay: 1.", &doc) && Instant::now() < deadline {
+            c.tick("saay: 1.", &doc);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(c.report().problems.len(), 1);
+        c.start("", &doc);
+        assert!(c.job.is_none(), "the library is already read");
+        assert_eq!(c.report().problems, []);
+        assert!(!c.report().library.is_empty(), "and completion keeps it");
     }
 
     #[test]

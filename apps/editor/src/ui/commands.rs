@@ -256,6 +256,10 @@ impl Editor {
                     .set_level_path(Some(path.clone()));
                 self.saved = doc;
                 let script = self.save_script(&path);
+                if matches!(script, Ok(true)) {
+                    // F5 straight after must not find the old build current.
+                    self.studio.script_changed();
+                }
                 self.path = Some(path);
                 let saved = lit.map_or(msg.clone(), |l| format!("{msg}; {l}"));
                 match script {
