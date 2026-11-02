@@ -24,6 +24,7 @@ use crate::ui::{Editor, Msg, Probe, cmd};
 mod faces;
 mod guide;
 mod keys;
+mod level_settings;
 mod materials;
 mod script_pane;
 mod scripting;

@@ -205,21 +205,39 @@ impl Editor {
         }
     }
 
-    /// Edit > Level settings: asks for the fog and applies it to the world
-    /// entity.
+    /// Edit > Level settings: opens the window that asks for the fog, on what the
+    /// level has now, in place of one that may be showing something older.
     pub(super) fn level_settings(&mut self, ui: &Ui<Msg>) {
         if self.studio.mode == Mode::Play {
             return;
         }
+        self.close_fog_window();
         let current = self.state.borrow().fog().unwrap_or(DEFAULT_FOG);
-        if let Some((start, end)) = level_dialog::ask_fog(ui, current) {
+        match level_dialog::open(ui, current) {
+            Ok(window) => *self.fog_window.borrow_mut() = Some(window),
+            Err(e) => {
+                self.state.borrow_mut().message = format!("Cannot open Level settings: {e:?}");
+            }
+        }
+    }
+
+    pub(super) fn close_fog_window(&mut self) {
+        if let Some(window) = self.fog_window.borrow_mut().take() {
+            window.close();
+        }
+    }
+
+    /// The window's OK. The level may have started playing meanwhile, and then the
+    /// document is frozen.
+    pub(super) fn set_fog(&mut self, start: f32, end: f32) {
+        if self.studio.mode != Mode::Play {
             self.state.borrow_mut().set_fog(start, end);
-            self.refresh();
         }
     }
 
     /// Replaces the document (New, Open, showcase).
     fn install(&mut self, doc: Document, path: Option<PathBuf>, message: &str) {
+        self.close_fog_window();
         self.studio.reset(&doc);
         self.studio.set_cache_level(path.as_deref());
         self.saved = doc.clone();

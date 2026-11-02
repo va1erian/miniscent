@@ -15,6 +15,7 @@ pub use super::commands::cmd;
 use super::commands::menus;
 use super::keys::{OPS, TOOLS, key_name, shortcut};
 use super::layouts::{self, Arrangement, Disposition};
+use super::level_dialog::FogWindow;
 use super::props::{Panel, apply};
 use super::script_pane::{ScriptMsg, ScriptPane};
 use super::toolbar::IconButton;
@@ -51,6 +52,8 @@ pub enum Msg {
     Camera(Box<crate::model::FlyCam>),
     /// The window's close button.
     CloseRequested,
+    /// The level settings window's answer: the fog's start and end.
+    SetFog(f32, f32),
     /// The answer to whether the script's unsaved edits may go.
     Discard(DialogAction),
 }
@@ -76,6 +79,8 @@ pub struct Editor {
     pub(super) discard_dialog: Dialog<Msg>,
     /// What is waiting on that answer.
     pub(super) after_discard: Option<Msg>,
+    /// The level settings window, once opened. It may have closed itself since.
+    pub(super) fog_window: Rc<RefCell<Option<FogWindow>>>,
     pub(super) menu: Handle<Menu<Msg>>,
     pub(super) status: Handle<StatusBar<Msg>>,
     tools: [Handle<IconButton<Msg>>; TOOLS.len()],
@@ -140,6 +145,7 @@ impl Editor {
             script: ScriptPane::new(state.clone()),
             discard_dialog,
             after_discard: None,
+            fog_window: Rc::default(),
             menu: Handle::new(),
             status: Handle::new(),
             tools: Default::default(),
@@ -373,6 +379,7 @@ impl App for Editor {
                 return;
             }
             Msg::Menu(cmd::LEVEL_SETTINGS) => self.level_settings(ui),
+            Msg::SetFog(start, end) => self.set_fog(start, end),
             Msg::CloseRequested => {
                 ui.quit();
                 return;

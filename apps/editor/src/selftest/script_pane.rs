@@ -446,6 +446,7 @@ fn own_window(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
 }
 
 pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
+    super::level_settings::script(run, stage, probe);
     sample(run, stage, probe);
     typing(run, stage, probe);
     mistakes(run, stage, probe);
