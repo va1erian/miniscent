@@ -81,6 +81,19 @@ impl Plan {
         if carve { radius } else { self.thick(radius) }
     }
 
+    /// Softens round what the plan has carved. A prism's hard corners are finer
+    /// than the lattice, and meshed as they are they alias into spikes.
+    fn smooth_carved(&mut self) {
+        let carved: Vec<Prim> = (self.pieces.iter())
+            .filter(|p| p.op == DabOp::Carve)
+            .map(|p| p.prim)
+            .collect();
+        let reach = self.cell * SMOOTH_REACH_CELLS;
+        for prim in carved {
+            self.push(prim.grown(reach), DabOp::Smooth);
+        }
+    }
+
     /// Smooths what the plan has added, which takes the hard creases out of
     /// where its pieces join. This is what makes growth read as grown rather
     /// than assembled. What does not fit is left as it is.
@@ -191,8 +204,9 @@ pub fn generate(kind: Kind, site: &Site, seed: u32) -> Plan {
         Kind::Tree => trees::grow(&mut plan, &frame, site, &mut rng),
         Kind::Hive => hive::grow(&mut plan, &frame, site, &mut rng),
     }
-    // A comb's walls are meant to have corners.
-    if kind != Kind::Hive {
+    if kind == Kind::Hive {
+        plan.smooth_carved();
+    } else {
         plan.smooth_added();
     }
     plan

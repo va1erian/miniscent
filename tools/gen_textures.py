@@ -172,6 +172,13 @@ def worley(points, seed):
     return near, second
 
 
+def streaks(noise, cut):
+    """Noise low-passed up the image, so it runs along V as fibres and runs do."""
+    keep = (np.abs(np.fft.fftfreq(N)) < cut)[:, None]
+    s = np.fft.ifft(np.fft.fft(noise, axis=0) * keep, axis=0).real
+    return (s - s.min()) / (np.ptp(s) + 1e-9)
+
+
 def smooth_step(lo, hi, x):
     t = np.clip((x - lo) / (hi - lo), 0, 1)
     return t * t * (3 - 2 * t)
@@ -184,19 +191,19 @@ def ramp(t, a, b):
 
 def cap():
     """A toadstool's skin: red with cream warts, big enough to read at a distance."""
-    near, _ = worley(110, 11)
-    wart = 1 - smooth_step(1.5, 2.8, near)
-    mottle = tile_noise(4, 4)
+    near, _ = worley(70, 11)
+    wart = 1 - smooth_step(2.4, 3.8, near)
+    # Broad mottling only: fine grain under a bump map reads as noise on a cap.
+    mottle = tile_noise(2, 4)
     skin = ramp(mottle, (0.50, 0.08, 0.05), (0.80, 0.20, 0.09))
     a = skin * (1 - wart[..., None]) + np.array((0.93, 0.87, 0.70)) * wart[..., None]
-    return a, 0.35 + 0.1 * mottle + 0.5 * wart, 3.0
+    return a, 0.35 + 0.05 * mottle + 0.5 * wart, 2.0
 
 
 def stem():
     """Pale flesh with fine fibres running up it (V is up on a wall)."""
     fibres = tile_noise(4, 8, 0.5)
-    streak = np.fft.ifft(np.fft.fft(fibres, axis=0) * (np.abs(np.fft.fftfreq(N)) < 0.03), axis=0).real
-    streak = (streak - streak.min()) / (np.ptp(streak) + 1e-9)
+    streak = streaks(fibres, 0.03)
     blotch = tile_noise(3, 4)
     a = ramp(streak, (0.62, 0.55, 0.42), (0.90, 0.84, 0.70)) * (0.88 + 0.12 * blotch[..., None])
     return a, 0.3 + 0.6 * streak, 2.0
@@ -205,8 +212,7 @@ def stem():
 def bark():
     """Dark furrows running up the trunk, with ridges broken into plates."""
     grain = tile_noise(5, 8, 0.6)
-    ridge = np.fft.ifft(np.fft.fft(grain, axis=0) * (np.abs(np.fft.fftfreq(N)) < 0.05), axis=0).real
-    ridge = (ridge - ridge.min()) / (np.ptp(ridge) + 1e-9)
+    ridge = streaks(grain, 0.05)
     furrow = smooth_step(0.38, 0.62, ridge)
     near, second = worley(30, 13)
     plate = smooth_step(0.0, 3.0, second - near)
@@ -229,11 +235,12 @@ def coral():
 def wax():
     """Honey-coloured wax: warm, smooth, with soft pooled runs."""
     flow = tile_noise(4, 4, 0.45)
-    run = np.fft.ifft(np.fft.fft(tile_noise(3, 8), axis=0) * (np.abs(np.fft.fftfreq(N)) < 0.04), axis=0).real
-    run = (run - run.min()) / (np.ptp(run) + 1e-9)
+    run = streaks(tile_noise(3, 8), 0.04)
     t = 0.6 * flow + 0.4 * run
-    a = ramp(t, (0.62, 0.36, 0.07), (0.98, 0.74, 0.25))
-    return a, 0.4 + 0.3 * t, 1.5
+    # Little range: on a curved comb two projections meet, and a wide one shows
+    # where they do as patches of another brightness.
+    a = ramp(t, (0.80, 0.54, 0.14), (0.92, 0.66, 0.20))
+    return a, 0.4 + 0.1 * t, 0.8
 
 
 if __name__ == "__main__":

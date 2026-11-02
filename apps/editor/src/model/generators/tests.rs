@@ -252,7 +252,7 @@ fn growth_is_smoothed_where_its_pieces_join() {
 }
 
 #[test]
-fn a_comb_keeps_its_corners() {
+fn a_comb_is_softened_where_its_prisms_would_alias() {
     let s = Site {
         origin: Vec3d::new(0.0, 0.0, 0.0),
         normal: Vec3d::new(0.0, 0.0, 1.0),
@@ -261,7 +261,16 @@ fn a_comb_keeps_its_corners() {
         material: 1,
     };
     let plan = generate(Kind::Hive, &s, 3);
-    assert!(plan.pieces().iter().all(|p| !matches!(p.op, DabOp::Smooth)));
+    let raw: Vec<Piece> = (plan.pieces().iter())
+        .filter(|p| !matches!(p.op, DabOp::Smooth))
+        .copied()
+        .collect();
+    assert!(raw.len() < plan.pieces().len());
+    let (before, after) = (
+        mean_turn(&raw, CellSize::Quarter),
+        mean_turn(plan.pieces(), CellSize::Quarter),
+    );
+    assert!(after < before, "{before} became {after}");
 }
 
 #[test]

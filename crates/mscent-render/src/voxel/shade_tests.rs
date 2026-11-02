@@ -165,3 +165,79 @@ fn a_merged_vertex_takes_the_mean_of_the_cells_it_stands_for() {
         "{between} of {total} merged vertices are in between"
     );
 }
+
+/// A ball in a room with a light that does not vary, and a bold checker for a
+/// texture: all that is left to see is how the projections meet.
+fn checker_ball() -> Framebuffer {
+    use crate::voxel::{VertexLight, VoxelScene};
+    use mscent_world::voxel::VoxelWorld;
+    let brushes = vec![room()];
+    let mut volume =
+        Volume::new(Op::Add, 1, CellSize::Quarter, [-16, -16, -16], [2, 2, 2]).expect("valid");
+    let shape = volume.clone();
+    let mut ctx = Context::new(&shape, &brushes);
+    let ball = Prim::sphere(v(0.0, 0.0, 1.0), 2.0).expect("valid");
+    apply_dab(&mut volume, &mut ctx, &ball, DabOp::Add { material: 0 });
+    let level = Level {
+        brushes,
+        volumes: vec![volume],
+        ..Default::default()
+    };
+    let bsp = mscent_world::compile(&level.csg_brushes()).expect("compiles");
+    let world = VoxelWorld::build(&level, &level.static_brushes(), &bsp);
+    let scene = VoxelScene::new(world, bsp.leaves().len(), |_, m| {
+        let lit = VertexLight {
+            color: Vec3::new(256.0, 256.0, 256.0),
+            dir: Vec3::new(0.0, 0.0, 1.0),
+        };
+        vec![lit; m.vertices.len()]
+    });
+    let pixels: Vec<u32> = (0..128u32 * 128)
+        .map(|i| {
+            let (x, y) = (i % 128, i / 128);
+            if (x / 8 + y / 8) % 2 == 0 {
+                0xff20_2020
+            } else {
+                0xffe0_e0e0
+            }
+        })
+        .collect();
+    let texture = crate::Texture::new(128, 128, pixels).expect("texture");
+    voxel_frame(&scene, &texture, &[crate::SpecTable::new(0)])
+}
+
+/// How many pixels stand alone against all four of their neighbours: the speckle
+/// a dither leaves in a pattern.
+fn speckles(fb: &Framebuffer) -> usize {
+    let (w, h) = (fb.width() as usize, fb.height() as usize);
+    let lum = |p: u32| i32::from((p & 255) as u8);
+    let px = fb.pixels();
+    let mut count = 0;
+    for y in 1..h - 1 {
+        for x in 1..w - 1 {
+            let at = lum(px[y * w + x]);
+            let near = [
+                px[y * w + x - 1],
+                px[y * w + x + 1],
+                px[(y - 1) * w + x],
+                px[(y + 1) * w + x],
+            ];
+            if near.iter().all(|&n| (lum(n) - at).abs() > 80) {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+/// Where projections meet on a curved surface they meet along a line, so a pattern
+/// on the surface stays a pattern. A dither across whole triangles turned it to
+/// noise, in squares that followed the voxel grid.
+#[test]
+fn a_pattern_on_a_curved_surface_stays_clean_where_projections_meet() {
+    let fb = checker_ball();
+    let n = speckles(&fb);
+    // Dithering across the triangles gave 304 here. A few are left where a seam
+    // crosses the checker's own corners.
+    assert!(n < 60, "{n} speckled pixels");
+}

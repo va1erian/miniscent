@@ -1,17 +1,22 @@
-//! Triangles whose corners disagree on texture axis or material. Each pixel picks
-//! one corner's look through a 4x4 ordered dither fixed on the screen: stable,
-//! cheap, and only these triangles pay. The one mechanism serves both cases.
+//! Triangles whose corners disagree on texture axis or material.
+//!
+//! The axis is chosen per pixel from the interpolated normal, so two projections
+//! meet along the line where the surface really turns from one to the other. That
+//! line is the shape's own and smooth; a choice per corner follows the voxel grid,
+//! and draws squares around anything round. A dither across the triangle would
+//! also turn any pattern on the surface to noise. Two materials meet the same way,
+//! at the middle of the triangle, with a narrow dither to take off the stair-step.
 //!
 //! They shade as their neighbours do, or they would show as patches on anything
 //! glossy. With no one tangent frame, the light and the half vector are stepped in
-//! world space and moved into the picked corner's frame per pixel. It costs a few
-//! dot products more on these triangles alone.
+//! world space and moved into the pixel's frame. It costs a few dot products more
+//! on these triangles alone.
 
 use mscent_math::Vec3;
 
 use super::fill::FillContext;
 use super::tri::{Corner, Gradient, each_row};
-use super::{TEXELS_PER_UNIT, axis_map};
+use super::{TEXELS_PER_UNIT, axis_map, dominant_axis};
 use crate::bump::{FLAT_NORMAL, bump_gain, view_normal};
 use crate::framebuffer::Framebuffer;
 use crate::lighting_shader::{
@@ -25,24 +30,68 @@ use crate::texture::{LodSampler, NormalView, Texture};
 /// Thresholds of the ordered dither, as fractions of 16.
 const BAYER: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
 
-/// One corner's look.
+/// How close two corners' weights must be, for a dither to choose between them.
+const MATERIAL_BAND: f32 = 0.15;
+
+/// One corner's material.
 struct Look<'a> {
-    u_axis: Vec3,
-    v_axis: Vec3,
     lod: LodSampler<'a>,
     smooth: bool,
     normals: Option<NormalView<'a>>,
     spec: Option<&'a SpecTable>,
 }
 
-impl Look<'_> {
+/// The two axes that texture a surface facing a given way.
+#[derive(Clone, Copy)]
+struct Frame {
+    u: Vec3,
+    v: Vec3,
+}
+
+impl Frame {
+    #[inline]
+    fn facing(n: Vec3) -> Self {
+        let (u, v) = axis_map(dominant_axis(n));
+        Self { u, v }
+    }
+
     /// Texel coordinates of `p` in 16.16 fixed point.
     #[inline]
     fn coords(&self, p: Vec3) -> (i32, i32) {
         let fixed = |v: f32| (f64::from(v) * f64::from(TEXELS_PER_UNIT) * 65536.0) as i64 as i32;
-        (fixed(p.dot(self.u_axis)), fixed(p.dot(self.v_axis)))
+        (fixed(p.dot(self.u)), fixed(p.dot(self.v)))
     }
 
+    /// `v` in the frame the normal maps are authored in, on a surface facing `n`.
+    #[inline]
+    fn to_tangent(&self, v: Vec3, n: Vec3) -> Vec3 {
+        Vec3::new(v.dot(self.u), -v.dot(self.v), v.dot(n))
+    }
+}
+
+/// Which corner's material a pixel takes: the corner it is nearest, with a dither
+/// only where two are nearly level. `t` is the dither's threshold, in `0..1`.
+#[inline]
+fn pick_corner(w: Vec3, t: f32) -> usize {
+    let w = [w.x, w.y, w.z];
+    let (mut first, mut second) = (0, 1);
+    if w[1] > w[0] {
+        (first, second) = (1, 0);
+    }
+    if w[2] > w[first] {
+        (first, second) = (2, first);
+    } else if w[2] > w[second] {
+        second = 2;
+    }
+    let lead = (w[first] - w[second]) / MATERIAL_BAND;
+    if lead >= 1.0 || t < 0.5 + 0.5 * lead {
+        first
+    } else {
+        second
+    }
+}
+
+impl Look<'_> {
     #[inline]
     fn texel(&self, (fu, fv): (i32, i32)) -> u32 {
         if self.smooth {
@@ -50,12 +99,6 @@ impl Look<'_> {
         } else {
             self.lod.nearest(fu >> 16, fv >> 16)
         }
-    }
-
-    /// `v` in the frame the normal maps are authored in, on a surface facing `n`.
-    #[inline]
-    fn to_frame(&self, v: Vec3, n: Vec3) -> Vec3 {
-        Vec3::new(v.dot(self.u_axis), -v.dot(self.v_axis), v.dot(n))
     }
 }
 
@@ -92,14 +135,12 @@ pub(super) fn fill_blended(
     let nearest = c[0].iz.max(c[1].iz).max(c[2].iz);
     let rate = rate_of(ctx.cam.focal(), nearest);
     let scale = bump_scale(rate);
-    let look = looks.map(|(axis, material)| {
+    let one_material = looks[0].1 == looks[1].1 && looks[1].1 == looks[2].1;
+    let look = looks.map(|(_, material)| {
         let id = u16::from(material);
         let tex = (ctx.texture_of)(id);
-        let (u_axis, v_axis) = axis_map(axis);
         let table = ctx.spec.get(usize::from(id)).or(ctx.spec.last());
         Look {
-            u_axis,
-            v_axis,
             lod: tex.lod_sampler(level_of(tex, rate)),
             smooth: tex.is_filtered(),
             normals: tex
@@ -134,10 +175,11 @@ pub(super) fn fill_blended(
             let (p0, p1) = (pos.value(x, y, za), pos.value(x + n, y, zb));
             let (l0, l1) = (light.value(x, y, za), light.value(x + n, y, zb));
             let (dp, dl) = ((p1 - p0) * inv, (l1 - l0) * inv);
+            let (n0, n1) = (normal.value(x, y, za), normal.value(x + n, y, zb));
+            let dn = (n1 - n0) * inv;
             // Only what a corner will read: most far triangles read none of it.
             let frame = shades.then(|| {
                 let (d0, d1) = (lit_dir.value(x, y, za), lit_dir.value(x + n, y, zb));
-                let (n0, n1) = (normal.value(x, y, za), normal.value(x + n, y, zb));
                 let half = |d: Vec3, p: Vec3| {
                     let to_light = d.normalized().unwrap_or(FLAT_NORMAL);
                     half_vector(to_light, (eye - p).normalized().unwrap_or(FLAT_NORMAL))
@@ -146,8 +188,6 @@ pub(super) fn fill_blended(
                 SpanFrame {
                     d0,
                     dd: (d1 - d0) * inv,
-                    n0,
-                    dn: (n1 - n0) * inv,
                     h0,
                     dh: (h1 - h0) * inv,
                 }
@@ -162,19 +202,20 @@ pub(super) fn fill_blended(
                 }
                 depth[slot] = iz;
                 let f = i as f32;
-                // The weights only choose among corners, so depth does not matter.
-                let w = weight.at + weight.dx * (px as f32 + 0.5) + weight.dy * fy;
-                let t = (f32::from(BAYER[(y & 3) as usize][(px & 3) as usize]) + 0.5) / 16.0;
-                let pick = if w.x > t {
-                    0
-                } else if w.x + w.y > t {
-                    1
+                let surface = n0 + dn * f;
+                let axes = Frame::facing(surface);
+                let picked = if one_material {
+                    &look[0]
                 } else {
-                    2
+                    // The weights only choose among corners, so depth does not matter.
+                    let w = weight.at + weight.dx * (px as f32 + 0.5) + weight.dy * fy;
+                    let t = (f32::from(BAYER[(y & 3) as usize][(px & 3) as usize]) + 0.5) / 16.0;
+                    &look[pick_corner(w, t)]
                 };
-                let picked = &look[pick];
-                let coords = picked.coords(p0 + dp * f);
-                let shading = frame.as_ref().map(|s| s.shade(picked, coords, f, scale));
+                let coords = axes.coords(p0 + dp * f);
+                let shading = frame
+                    .as_ref()
+                    .map(|s| s.shade(picked, axes, surface, coords, f, scale));
                 let (gain, spec) = shading.unwrap_or((1.0, 0.0));
                 let mut k = (l0 + dl * f) * gain;
                 if k.x.max(k.y).max(k.z) > KNEE {
@@ -198,12 +239,10 @@ pub(super) fn fill_blended(
     });
 }
 
-/// World-space light, normal and half vector over one span.
+/// World-space light and half vector over one span.
 struct SpanFrame {
     d0: Vec3,
     dd: Vec3,
-    n0: Vec3,
-    dn: Vec3,
     h0: Vec3,
     dh: Vec3,
 }
@@ -211,8 +250,15 @@ struct SpanFrame {
 impl SpanFrame {
     /// The bump's gain and the highlight's strength for a pixel of `look`.
     #[inline]
-    fn shade(&self, look: &Look, (fu, fv): (i32, i32), f: f32, scale: f32) -> (f32, f32) {
-        let normal = self.n0 + self.dn * f;
+    fn shade(
+        &self,
+        look: &Look,
+        axes: Frame,
+        surface: Vec3,
+        (fu, fv): (i32, i32),
+        f: f32,
+        scale: f32,
+    ) -> (f32, f32) {
         let mut n = FLAT_NORMAL;
         let mut gain = 1.0;
         if let Some(map) = &look.normals {
@@ -220,12 +266,33 @@ impl SpanFrame {
             if scale < 1.0 {
                 n = FLAT_NORMAL + (n - FLAT_NORMAL) * scale;
             }
-            gain = bump_gain(n, look.to_frame(self.d0 + self.dd * f, normal));
+            gain = bump_gain(n, axes.to_tangent(self.d0 + self.dd * f, surface));
         }
         let spec = look.spec.map_or(0.0, |table| {
-            let h = look.to_frame(self.h0 + self.dh * f, normal);
+            let h = axes.to_tangent(self.h0 + self.dh * f, surface);
             table.response(n.dot(h) * (1.5 - 0.5 * h.dot(h)))
         });
         (gain, spec)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_clear_lead_takes_no_dither() {
+        let w = Vec3::new(0.7, 0.2, 0.1);
+        for t in [0.0, 0.5, 0.99] {
+            assert_eq!(pick_corner(w, t), 0);
+        }
+        assert_eq!(pick_corner(Vec3::new(0.1, 0.1, 0.8), 0.99), 2);
+    }
+
+    #[test]
+    fn nearly_level_corners_take_turns() {
+        let w = Vec3::new(0.48, 0.5, 0.02);
+        assert_eq!(pick_corner(w, 0.01), 1);
+        assert_eq!(pick_corner(w, 0.99), 0);
     }
 }
