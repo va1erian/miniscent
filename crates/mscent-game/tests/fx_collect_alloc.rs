@@ -66,9 +66,9 @@ fn collecting_a_busy_frame_allocates_nothing_once_the_lists_have_grown() {
         impact: Impact::Drone,
     });
     fx.advance(16_666_667, &bsp);
-    fx.collect(&cam, None, &mut draws);
+    fx.collect(&cam, None, None, &mut draws);
     assert!(!draws.is_empty());
     let before = CALLS.load(Ordering::Relaxed);
-    fx.collect(&cam, None, &mut draws);
+    fx.collect(&cam, None, None, &mut draws);
     assert_eq!(CALLS.load(Ordering::Relaxed) - before, 0);
 }

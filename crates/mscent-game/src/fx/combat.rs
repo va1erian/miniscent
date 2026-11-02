@@ -6,9 +6,11 @@ use mscent_math::Vec3;
 use mscent_math::epsilon::SURFACE_PROBE;
 use mscent_render::particles::{Mask, ParticleDraws, SpriteDraw, streak_from_world};
 use mscent_render::shade::mul_rgb;
-use mscent_render::{Camera, Fog};
+use mscent_render::{Camera, Fog, Framebuffer, Quality};
 use mscent_world::Bsp;
 
+use super::budget::{self, Keep, Limits, Sink, Tag, Tags, Tally};
+use super::class::Blend;
 use super::collect::{self, FogView};
 use super::recipes;
 use super::{Effect, EffectArgs, Fx};
@@ -76,6 +78,9 @@ impl Bolt {
 pub struct CombatFx {
     fx: Fx,
     bolts: [Option<Bolt>; MAX_BOLTS],
+    limits: Limits,
+    keep: Keep,
+    tags: Tags,
 }
 
 impl Default for CombatFx {
@@ -89,12 +94,22 @@ impl CombatFx {
         Self {
             fx: Fx::new(&recipes::CLASSES, SEED),
             bolts: [None; MAX_BOLTS],
+            limits: Limits::of(Quality::High),
+            keep: Keep::default(),
+            tags: Tags::default(),
         }
+    }
+
+    /// What this quality may spend from now on. Particles already alive stay.
+    pub fn set_quality(&mut self, quality: Quality) {
+        self.limits = Limits::of(quality);
+        self.fx.set_density(self.limits.density);
     }
 
     pub fn clear(&mut self) {
         self.fx.clear();
         self.bolts = [None; MAX_BOLTS];
+        self.keep = Keep::default();
     }
 
     /// Live particles, for tests and stats.
@@ -165,15 +180,33 @@ impl CombatFx {
         self.fx.spawn(recipes::DRONE_EXPLOSION, &args);
     }
 
-    /// Replaces `out` with this frame's draws. No allocation once its lists
-    /// have grown to a frame's size.
-    pub fn collect(&self, cam: &Camera, fog: Option<Fog>, out: &mut ParticleDraws) {
+    /// Replaces `out` with this frame's draws, fitted to the budget. `depth` is
+    /// the last frame, if there is one, for judging what the scene hides. No
+    /// allocation once the lists have grown to a frame's size.
+    pub fn collect(
+        &mut self,
+        cam: &Camera,
+        fog: Option<Fog>,
+        depth: Option<&Framebuffer>,
+        out: &mut ParticleDraws,
+    ) {
         out.clear();
+        self.tags.clear();
         let fog = FogView(fog);
-        collect::particles(&self.fx, &recipes::CLASSES, cam, &fog, out);
+        let (w, h) = (cam.width() as f32, cam.height() as f32);
+        let mut sink = Sink {
+            out,
+            tags: &mut self.tags,
+            width: w,
+            height: h,
+        };
+        collect::particles(&self.fx, &recipes::CLASSES, cam, &fog, &mut sink);
         for bolt in self.bolts.iter().flatten() {
-            draw_bolt(bolt, cam, &fog, out);
+            draw_bolt(bolt, cam, &fog, &mut sink);
         }
+        let tally = Tally::of(out, &self.tags, depth, w, h);
+        self.keep.follow(tally.fit(self.limits.screens * w * h));
+        budget::thin(out, &self.tags, self.keep);
         collect::sort_back_to_front(&mut out.over);
     }
 }
@@ -218,7 +251,7 @@ fn arrival_of(s: &ShotFx) -> Option<(Effect, EffectArgs)> {
 /// The drone's dark hull, for its chips.
 pub const DRONE_TINT: u32 = 0x0060_6878;
 
-fn draw_bolt(b: &Bolt, cam: &Camera, fog: &FogView, out: &mut ParticleDraws) {
+fn draw_bolt(b: &Bolt, cam: &Camera, fog: &FogView, out: &mut Sink) {
     let (head, tail) = b.span();
     let (a, z) = (b.origin + b.dir * tail, b.origin + b.dir * head);
     let edge = if b.by_player { PLAYER_EDGE } else { ENEMY_EDGE };
@@ -228,22 +261,23 @@ fn draw_bolt(b: &Bolt, cam: &Camera, fog: &FogView, out: &mut ParticleDraws) {
     let width = (6.0 / depth.max(1.0)).clamp(1.0, 3.0) as u8;
     let tinted = |c: u32| mul_rgb(c, fade);
     if let Some(s) = streak_from_world(cam, a, z, width + 2, tinted(edge)) {
-        out.streaks.push(s);
+        out.streak(s, Tag::ESSENTIAL);
     }
     if let Some(s) = streak_from_world(cam, a, z, width, tinted(CORE)) {
-        out.streaks.push(s);
+        out.streak(s, Tag::ESSENTIAL);
     }
     let Some(p) = cam.project(cam.world_to_camera(z)) else {
         return;
     };
-    out.add.push(SpriteDraw {
+    let glow = SpriteDraw {
         x: p.x,
         y: p.y,
         radius: GLOW_RADIUS * cam.focal() * p.inv_z,
         inv_z: p.inv_z,
         tint: tinted(edge),
         mask: Mask::Soft,
-    });
+    };
+    out.sprite(glow, Blend::Add, Tag::ESSENTIAL);
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 # Particles: combat effects in a software renderer
 
-M9.0 to M9.3 are built; the rest is design. It replaces the screen-space tracer that was in
+M9.0 to M9.4 are built; the rest is design. It replaces the screen-space tracer that was in
 [`apps/game/src/feedback.rs`](../apps/game/src/feedback.rs) with a world-space particle system
 that covers the shots, hits and explosions of combat and can later serve a destructible brush.
 See [What was built](#what-was-built-m91-to-m93) for where the code differs from this design.
@@ -149,7 +149,7 @@ requires a working one-worker path there, so the minimum belongs to the default,
 ## What was built (M9.1 to M9.3)
 
 `crates/mscent-render/src/particles/` draws and `crates/mscent-game/src/fx/` simulates, as designed.
-There is no budget yet (M9.4), so nothing limits fill, and no dynamic light (M9.5).
+There is no dynamic light yet (M9.5).
 
 Measured with `cargo run --release -p mscent-render --example fx_bench` (640x360, one thread, dev
 machine). These replace the prototype figures in the table above where they differ:
@@ -198,6 +198,46 @@ which draws through a real baked level: a shot behind a wall changes no pixels (
 the open change more than 100), metal and brick give different pictures, and a scripted shot is
 pixel-identical twice. Screenshots of a kill and a close wall hit were looked at during development.
 Not tested: a real window, the i3-7100U, or whether the recipes look right to a person who plays it.
+
+## What was built (M9.4)
+
+`crates/mscent-game/src/fx/budget.rs` fits each frame to the budget during collect: it costs every
+draw, cuts Cosmetic and then Normal by key, and never touches Essential. Measured with
+`cargo run --release -p mscent-game --example fx_budget_bench` (40 drone explosions, 640x360, one
+thread, AVX2 on the dev machine, no scene behind them):
+
+| Quality | Spent of budget, screens | Sprites, streaks | Collect | Draw | ns per unit |
+|---|---|---|---|---|---|
+| High | 4.82 of 5.0 | 76, 149 | 15 us | 0.48 ms | 0.43 |
+| Medium | 2.94 of 3.0 | 55, 116 | 16 us | 0.28 ms | 0.41 |
+| Low | 1.21 of 1.5 | 37, 145 | 18 us | 0.12 ms | 0.40 to 0.43 |
+
+The ns per unit holding steady across all three, close to the 0.45 ns of an AVX2 additive pixel, is
+what says the weights are about right. At that rate High's 5 screens are about 0.5 ms on the dev
+machine, or 2.5 ms on the reference at the 5x guess. This is not a run on the i3-7100U.
+
+Where the code differs from the design below:
+
+- **The weights are the measured ones**: "over" 1.25, streak pixels 10, plus 64 per sprite and 36 per
+  row, which covers the small-sprite setup M9.1 found. The design's 1.7 and 5.8 came from prototypes.
+- **Depth probes read the last frame.** Collect runs before the scene is drawn, because particles
+  share its band pass, and a second dispatch would cost more than the probes save. A wrong probe
+  charges the wrong amount for one frame and changes no pixel beyond the thinning it causes.
+- **`keep` falls at once and climbs over about a second**, rather than a two-way low-pass, so the
+  budget holds on the frame of the spike. `keep` moves per frame, so it follows the frame rate.
+- **The first cut can pop slightly.** Going from nothing thinned to a cut puts keys inside the fade
+  at once. Not yet seen in a picture.
+- **Spawn density is by key, with no distance rule.** Quality thins Normal and Cosmetic at birth.
+  Fewer spawns at a distance and none beyond fog are not built: collect already drops fogged
+  particles, so that saves simulation only, which costs little.
+
+Not built, and needed before this design is finished:
+
+- **The adaptive multiplier.** The particle pass runs inside the scene's bands, so nothing times it
+  apart from the scene yet.
+- **Hiding particle cost from the resolution controller**, for the same reason. Until then a big
+  explosion can lower the internal resolution for a while after it ends. Not measured.
+- **Moving large sprites to the half-res layer** arrives with the layer, in M9.6.
 
 ## Design overview
 
@@ -516,7 +556,7 @@ crates/mscent-game/src/fx/
 | M9.1 | **Done.** Kernels, sprite bank, sprite and streak drawing, `fx_bench` in the repo | M9.0 | M | SIMD paths bit-identical to scalar; depth test proven by pixels behind and in front of a wall; bench reproduces the table above |
 | M9.2 | **Done.** Pools, classes, emitters, 60 Hz tick, collision levels | M9.1 | M | Zero allocation per frame; same seed gives identical particles; hostile arguments never panic; particles never end in solid under `Bounce` |
 | M9.3 | **Done.** Bolts and hits: `Event::Shot`, `Hitscan.normal`, beams, `material_at`, surface rows; remove the tracer | M9.2 | M | Enemy shot behind a wall draws no pixels (the old tracer failed this); each material gives its own output; the replay test is unchanged |
-| M9.4 | Budget: costs, probes, tiers, `keep`, Quality rows | M9.2 | M | A frame at 100 full-screen sprites stays within 10% of budget, Essential is untouched, and a scripted run is pixel-identical twice |
+| M9.4 | **Done**, without the adaptive multiplier. Budget: costs, probes, tiers, `keep`, Quality rows | M9.2 | M | A frame at 100 full-screen sprites stays within 10% of budget, Essential is untouched, and a scripted run is pixel-identical twice |
 | M9.5 | Dynamic lights: per-face shader variant, reach flood, mesh lights | M9.3 | M | No cost when no light is active (frame bench unchanged); wall behind a wall stays unlit; per-span cost measured |
 | M9.6 | Drone explosion and `Blast`, half-res layer, shake, overlay | M9.4, M9.5 | L | `fx_gallery` contact sheets looked at by a person; peak cost of `Blast` reported at 640x360 |
 | M9.7 | Scorch decals: blended polygon raster, ring of 64, depth bias | M9.3 | S | Decal stays on its face from several angles without z-fighting |

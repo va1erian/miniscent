@@ -9,30 +9,29 @@
 use std::time::Duration;
 
 use mscent_collide::FixedStepper;
-use mscent_game::fx::combat::{CombatFx, DRONE_TINT, Impact, ShotFx};
+use mscent_game::fx::combat::{CombatFx, DRONE_TINT};
 use mscent_game::{
-    Arena, Event as GameEvent, Game, HudModel, LoadError, Menu, MenuAction, MenuCommand, Phase,
-    Screen, Shooter, Struck, draw_hud, draw_menu,
+    Arena, Event as GameEvent, Game, LoadError, Menu, MenuAction, MenuCommand, Phase, Screen,
 };
 use mscent_math::{Quat, Vec3};
 use mscent_platform::{Event, Key, MouseButton};
 use mscent_render::particles::{ParticleDraws, SpriteBank};
 use mscent_render::{
     Actor, ActorKind, BakeCache, BuildConfig, BuildError, Framebuffer, LevelRenderer,
-    MaterialTable, Quality, View, draw_text, fill_rect,
+    MaterialTable, Quality, View,
 };
 use mscent_world::Level;
 
 use crate::controls::Controls;
 use crate::feedback::Feedback;
 
+mod overlay;
+mod shots;
+
 /// Radians of turn per pixel of mouse movement.
 const DEFAULT_SENSITIVITY: f32 = 0.0022;
 /// Frames a hit marker stays on screen.
 const FLASH_FRAMES: u32 = 6;
-/// Where the player's bolt starts: right of and below the eye, and ahead of
-/// it, in the camera frame (+X right, +Y up, view along -Z).
-const GUN_OFFSET: Vec3 = Vec3::new(0.22, -0.18, -0.35);
 
 /// How a session is built and drawn.
 #[derive(Clone, Copy, Debug)]
@@ -163,6 +162,8 @@ impl GameSession {
         let mut menu = Menu::new();
         // Item 0 of the main menu is "Start".
         menu.press(MenuCommand::Select);
+        let mut fx = CombatFx::new();
+        fx.set_quality(cfg.quality);
         Self {
             prev_orientation: game.player.orientation,
             game,
@@ -177,7 +178,7 @@ impl GameSession {
             hit: 0,
             kill: 0,
             feedback: Feedback::default(),
-            fx: CombatFx::new(),
+            fx,
             draws: ParticleDraws::default(),
             bank: SpriteBank::new(),
         }
@@ -212,6 +213,7 @@ impl GameSession {
 
     pub fn set_quality(&mut self, quality: Quality) {
         self.quality = quality;
+        self.fx.set_quality(quality);
     }
 
     pub fn set_stats(&mut self, stats: FrameStats) {
@@ -370,43 +372,6 @@ impl GameSession {
         }
     }
 
-    fn shot_effect(
-        &mut self,
-        shooter: Shooter,
-        origin: Vec3,
-        end: Vec3,
-        normal: Vec3,
-        struck: Struck,
-    ) {
-        let by_player = shooter == Shooter::Player;
-        let muzzle = if by_player {
-            origin + self.game.player.orientation.rotate(GUN_OFFSET)
-        } else {
-            origin
-        };
-        let impact = match struck {
-            // A hit on the player would burst inside the camera.
-            Struck::Nothing | Struck::Player => Impact::None,
-            Struck::Enemy(_) => Impact::Drone,
-            Struck::Wall => {
-                self.renderer
-                    .scene()
-                    .surface_at(end, normal)
-                    .map_or(Impact::None, |s| Impact::Surface {
-                        material: s.material,
-                        tint: s.tint,
-                    })
-            }
-        };
-        self.fx.shot(&ShotFx {
-            by_player,
-            muzzle,
-            end,
-            normal,
-            impact,
-        });
-    }
-
     /// The camera for this frame, interpolated between the last two steps.
     pub fn view(&self) -> View {
         let alpha = self.stepper.alpha();
@@ -449,7 +414,12 @@ impl GameSession {
         let actors = self.actors();
         let mut fb = self.fb.take()?;
         match self.renderer.camera(&view, width, height) {
-            Some(cam) => self.fx.collect(&cam, self.renderer.fog(), &mut self.draws),
+            // `fb` still holds the last frame, whose depth is the best guess
+            // at what this one hides.
+            Some(cam) => {
+                let fog = self.renderer.fog();
+                self.fx.collect(&cam, fog, Some(&fb), &mut self.draws);
+            }
             None => self.draws.clear(),
         }
         let drawn = self.renderer.render_with_particles(
@@ -469,29 +439,5 @@ impl GameSession {
         self.kill = self.kill.saturating_sub(1);
         self.fb = Some(fb);
         drawn.and(self.fb.as_ref())
-    }
-
-    fn draw_overlays(&self, fb: &mut Framebuffer) {
-        draw_hud(fb, &HudModel::from_game(&self.game));
-        let (w, h) = (fb.width() as i32, fb.height() as i32);
-        let stats = format!("{:.0} FPS {:.1} MS", self.stats.fps, self.stats.frame_ms);
-        let size = mscent_render::text_size(&stats, 1);
-        draw_text(fb, w - size.0 as i32 - 8, 8, &stats, 0xffff_ffff, 1);
-        let (cx, cy) = (w / 2, h / 2);
-        if self.hit > 0 {
-            fill_rect(fb, cx - 9, cy - 9, 4, 4, 0xffff_3030);
-            fill_rect(fb, cx + 6, cy - 9, 4, 4, 0xffff_3030);
-            fill_rect(fb, cx - 9, cy + 6, 4, 4, 0xffff_3030);
-            fill_rect(fb, cx + 6, cy + 6, 4, 4, 0xffff_3030);
-        }
-        if self.kill > 0 {
-            draw_text(fb, cx - 12, cy + 16, "KILL", 0xffff_d040, 1);
-        }
-        if self.menu.screen() == Screen::Won || self.menu.screen() == Screen::Lost {
-            let hint = "R TO RESTART";
-            let tw = mscent_render::text_size(hint, 1).0 as i32;
-            draw_text(fb, (w - tw) / 2, h - 24, hint, 0xffc0_c0c0, 1);
-        }
-        draw_menu(fb, &self.menu);
     }
 }

@@ -128,6 +128,22 @@ fn more_shots_than_bolts_still_land() {
 }
 
 #[test]
+fn a_lower_quality_spawns_fewer_particles_but_every_flash() {
+    let spawned = |quality| {
+        let mut fx = CombatFx::new();
+        fx.set_quality(quality);
+        fx.drone_explosion(v(0.0, 0.0, 0.0), DRONE_TINT);
+        let mut flashes = 0;
+        fx.fx
+            .for_each(|p| flashes += usize::from(p.class == recipes::FLASH));
+        (fx.live(), flashes)
+    };
+    let (high, low) = (spawned(Quality::High), spawned(Quality::Low));
+    assert!(low.0 * 2 < high.0, "{low:?} against {high:?}");
+    assert_eq!((low.1, high.1), (2, 2), "the flash is Essential");
+}
+
+#[test]
 fn a_ramp_and_fog_never_put_a_particle_behind_the_eye_in_the_list() {
     let view = View::from_angles(v(0.0, 0.0, 0.0), -core::f32::consts::FRAC_PI_2, 0.0, 0.0);
     let cam = view.camera(1.3, 0.1, 400.0, 320, 180).expect("a camera");
@@ -135,11 +151,11 @@ fn a_ramp_and_fog_never_put_a_particle_behind_the_eye_in_the_list() {
     // Ahead of the camera, then behind it.
     fx.drone_explosion(v(5.0, 0.0, 0.0), DRONE_TINT);
     let mut draws = ParticleDraws::default();
-    fx.collect(&cam, None, &mut draws);
+    fx.collect(&cam, None, None, &mut draws);
     let ahead = draws.add.len();
     assert!(ahead > 0);
     let mut behind = CombatFx::new();
     behind.drone_explosion(v(-5.0, 0.0, 0.0), DRONE_TINT);
-    behind.collect(&cam, None, &mut draws);
+    behind.collect(&cam, None, None, &mut draws);
     assert_eq!(draws.add.len(), 0);
 }

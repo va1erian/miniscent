@@ -15,6 +15,7 @@
 //! `Fx` owns its seeded `Rng` and never touches `Game`, so effects cannot
 //! change gameplay or break a replay.
 
+pub mod budget;
 pub mod class;
 mod collect;
 pub mod collide;
@@ -53,6 +54,8 @@ const TRAIL_LIFE: f32 = 0.6;
 /// Trail particles one class can shed in one tick; the rest are skipped.
 const MAX_SHED: usize = 64;
 const NS_PER_SEC: u64 = 1_000_000_000;
+/// `LiveParticle::key` takes every byte value.
+const ALL_KEYS: u16 = 256;
 
 /// One live particle as the renderer sees it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -107,6 +110,8 @@ pub struct Fx {
     clock: Clock,
     queue: emit::Queue,
     budget: Budget,
+    /// Normal and Cosmetic particles with a key at or above this are not born.
+    density_keys: u16,
 }
 
 impl Fx {
@@ -131,7 +136,14 @@ impl Fx {
             clock: Clock::default(),
             queue: emit::Queue::default(),
             budget: Budget::default(),
+            density_keys: ALL_KEYS,
         }
+    }
+
+    /// The fraction of Normal and Cosmetic particles spawned from now on.
+    pub fn set_density(&mut self, density: f32) {
+        // A NaN casts to 0, which spawns only what is Essential.
+        self.density_keys = (density.clamp(0.0, 1.0) * f32::from(ALL_KEYS)) as u16;
     }
 
     /// Fires every emitter of `effect`; delayed ones wait in the queue.
@@ -217,7 +229,9 @@ impl Fx {
         let replace = self.classes[ci].tier == Tier::Essential;
         for _ in 0..emit::count_of(e, &mut self.rng) {
             let born = emit::born(e, args, &mut self.rng);
-            self.pools[ci].push(&born, replace);
+            if replace || u16::from(born.key) < self.density_keys {
+                self.pools[ci].push(&born, replace);
+            }
         }
     }
 

@@ -2,10 +2,11 @@
 //! pick the colour for the particle's age, and apply fog per particle, which
 //! is one colour change instead of a per-pixel cost.
 
-use mscent_render::particles::{Mask, ParticleDraws, SpriteDraw, streak_from_world};
+use mscent_render::particles::{Mask, SpriteDraw, streak_from_world};
 use mscent_render::shade::{lerp_rgb, mul_rgb as scale_rgb};
 use mscent_render::{Camera, Fog};
 
+use super::budget::{Sink, Tag};
 use super::class::{Blend, ParticleClass, Prim, PuffShape};
 use super::{Fx, LiveParticle};
 
@@ -43,13 +44,7 @@ impl FogView {
 }
 
 /// Appends every live particle's draw to `out`.
-pub fn particles(
-    fx: &Fx,
-    classes: &[ParticleClass],
-    cam: &Camera,
-    fog: &FogView,
-    out: &mut ParticleDraws,
-) {
+pub fn particles(fx: &Fx, classes: &[ParticleClass], cam: &Camera, fog: &FogView, out: &mut Sink) {
     fx.for_each(|p| {
         if let Some(class) = classes.get(usize::from(p.class.0)) {
             particle(&p, class, cam, fog, out);
@@ -57,13 +52,11 @@ pub fn particles(
     });
 }
 
-fn particle(
-    p: &LiveParticle,
-    class: &ParticleClass,
-    cam: &Camera,
-    fog: &FogView,
-    out: &mut ParticleDraws,
-) {
+fn particle(p: &LiveParticle, class: &ParticleClass, cam: &Camera, fog: &FogView, out: &mut Sink) {
+    let tag = Tag {
+        tier: class.tier,
+        key: p.key,
+    };
     let c = cam.world_to_camera(p.pos);
     let Some(fade) = fog.fade(-c.z) else { return };
     let tint = tint_of(p, class);
@@ -76,7 +69,7 @@ fn particle(
             let tail = p.pos - p.vel * class.stretch;
             let width = (SPARK_WIDTH_DEPTH / -c.z).clamp(1.0, MAX_SPARK_WIDTH) as u8;
             if let Some(s) = streak_from_world(cam, tail, p.pos, width, tint) {
-                out.streaks.push(s);
+                out.streak(s, tag);
             }
             return;
         }
@@ -96,10 +89,7 @@ fn particle(
         tint,
         mask: shape,
     };
-    match class.blend {
-        Blend::Add => out.add.push(sprite),
-        Blend::Over => out.over.push(sprite),
-    }
+    out.sprite(sprite, class.blend, tag);
 }
 
 fn mask_of(shape: PuffShape, p: &LiveParticle) -> Mask {

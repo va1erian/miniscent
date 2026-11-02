@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use miniscent_game::app::{RunOptions, run};
 use miniscent_game::{GameSession, SessionConfig, assets, levels};
+use mscent_game::fx::budget::cost_of;
 use mscent_game::fx::combat::{CombatFx, DRONE_TINT, Impact, ShotFx};
 use mscent_math::{Vec3, Vec3d};
 use mscent_platform::{HeadlessPlatform, Script};
@@ -62,13 +63,13 @@ fn view() -> View {
     View::from_angles(v(-4.0, 0.0, 0.0), -core::f32::consts::FRAC_PI_2, 0.0, 0.0)
 }
 
-fn frame(r: &LevelRenderer, fx: Option<&CombatFx>) -> Framebuffer {
+fn frame(r: &LevelRenderer, fx: Option<&mut CombatFx>) -> Framebuffer {
     let mut fb = Framebuffer::new(W, H).expect("a target");
     let view = view();
     let mut draws = ParticleDraws::default();
     if let Some(fx) = fx {
         let cam = r.camera(&view, W, H).expect("a camera");
-        fx.collect(&cam, r.fog(), &mut draws);
+        fx.collect(&cam, r.fog(), None, &mut draws);
     }
     let bank = SpriteBank::new();
     r.render_with_particles(
@@ -110,14 +111,14 @@ fn far_side_fx(r: &LevelRenderer) -> CombatFx {
 #[test]
 fn a_shot_behind_a_wall_draws_no_pixels_and_in_the_open_it_does() {
     let walled = renderer(true);
-    let fx = far_side_fx(&walled);
+    let mut fx = far_side_fx(&walled);
     assert!(fx.bolts() > 0 && fx.live() > 0, "something to hide");
-    let hidden = changed(&frame(&walled, None), &frame(&walled, Some(&fx)));
+    let hidden = changed(&frame(&walled, None), &frame(&walled, Some(&mut fx)));
     assert_eq!(hidden, 0, "the old tracer showed through walls");
 
     let open = renderer(false);
-    let fx = far_side_fx(&open);
-    let seen = changed(&frame(&open, None), &frame(&open, Some(&fx)));
+    let mut fx = far_side_fx(&open);
+    let seen = changed(&frame(&open, None), &frame(&open, Some(&mut fx)));
     assert!(seen > 100, "the same effects in the open: {seen} pixels");
 }
 
@@ -141,13 +142,42 @@ fn different_materials_give_different_pictures() {
             fx.advance(FRAME, r.scene().bsp());
         }
         assert_eq!(fx.bolts(), 0);
-        frame(&r, Some(&fx))
+        frame(&r, Some(&mut fx))
     };
     let base = frame(&r, None);
     let (metal, brick) = (picture(METAL), picture(BRICK));
     assert!(changed(&base, &metal) > 20, "metal shows");
     assert!(changed(&base, &brick) > 20, "brick shows");
     assert!(changed(&metal, &brick) > 20, "and they differ");
+}
+
+#[test]
+fn an_explosion_behind_a_wall_is_charged_less_than_the_same_one_in_the_open() {
+    let r = renderer(true);
+    let scene = frame(&r, None);
+    let cam = r.camera(&view(), W, H).expect("a camera");
+    let (w, h) = (W as f32, H as f32);
+    let explosion = |at| {
+        let mut fx = CombatFx::new();
+        fx.drone_explosion(at, DRONE_TINT);
+        for _ in 0..20 {
+            fx.advance(FRAME, r.scene().bsp());
+        }
+        let mut draws = ParticleDraws::default();
+        fx.collect(&cam, r.fog(), None, &mut draws);
+        draws
+    };
+    // The same distance from the eye, so the same size on screen; one is on
+    // the eye's side of the divider at x = -1 and one past it.
+    let (front, behind) = (explosion(v(-2.0, 0.0, 0.0)), explosion(v(2.0, 0.0, 0.0)));
+    assert!(!behind.is_empty());
+    let open = cost_of(&front, Some(&scene), w, h);
+    let walled = cost_of(&behind, Some(&scene), w, h);
+    assert!(walled < open * 0.7, "behind {walled} against front {open}");
+    assert!(
+        cost_of(&behind, None, w, h) > walled,
+        "and it is the depth that made the difference"
+    );
 }
 
 fn session_frame(script: &str, frames: u64) -> Vec<u32> {
