@@ -7,9 +7,10 @@ use mscent_render::{Fog, View};
 use mscent_world::materials::{BRICK, METAL};
 use mscent_world::{Brush, Op, compile, extract_faces};
 
-use crate::fx::budget::Tags;
+use crate::fx::budget::{Sink, Tags};
 
 const FRAME_NS: u64 = 16_666_667;
+const CAP_SCREENS: f32 = 0.25;
 const MARK: Mark = Mark {
     radius: 0.5,
     darkness: 200,
@@ -261,7 +262,7 @@ fn collected(decals: &Decals, fog: Option<Fog>) -> ParticleDraws {
         width: 320.0,
         height: 180.0,
     };
-    decals.collect(&cam, &FogView(fog), &mut sink);
+    decals.collect(&cam, &FogView(fog), CAP_SCREENS, &mut sink);
     out
 }
 
@@ -304,5 +305,34 @@ fn marks_piled_up_in_front_of_the_eye_stop_at_the_area_cap() {
     let out = collected(&ring, None);
     let area: f32 = out.decals.iter().map(|d| d.screen_area(320.0, 180.0)).sum();
     assert!(!out.decals.is_empty() && out.decals.len() < MAX_DECALS);
-    assert!(area <= MAX_SCREENS * 320.0 * 180.0, "{area}");
+    assert!(area <= CAP_SCREENS * 320.0 * 180.0, "{area}");
+}
+
+#[test]
+fn a_mark_too_big_for_the_cap_does_not_hide_the_older_ones() {
+    let view = View::from_angles(v(0.0, 0.0, 0.0), -core::f32::consts::FRAC_PI_2, 0.0, 0.0);
+    let cam = view.camera(1.3, 0.1, 400.0, 640, 360).expect("a camera");
+    let mark = |x: f32, half: f32| {
+        Decal::new(
+            v(x, 0.0, 0.0),
+            v(-1.0, 0.0, 0.0),
+            Mark {
+                radius: half,
+                darkness: 200,
+            },
+            None,
+        )
+    };
+    let mut ring = Decals::new();
+    ring.push(mark(10.0, 0.3).expect("a small mark, far off"));
+    ring.push(mark(0.5, 0.45).expect("a big mark, right at the eye"));
+    let (mut draws, mut tags) = (ParticleDraws::default(), Tags::default());
+    let mut sink = Sink {
+        out: &mut draws,
+        tags: &mut tags,
+        width: 640.0,
+        height: 360.0,
+    };
+    ring.collect(&cam, &FogView(None), CAP_SCREENS, &mut sink);
+    assert_eq!(draws.decals.len(), 1, "the far one, on its own");
 }

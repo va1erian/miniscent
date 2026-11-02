@@ -3,11 +3,13 @@
 
 use mscent_math::{Aabb, Vec3};
 use mscent_render::DynLight;
+use mscent_render::dynlight::MAX_RADIUS;
 use mscent_render::scene::Scene;
 use mscent_world::materials::LIGHTPANEL;
 
 use super::super::EffectArgs;
 use super::super::recipes_big::{self as big, BLAST_RADIUS};
+use super::super::{MAX_CATCHUP_TICKS, NS_PER_SEC as NS, TICK_HZ};
 use super::{CombatFx, args_at};
 
 /// How long the white overlay and the shake last, in seconds.
@@ -26,6 +28,9 @@ const SHAKE_RATES: (f32, f32, f32) = (61.0, 47.0, 53.0);
 const SHATTER_UNIT: f32 = 8.0;
 const MAX_SHATTER_BATCHES: u32 = 8;
 const NS_PER_SEC: f32 = 1.0e9;
+/// The most one step ages the view: a stall drops its time, as it does for the
+/// particles and the lights, so the shake does not end before they do.
+const MAX_STEP_NS: u64 = MAX_CATCHUP_TICKS as u64 * NS / TICK_HZ;
 
 /// What a blast does to the view this frame. Cosmetic: the game never sees it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -54,7 +59,7 @@ impl BlastView {
     }
 
     pub(super) fn advance(&mut self, elapsed_ns: u64) {
-        self.age_ns = self.age_ns.saturating_add(elapsed_ns);
+        self.age_ns = self.age_ns.saturating_add(elapsed_ns.min(MAX_STEP_NS));
     }
 
     fn start(&mut self, pos: Vec3, radius: f32) {
@@ -63,17 +68,19 @@ impl BlastView {
     }
 
     /// `1..=0` of what the view feels at `eye`; 0 when it cannot see the blast.
+    /// The flood is capped, so the falloff ends where it does and not at a
+    /// leaf's edge.
     fn felt(&mut self, scene: &Scene, eye: Vec3) -> f32 {
+        let reach = (FELT_RADII * self.radius).min(MAX_RADIUS);
         if !self.placed {
-            let reach = FELT_RADII * self.radius;
-            self.reach
-                .place(scene, self.pos, reach, Vec3::new(1.0, 1.0, 1.0));
+            let white = Vec3::new(1.0, 1.0, 1.0);
+            self.reach.place(scene, self.pos, reach, white);
             self.placed = true;
         }
         if !self.reach.reaches_leaf(scene.bsp().leaf_at_f32(eye)) {
             return 0.0;
         }
-        (1.0 - (eye - self.pos).length() / (FELT_RADII * self.radius)).clamp(0.0, 1.0)
+        (1.0 - (eye - self.pos).length() / reach).clamp(0.0, 1.0)
     }
 }
 

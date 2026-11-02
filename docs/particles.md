@@ -232,7 +232,10 @@ Where the code differs from the design below:
   share its band pass, and a second dispatch would cost more than the probes save. A wrong probe
   charges the wrong amount for one frame and changes no pixel beyond the thinning it causes.
 - **`keep` falls at once and climbs over about a second**, rather than a two-way low-pass, so the
-  budget holds on the frame of the spike. `keep` moves per frame, so it follows the frame rate.
+  budget holds on the frame of the spike. `keep` moves per frame, so it follows the frame rate. So a
+  frame overcharged by a wrong probe pays for about a second, not one frame. That happens when the
+  adaptive controller changes resolution mid-fight, since a new framebuffer has no depth to probe. It
+  cannot happen in a scripted run, and the visible effect is not measured.
 - **The first cut can pop slightly.** Going from nothing thinned to a cut puts keys inside the fade
   at once. Not yet seen in a picture.
 - **Spawn density is by key, with no distance rule.** Quality thins Normal and Cosmetic at birth.
@@ -425,19 +428,19 @@ light on screen.
 `GameSession::blast`, the tests and the gallery do. `cargo run --release -p miniscent-game --example
 fx_gallery` writes a sheet per effect to `target/shots/fx/`, six frames from 0.03 to 2.5 s, and prints
 each effect's worst frame. On the dev machine at 640x360, High, on the default workers, over an empty
-frame of 1.26 ms:
+frame of about 1.2 ms, with the half-res layer on:
 
 | Effect | Worst frame | Over empty | Budget spent, screens |
 |---|---|---|---|
-| A hit, by material | 1.52 to 1.61 ms | 0.26 to 0.35 ms | 0.07 to 0.08 |
-| Drone hit | 1.67 ms | 0.41 ms | 0.04 |
-| Drone explosion | 1.48 ms | 0.22 ms | 1.51 |
-| `Blast` | 1.68 ms | 0.42 ms | 5.00 of 5.0 |
+| A hit, by material | 1.50 to 1.62 ms | 0.28 to 0.40 ms | 0.07 to 0.08 |
+| Drone hit | 1.64 ms | 0.41 ms | 0.04 |
+| Drone explosion | 1.68 ms | 0.45 ms | 1.51 |
+| `Blast` | 1.77 to 1.82 ms | 0.55 to 0.64 ms | 4.98 of 5.0 |
 
 These are one run each, and a hit's "worst" falls at a frame where it is long over, so differences
-under about 0.3 ms are noise. **`Blast` peaks at 0.42 ms over the empty frame on all cores**, against
-the design's unbudgeted 2.2 ms and budgeted 0.65 ms on one thread. That is not a one-thread figure,
-and it is not the i3-7100U. Its lights are included.
+under about 0.3 ms are noise. **`Blast` peaks at 0.55 to 0.64 ms over the empty frame on all cores**,
+lights included. The design's 2.2 ms unbudgeted and 0.65 ms budgeted were for one thread, so this does
+not confirm them, and it is not the i3-7100U.
 
 The view (`CombatFx::view_kick`) takes a white overlay for 0.1 s and a shake of at most 0.15 units for
 0.5 s, weaker with distance out to three radii. A flood from the blast says which leaves can see it,
@@ -448,8 +451,8 @@ What the sheets showed, looked at by the author and not by a player:
 - **A large fire sprite cuts the floor along a straight line.** Its one depth meets the floor at a
   constant screen row, which is the risk under Decisions. It is plain on the `Blast` sheet at 0.25 s,
   and it is what most needs a person's opinion; the next thing to try is the per-block fade.
-- **`Blast`'s smoke is faint** once the budget has cut it, and it climbs back slowly. The half-res
-  layer is meant to help here.
+- **`Blast`'s smoke is faint** on the sheets, with the layer on as well as off, though the layer keeps
+  three times the sprites at the same cost. Its ramp's alpha is the place to start.
 - **A shatter is still faint** at 8 units. It read as nearly nothing with drone-chip sizes, so it got
   its own classes, `SHARD` and `BRUSH_DUST`; on the sheet that is now grey dust and some small chips.
   Its sizes and counts are the first thing to raise.
@@ -574,6 +577,27 @@ hostile sprites, and a heavy scene that stays in budget and keeps a higher Cosme
 without); and `apps/game/tests/layer_fx.rs` on real pixels at six tilings. Not tested: the
 i3-7100U, a window, and flicker of the layer on a scripted explosion (the hold is tested on the
 gate alone).
+
+## What the second review changed
+
+The pre-PR review of M9.4 to M9.8 found no soundness or worker-count problem. It found these where
+separately built parts meet, now fixed:
+
+- **Decals could use up the budget.** They are charged as Essential at 7.5 units a pixel, so a wall of
+  marks at Low cut every other particle. `Limits::decal_screens` (0.25, 0.15, 0.08) now keeps them well
+  under each budget, and a mark too big for what is left is skipped rather than hiding older ones. So
+  at Low a mark closer than about 2 units is not drawn.
+- **A blast's pushed light could jump through a wall** into open space beyond. A lift now tests along
+  its length, every 0.25 units, because `segment_clear` allocates and lifts run on every hit.
+- **The layer could put far smoke over near smoke.** It draws under every full-size sprite, so the
+  "over" sprites behind the nearest moved one now go with it, and the saving is worked out on the
+  whole set.
+- **The pause menu held the flash and the shake**, since the particle clock stops there.
+- **The view's reach and clock** now match the capped flood and the particles' catch-up limit.
+
+Left as they are, knowingly: first-use allocations land in the first combat frames, not at load: each
+`DynLight` slot's bit sets, the lit copy of the level's mesh lighting, and each worker's layer scratch.
+All are bounded and none repeats. `tests/layer_alloc.rs` covers one worker.
 
 ## Design overview
 

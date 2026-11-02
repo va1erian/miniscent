@@ -16,8 +16,13 @@ use super::{MAX_CATCHUP_TICKS, NS_PER_SEC, TICK_HZ};
 
 /// Longest life a light is given, in seconds; flashes last a fraction of one.
 const MAX_LIFE: f32 = 10.0;
-/// Halvings of a lift tried before it is given up, when it ends in solid.
+/// Halvings of a lift tried before it is given up, when it meets solid.
 const LIFT_TRIES: u32 = 3;
+/// Spacing of the tests along a lift, and the most of them. `is_solid` rather
+/// than `segment_clear`, which allocates and would run on every hit; a wall
+/// thinner than the spacing could be missed, and none is that thin.
+const LIFT_STEP: f32 = 0.25;
+const MAX_LIFT_TESTS: u32 = 64;
 /// Longest step of the light clock, the same cap as the particles' so a
 /// stall drops its time rather than burning a light out unseen.
 const MAX_STEP_NS: u64 = MAX_CATCHUP_TICKS as u64 * NS_PER_SEC / TICK_HZ;
@@ -228,18 +233,25 @@ fn usable(s: &LightSpec) -> bool {
     finite && scalars && shows
 }
 
-/// `spec.pos` moved by its lift, or by less if that lands in solid.
+/// `spec.pos` moved by its lift, or by less if that would meet solid: a light
+/// must stay on its own side of a wall, whatever is open beyond it.
 fn lifted(spec: &LightSpec, bsp: Option<&Bsp>) -> Vec3 {
     let Some(bsp) = bsp else { return spec.pos };
     let mut k = 1.0;
     for _ in 0..LIFT_TRIES {
         let p = spec.pos + spec.lift * k;
-        if !bsp.is_solid(p.to_f64()) {
+        if path_open(bsp, spec.pos, p) {
             return p;
         }
         k *= 0.5;
     }
     spec.pos
+}
+
+/// No test from `a` to `b` lands in solid, `b` included.
+fn path_open(bsp: &Bsp, a: Vec3, b: Vec3) -> bool {
+    let tests = (((b - a).length() / LIFT_STEP).ceil() as u32).clamp(1, MAX_LIFT_TESTS);
+    (1..=tests).all(|i| !bsp.is_solid(a.lerp(b, i as f32 / tests as f32).to_f64()))
 }
 
 #[cfg(test)]

@@ -425,7 +425,13 @@ impl GameSession {
         if self.fb.as_ref().map(|f| (f.width(), f.height())) != Some((width, height)) {
             self.fb = Some(Framebuffer::new(width, height)?);
         }
-        self.kick = self.fx.view_kick(self.renderer.scene(), self.eye());
+        // The particle clock stops on the pause menu, and a flash must not stay
+        // up behind it for as long as the pause lasts.
+        self.kick = if self.menu.screen() == Screen::Paused {
+            ViewKick::default()
+        } else {
+            self.fx.view_kick(self.renderer.scene(), self.eye())
+        };
         let view = self.view();
         let actors = self.actors();
         let mut fb = self.fb.take()?;

@@ -102,11 +102,12 @@ fn big_normal_and_cosmetic_sprites_move_when_over_budget_and_the_rest_stay() {
         width: W,
         height: H,
     };
-    sink.sprite(
-        sprite(300.0, 30.0, 0x40ff_ffff),
-        Blend::Over,
-        tag(Tier::Normal, 1),
-    );
+    // Nearer than all of them: one behind would go too, to keep its order.
+    let near = SpriteDraw {
+        inv_z: 0.9,
+        ..sprite(300.0, 30.0, 0x40ff_ffff)
+    };
+    sink.sprite(near, Blend::Over, tag(Tier::Normal, 1));
     sink.sprite(
         sprite(300.0, 32.0, 0x40ff_ffff),
         Blend::Add,
@@ -366,4 +367,44 @@ fn a_heavy_scene_stays_in_budget_and_keeps_more_cosmetic_smoke_with_the_layer() 
         sprites(&with),
         sprites(&without)
     );
+}
+
+#[test]
+fn small_smoke_behind_the_nearest_big_puff_goes_with_it_and_nearer_smoke_stays() {
+    let (mut draws, mut tags) = (ParticleDraws::default(), Tags::default());
+    let puff = |x: f32, radius: f32, inv_z: f32| SpriteDraw {
+        x,
+        y: 180.0,
+        radius,
+        inv_z,
+        tint: 0x8040_4040,
+        mask: Mask::Soft,
+    };
+    let tag = Tag {
+        tier: Tier::Cosmetic,
+        key: 0,
+    };
+    let mut sink = Sink {
+        out: &mut draws,
+        tags: &mut tags,
+        width: 640.0,
+        height: 360.0,
+    };
+    sink.sprite(puff(300.0, 200.0, 0.5), Blend::Over, tag);
+    sink.sprite(puff(300.0, 10.0, 0.1), Blend::Over, tag);
+    sink.sprite(puff(300.0, 10.0, 0.9), Blend::Over, tag);
+    let screen = Screen {
+        depth: None,
+        width: 640.0,
+        height: 360.0,
+    };
+    let moved = Gate::default().apply((true, true), (&mut draws, &mut tags), &screen);
+    assert!(moved);
+    let inv_z = |list: &[SpriteDraw]| list.iter().map(|s| s.inv_z).collect::<Vec<_>>();
+    assert_eq!(
+        inv_z(&draws.layer_over),
+        [0.5, 0.1],
+        "in the order they came"
+    );
+    assert_eq!(inv_z(&draws.over), [0.9]);
 }

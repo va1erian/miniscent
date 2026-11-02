@@ -2,9 +2,12 @@
 //! them through the half-res layer (`mscent_render::particles` has the
 //! drawing). The cut is computed after, from the cheaper costs.
 //!
-//! Only Normal and Cosmetic sprites wider than [`BIG_DIAMETER`] move, and only
-//! those the scene shows ([`MIN_SEEN`]): a hidden one is cheap where it is and
-//! would only widen the layer's region. Essential draws stay crisp. Nothing
+//! Only Normal and Cosmetic sprites wider than [`BIG_DIAMETER`] are moved for
+//! their own sake, and only those the scene shows ([`MIN_SEEN`]): a hidden one
+//! is cheap where it is and would only widen the layer's region. Essential
+//! draws stay crisp. The layer goes under every full-size sprite, so the small
+//! "over" sprites behind the nearest moved one go with it, or they would paint
+//! over smoke nearer than they are. Nothing
 //! moves unless the saving on the fill beats what the layer costs for the
 //! region those sprites cover, so a frame is never made dearer.
 //!
@@ -127,18 +130,22 @@ impl Gate {
         if !allowed || !(over || held) {
             return false;
         }
+        let nearest = nearest_moved(&draws.over, &tags.over, screen);
+        let goes_over = |s: &SpriteDraw, t: &Tag| t.tier != Tier::Essential && s.inv_z <= nearest;
+        let goes_add = |s: &SpriteDraw, t: &Tag| gain(s, *t, 1.0, screen) > 0.0;
         let (mut saved, mut region) = (0.0, Region::EMPTY);
-        let lists = [
-            (&draws.over, &tags.over, OVER_WEIGHT),
-            (&draws.add, &tags.add, 1.0),
-        ];
-        for (list, list_tags, weight) in lists {
-            for (s, t) in list.iter().zip(list_tags) {
-                let g = gain(s, *t, weight, screen);
-                if g > 0.0 {
-                    saved += g;
-                    region.include(s, screen.width, screen.height);
-                }
+        for (s, t) in draws.over.iter().zip(&tags.over) {
+            if goes_over(s, t) {
+                // A small sprite can cost more through the layer; it goes for
+                // its order all the same, so that counts against the saving.
+                saved += saving(s, OVER_WEIGHT, screen);
+                region.include(s, screen.width, screen.height);
+            }
+        }
+        for (s, t) in draws.add.iter().zip(&tags.add) {
+            if goes_add(s, t) {
+                saved += saving(s, 1.0, screen);
+                region.include(s, screen.width, screen.height);
             }
         }
         if saved <= region.cost() {
@@ -147,12 +154,12 @@ impl Gate {
         move_where(
             (&mut draws.over, &mut tags.over),
             (&mut draws.layer_over, &mut tags.layer_over),
-            |s, t| gain(s, *t, OVER_WEIGHT, screen) > 0.0,
+            goes_over,
         );
         move_where(
             (&mut draws.add, &mut tags.add),
             (&mut draws.layer_add, &mut tags.layer_add),
-            |s, t| gain(s, *t, 1.0, screen) > 0.0,
+            goes_add,
         );
         if over {
             self.hold = HOLD_FRAMES;
@@ -169,8 +176,21 @@ fn gain(s: &SpriteDraw, tag: Tag, weight: f32, screen: &Screen) -> f32 {
     if tag.tier == Tier::Essential || !big || seen(s, screen.depth) < MIN_SEEN {
         return 0.0;
     }
+    saving(s, weight, screen).max(0.0)
+}
+
+/// What `s` costs at full size less what it costs through the layer.
+fn saving(s: &SpriteDraw, weight: f32, screen: &Screen) -> f32 {
     let (w, h, depth) = (screen.width, screen.height, screen.depth);
-    (sprite_cost(s, weight, depth, w, h) - layer_cost(s, weight, depth, w, h)).max(0.0)
+    sprite_cost(s, weight, depth, w, h) - layer_cost(s, weight, depth, w, h)
+}
+
+/// `1/z` of the nearest "over" sprite that moves for its own sake; nothing has
+/// a smaller `1/z` than the -1 of a list where none does.
+fn nearest_moved(list: &[SpriteDraw], tags: &[Tag], screen: &Screen) -> f32 {
+    let moved = list.iter().zip(tags);
+    let moved = moved.filter(|(s, t)| gain(s, **t, OVER_WEIGHT, screen) > 0.0);
+    moved.map(|(s, _)| s.inv_z).fold(-1.0, f32::max)
 }
 
 /// Moves what `moves` picks from one list, with its tags, to the end of

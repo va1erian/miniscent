@@ -23,10 +23,6 @@ const MAX_VERTS: usize = MAX_DECAL_POINTS - 1;
 pub const MAX_EDGES: usize = 24;
 /// Noisy masks to choose from, so neighbouring marks differ.
 const MASK_VARIANTS: usize = 4;
-/// What decals may fill in one frame, in multiples of the frame's pixels.
-/// Marks pile up on a wall someone is standing at, and they are never thinned
-/// by the budget, so this is their own bound; the oldest go first.
-const MAX_SCREENS: f32 = 0.5;
 /// Full strength of a fog fade or a mark's darkness.
 const OPAQUE: u32 = 256;
 
@@ -283,12 +279,15 @@ impl Decals {
         (0..self.live).filter_map(move |i| self.slots.get((first + i) % MAX_DECALS))
     }
 
-    /// Appends each visible mark to the frame's draws, newest first, until
-    /// they fill [`MAX_SCREENS`] of the screen. Fog fades a mark with its
+    /// Appends each visible mark to the frame's draws, newest first, while they
+    /// fit in `screens` of the screen's pixels. Marks pile up on a wall someone
+    /// is standing at and the budget never thins them, so this is their own
+    /// bound. A mark too big for what is left is skipped, and a smaller older
+    /// one can still show. Fog fades a mark with its
     /// distance as it does an "over" particle's tint, because a black mark in
     /// fog would stand out from the haze around it.
-    pub fn collect(&self, cam: &Camera, fog: &FogView, out: &mut Sink) {
-        let mut room = MAX_SCREENS * out.width * out.height;
+    pub fn collect(&self, cam: &Camera, fog: &FogView, screens: f32, out: &mut Sink) {
+        let mut room = screens * out.width * out.height;
         for d in self.iter().rev() {
             let depth = -cam.world_to_camera(d.centre()).z;
             let Some(fade) = fog.fade(depth) else {
@@ -299,11 +298,11 @@ impl Decals {
             let Some(draw) = decal_from_world(cam, d.vertices(), darkness, mask) else {
                 continue;
             };
-            room -= draw.screen_area(out.width, out.height);
-            if room < 0.0 {
-                break;
+            let area = draw.screen_area(out.width, out.height);
+            if area <= room {
+                room -= area;
+                out.decal(draw);
             }
-            out.decal(draw);
         }
     }
 }

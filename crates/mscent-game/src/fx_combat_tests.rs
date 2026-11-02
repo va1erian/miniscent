@@ -175,3 +175,26 @@ fn a_cleared_session_replays_the_same_particles() {
     assert!(!first.is_empty());
     assert_eq!(snapshot(&fx), first);
 }
+
+#[test]
+fn a_full_ring_of_marks_up_close_leaves_low_quality_its_particles() {
+    let view = View::from_angles(v(16.0, 0.0, 0.0), -core::f32::consts::FRAC_PI_2, 0.0, 0.0);
+    let cam = view.camera(1.3, 0.1, 400.0, 640, 360).expect("a camera");
+    let mut fx = CombatFx::new();
+    fx.set_quality(Quality::Low);
+    for i in 0..64 {
+        let at = |n: i32| (n % 8) as f32 * 0.8 - 2.8;
+        fx.shot(&ShotFx {
+            end: v(19.9, at(i), at(i / 8)),
+            ..wall_shot(BRICK)
+        });
+    }
+    run(&mut fx, 10);
+    assert_eq!(fx.decals(), MAX_DECALS);
+    fx.drone_explosion(v(18.0, 0.0, 0.0), DRONE_TINT);
+    let mut draws = ParticleDraws::default();
+    fx.collect(&cam, None, None, &mut draws);
+    assert!(!draws.decals.is_empty());
+    assert!(fx.keep().normal > 0, "{:?}", fx.keep());
+    assert!(draws.streaks.len() + draws.add.len() > 5);
+}

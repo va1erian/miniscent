@@ -141,7 +141,7 @@ impl CombatFx {
         self.layer.reset();
     }
 
-    /// Allow or forbid the half-res layer, whatever the quality says.
+    /// Allow or forbid the half-res layer, until the next [`Self::set_quality`].
     pub fn set_layer(&mut self, on: bool) {
         self.limits.layer = on;
     }
@@ -294,7 +294,8 @@ impl CombatFx {
         for bolt in self.bolts.iter().flatten() {
             draw_bolt(bolt, cam, &fog, &mut sink);
         }
-        self.decals.collect(cam, &fog, &mut sink);
+        self.decals
+            .collect(cam, &fog, self.limits.decal_screens, &mut sink);
         let mut tally = Tally::of(out, &self.tags, depth, w, h);
         let budget = self.limits.screens * w * h;
         let over = tally.over_budget(budget);

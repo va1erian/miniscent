@@ -67,20 +67,25 @@ pub struct Limits {
     pub lights: usize,
     /// Whether big sprites may be drawn through the half-res layer.
     pub layer: bool,
+    /// Pixels decals may fill, in multiples of the frame's. They are charged as
+    /// Essential at 7.5 units a pixel, so this keeps them to well under the
+    /// budget: at the limit they leave every quality its particles.
+    pub decal_screens: f32,
 }
 
 impl Limits {
     pub fn of(quality: Quality) -> Self {
-        let (screens, density, lights, layer) = match quality {
-            Quality::High => (5.0, 1.0, 4, true),
-            Quality::Medium => (3.0, 0.7, 2, true),
-            Quality::Low => (1.5, 0.4, 1, false),
+        let (screens, density, lights, layer, decal_screens) = match quality {
+            Quality::High => (5.0, 1.0, 4, true, 0.25),
+            Quality::Medium => (3.0, 0.7, 2, true, 0.15),
+            Quality::Low => (1.5, 0.4, 1, false, 0.08),
         };
         Self {
             screens,
             density,
             lights,
             layer,
+            decal_screens,
         }
     }
 }

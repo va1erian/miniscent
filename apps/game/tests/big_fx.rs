@@ -134,13 +134,14 @@ fn hostile_blasts_and_shatters_do_nothing_and_do_not_panic() {
         fx.shatter(bad, BRICK, 0);
     }
     fx.blast(v(0.0, 0.0, 0.0), -1.0, r.scene().bsp());
+    let live = |fx: &CombatFx| (fx.live(), fx.live_lights());
     fx.blast(v(0.0, 0.0, 0.0), 0.0, r.scene().bsp());
     let inverted = Aabb {
         min: v(1.0, 1.0, 1.0),
         max: v(0.0, 0.0, 0.0),
     };
     fx.shatter(inverted, BRICK, 0);
-    assert_eq!((fx.live(), fx.live_lights()), (0, 0));
+    assert_eq!(live(&fx), (0, 0));
     assert_eq!(
         fx.view_kick(r.scene(), v(f32::NAN, 0.0, 0.0)),
         ViewKick::default()
@@ -179,21 +180,28 @@ fn a_bigger_brush_makes_more_debris_up_to_a_limit_and_each_material_differs() {
 #[test]
 fn a_thousand_unit_brush_stays_within_budget() {
     let r = divided_room();
-    let view = View::from_angles(v(0.0, 0.0, 0.0), -core::f32::consts::FRAC_PI_2, 0.0, 0.0);
+    let view = View::from_angles(v(-10.0, 0.0, 0.0), -core::f32::consts::FRAC_PI_2, 0.0, 0.0);
     let cam = r.camera(&view, W, H).expect("a camera");
     let (w, h) = (W as f32, H as f32);
     let mut fx = CombatFx::new();
+    // Around the eye, as close as debris gets.
     let bounds = Aabb {
-        min: v(5.0, -5.0, -5.0),
-        max: v(15.0, 5.0, 5.0),
+        min: v(-15.0, -5.0, -5.0),
+        max: v(-5.0, 5.0, 5.0),
     };
+    fx.set_quality(Quality::Low);
     fx.shatter(bounds, BRICK, 0x0090_3020);
     let mut draws = CombatFx::new_draws();
-    fx.collect(&cam, None, None, &mut draws);
-    let budget = Limits::of(Quality::High).screens * w * h;
-    let spent = cost_of(&draws, None, w, h);
-    assert!(!draws.is_empty());
-    assert!(spent <= budget * 1.1, "{spent} of {budget}");
+    let budget = Limits::of(Quality::Low).screens * w * h;
+    let mut peak = 0.0f32;
+    for _ in 0..30 {
+        fx.advance(FRAME, r.scene().bsp());
+        fx.collect(&cam, None, None, &mut draws);
+        peak = peak.max(cost_of(&draws, None, w, h));
+    }
+    // Its counts are capped so low that it fits with nothing cut, even at Low.
+    assert!(peak > 0.0 && peak <= budget, "{peak} of {budget}");
+    assert_eq!(fx.keep(), Default::default());
 }
 
 /// The last of `frames` of a session, after a blast near the eye if `blast`.
@@ -236,4 +244,85 @@ fn a_session_shows_a_blast_replays_it_exactly_and_returns_to_normal() {
         session_frame(true, LONG_AFTER) == session_frame(false, LONG_AFTER),
         "the blast is gone and changed nothing"
     );
+}
+
+#[test]
+fn a_blast_with_a_huge_radius_does_not_panic_and_fades_like_any_other() {
+    let r = divided_room();
+    for radius in [1.0e6, 1.0e30, f32::MAX] {
+        let mut fx = CombatFx::new();
+        fx.blast(v(-10.0, 0.0, 0.0), radius, r.scene().bsp());
+        let cam_view = View::from_angles(v(-18.0, 0.0, 0.0), 0.0, 0.0, 0.0);
+        let cam = r.camera(&cam_view, W, H).expect("a camera");
+        let mut draws = CombatFx::new_draws();
+        for _ in 0..40 {
+            fx.advance(FRAME, r.scene().bsp());
+            let kick = fx.view_kick(r.scene(), v(-12.0, 0.0, 0.0));
+            assert!(kick.shake.is_finite() && kick.white <= 256);
+            fx.collect(&cam, None, None, &mut draws);
+            fx.lights(r.scene());
+        }
+    }
+}
+
+#[test]
+fn a_pushed_light_stays_on_its_own_side_of_a_wall() {
+    let r = divided_room();
+    let mut fx = CombatFx::new();
+    // Close enough that a push of 7 units ends in open space past the slab.
+    fx.blast(v(-4.0, 0.0, 0.0), 12.0, r.scene().bsp());
+    let lights = fx.lights(r.scene());
+    assert_eq!(lights.len(), 4);
+    for light in lights {
+        assert!(light.pos().x < -1.0, "{:?}", light.pos());
+    }
+}
+
+#[test]
+fn clear_forgets_the_blast_lights_and_the_cut() {
+    let r = divided_room();
+    let view = View::from_angles(v(-18.0, 0.0, 0.0), -core::f32::consts::FRAC_PI_2, 0.0, 0.0);
+    let cam = r.camera(&view, W, H).expect("a camera");
+    let mut fx = CombatFx::new();
+    fx.set_quality(Quality::Low);
+    fx.blast(v(-10.0, 0.0, 0.0), 12.0, r.scene().bsp());
+    let mut draws = CombatFx::new_draws();
+    for _ in 0..12 {
+        fx.advance(FRAME, r.scene().bsp());
+        fx.collect(&cam, None, None, &mut draws);
+    }
+    assert_ne!(
+        fx.keep(),
+        Default::default(),
+        "the budget had cut something"
+    );
+    fx.clear();
+    assert_eq!(
+        (fx.live(), fx.live_lights(), fx.bolts(), fx.decals()),
+        (0, 0, 0, 0)
+    );
+    assert_eq!(fx.keep(), Default::default());
+    assert_eq!(
+        fx.view_kick(r.scene(), v(-12.0, 0.0, 0.0)),
+        ViewKick::default()
+    );
+    fx.collect(&cam, None, None, &mut draws);
+    assert!(draws.is_empty());
+}
+
+#[test]
+fn the_pause_menu_does_not_hold_the_shake() {
+    let cfg = SessionConfig::default();
+    let materials = assets::load_materials(None).expect("textures");
+    let mut s = GameSession::new(&levels::corridor_level(), materials, &cfg).expect("a level");
+    s.blast(s.game().player.pos(), 12.0);
+    let dt = Duration::from_micros(16_667);
+    s.step(dt, &[]);
+    s.render(160, 90);
+    let shaken = s.view().pos;
+    s.step(dt, &[mscent_platform::Event::FocusLost]);
+    s.render(160, 90);
+    let (still, plain) = (s.view().pos, s.game().player.pos());
+    assert_ne!(shaken, still, "it was shaking, and it stops");
+    assert!((still - plain).length() < 0.2, "only the hover bob is left");
 }
