@@ -11,7 +11,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use mscent_platform::{Event as PEvent, Key as PKey, MouseButton as PButton};
+use mscent_platform::{Event as PEvent, Key as PKey, MouseButton as PButton, physical_letter};
 use xui::app::Ui;
 use xui::backend::{Event, NodeKind, NodeSpec, Result, TextAlign, TextStyle, TextVAlign, WidgetId};
 use xui::geometry::{Rect, Size};
@@ -37,7 +37,9 @@ pub fn platform_key(k: Key) -> Option<PKey> {
         0x28 => PKey::Down,
         0x25 => PKey::Left,
         0x27 => PKey::Right,
-        0x30..=0x39 | 0x41..=0x5A => PKey::Char(u8::try_from(c).ok()? as char),
+        0x30..=0x39 => PKey::Char(u8::try_from(c).ok()? as char),
+        // Movement keys are positions: ZQSD on AZERTY is where WASD is.
+        0x41..=0x5A => PKey::Char(physical_letter(u8::try_from(c).ok()? as char)),
         0x70..=0x7B => PKey::F((c - 0x6F) as u8),
         _ => return None,
     })
@@ -378,7 +380,9 @@ mod tests {
 
     #[test]
     fn virtual_keys_map_to_platform_keys() {
-        assert_eq!(platform_key(Key::W), Some(PKey::Char('W')));
+        // Which position W maps to depends on the active layout.
+        assert!(matches!(platform_key(Key::W), Some(PKey::Char(_))));
+        assert_eq!(platform_key(Key::from_code(0x35)), Some(PKey::Char('5')));
         assert_eq!(platform_key(Key::ESCAPE), Some(PKey::Escape));
         assert_eq!(platform_key(Key::F5), Some(PKey::F(5)));
         assert_eq!(platform_key(Key::LEFT), Some(PKey::Left));
