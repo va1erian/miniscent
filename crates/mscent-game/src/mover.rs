@@ -145,12 +145,20 @@ impl Mover {
         true
     }
 
-    fn reverse(&mut self) {
-        if let Some(m) = self.motion.as_mut() {
-            core::mem::swap(&mut m.from, &mut m.to);
-            core::mem::swap(&mut m.from_pose, &mut m.to_pose);
-            m.step = m.steps - m.step;
+    /// Turns the motion back. True when it had not left yet, so it has ended.
+    fn reverse(&mut self) -> bool {
+        let Some(m) = self.motion.as_mut() else {
+            return false;
+        };
+        if m.step == 0 {
+            self.at = m.from_pose;
+            self.motion = None;
+            return true;
         }
+        core::mem::swap(&mut m.from, &mut m.to);
+        core::mem::swap(&mut m.from_pose, &mut m.to_pose);
+        m.step = m.steps - m.step;
+        false
     }
 }
 
@@ -256,7 +264,11 @@ impl Game {
         mover.blocked = true;
         match mover.when_blocked {
             WhenBlocked::Hold => {}
-            WhenBlocked::Reverse => mover.reverse(),
+            WhenBlocked::Reverse => {
+                if mover.reverse() {
+                    self.events.push(Event::MoverArrived(index));
+                }
+            }
             WhenBlocked::Crush { damage_per_second } => {
                 mover.crush_owed += damage_per_second * STEP_DT;
                 let whole = mover.crush_owed.floor();

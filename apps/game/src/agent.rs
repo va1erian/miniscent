@@ -68,8 +68,16 @@ pub fn dump_level(path: &Path) -> Result<String, String> {
 /// `--pack-level`: reads text and writes the binary level. Anything refused is
 /// reported with its line, and nothing is written.
 pub fn pack_level(from: &Path, to: &Path) -> Result<String, String> {
-    let text = std::fs::read_to_string(from)
-        .map_err(|e| format!("cannot read {}: {e}", from.display()))?;
+    let cannot_read = |e| format!("cannot read {}: {e}", from.display());
+    let len = std::fs::metadata(from).map_err(cannot_read)?.len();
+    if len > format::MAX_FILE_BYTES as u64 {
+        return Err(format!(
+            "{} is {len} bytes; the limit is {}",
+            from.display(),
+            format::MAX_FILE_BYTES
+        ));
+    }
+    let text = std::fs::read_to_string(from).map_err(cannot_read)?;
     let level = level_text::from_text(&text).map_err(|e| format!("{}: {e}", from.display()))?;
     let bytes = format::write(&level);
     std::fs::write(to, &bytes).map_err(|e| format!("cannot write {}: {e}", to.display()))?;
@@ -94,9 +102,23 @@ fn kind_name(thing: Thing) -> &'static str {
     }
 }
 
-/// The text between each pair of single quotes.
-fn quoted_strings(text: &str) -> impl Iterator<Item = &str> {
-    text.split(char::from(b'\'')).skip(1).step_by(2)
+/// The script's string literals. Comments are skipped: an apostrophe in one is
+/// not the start of a string.
+fn quoted_strings(text: &str) -> Vec<&str> {
+    let mut found = Vec::new();
+    let mut rest = text;
+    while let Some(open) = rest.find(['\'', '"']) {
+        let quote = char::from(rest.as_bytes()[open]);
+        let inner = &rest[open + 1..];
+        let Some(close) = inner.find(quote) else {
+            break;
+        };
+        if quote == '\'' {
+            found.push(&inner[..close]);
+        }
+        rest = &inner[close + 1..];
+    }
+    found
 }
 
 /// Every named thing and tag, and whether any script text mentions it. A name
@@ -317,5 +339,23 @@ fn report(tally: &Tally, steps: u64, hung: bool) -> Result<String, String> {
         Ok(text)
     } else {
         Err(text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pack_level_refuses_a_file_past_the_limit_without_reading_it() {
+        let dir = std::env::temp_dir().join(format!("mscent-pack-big-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let big = dir.join("big.txt");
+        let file = File::create(&big).unwrap();
+        file.set_len(format::MAX_FILE_BYTES as u64 + 1).unwrap();
+        drop(file);
+        let why = pack_level(&big, &dir.join("out.msl")).unwrap_err();
+        assert!(why.contains("bytes; the limit is"), "{why}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

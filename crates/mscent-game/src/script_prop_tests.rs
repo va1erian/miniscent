@@ -243,6 +243,35 @@ fn destroy_fires_the_same_handlers_as_a_shot() {
 }
 
 #[test]
+fn a_group_going_all_at_once_says_so_once() {
+    let named: Vec<(Entity, &str, &[&str])> = vec![(marker(4.0, 0.0), "spot", &[])];
+    let src = "
+        3 timesRepeat: [ spawn: 'crate' at: (marker: 'spot') tag: 'c' ].
+        (tagged: 'c') onAllDestroyed: [ say: 'cleared' ].
+        after: 0.1 do: [ (tagged: 'c') members do: [:m | m destroy] ].";
+    let mut game = game_on(&level(named), src);
+    run(&mut game, 30);
+    assert_eq!(game.take_messages(), ["cleared"]);
+    no_errors(&mut game);
+}
+
+#[test]
+fn a_friendly_behind_a_door_does_not_shield_the_player_in_the_open() {
+    let named: Vec<(Entity, &str, &[&str])> = vec![
+        (enemy(v(13.0, 0.0, 0.0)), "foe", &[]),
+        (enemy(v(16.0, 0.0, 0.0)), "", &["pal"]),
+    ];
+    let src = "(tagged: 'pal') setFaction: 'friendly'.
+        (tagged: 'pal') disable.";
+    let mut game = game_on(&level(named), src);
+    game.player.body.pos = v(6.0, 0.0, 0.0);
+    run(&mut game, 300);
+    assert!(game.player.health < crate::player::MAX_HEALTH);
+    assert!(game.enemies[1].alive());
+    no_errors(&mut game);
+}
+
+#[test]
 fn bad_prop_requests_are_errors_on_their_line() {
     for (src, wanted) in [
         ("3 onPickup: [ ].", "for a prop"),

@@ -239,13 +239,17 @@ impl GameSession {
         sources: &[Source],
     ) -> Result<Vec<ScriptError>, Vec<ScriptError>> {
         let warnings = self.game.load_script(sources)?;
-        self.restart();
+        self.reset_after_game_restart();
         Ok(warnings)
     }
 
     /// Starts the level over: player, enemies, weapon and menu.
     pub fn restart(&mut self) {
         self.game.restart();
+        self.reset_after_game_restart();
+    }
+
+    fn reset_after_game_restart(&mut self) {
         self.game.player.up_ref = Some(Vec3::new(0.0, 0.0, 1.0));
         self.game.player.orientation = spawn_orientation(self.game.arena.player_yaw);
         self.prev_orientation = self.game.player.orientation;

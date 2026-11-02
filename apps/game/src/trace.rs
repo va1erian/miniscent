@@ -44,7 +44,11 @@ fn event_fields(game: &Game, event: &Event) -> Option<String> {
         Event::ScriptWon => "\"ev\":\"won\"".to_string(),
         Event::ScriptLost => "\"ev\":\"lost\"".to_string(),
         Event::MoverSent(i) => {
-            let pose = game.mover(i).and_then(|m| m.target_name()).unwrap_or("");
+            // An instant move has arrived by the time its first step is written.
+            let pose = game
+                .mover(i)
+                .and_then(|m| m.target_name().or(m.pose_name()));
+            let pose = pose.unwrap_or("");
             let pose = escape(pose);
             let head = named("move_to", "mover", "mover", i);
             format!("{head},\"pose\":\"{pose}\"")

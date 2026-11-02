@@ -260,6 +260,47 @@ fn a_door_that_moved_shows_in_the_next_shot() {
 }
 
 #[test]
+fn an_apostrophe_in_a_comment_does_not_hide_names_from_check() {
+    let dir = Temp::new("apostrophe");
+    let level = make_level(&dir);
+    dir.write("level.st", &format!("\"the player's vault\"\n{SCRIPT}"));
+    let text = out(&game(&["--level", s(&level), "--check"]));
+    assert!(
+        text.contains("1 name(s) in the level no script mentions"),
+        "{text}"
+    );
+}
+
+#[test]
+fn the_trace_names_the_pose_of_an_instant_move_sent_on_load() {
+    let dir = Temp::new("instant");
+    let level = make_level(&dir);
+    dir.write(
+        "level.st",
+        "vault := mover: 'vault_door'.
+        vault pose: 'open' move: (x: 0 y: 0 z: 18).
+        vault moveTo: 'open' in: 0.\n",
+    );
+    let test = dir.write("t.st", "wait: 0.1.\n");
+    let trace = dir.path("trace.jsonl");
+    let args = [
+        "--level",
+        s(&level),
+        "--test",
+        s(&test),
+        "--trace",
+        s(&trace),
+    ];
+    let run = game(&args);
+    assert!(run.status.success(), "{}", out(&run));
+    let log = std::fs::read_to_string(&trace).unwrap();
+    assert!(
+        log.contains(r#""ev":"move_to","mover":"vault_door","pose":"open""#),
+        "{log}"
+    );
+}
+
+#[test]
 fn check_lists_names_warns_about_unused_ones_and_fails_on_errors() {
     let dir = Temp::new("check");
     let level = make_level(&dir);

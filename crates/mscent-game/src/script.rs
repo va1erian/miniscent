@@ -95,6 +95,8 @@ pub(crate) struct ScriptState {
     pub carried: Vec<Event>,
     /// Which handler each started task belongs to, so an error can end it.
     fired: Vec<(u64, usize)>,
+    /// Groups that went this step: several members going at once is one event.
+    all_gone: Vec<u16>,
 }
 
 impl ScriptState {
@@ -122,6 +124,7 @@ impl ScriptState {
             entry_tasks: Vec::new(),
             carried: Vec::new(),
             fired: Vec::new(),
+            all_gone: Vec::new(),
         }
     }
 
@@ -289,6 +292,7 @@ impl Game {
         self.update_props(input);
         let carried = std::mem::take(&mut self.script.carried);
         let events = self.events.get(mark..).map(<[Event]>::to_vec);
+        self.script.all_gone.clear();
         for event in carried.into_iter().chain(events.unwrap_or_default()) {
             self.start_handlers(&mut vm, event);
         }
@@ -361,9 +365,14 @@ impl Game {
             .unwrap_or_default();
         for tag in tags {
             self.fire_trigger(vm, Trigger::Each(tag), subject);
-            if self.tag_alive(tag) == 0 {
-                self.fire_trigger(vm, Trigger::All(tag), subject);
-            }
+            self.fire_if_all_gone(vm, tag, subject);
+        }
+    }
+
+    fn fire_if_all_gone(&mut self, vm: &mut Vm<Game>, tag: u16, subject: Value) {
+        if self.tag_alive(tag) == 0 && !self.script.all_gone.contains(&tag) {
+            self.script.all_gone.push(tag);
+            self.fire_trigger(vm, Trigger::All(tag), subject);
         }
     }
 
@@ -373,9 +382,7 @@ impl Game {
         let tags = self.script.prop_tags.get(prop).cloned().unwrap_or_default();
         for tag in tags {
             self.fire_trigger(vm, Trigger::Each(tag), subject);
-            if self.tag_alive(tag) == 0 {
-                self.fire_trigger(vm, Trigger::All(tag), subject);
-            }
+            self.fire_if_all_gone(vm, tag, subject);
         }
     }
 

@@ -203,6 +203,24 @@ fn reverse_goes_back_to_where_it_came_from() {
 }
 
 #[test]
+fn a_move_blocked_on_its_first_step_stays_where_it_was_and_ends() {
+    let (mut game, door) = squeeze(WhenBlocked::Hold);
+    run(&mut game, 240, &Input::default());
+    let held = *game.mover(door).unwrap().pose();
+    game.set_when_blocked(door, WhenBlocked::Reverse).unwrap();
+    game.move_mover(door, "in", 0.0).unwrap();
+    game.take_events();
+    run(&mut game, 5, &Input::default());
+    let mover = game.mover(door).unwrap();
+    assert!(!mover.is_moving(), "there is nowhere to go back to");
+    assert_eq!(mover.pose(), &held);
+    assert_eq!(mover.pose_name(), None, "it stopped between poses");
+    let events = game.take_events();
+    let arrived = events.iter().filter(|e| **e == Event::MoverArrived(door));
+    assert_eq!(arrived.count(), 1, "{events:?}");
+}
+
+#[test]
 fn crush_hurts_the_player_until_the_level_is_lost() {
     let (mut game, door) = squeeze(WhenBlocked::Crush {
         damage_per_second: 1000.0,

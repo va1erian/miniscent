@@ -5,7 +5,7 @@
 //! recorded input trace replays to the same result.
 
 use crate::arena::Arena;
-use crate::combat::Sphere;
+use crate::combat::{Sphere, line_of_sight};
 use crate::enemy::{Enemy, Faction};
 use crate::input::Input;
 use crate::mover::{Mover, spawn_movers};
@@ -268,12 +268,10 @@ impl Game {
         let pos = me.pos();
         let mut best = None;
         let mut best_d = range * range;
-        if hostile {
-            let d = (self.player.pos() - pos).length_squared();
-            if d <= best_d {
-                best = Some(None);
-                best_d = d;
-            }
+        let player_in_range = hostile && (self.player.pos() - pos).length_squared() <= best_d;
+        if player_in_range {
+            best = Some(None);
+            best_d = (self.player.pos() - pos).length_squared();
         }
         for (j, other) in self.enemies.iter().enumerate() {
             if j != i && other.alive() && other.faction != me.faction {
@@ -284,7 +282,24 @@ impl Game {
                 }
             }
         }
+        if let Some(Some(j)) = best
+            && player_in_range
+            && self.player_shielded_by(pos, j)
+        {
+            return Some(None);
+        }
         best
+    }
+
+    /// Whether enemy `j`, nearer than the player, is out of sight of `from` while
+    /// the player is not, so a friendly behind a wall does not hide the player.
+    fn player_shielded_by(&self, from: mscent_math::Vec3, j: usize) -> bool {
+        let solids = Solids::new(&self.arena.bsp, &self.solids);
+        let unseen = self
+            .enemies
+            .get(j)
+            .is_some_and(|e| !line_of_sight(solids, from, e.pos()));
+        unseen && line_of_sight(solids, from, self.player.pos())
     }
 
     fn target_sphere(&self, target: Option<usize>) -> Sphere {
