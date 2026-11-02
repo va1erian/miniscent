@@ -2,13 +2,22 @@ use std::path::PathBuf;
 
 use super::*;
 use crate::texture::TextureError;
+use mscent_math::Vec3;
 
 fn textures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures")
 }
 
-fn rgb(r: u8, g: u8, b: u8) -> u32 {
-    u32::from_be_bytes([255, r, g, b])
+/// The maps of a stock recipe, baked by the generator directly: what the table
+/// must hand to the renderer, made without `load_dir` or `load_recipe`.
+fn baked(name: &str) -> mscent_texgen::Maps {
+    let path = textures_dir().join(format!("{name}.mst"));
+    let recipe = mscent_texgen::recipe::read(&std::fs::read(path).unwrap()).unwrap();
+    mscent_texgen::bake(&recipe, recipe.size).unwrap()
+}
+
+fn stock_texture<'a>(table: &'a MaterialTable, name: &str) -> &'a Texture {
+    &table.get(table.find(name).unwrap()).unwrap().texture
 }
 
 fn solid(name: &str) -> Material {
@@ -25,29 +34,48 @@ fn assets_load_and_texels_read_back() {
     let names: Vec<&str> = table.iter().map(|(_, m)| m.name.as_str()).collect();
     assert_eq!(names, ["brick", "floor", "lightpanel", "metal", "rock"]);
 
-    // Expected values were read with an independent decoder (PIL).
-    let brick = &table.get(table.find("brick").unwrap()).unwrap().texture;
-    assert_eq!((brick.width(), brick.height()), (128, 128));
-    assert_eq!(brick.texel(0, 0), rgb(115, 110, 102));
-    assert_eq!(brick.texel(5, 7), rgb(186, 74, 49));
-    assert_eq!(brick.texel(127, 127), rgb(127, 51, 34));
-    assert_eq!(brick.texel(64, 3), rgb(116, 111, 103));
-    assert_eq!(brick.height_at(0, 0), Some(40));
-    assert_eq!(brick.height_at(5, 7), Some(216));
-    assert_eq!(brick.height_at(127, 127), Some(159));
-
-    let metal = &table.get(table.find("metal").unwrap()).unwrap().texture;
-    assert_eq!(metal.texel(5, 7), rgb(137, 145, 156));
+    for name in names {
+        let (tex, maps) = (stock_texture(&table, name), baked(name));
+        assert_eq!((tex.width(), tex.height()), (128, 128), "{name}");
+        assert_eq!((tex.width(), tex.height()), (maps.width, maps.height));
+        let heights = maps.heights.as_ref().unwrap();
+        // Corners, an interior texel and a texel on the other side of a tile.
+        for (x, y) in [(0, 0), (5, 7), (127, 127), (64, 3), (3, 64)] {
+            let i = y as usize * 128 + x as usize;
+            assert_eq!(tex.texel(x, y), maps.albedo[i], "{name} albedo {x},{y}");
+            assert_eq!(tex.height_at(x, y), Some(heights[i]), "{name} height");
+        }
+    }
+    // The recipes differ, so reading the wrong file would show.
+    assert_ne!(
+        stock_texture(&table, "brick").texel(5, 7),
+        stock_texture(&table, "metal").texel(5, 7)
+    );
 }
 
 #[test]
 fn normal_maps_decode_to_unit_vectors() {
     let table = MaterialTable::load_dir(&textures_dir()).unwrap();
-    let brick = &table.get(table.find("brick").unwrap()).unwrap().texture;
-    assert!(brick.has_normals() && brick.has_heights());
-    // Raw (125,127,255) is a nearly flat normal pointing out of the surface.
-    let n = brick.normal(5, 7).unwrap();
-    assert!(n.z > 0.99 && n.x.abs() < 0.02 && (n.length() - 1.0).abs() < 1e-4);
+    for (_, m) in table.iter() {
+        let tex = &m.texture;
+        assert!(tex.has_normals() && tex.has_heights(), "{}", m.name);
+        let mut tilted = false;
+        for y in 0..128 {
+            for x in 0..128 {
+                // `normal` normalizes, so the stored texel must already be
+                // unit length for that to change nothing.
+                let raw = tex.normal_texel(x, y).unwrap();
+                let c = |shift: u32| f32::from(((raw >> shift) & 0xff) as u8) / 127.5 - 1.0;
+                let stored = Vec3::new(c(16), c(8), c(0));
+                assert!((stored.length() - 1.0).abs() < 0.02, "{} {x},{y}", m.name);
+                let n = tex.normal(x, y).unwrap();
+                assert!(n.z > 0.0, "{} points into the wall at {x},{y}", m.name);
+                assert!((n.length() - 1.0).abs() < 1e-4);
+                tilted |= n.z < 0.99;
+            }
+        }
+        assert!(tilted, "{} is flat everywhere", m.name);
+    }
 }
 
 #[test]
@@ -73,16 +101,25 @@ fn stock_ids_match_the_constants_levels_are_built_with() {
 }
 
 #[test]
-fn no_stock_material_has_a_mask() {
+fn only_metal_and_floor_have_a_mask() {
     let table = MaterialTable::load_dir(&textures_dir()).unwrap();
     for (_, m) in table.iter() {
-        assert_eq!(m.texture.spec_mean(), 1.0, "{}", m.name);
-        for y in 0..m.texture.height() as i32 {
-            for x in 0..m.texture.width() as i32 {
-                let texel = m.texture.normal_texel(x, y).unwrap();
-                assert_eq!(texel >> 24, 255, "{} at {x},{y}", m.name);
-            }
-        }
+        let expected = matches!(m.name.as_str(), "metal" | "floor");
+        let masked = m.texture.spec_mean() < 1.0;
+        assert_eq!(
+            masked,
+            expected,
+            "{} (mean {})",
+            m.name,
+            m.texture.spec_mean()
+        );
+        // The mask rides in the alpha of the normal texels: an unmasked
+        // material has it full everywhere.
+        let coords = (0..128).flat_map(|y| (0..128).map(move |x| (x, y)));
+        let full = coords
+            .map(|(x, y)| m.texture.normal_texel(x, y).unwrap() >> 24)
+            .all(|a| a == 255);
+        assert_eq!(full, !expected, "{}", m.name);
     }
 }
 
