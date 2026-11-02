@@ -114,6 +114,9 @@ pub struct Studio {
     live_dirty: bool,
     /// Batches meshed so far.
     live_count: usize,
+    /// The vista warnings last put in the log, so an edit that leaves them as
+    /// they were does not repeat them.
+    warned: Vec<String>,
 }
 
 /// The internal render size for a pane of `pane` pixels: the pane divided by
@@ -133,6 +136,7 @@ impl Studio {
             stroking: false,
             live_dirty: false,
             live_count: 0,
+            warned: Vec::new(),
             bake_job: None,
             wanted: None,
             changed_at: Instant::now(),
@@ -194,6 +198,7 @@ impl Studio {
         self.bake_job = None;
         self.live_job = None;
         self.live_bsp = None;
+        self.warned.clear();
         self.retire_worker();
         self.built_doc = None;
         self.wanted = None;
@@ -477,3 +482,5 @@ mod tests;
 mod texture_tests;
 #[cfg(test)]
 mod tick_costs;
+#[cfg(test)]
+mod vista_tests;

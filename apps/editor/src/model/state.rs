@@ -266,10 +266,12 @@ impl EditorState {
     /// Places an entity (a second player start replaces the first).
     pub fn place_entity(&mut self, k: EntityKind, p: [f64; 3]) -> Id {
         let id = self.doc.alloc_id();
-        let entity = EntityDef {
-            id,
-            entity: k.make(p),
-        };
+        let mut made = k.make(p);
+        // A layer maps the middle of the play space, which only the editor knows.
+        if let Entity::VistaLayer { centre, .. } = &mut made {
+            *centre = self.vista_centre();
+        }
+        let entity = EntityDef { id, entity: made };
         let mut cmds = Vec::new();
         // There is one player start.
         if k == EntityKind::PlayerStart {

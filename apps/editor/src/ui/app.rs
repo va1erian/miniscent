@@ -83,6 +83,7 @@ pub mod cmd {
     pub const LAYOUT_CLASSIC: MenuId = MenuId::new(23);
     pub const LAYOUT_QUAD: MenuId = MenuId::new(24);
     pub const LEVEL_SETTINGS: MenuId = MenuId::new(25);
+    pub const NEW_VISTA: MenuId = MenuId::new(27);
 }
 
 pub struct Editor {
@@ -192,6 +193,7 @@ impl Editor {
             row()
                 .gap(2)
                 .children((tool_button(9), tool_button(10), tool_button(11))),
+            row().gap(2).child(tool_button(12)),
         ));
         let op_button = |i: usize| {
             let (tip, glyph) = OPS[i];

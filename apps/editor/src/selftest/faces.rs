@@ -15,7 +15,7 @@ use crate::ui::facepanel::FaceMsg;
 use crate::ui::{Msg, Probe, cmd};
 
 /// The Face tool's index in the palette.
-const FACE_TOOL: usize = 6;
+pub(super) const FACE_TOOL: usize = 6;
 
 fn edit(stage: &Stage<'_, Msg>, e: FaceEdit) {
     stage.emit(Msg::Face(FaceMsg::Edit(e)));
@@ -80,8 +80,9 @@ const MAX_STAND_OFF: f64 = 22.0;
 /// The largest wall that a camera standing back far enough to see all of it,
 /// with room around it for its highlight, really sees: the face, and the
 /// camera that looks at its middle. A thin sliver would make the scale,
-/// rotation and shift of a mapping impossible to judge.
-fn biggest_wall(doc: &Document) -> Option<(FaceRef, FlyCam)> {
+/// rotation and shift of a mapping impossible to judge. Only a wall whose
+/// visible normal `accept` allows counts.
+fn biggest_wall(doc: &Document, accept: fn(Vec3d) -> bool) -> Option<(FaceRef, FlyCam)> {
     let mut walls: Vec<(f64, FaceRef, Vec3d, Vec3d, f64)> = Vec::new();
     for (def, brush) in doc.brushes().iter().zip(build_all(doc)) {
         let planes = brush.map_or(0, |b| b.planes().len());
@@ -94,7 +95,7 @@ fn biggest_wall(doc: &Document) -> Option<(FaceRef, FlyCam)> {
                 continue;
             };
             let verts = poly.vertices();
-            if n.z.abs() >= 0.5 || verts.is_empty() {
+            if n.z.abs() >= 0.5 || verts.is_empty() || !accept(n) {
                 continue;
             }
             let mid = verts.iter().fold(Vec3d::ZERO, |a, v| a + *v) * (1.0 / verts.len() as f64);
@@ -135,11 +136,21 @@ pub(super) fn frame_big_face(
     stage: &Stage<'_, Msg>,
     probe: &Probe,
 ) -> Option<FaceRef> {
+    frame_wall(run, stage, probe, |_| true)
+}
+
+/// As [`frame_big_face`], for the biggest wall whose visible normal `accept`s.
+pub(super) fn frame_wall(
+    run: &mut Run,
+    stage: &Stage<'_, Msg>,
+    probe: &Probe,
+    accept: fn(Vec3d) -> bool,
+) -> Option<FaceRef> {
     let pane = probe.view_pane();
     let state = probe.state();
     state.borrow_mut().selection = None;
     stage.emit(Msg::Tool(FACE_TOOL));
-    let framed = biggest_wall(&state.borrow().doc);
+    let framed = biggest_wall(&state.borrow().doc, accept);
     run.check(framed.is_some(), "a big wall can be seen from in front");
     let (wall, cam) = framed?;
     let want = cam.view().forward();

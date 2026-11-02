@@ -36,6 +36,9 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         probe.state().borrow().texture_sizes.len(),
         probe.materials().replace(table),
     );
+    // One size per material of the table installed: the stock set has grown
+    // since this was written, so the count cannot be taken from the old table.
+    let expected = NAMES.len() + 1;
     run.check(generation == 1, &format!("a new generation: {generation}"));
     let p = wait_for_preview(stage, probe);
     run.check(p == Preview::Full, &format!("full light kept: {p:?}"));
@@ -45,6 +48,6 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         "the new materials reached the picture",
     );
     let now = probe.state().borrow().texture_sizes.len();
-    run.check(now == sizes + 1, &format!("sizes {sizes} became {now}"));
+    run.check(now == expected, &format!("sizes {sizes} became {now}"));
     run.shot(stage, "wide-04-materials.png");
 }

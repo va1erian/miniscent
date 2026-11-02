@@ -49,6 +49,16 @@ fn script(ui: &mut Ui<Msg>) -> xui::backend::Result<Editor> {
     app.state.borrow_mut().selection = Some(Selection::Brush(first));
     app.refresh();
     assert_eq!(shown(&mut app, 3), "metal");
+    // A viewport material shows its own row, and a brush on it is no texture index.
+    assert_eq!(
+        shown(&mut app, mscent_world::materials::VIEW_FIRST + 2),
+        "View 2"
+    );
+    assert_eq!(
+        shown(&mut app, mscent_world::materials::NO_DRAW),
+        "(other id)"
+    );
+    assert_eq!(app.panel.face.thumb_count(), usize::from(STOCK) + 8);
     assert_eq!(
         shown(&mut app, STOCK),
         "(other id)",

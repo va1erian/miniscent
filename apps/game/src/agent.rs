@@ -11,7 +11,7 @@ use mscent_game::{Arena, Game, Thing, natives, test_natives};
 use mscent_render::png_encode::encode_png;
 use mscent_render::{BakeCache, LevelRenderer};
 use mscent_script::{ScriptError, Source, language_selectors};
-use mscent_world::{Level, format, level_text};
+use mscent_world::{Level, format, level_text, vista_warnings};
 
 use crate::assets;
 use crate::scripts::{self, ScriptFiles};
@@ -159,9 +159,15 @@ pub fn check(level_path: &Path) -> Result<String, String> {
     let arena = Arena::from_scripted_level(&level).map_err(|e| format!("{e:?}"))?;
     let mut game = Game::new(arena);
     let sources = sources_of(files.as_ref());
+    // Problems with the vistas are the level's, so they show with or without a script.
+    let vistas: Vec<String> = vista_warnings(&level)
+        .iter()
+        .map(|w| format!("warning: {w}\n"))
+        .collect();
     if files.is_none() {
         let (rows, _) = inventory(&game, &[]);
-        return Ok(format!("no script beside this level\n{rows}"));
+        let vistas = vistas.concat();
+        return Ok(format!("no script beside this level\n{vistas}{rows}"));
     }
     let warnings = game
         .load_script(&sources)
@@ -171,7 +177,7 @@ pub fn check(level_path: &Path) -> Result<String, String> {
         return Err(error_list("the script's top level failed", &errors));
     }
     let (rows, unused) = inventory(&game, &sources);
-    let mut out = String::new();
+    let mut out = vistas.concat();
     for w in &warnings {
         out += &format!("warning: {w}\n");
     }
@@ -181,7 +187,7 @@ pub fn check(level_path: &Path) -> Result<String, String> {
     out += &format!(
         "ok: {} source file(s), {} warning(s)\n{rows}",
         sources.len(),
-        warnings.len()
+        warnings.len() + vistas.len()
     );
     Ok(out)
 }

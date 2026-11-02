@@ -8,7 +8,7 @@ use super::icons::Glyph;
 use crate::model::{EntityKind, Tool};
 
 /// The palette: tooltip name, shortcut key, icon and tool.
-pub(super) const TOOLS: [(&str, Key, Glyph, Tool); 12] = [
+pub(super) const TOOLS: [(&str, Key, Glyph, Tool); 13] = [
     (
         "Select / move",
         Key::Q,
@@ -65,6 +65,12 @@ pub(super) const TOOLS: [(&str, Key, Glyph, Tool); 12] = [
         Key::X,
         Glyph::Lucide(Lucide::CircleX),
         Tool::Voxel,
+    ),
+    (
+        "Vista layer: the eye of a view, placed in a sealed room",
+        Key::Y,
+        Glyph::Lucide(Lucide::Disc),
+        Tool::Place(EntityKind::VistaLayer),
     ),
 ];
 

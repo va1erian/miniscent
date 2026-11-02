@@ -59,6 +59,7 @@ pub mod polytope;
 pub mod portals;
 pub mod showcase;
 pub mod texinfo;
+pub mod vista_check;
 pub mod voxel;
 
 pub use brush::{Brush, BrushError, Op};
@@ -75,6 +76,7 @@ pub use level_builder::LevelBuilder;
 pub use portals::{Portal, Portals};
 pub use showcase::showcase_level;
 pub use texinfo::TexInfo;
+pub use vista_check::{VistaWarning, vista_warnings};
 
 #[cfg(test)]
 mod brush_tests;

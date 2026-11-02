@@ -18,6 +18,7 @@ pub mod state;
 pub mod stroke;
 pub mod tools;
 pub mod view;
+pub mod vista;
 pub mod voxel;
 
 #[cfg(test)]
@@ -34,6 +35,8 @@ mod review_tests;
 mod tests;
 #[cfg(test)]
 mod tools_tests;
+#[cfg(test)]
+mod vista_tests;
 #[cfg(test)]
 mod voxel_tests;
 

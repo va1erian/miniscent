@@ -17,6 +17,8 @@ use crate::ui::Editor;
 
 /// How many ids the stock manifest fills.
 const STOCK: usize = mscent_world::materials::LAST_SKY as usize + 1;
+/// The View rows and thumbnails that follow the textures.
+const VIEWS: usize = mscent_world::materials::VIEW_SLOTS as usize;
 
 fn stock_plus_one() -> MaterialTable {
     let mut table = miniscent_game::assets::load_materials(None).expect("stock");
@@ -76,7 +78,7 @@ fn a_failed_remount_keeps_the_old_lists_and_the_next_try_succeeds() {
         let fail = |_: &Host, _: Layout<Msg>| Err(BackendError::CreateFailed("forced"));
         assert!(panel.show_materials_with(1, Some(&bigger), &fail).is_err());
         assert_eq!(panel.materials_shown(), 0, "still to be done");
-        assert_eq!(panel.face.thumb_count(), STOCK);
+        assert_eq!(panel.face.thumb_count(), STOCK + VIEWS);
         panel.sync(&mut state.borrow_mut());
 
         // The thumbnails mount and the second one, the list's, fails.
@@ -93,7 +95,7 @@ fn a_failed_remount_keeps_the_old_lists_and_the_next_try_succeeds() {
         assert_eq!(panel.materials_shown(), 0, "still to be done");
         assert_eq!(
             panel.face.thumb_count(),
-            STOCK + 1,
+            STOCK + 1 + VIEWS,
             "the thumbnails are consistent"
         );
         assert!(
@@ -102,7 +104,7 @@ fn a_failed_remount_keeps_the_old_lists_and_the_next_try_succeeds() {
         );
         assert_eq!(
             panel.materials.labels().len(),
-            STOCK + 1,
+            STOCK + 1 + VIEWS,
             "with its own rows"
         );
         panel.sync(&mut state.borrow_mut());
@@ -114,7 +116,7 @@ fn a_failed_remount_keeps_the_old_lists_and_the_next_try_succeeds() {
         assert_eq!(sizes.len(), STOCK + 1);
         assert_eq!(panel.materials_shown(), 1);
         assert!(!Rc::ptr_eq(&old, &panel.material.get()), "a new list");
-        assert_eq!(panel.materials.labels().len(), STOCK + 2);
+        assert_eq!(panel.materials.labels().len(), STOCK + 2 + VIEWS);
         panel.sync(&mut state.borrow_mut());
     });
 }

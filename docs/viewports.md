@@ -173,7 +173,9 @@ a flood over `Portals`. Each layer belongs to the island around `pos`.
 
 Editor and `--check` warnings, not errors: the view shares an island with the player
 start (a leak), a layer in solid, a viewport face on a slot with no layer, a mover
-with a viewport face, voxels in a layer's island (not drawn).
+with a viewport face, voxels in a layer's island (not drawn). `vista_warnings` in
+`mscent-world` finds them; the editor puts them in its log when they change. A sky or
+cutout material on a voxel volume is not checked.
 
 ## Self-lit and cutout materials
 
@@ -249,9 +251,14 @@ material lists.
 **Original Unreal: clouds over a horizon.** Add a third room with one big plate in
 `sky-clouds`, layer 2, a `pan`, walls painted **View 0**. It costs no lightmap.
 
-An editor command, **New Vista**, does the first recipe in one step: a stock room
-beyond the level bounds, the entity, and `centre` set to the bounds' centre. It goes
-through the normal commands, so undo covers it. Then the mapper only paints faces.
+An editor command, **New Vista** (Edit menu), does the first recipe in one step: a
+64-unit room of stars 32 units beyond the level bounds, a planet plate 8 units off
+its west wall, and a layer for the next free slot with a slow spin. `centre` is the
+bounds' centre, or the `centre` of a layer the level already has, so all layers agree.
+It goes through the normal commands, so undo covers it, and with all 8 slots used it
+does nothing and says so. Then the mapper only paints faces: **View 0** to **View 7**
+are the last rows of both material lists. The panel edits the fog colour as three
+channels, and every field is held to the ranges of `Entity::is_valid`.
 
 ## Costs and budget
 

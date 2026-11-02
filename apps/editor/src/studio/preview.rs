@@ -240,6 +240,11 @@ impl Studio {
             self.relight(built, &made_for);
             return;
         }
+        if built.warnings != self.warned {
+            out.log
+                .extend(built.warnings.iter().map(|w| format!("WARNING: {w}")));
+            self.warned.clone_from(&built.warnings);
+        }
         if self
             .bake_job
             .as_ref()

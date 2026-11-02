@@ -2,13 +2,19 @@
 //! table of the current generation.
 
 use mscent_render::MaterialTable;
-use mscent_world::materials::NAMES;
+use mscent_world::materials::{NAMES, VIEW_SLOTS, view_material};
 
 use super::app::Editor;
 
 /// The last row: an id the table has no material for (retired, or from a level
 /// made with another manifest). No row may show a name that is not the brush's.
 const OTHER: &str = "(other id)";
+
+/// The viewport materials, after the textures: "View 0" to "View 7". Their ids
+/// are far above any texture's, so a row number is never one of them.
+pub fn view_rows() -> impl Iterator<Item = (u16, String)> {
+    (0..VIEW_SLOTS).filter_map(|slot| Some((view_material(slot)?, format!("View {slot}"))))
+}
 
 /// The rows of the brush panel's material list. A retired id has no row, so a
 /// row number is not an id.
@@ -21,14 +27,16 @@ impl Default for MaterialChoices {
     /// The stock names, for an editor with no textures to read: brushes can
     /// still be given the ids every manifest has.
     fn default() -> Self {
-        let rows = (0u16..).zip(NAMES.map(String::from)).collect();
+        let stock = (0u16..).zip(NAMES.map(String::from));
+        let rows = stock.chain(view_rows()).collect();
         Self { rows }
     }
 }
 
 impl MaterialChoices {
     pub fn from_table(table: &MaterialTable) -> Self {
-        let rows = table.iter().map(|(id, m)| (id.0, m.name.clone())).collect();
+        let textures = table.iter().map(|(id, m)| (id.0, m.name.clone()));
+        let rows = textures.chain(view_rows()).collect();
         Self { rows }
     }
 
@@ -124,14 +132,43 @@ mod tests {
         let c = MaterialChoices::from_table(&table());
         assert_eq!(c.id_of(5), Some(5));
         assert_eq!(c.id_of(6), Some(7), "row 6 is glass: id 6 has no row");
-        assert_eq!(c.id_of(7), None, "the last row picks nothing");
+        assert_eq!(
+            c.id_of(7),
+            view_material(0),
+            "the views follow the textures"
+        );
+        assert_eq!(
+            c.id_of(7 + usize::from(VIEW_SLOTS)),
+            None,
+            "the last row picks nothing"
+        );
         assert_eq!(c.id_of(usize::MAX), None);
     }
 
     #[test]
     fn with_no_textures_the_stock_names_remain() {
         let c = MaterialChoices::default();
-        assert_eq!(c.labels(), [&NAMES[..], &[OTHER]].concat());
+        let views = ["View 0", "View 1", "View 2", "View 3"];
+        let views = [&views[..], &["View 4", "View 5", "View 6", "View 7"]].concat();
+        assert_eq!(c.labels(), [&NAMES[..], &views, &[OTHER]].concat());
         assert_eq!(c.id_of(3), Some(3));
+    }
+
+    #[test]
+    fn a_view_material_shows_its_own_row_and_picks_its_own_id() {
+        for choices in [
+            MaterialChoices::from_table(&table()),
+            MaterialChoices::default(),
+        ] {
+            for slot in 0..VIEW_SLOTS {
+                let id = view_material(slot).expect("a slot");
+                let row = choices.row_of(id);
+                assert_eq!(choices.labels()[row], format!("View {slot}"));
+                assert_eq!(choices.id_of(row), Some(id), "the mapping holds both ways");
+            }
+            // The id just above the slots is not one of them.
+            let none = choices.row_of(mscent_world::materials::NO_DRAW);
+            assert_eq!(choices.labels()[none], OTHER);
+        }
     }
 }

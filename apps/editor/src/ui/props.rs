@@ -51,9 +51,11 @@ pub enum Prop {
     Voxel(VoxelProp),
 }
 
+/// Largest value a kind-specific field accepts, which is an entity coordinate's.
+const MAX_PARAM: f64 = mscent_world::entity::MAX_ENTITY_COORD as f64;
 const AXES: [&str; 3] = ["X", "Y", "Z"];
-/// Most kind-specific fields any entity has.
-const PARAMS: usize = 5;
+/// Most kind-specific fields any entity has (a vista layer).
+const PARAMS: usize = 16;
 
 /// Handles to every widget that shows selection data.
 #[derive(Default)]
@@ -91,6 +93,17 @@ fn field(
     make: impl Fn(f64) -> Prop + 'static,
 ) -> Build<NumberField<Msg>, Msg> {
     number_field(-4096.0, 4096.0, 1.0)
+        .then(move |f| f.on_commit(move |v| Some(Msg::Prop(make(v)))))
+        .bind(handle)
+}
+
+/// A kind-specific field. Its range is wide because the model holds each value
+/// to its own limits (a vista layer's fog reaches 100 000).
+fn param_field(
+    handle: &Handle<NumberField<Msg>>,
+    make: impl Fn(f64) -> Prop + 'static,
+) -> Build<NumberField<Msg>, Msg> {
+    number_field(-MAX_PARAM, MAX_PARAM, 1.0)
         .then(move |f| f.on_commit(move |v| Some(Msg::Prop(make(v)))))
         .bind(handle)
 }
@@ -233,7 +246,7 @@ impl Panel {
         for i in 0..PARAMS {
             ent = ent
                 .child(label("-").bind(&self.param_labels[i]))
-                .child(field(&self.params[i], move |v| Prop::Param(i, v)));
+                .child(param_field(&self.params[i], move |v| Prop::Param(i, v)));
         }
         let names = grid([Track::Auto, Track::Fill(1)])
             .gap(6)
