@@ -1,6 +1,6 @@
 # Voxel volumes: design
 
-Status: M11.1, M11.2 and M11.6 are done (field, dabs, meshing, level of detail, connectivity, level file, collision); the game collides with volumes but does not draw them, and the editor loads and keeps them but does not draw or edit them yet. Work items are [M11](work-items.md#m11-voxel-volumes).
+Status: M11.1 to M11.9 are done; [what differs from this design](#where-the-build-differs) is listed below. Work items are [M11](work-items.md#m11-voxel-volumes).
 
 Brushes are good at architecture and bad at anything that grows. This design adds a second kind of
 geometry for hives, coral, mushrooms, trees, cave systems, stalactites and alien interiors, painted
@@ -73,23 +73,22 @@ This gives the behaviour a level designer expects, with no special cases:
 - Move a `Subtract` volume: its sculpting moves with it and its walls re-form from what lies there.
 
 Volumes may touch but not overlap. A move or growth that would overlap is refused, like a Vertex
-move that loses a corner. Touching volumes must read each other's resolved samples across the border.
-**Not yet:** today a volume's ring sees only brushes, so a tunnel across a shared face is sealed by a
-wall on each side. M11.3 does this before volumes can be seen in a level.
+move that loses a corner. Touching volumes read each other's resolved samples across the border
+(`Context::in_level`), so a tunnel across a shared face has no wall in it. With different cell sizes the
+two surfaces overlap rather than meet exactly.
 
-A mover brush stays out of the CSG, so M11.3 builds a `Context` from `Level::static_brushes`.
+A mover brush stays out of the CSG, so a `Context` is built from `Level::static_brushes`.
 
 `--dump-level` refuses a level with volumes, because the text form has none and packing it again
 would lose them. A text form can follow if an agent needs to write volumes.
 
 A volume may not share an order with a brush, because it would then be neither before nor after it.
-The loader refuses that. Until a volume is a `BrushDef` (M11.7), the editor keeps each one right after
-the last surviving brush that preceded it when loaded, and renumbers brushes and volumes as one
-sequence on save.
+The loader refuses that. In the editor a volume is an entry in the brush list, so its order is its
+position, like any brush's.
 
-**Materials of untouched rock.** `base` gives a sample's density only, so a chunk nobody painted says
-material 0. Carving into a `Subtract` volume therefore shows material 0 instead of the brush's, until
-M11.3 takes the material of the brush that decided the sample.
+**Materials of untouched rock.** A stored material of 255 means "whatever brush this sample came from":
+the face that decided it, or the nearest brush for rock too deep for any to reach. A carved wall so shows the
+material of the wall it was carved from. A brush material a sample cannot name (254 and up) draws grey.
 
 ### Where a Subtract volume meets the BSP
 
@@ -121,7 +120,9 @@ This seam is where a hybrid would show holes. The rules:
    BSP's portal from the room into the box's leaf is already correct.
 
 An `Add` volume has none of this: its ring is forced to air, and it intersects brush geometry in the
-z-buffer. Triangles wholly inside BSP solid are dropped at meshing, which also saves their light.
+z-buffer. Its triangles wholly inside BSP solid are dropped at meshing, which also saves their light. A
+`Subtract` volume keeps its triangles in the ring: a cave's surface can close just past its box, in what
+the BSP calls solid, with its air side in the box. Dropping those showed the sky.
 
 ### Invariants
 
@@ -149,7 +150,7 @@ Each of these is asserted by a test (see [Glitches](#glitches-designed-out)):
 tick from the UI thread, so `PartialEq` on a volume compares `Arc` pointers first and only reads the
 bytes of chunks whose pointers differ. An undo step shares every untouched chunk with its neighbours.
 
-Limits: `MAX_VOLUMES` 256, 4096 chunks per volume, `MAX_DETAIL_CHUNKS` 16 384 per level (128 MiB). Tolerances go in `mscent_math::epsilon`.
+Limits: `MAX_VOLUMES` 256, 4096 chunks per volume, `MAX_TOTAL_CHUNKS` 65 536 per level (every chunk is meshed at load, about 20 µs each even when empty), `MAX_DETAIL_CHUNKS` 16 384 per level (128 MiB). Tolerances go in `mscent_math::epsilon`.
 
 ### File format
 
@@ -176,8 +177,8 @@ A hostile file is the main threat, and RLE is a decompression bomb by design, so
 - A material id not in the table draws with the existing grey fallback.
 
 `voxel/wire_tests.rs` covers bit flips and truncation (whatever loads is also meshed), forged runs and
-each limit. **The writer has no limit of its own:** a level can be sculpted past `MAX_DETAIL_CHUNKS` or
-`format::MAX_FILE_BYTES` and then not load, so M11.7 must refuse such edits or fail the save.
+each limit. A stroke stops at `MAX_DETAIL_CHUNKS`, and saving reads the bytes back first and refuses a
+level the loader would refuse, leaving the old file in place.
 
 Only deltas are stored. As with brushes, the loader recompiles: `resolved` and meshes are rebuilt at
 load (about 40 µs a chunk measured for meshing, so a large cave adds tens of milliseconds).
@@ -194,8 +195,8 @@ agrees too. A brush's value must also not depend on which chunk asks for it, so 
 sample and not only per chunk.
 
 Each mesh stores positions, normals, the cell of each vertex, material per triangle and a **15-bit air
-connectivity mask** between chunk faces. M11.3 adds dropping of buried triangles, and M11.6 the per-cell
-collision index.
+connectivity mask** between chunk faces. `VoxelWorld` adds the dropping of buried triangles and the
+per-cell collision index.
 
 ### Level of detail, without cracks
 
@@ -397,13 +398,13 @@ The tool is **Voxel (X)**. There is no need to place a box: dabbing is enough.
 |---|---|
 | Add / Carve | Sphere, box or capsule dab with a falloff; hold Ctrl while painting to swap |
 | Smooth | Blur toward the local average: the CE2 tool that makes everything look natural |
-| Flatten | Toward the plane set by the stroke's first hit |
-| Roughen | Displace by seeded 3D noise, for weathering |
+| Flatten | Toward the plane set by the stroke's first hit (that point and the surface normal there), fully at the dab's core. New solid takes the tool's material |
+| Roughen | Displace by seeded value noise (`voxel::noise3`), bumps three cells apart. A dab moves the surface a fraction of a cell and dabs overlap, so scrubbing deepens the same bumps rather than adding new ones |
 | Paint | Material only; no shape change, no re-bake |
-| Tunnel | Click a path; carves round cones with radius per point |
+| Tunnel | Click a path: the first click carves the mouth, each next click carves a round cone from the last point, with the radius the tool has at that click (set with the wheel). Esc ends the path. One undo step per click |
 | Growth | Generators, below |
-| Fill | Fills the box from a warped gyroid or noise field, for alien interiors |
-| Copy / Stamp | Captures a region and pastes it as a dab |
+| Fill | "Fill selected volume" in the panel replaces every sample of the selected volume from a warped gyroid or ridged noise field (`generators/field.rs`), as one undo step. It replaces the whole volume, sculpting included |
+| Copy / Stamp | Copy captures a ball (the tool's radius, up to 48 cells) of the volume under the click as samples (`voxel::capture`). Stamp replaces the same ball at the click (`voxel::stamp`), creating an add volume where there is none. The cell size must match |
 
 Radius with the wheel, strength with Ctrl+wheel; hold Shift to lock the stroke to one plane.
 Right button remains fly-look, and only the 3D view paints. The 2D views show the box, an outline of
@@ -417,15 +418,29 @@ through the same dab code, so undo, light and limits need no generator logic.
 
 | Generator | Method |
 |---|---|
-| Stalactites | Rays up and down from the brushed area find rock; tapered round cones with drip noise |
-| Mushrooms | Stem round cone, ellipsoid cap, radial carves for gills, clustered placement |
-| Coral | Branching growth with a random bias, then smooth union and Roughen |
-| Trees | Space colonization: attractors in a crown, branches grown toward them, thickness from the pipe model, flare into the ground |
-| Hive | Hexagonal comb on a surface: carved prisms that leave wax walls, on a curved base |
+| Stalactites | Tapered round cones with a flared root, scattered over a disc and growing along the surface normal, so the one generator hangs from a ceiling and rises from a floor. Drips shorten toward the edge |
+| Mushrooms | A cluster of leaning stems (round cones) with spheroid caps hollowed beneath and twelve radial gill carves |
+| Coral | Branching growth with a random bias: each branch forks twice, four levels deep, thinning as it goes, from three or four colonies |
+| Trees | Space colonization: 140 attractors in a crown, nodes grown toward the nearest ones until reached, thickness from the pipe model (exponent 3), buttress roots flaring into the ground |
+| Hive | A wax lens bulging out of the surface (so the comb is curved) with hexagonal prisms carved into it in a packed grid at random depths. The walls are what the carving leaves, never under two cells thick |
 
-**Ghost preview:** a generator runs on a background thread and shows the primitives in wireframe in
-the 3D view. Wheel re-rolls the seed; click commits one undo step. Radii are clamped to at least one
-cell, because thinner than that aliases into broken beads.
+A plan holds at most 4096 primitives (`generators::MAX_PIECES`): sphere, round cone, spheroid (an
+ellipsoid of revolution) or hexagonal prism, each added or carved. `Prim` gained the spheroid and the
+prism for this; the prism is there because a comb of round holes reads as a sponge. `Plan` widens every
+radius to at least one cell, because thinner than that aliases into broken beads. A site is a point, a
+normal, a size (the tool's radius) and a cell. The normal comes from three parallel rays through the pick
+code a stroke uses (`generators::surface_normal`), so it works on brushes and on voxel surfaces alike.
+Not done: a generator does not snap each drip or stem to the surface with a ray of its own, so on a
+strongly curved surface a root can float or sink. Roots are sunk a little and flared to hide that.
+
+**Held result instead of a ghost.** The design asked for a wireframe of the primitives in the 3D view.
+The highlight overlay (`studio/highlight.rs`) fills and outlines polygons with the frame's depth test
+and has no wire primitive, so a wireframe of a few hundred spheres and cones would have needed a second
+overlay path. What is built instead is the real result: with a generator chosen in the panel, a click
+runs it on the stroke thread, puts the result in the document without recording it, and holds it. The
+wheel, or the Seed field, re-rolls: the document goes back to before and the generator runs again with
+another seed. Commit records one undo step. Esc, a new click, undo or a tool change drops it. The volume
+grows the way a stroke's does, so the limits (detail chunks, neighbours, box size) apply unchanged.
 
 ### Stroke semantics
 
@@ -524,7 +539,21 @@ The cave is far denser than a level: a chunk here holds about 860 triangles. At 
 walking body costs about 4 ms a second, 0.4% of a core. The start test is the costliest part of a short
 sweep; it searches rings of index cells for the nearest triangle. Not measured on the i3-7100U.
 
-Drawing, from a throwaway prototype that M11.4 replaces with a real benchmark, on frames of 640x360
+Drawing through the real path, from `cargo run --release -p mscent-render --example voxel_bench_frame`:
+one worker, 640x360, the same cave from 40 air positions, against a brush room all of whose pixels are lit
+faces. The first frame of a view can run far over budget until the governor acts.
+
+| What | Low | Medium | High |
+|---|---|---|---|
+| Cave, mean frame | 9.5 ms | 12.1 ms | 11.6 ms |
+| Cave, cost per screen pixel | 41 ns | 52 ns | 50 ns |
+| Brush room, cost per screen pixel | 26 ns | 45 ns | 46 ns |
+
+So on this dense scene a voxel pixel at High costs about 10% more than a brush pixel, which **misses** the
+aim of no more. The rest is triangle setup, at about 120 ns per triangle against the 22 ns the prototype
+suggested. The machine is noisy, and the Medium and High rows swap on some runs.
+
+The prototype this replaced, on the same frames, for the record:
 from 40 air positions:
 
 | What | Result |
@@ -558,8 +587,7 @@ What it does not say:
   That would put 25k triangles near 2.8 ms, but it also puts today's 8.86 ms frame near 44 ms, so
   M1.4 and M8.5 remain open for the whole game, not just this.
 - **Prototype fill has no bump or specular,** and fills at about 10 ns per pixel against about 38 ns
-  for the whole showcase frame. A voxel pixel at High must cost no more than a brush pixel; the prototype
-  does not show that. M11.4 measures it.
+  for the whole showcase frame.
 - **It has no near-plane clipping** and no shader variants.
 - **Baking with voxel occluders** is measured below.
 
@@ -611,12 +639,37 @@ crates/mscent-world/src/lightmap/occluders.rs, voxel_rays.rs, cell_sites.rs, cel
 crates/mscent-collide/src/voxel.rs, solids.rs
 crates/mscent-render/src/voxel/  prepare, fill, flood, shader, governor
 crates/mscent-game/src/combat.rs (carve), destruct.rs (queue)
-apps/editor/src/model/voxel/     tool, stroke, grow, generators/*
+apps/editor/src/model/           stroke (thread), sculptor (what a stroke does), growth (generator and
+                                 Fill jobs), voxel (state), generators/* (one file per generator)
 apps/editor/src/studio/live.rs   mesher thread, batches
-apps/editor/src/ui/voxelpanel.rs
+apps/editor/src/ui/voxelpanel.rs dab, generator, seed, Commit, Fill
 apps/editor/src/selftest/voxel.rs
 ```
 
+
+## Where the build differs
+
+| Design | Built | Why |
+|---|---|---|
+| Chunks beyond the fog's total depth are skipped | Drawn at the lowest detail | Fog colour is not the sky's: a far wall would turn into sky at the fog line |
+| Dabs up to radius 2 on the UI thread, larger ones as a job | Every dab on the stroke's thread | A UI tick is an `Arc` clone at any radius |
+| `Cmd::VoxelBatch` with per-chunk generations | One live job at a time, taking the newest document | Stale work cannot be queued, so nothing needs a generation |
+| Undo budget of 256 MiB in `History` | Not built | History still has no budget of any kind; a chunk is shared until changed |
+| Stroke light: hard shadows at 150 ms, then a per-chunk bake | Cells inherit during the stroke; the whole-level bake runs when it ends | `light_cells` exists for per-chunk work if a large level needs it |
+| Wireframe ghost for generators | The real result, held until Commit | `highlight.rs` only fills polygons; a second overlay path was not worth it |
+| Ctrl+wheel strength, Shift locks a plane | Not built | Roughen's strength is fixed |
+| Add, Carve as sphere, box or capsule | Capsule between pointer samples | A sphere is the zero-length case |
+| Destructible flag on the material, in level data | `materials::is_destructible`: rock | No format change for a game with five materials |
+
+Known limits:
+
+- Particles collide with the BSP only, so sparks and debris pass through voxel rock.
+- Triangles whose corners disagree on texture take Gouraud light and albedo only, with no bump or specular.
+- Brush luxels gather no bounce from voxel patches; only cells gather from faces and chunks.
+- A chunk new in a stroke or a shot, with no old cell to inherit from, is lit by lamps with no shadows until the next bake.
+- Light does not newly pour through a shot hole, and brush shadows do not change, as designed.
+- `check_frame_cost.py` has no voxel scene.
+- The reference machine (i3-7100U) is unmeasured for all of this.
 
 ## Alternatives rejected
 

@@ -14,6 +14,7 @@ pub(crate) mod blend;
 pub(crate) mod fill;
 mod flood;
 pub(crate) mod list;
+pub use list::MAX_VOXEL_TRIS;
 pub(crate) mod shader;
 mod tri;
 

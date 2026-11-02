@@ -20,6 +20,33 @@ enum Shape {
         min: Vec3d,
         max: Vec3d,
     },
+    /// An ellipsoid of revolution: `along` the unit `axis`, `across` elsewhere.
+    Spheroid {
+        centre: Vec3d,
+        axis: Vec3d,
+        along: f64,
+        across: f64,
+    },
+    /// A hexagonal prism, the cell of a comb. `side` is the unit direction
+    /// perpendicular to `axis` that points at a corner.
+    HexPrism {
+        centre: Vec3d,
+        axis: Vec3d,
+        side: Vec3d,
+        apothem: f64,
+        half_depth: f64,
+    },
+}
+
+/// Half the width of a hexagon across its corners, per unit of apothem.
+const HEX_CORNER: f64 = 1.154_700_538_379_251_7;
+/// Cosine of 30 degrees: the slanted flats' normal along a corner direction.
+const HEX_SLANT: f64 = 0.866_025_403_784_438_6;
+
+/// The box of half-width `r` around `centre`.
+fn cube(centre: Vec3d, r: f64) -> (Vec3d, Vec3d) {
+    let r = Vec3d::new(r, r, r);
+    (centre - r, centre + r)
 }
 
 /// A validated shape: in the range brushes use, with positive sizes. The range
@@ -56,6 +83,41 @@ impl Prim {
         ok.then_some(Self(Shape::Cuboid { min, max }))
     }
 
+    /// An ellipsoid with a unit `axis` (any length but zero is accepted and
+    /// normalised) and two radii: along the axis, and across it.
+    pub fn spheroid(centre: Vec3d, axis: Vec3d, along: f64, across: f64) -> Option<Self> {
+        let axis = axis.normalized()?;
+        let ok = in_range(centre) && positive(along) && positive(across);
+        ok.then_some(Self(Shape::Spheroid {
+            centre,
+            axis,
+            along,
+            across,
+        }))
+    }
+
+    /// A hexagonal prism: `apothem` is half the distance between opposite
+    /// flats, `half_depth` half its length along `axis`, and `corner_hint`
+    /// picks which way a corner points (any direction not along the axis).
+    pub fn hex_prism(
+        centre: Vec3d,
+        axis: Vec3d,
+        corner_hint: Vec3d,
+        apothem: f64,
+        half_depth: f64,
+    ) -> Option<Self> {
+        let axis = axis.normalized()?;
+        let side = (corner_hint - axis * corner_hint.dot(axis)).normalized()?;
+        let ok = in_range(centre) && positive(apothem) && positive(half_depth);
+        ok.then_some(Self(Shape::HexPrism {
+            centre,
+            axis,
+            side,
+            apothem,
+            half_depth,
+        }))
+    }
+
     /// Signed distance from `p`, negative inside. Exact except for the round
     /// cone, where it is close enough for a surface: its sign is right.
     pub fn distance(&self, p: Vec3d) -> f64 {
@@ -75,6 +137,34 @@ impl Prim {
                     0.0
                 };
                 (p - (a + ab * t)).length() - (radius_a + (radius_b - radius_a) * t)
+            }
+            Shape::Spheroid {
+                centre,
+                axis,
+                along,
+                across,
+            } => {
+                let d = p - centre;
+                let h = d.dot(axis);
+                let q = (d - axis * h).length();
+                // Scaled back by the smaller radius: wrong in size, right in sign.
+                let k = ((h / along).powi(2) + (q / across).powi(2)).sqrt();
+                (k - 1.0) * along.min(across)
+            }
+            Shape::HexPrism {
+                centre,
+                axis,
+                side,
+                apothem,
+                half_depth,
+            } => {
+                let d = p - centre;
+                let (h, x) = (d.dot(axis), d.dot(side).abs());
+                let y = d.dot(axis.cross(side)).abs();
+                // Corners lie along `side`; two flats face the cross direction
+                // and four slant 30 degrees round from the corner direction.
+                let flat = (x * HEX_SLANT + y * 0.5).max(y);
+                (flat - apothem).max(h.abs() - half_depth)
             }
             Shape::Cuboid { min, max } => {
                 let q = [
@@ -108,6 +198,18 @@ impl Prim {
                 )
             }
             Shape::Cuboid { min, max } => (min, max),
+            Shape::Spheroid {
+                centre,
+                along,
+                across,
+                ..
+            } => cube(centre, along.max(across)),
+            Shape::HexPrism {
+                centre,
+                apothem,
+                half_depth,
+                ..
+            } => cube(centre, apothem * HEX_CORNER + half_depth),
         }
     }
 }

@@ -160,7 +160,8 @@ fn holding_alt_builds_up_instead() {
         at_wall(0.0),
         StrokeKeys {
             swap: false,
-            build_up: true
+            build_up: true,
+            ..Default::default()
         }
     ));
     let mut even = room_state();
@@ -180,7 +181,8 @@ fn control_swaps_add_and_carve() {
         at_wall(0.0),
         StrokeKeys {
             swap: true,
-            build_up: false
+            build_up: false,
+            ..Default::default()
         }
     ));
     st.finish_stroke();

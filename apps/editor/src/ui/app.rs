@@ -443,6 +443,12 @@ impl App for Editor {
             Msg::Escape => {
                 if self.studio.mode == Mode::Play {
                     self.end_play(Some("Back in the editor"));
+                } else {
+                    let mut st = self.state.borrow_mut();
+                    st.cancel_drag();
+                    st.end_path();
+                    drop(st);
+                    self.refresh();
                 }
                 return;
             }

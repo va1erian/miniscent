@@ -22,6 +22,8 @@
 //! * [`Volume`] (`volume.rs`): sparse copy-on-write chunks. Cloning is O(1).
 //! * [`Context`] (`context.rs`): what the brushes contribute to one volume.
 //! * [`apply_dab`], [`fill`] (`dab.rs`): edits, returning the chunks to remesh.
+//! * [`capture`], [`stamp`] (`clip.rs`): Copy and Stamp.
+//! * [`noise3`] (`noise.rs`): seeded noise for roughening and generated fields.
 //! * [`Mesher`] (`surface.rs`): surface nets, one [`ChunkMesh`] per chunk.
 //! * [`ChunkMesh::clustered`] (`lod.rs`): level of detail without cracks.
 //! * [`AirMask`] (`connectivity.rs`): which chunk faces air joins.
@@ -32,14 +34,17 @@
 
 mod block;
 mod chunk;
+mod clip;
 mod connectivity;
 mod context;
 mod dab;
 mod edit;
 mod index;
 mod lod;
+mod noise;
 mod prim;
-pub(crate) mod query;
+mod query;
+mod span;
 mod surface;
 mod volume;
 pub(crate) mod wire;
@@ -58,17 +63,21 @@ mod surface_tests;
 #[cfg(test)]
 mod test_util;
 #[cfg(test)]
+mod tools_tests;
+#[cfg(test)]
 mod wire_tests;
 #[cfg(test)]
 mod world_tests;
 
 pub use chunk::{Chunk, ChunkData};
+pub use clip::{Clip, MAX_CLIP_HALF, capture, stamp};
 pub use connectivity::{AirMask, Face};
 pub use context::Context;
 pub use dab::{DabOp, apply_dab, fill};
 pub use edit::{MIN_ISLAND_SAMPLES, first_solid, remove_islands, solid_material_near};
 pub use index::{CellIndex, INDEX_EDGE};
 pub use lod::Lod;
+pub use noise::noise3;
 pub use prim::Prim;
 pub use surface::{ChunkMesh, Mesher, VoxelVertex};
 pub use volume::{CellSize, Volume, VolumeError};

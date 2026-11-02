@@ -1,11 +1,15 @@
 //! The Voxel tool on the editor state. One stroke is one undo step, and Esc puts
-//! back what the stroke started from.
+//! back what the stroke started from. A generator's result is held, already in
+//! the document, until Commit makes it a step; re-rolling or Esc puts it back.
+
+use std::sync::Arc;
 
 use super::command::Command;
 use super::document::{BrushDef, Document, Id, Shape};
+use super::growth::Request;
 use super::pick::Ray;
 use super::state::{EditorState, Selection};
-use super::stroke::{Sculpted, StrokeJob, StrokeKeys};
+use super::stroke::{Sculpted, StrokeJob, StrokeKeys, VoxelOp};
 
 /// A stroke in progress.
 #[derive(Debug)]
@@ -16,19 +20,46 @@ pub struct Stroke {
     /// The stroke has its last ray and is finishing.
     ending: bool,
     new_id: Id,
+    /// What a held generation was asked for and where, to roll it again.
+    held: Option<(Ray, Request)>,
+    /// A held generation has finished and waits for Commit.
+    ready: bool,
 }
 
 impl EditorState {
-    /// Button down in the 3D view: the first ray of a stroke.
+    /// Button down in the 3D view: the first ray of a stroke, or the place a
+    /// generator will grow.
     pub fn begin_stroke(&mut self, ray: Ray, keys: StrokeKeys) -> bool {
         // A stroke whose button has come up is finished work: it is not this
         // press's to cancel, and the UI never waits for one.
         self.poll_stroke();
-        if self.stroke.as_ref().is_some_and(|s| s.ending) {
+        if self.stroke.as_ref().is_some_and(|s| s.ending && !s.ready) {
             self.message = "The last stroke is still finishing".into();
             return false;
         }
         self.cancel_stroke();
+        let held = self.voxel.generator.map(|kind| {
+            let request = Request::Grow {
+                kind,
+                seed: self.voxel.seed,
+            };
+            (ray, request)
+        });
+        let keys = StrokeKeys {
+            clip: self.clip.clone(),
+            request: held.map(|(_, r)| r).or(keys.request),
+            ..keys
+        };
+        if !self.start_stroke(keys, held) {
+            return false;
+        }
+        if let Some(s) = &self.stroke {
+            s.job.ray(ray);
+        }
+        true
+    }
+
+    fn start_stroke(&mut self, keys: StrokeKeys, held: Option<(Ray, Request)>) -> bool {
         let new_id = self.doc.alloc_id();
         let job = match StrokeJob::start(self.doc.clone(), new_id, self.voxel, keys) {
             Ok(job) => job,
@@ -37,20 +68,52 @@ impl EditorState {
                 return false;
             }
         };
-        job.ray(ray);
         self.stroke = Some(Stroke {
             job,
             before: None,
             ending: false,
             new_id,
+            held,
+            ready: false,
         });
+        true
+    }
+
+    /// Pours the chosen field into the selected volume: one undo step.
+    pub fn fill_selected(&mut self) -> bool {
+        let Some(Selection::Brush(id)) = self.selection.filter(|s| match s {
+            Selection::Brush(id) => self.doc.volumes().any(|(d, _)| d.id == *id),
+            Selection::Entity(_) => false,
+        }) else {
+            self.message = "Select a volume to fill".into();
+            return false;
+        };
+        self.cancel_stroke();
+        let tool = self.voxel;
+        let request = Request::Fill {
+            id,
+            field: tool.field,
+            seed: tool.seed,
+            wavelength: tool.wavelength,
+        };
+        let keys = StrokeKeys {
+            request: Some(request),
+            ..Default::default()
+        };
+        if !self.start_stroke(keys, None) {
+            return false;
+        }
+        self.end_stroke();
         true
     }
 
     /// The pointer moved during a stroke.
     pub fn stroke_ray(&mut self, ray: Ray) {
-        if let Some(s) = &self.stroke {
+        if let Some(s) = &mut self.stroke {
             s.job.ray(ray);
+            if let Some((last, _)) = &mut s.held {
+                *last = ray;
+            }
         }
     }
 
@@ -63,8 +126,14 @@ impl EditorState {
         }
     }
 
+    /// Whether the pointer is still working a stroke. A held generation is not.
     pub fn stroking(&self) -> bool {
-        self.stroke.is_some()
+        self.stroke.as_ref().is_some_and(|s| !s.ready)
+    }
+
+    /// Whether a generated result waits for Commit.
+    pub fn pending(&self) -> bool {
+        self.stroke.as_ref().is_some_and(|s| s.ready)
     }
 
     /// Takes in what the stroke has done so far, and records it when it is over.
@@ -73,21 +142,53 @@ impl EditorState {
         let Some(stroke) = &self.stroke else {
             return false;
         };
+        if stroke.ready {
+            return false;
+        }
+        // Asked first: whatever the thread published before it finished is then
+        // surely here to take.
+        let finished = stroke.ending.then(|| stroke.job.finished()).flatten();
         let latest = stroke.job.take();
         let note = stroke.job.take_note();
-        let finished = stroke.ending.then(|| stroke.job.finished()).flatten();
+        let clip = stroke.job.take_clip();
+        let reached = stroke.job.take_reached();
         if let Some(note) = note {
             self.message = note;
+        }
+        if let Some(clip) = clip {
+            self.message = "Copied".into();
+            self.clip = Some(Arc::new(clip));
+        }
+        if reached.is_some() {
+            self.voxel.path = reached;
         }
         let mut changed = latest.is_some_and(|s| self.adopt_sculpted(&s));
         if let Some(last) = finished {
             if let Some(sculpted) = last {
                 self.adopt_sculpted(&sculpted);
             }
-            self.record_stroke();
+            self.settle_stroke();
             changed = true;
         }
         changed
+    }
+
+    /// A finished stroke is recorded; a finished generation waits for Commit.
+    fn settle_stroke(&mut self) {
+        let grown = self.stroke.as_mut().and_then(|s| {
+            s.ready = s.held.is_some();
+            match s.held {
+                Some((_, Request::Grow { kind, .. })) => Some(kind.name()),
+                _ => None,
+            }
+        });
+        match grown {
+            Some(name) => {
+                self.message =
+                    format!("{name}: Commit keeps it, the wheel rolls another, Esc drops it");
+            }
+            None => self.record_stroke(),
+        }
     }
 
     /// Ends the stroke and waits for it.
@@ -98,10 +199,42 @@ impl EditorState {
         if let Some(sculpted) = last {
             self.adopt_sculpted(&sculpted);
         }
-        if let Some(note) = self.stroke.as_ref().and_then(|s| s.job.take_note()) {
-            self.message = note;
+        if let Some(s) = &self.stroke {
+            if let Some(note) = s.job.take_note() {
+                self.message = note;
+            }
+            if let Some(clip) = s.job.take_clip() {
+                self.clip = Some(Arc::new(clip));
+            }
+            if let Some(reached) = s.job.take_reached() {
+                self.voxel.path = Some(reached);
+            }
+        }
+        self.settle_stroke();
+    }
+
+    /// Keeps the generated result as one undo step.
+    pub fn commit_pending(&mut self) -> bool {
+        if !self.pending() {
+            return false;
         }
         self.record_stroke();
+        true
+    }
+
+    /// Rolls the held generation again with `seed`.
+    pub fn reroll_to(&mut self, seed: u32) -> bool {
+        let Some((ray, Request::Grow { kind, .. })) = self.stroke.as_ref().and_then(|s| s.held)
+        else {
+            return false;
+        };
+        self.voxel.seed = seed;
+        self.voxel.generator = Some(kind);
+        if !self.begin_stroke(ray, StrokeKeys::default()) {
+            return false;
+        }
+        self.end_stroke();
+        true
     }
 
     /// Esc: the document goes back to the stroke's start.
@@ -119,6 +252,13 @@ impl EditorState {
         self.drop_stale_selection_after_stroke();
         self.message = "Stroke cancelled".into();
         true
+    }
+
+    /// Ends the tunnel being clicked, so the next click starts a new one.
+    pub fn end_path(&mut self) {
+        if self.voxel.path.take().is_some() && self.voxel.op == VoxelOp::Tunnel {
+            self.message = "Tunnel ended".into();
+        }
     }
 
     fn drop_stale_selection_after_stroke(&mut self) {

@@ -18,7 +18,7 @@ use mscent_render::{
 use mscent_world::brush::{Brush, Op};
 use mscent_world::materials::{BRICK, FLOOR, METAL, ROCK};
 use mscent_world::voxel::{CellSize, Context, DabOp, Prim, Volume, apply_dab, fill};
-use mscent_world::{Entity, Level};
+use mscent_world::{Entity, Level, format};
 
 const SIZE: (u32, u32) = (1280, 720);
 const HOLE: u32 = 0xffff_00ff;
@@ -360,6 +360,36 @@ fn alien_cave(dir: &Path) -> Result<(), Failure> {
     shoot(&renderer(&level)?, eye, target, &dir.join("alien-cave.png"))
 }
 
+/// Where each saved showcase level is looked at from: eye, then target. The
+/// levels are written by the editor's generators (`MSCENT_BLESS=1 cargo test -p
+/// mscent-editor showcase`), one per use case, and these are the poses its
+/// budget test uses.
+const SHOWCASES: [(&str, [f32; 3], [f32; 3]); 5] = [
+    ("hive", [0.0, 3.0, 5.0], [0.0, 12.0, 5.0]),
+    ("coral", [0.0, -8.0, 3.5], [0.0, 3.0, 1.8]),
+    ("mushrooms", [0.0, -8.0, 2.5], [0.0, 3.0, 1.5]),
+    ("tree", [0.0, -11.0, 4.0], [0.0, 4.0, 6.0]),
+    ("cave", [0.0, -3.0, 2.6], [0.0, 8.0, 2.6]),
+];
+
+/// The levels the editor's generators built, drawn from their saved files.
+fn showcases(dir: &Path) -> Result<(), Failure> {
+    let levels = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/levels");
+    for (name, eye, target) in SHOWCASES {
+        let bytes = std::fs::read(levels.join(format!("voxel-{name}.msl")))?;
+        let level = format::read(&bytes).map_err(|e| format!("{name}: {e:?}"))?;
+        let r = renderer(&level)?;
+        let png = dir.join(format!("{name}.png"));
+        shoot(
+            &r,
+            Vec3::new(eye[0], eye[1], eye[2]),
+            Vec3::new(target[0], target[1], target[2]),
+            &png,
+        )?;
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), Failure> {
     let dir = std::env::args()
         .nth(1)
@@ -367,5 +397,6 @@ fn main() -> Result<(), Failure> {
     std::fs::create_dir_all(&dir)?;
     cave_entrance(&dir)?;
     garden(&dir)?;
-    alien_cave(&dir)
+    alien_cave(&dir)?;
+    showcases(&dir)
 }

@@ -6,10 +6,13 @@ pub mod document;
 pub mod entity;
 pub mod facetex;
 pub mod fly;
+pub mod generators;
+mod growth;
 pub mod labels;
 pub mod outline;
 pub mod pick;
 pub mod pointer;
+mod sculptor;
 pub mod shape_ops;
 pub mod state;
 pub mod stroke;
@@ -19,6 +22,8 @@ pub mod voxel;
 
 #[cfg(test)]
 mod facetex_tests;
+#[cfg(test)]
+mod growth_tests;
 #[cfg(test)]
 mod hostile_tests;
 #[cfg(test)]
