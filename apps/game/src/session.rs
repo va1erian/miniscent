@@ -162,6 +162,11 @@ impl GameSession {
         let mut game = Game::new(arena);
         game.player.orientation = spawn_orientation(game.arena.player_yaw);
         game.player.up_ref = Some(Vec3::new(0.0, 0.0, 1.0));
+        Self::with_game(game, renderer, cfg)
+    }
+
+    /// Wraps a game already under way, as a test does to take a picture of it.
+    pub fn with_game(game: Game, renderer: LevelRenderer, cfg: &SessionConfig) -> Self {
         let mut menu = Menu::new();
         // Item 0 of the main menu is "Start".
         menu.press(MenuCommand::Select);
@@ -187,6 +192,11 @@ impl GameSession {
     /// lighting for the same level arrives while it is being played.
     pub fn set_renderer(&mut self, renderer: LevelRenderer) {
         self.renderer = renderer;
+    }
+
+    /// The game and the renderer, taken apart again.
+    pub fn into_parts(self) -> (Game, LevelRenderer) {
+        (self.game, self.renderer)
     }
 
     /// The renderer, once the game is over with.

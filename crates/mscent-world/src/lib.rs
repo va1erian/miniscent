@@ -51,6 +51,7 @@ pub mod r#gen;
 pub mod gen_level;
 pub mod labels;
 pub mod level_builder;
+pub mod level_text;
 pub mod lightmap;
 pub mod materials;
 pub mod polytope;
@@ -84,6 +85,8 @@ mod format_tests;
 mod gen_tests;
 #[cfg(test)]
 mod labels_tests;
+#[cfg(test)]
+mod level_text_tests;
 #[cfg(test)]
 mod portals_tests;
 #[cfg(test)]

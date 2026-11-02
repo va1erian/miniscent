@@ -4,8 +4,10 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use miniscent_game::agent::{self, TestOutput};
 use miniscent_game::app::{self, RunOptions, RunReport};
 use miniscent_game::cli::{self, Options, USAGE};
+use miniscent_game::scripts::ScriptWatcher;
 use miniscent_game::{GameSession, SessionConfig, assets, levels, lightcache, scripts};
 use mscent_platform::{HeadlessPlatform, Script};
 use mscent_render::png_encode::encode_png;
@@ -69,6 +71,7 @@ fn run_options(o: &Options, cap: bool) -> RunOptions {
         shot_stem: o.screenshot.clone().or_else(|| {
             (!o.shots_at.is_empty()).then(|| Path::new("target/shots/play.png").to_path_buf())
         }),
+        watch: None,
     }
 }
 
@@ -109,7 +112,11 @@ fn run_desktop(o: &Options, session: &mut GameSession) -> Result<RunReport, Stri
         height: o.res.1 * o.scale,
     })
     .map_err(|e| format!("cannot open a window: {e}"))?;
-    Ok(app::run(&mut platform, session, &run_options(o, true)))
+    let opts = RunOptions {
+        watch: o.level.as_deref().map(ScriptWatcher::new),
+        ..run_options(o, true)
+    };
+    Ok(app::run(&mut platform, session, &opts))
 }
 
 #[cfg(not(feature = "desktop"))]
@@ -117,10 +124,40 @@ fn run_desktop(_: &Options, _: &mut GameSession) -> Result<RunReport, String> {
     Err("built without the `desktop` feature; use --screenshot, --script or --bench".into())
 }
 
+/// The commands that do their one job and exit. `None` if this is not one.
+fn agent_command(o: &Options) -> Option<Result<String, String>> {
+    let needs_level = |what: &str| format!("{what} needs --level <file.msl>");
+    if o.script_api {
+        return Some(Ok(agent::script_api()));
+    }
+    if let Some(path) = &o.dump_level {
+        return Some(agent::dump_level(path));
+    }
+    if let Some((from, to)) = &o.pack_level {
+        return Some(agent::pack_level(from, to));
+    }
+    if o.check {
+        let level = o.level.as_deref().ok_or_else(|| needs_level("--check"));
+        return Some(level.and_then(agent::check));
+    }
+    let test = o.test.as_deref()?;
+    let out = TestOutput {
+        trace: o.trace.clone(),
+        shots_dir: o.shots_dir.clone().unwrap_or_else(|| "target/shots".into()),
+        assets: o.assets.clone(),
+    };
+    let level = o.level.as_deref().ok_or_else(|| needs_level("--test"));
+    Some(level.and_then(|level| agent::run_test(level, test, &out)))
+}
+
 fn real_main() -> Result<(), String> {
     let o = cli::parse(std::env::args().skip(1))?;
     if o.help {
         print!("{USAGE}");
+        return Ok(());
+    }
+    if let Some(result) = agent_command(&o) {
+        println!("{}", result?);
         return Ok(());
     }
     let level = level_of(&o)?;

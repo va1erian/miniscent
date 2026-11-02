@@ -1,6 +1,8 @@
 //! The real executable on a real level file with a script beside it.
 
 use miniscent_game::levels::corridor_level;
+use miniscent_game::scripts::{self, ScriptWatcher};
+use miniscent_game::{GameSession, SessionConfig};
 use mscent_math::Vec3;
 use mscent_world::{Entity, EntityLabel, Level, format};
 use std::path::{Path, PathBuf};
@@ -95,4 +97,34 @@ fn the_shared_library_is_available_to_a_level_script() {
     let stderr = text(&out.stderr);
     assert!(stderr.contains("doors.st:"), "{stderr}");
     assert!(stderr.contains("no mover named 'nothing'"), "{stderr}");
+}
+
+#[test]
+fn saving_a_script_restarts_the_level_on_it_and_a_broken_one_changes_nothing() {
+    let dir = temp_dir("reload");
+    let level_path = dir.join("level.msl");
+    let script = dir.join("level.st");
+    let materials = miniscent_game::assets::load_materials(None).expect("textures");
+    let cfg = SessionConfig::default();
+    let mut session = GameSession::new(&corridor_level(), materials, &cfg).expect("level");
+    std::fs::write(&script, "player give: 'first'.").unwrap();
+    let files = scripts::for_level(&level_path).unwrap().expect("a script");
+    scripts::start(&mut session, &files).unwrap();
+    assert!(session.game().has_item("first"));
+    let mut watcher = ScriptWatcher::new(&level_path);
+    assert_eq!(watcher.reload_if_changed(&mut session), Ok(false));
+
+    std::fs::write(&script, "player give: 'second one'.").unwrap();
+    assert_eq!(watcher.reload_if_changed(&mut session), Ok(true));
+    assert!(session.game().has_item("second one"));
+    assert!(!session.game().has_item("first"), "the level started over");
+
+    std::fs::write(&script, "player give: 'third'. nosuchthing.").unwrap();
+    let problem = watcher.reload_if_changed(&mut session).unwrap_err();
+    assert!(problem.contains("level.st:1:"), "{problem}");
+    assert!(
+        session.game().has_item("second one"),
+        "the old script runs on"
+    );
+    let _ = std::fs::remove_dir_all(dir);
 }

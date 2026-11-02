@@ -341,7 +341,7 @@ player -> fire -> enemies -> movers -> zones
 | Player | `give:`, `has:`, `hp`, `heal:`, `pos` |
 | Game | `say:`, `win`, `lose`, `randomFrom:to:`, `x:y:z:` |
 | Time | `wait:`, `fork:`; in the library: `waitUntil:`, `waitArrived:`, `waitDestroyed:`, `every:do:`, `after:do:` |
-| Test only | `assert:because:`, `teleport:distance:`, `aimAt:`, `fireFor:`, `shot:` |
+| Test only | `assert:because:`, `teleport:distance:`, `flyTo:`, `aimAt:`, `fireFor:`, `shot:`, `phase` |
 
 A handler that takes a parameter is given what its event was about: `[:enemy | ... ]` for a death, the
 mover for `onArrived:` and `onHit:`, the player for a zone.
@@ -350,8 +350,7 @@ mover for `onArrived:` and `onHit:`, the player for a zone.
 otherwise spawn nothing and wait forever. `tagged:` accepts any name, since a tag can come into being with
 a spawn, so it has no load-time check.
 
-The rows for spawned things and factions, `defineProp:`, and the test functions are not built yet (M9.6,
-M9.8). `say:` goes to the console until the HUD shows it.
+The rows for spawned things and factions, and `defineProp:`, are not built yet (M9.8). `say:` goes to the console until the HUD shows it.
 
 `defineEnemy:base:` setters write the fields of `EnemyStats`, so most tuning needs no rebuild. A new AI
 state does need one: `enemy.rs` stays Rust, because it runs at 120 Hz for every enemy and sight rays are
@@ -409,10 +408,12 @@ whenever geometry moves.
 The trace is one JSON object per line:
 
 ```json
-{"t":3.25,"ev":"destroyed","who":"vault_switch_2","tag":"vault_switch"}
-{"t":3.25,"cmd":"moveTo","mover":"vault_door","pose":"open","secs":1.5}
-{"t":4.75,"ev":"arrived","mover":"vault_door","pose":"open"}
-{"t":9.01,"err":"foundry.st:41: 'closed' does not understand hp"}
+{"t":3.250,"ev":"destroyed","who":"enemy_2"}
+{"t":3.250,"ev":"move_to","mover":"vault_door","pose":"open"}
+{"t":3.250,"say":"Vault unlocked"}
+{"t":4.750,"ev":"arrived","mover":"vault_door","pose":"open"}
+{"t":5.000,"check":true,"because":"the vault opens"}
+{"t":9.010,"err":"foundry.st:41: this message is for a mover"}
 ```
 
 ```bash

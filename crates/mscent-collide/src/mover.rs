@@ -276,6 +276,11 @@ impl MoverSolid {
         solid
     }
 
+    /// The middle of its bounds where it is now.
+    pub fn centre(&self) -> Vec3d {
+        self.lo.lerp(self.hi, 0.5)
+    }
+
     pub fn shape(&self) -> &MoverShape {
         &self.shape
     }

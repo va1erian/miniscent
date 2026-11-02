@@ -36,6 +36,8 @@ pub enum Event {
     PlayerDied,
     GoalReached,
     Restarted,
+    /// Mover `i` was sent to a pose.
+    MoverSent(usize),
     /// Mover `i` reached the pose it was sent to.
     MoverArrived(usize),
     /// Mover `i` met a body with nowhere to go. Fires once per stoppage.
@@ -48,6 +50,8 @@ pub enum Event {
     ZoneLeft(usize),
     ScriptWon,
     ScriptLost,
+    /// A script spawned enemy `i`.
+    EnemySpawned(usize),
 }
 
 #[derive(Clone, Debug)]
@@ -69,6 +73,8 @@ pub struct Game {
     pub(crate) script_program: Option<Box<Vm<Game>>>,
     pub(crate) vm: Option<Box<Vm<Game>>>,
     pub(crate) script: ScriptState,
+    /// The script has the test functions, and keeps running after the level ends.
+    pub(crate) script_test_mode: bool,
     stepper: FixedStepper,
 }
 
@@ -91,6 +97,7 @@ impl Game {
             script_program: None,
             vm: None,
             script,
+            script_test_mode: false,
             stepper: FixedStepper::new(),
         }
     }
@@ -138,6 +145,10 @@ impl Game {
     /// One fixed step. Does nothing once the level is won or lost.
     pub fn step(&mut self, input: &Input) {
         if self.phase != Phase::Playing {
+            // A test can still look at how the level ended.
+            if self.script_test_mode {
+                self.run_script(self.events.len());
+            }
             return;
         }
         let mark = self.events.len();

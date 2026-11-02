@@ -100,6 +100,12 @@ impl Mover {
         self.poses.get(i).map(|(name, _)| name.as_str())
     }
 
+    /// The named pose it is on its way to, if it is moving to one.
+    pub fn target_name(&self) -> Option<&str> {
+        let i = self.motion.as_ref()?.to_pose?;
+        self.poses.get(i).map(|(name, _)| name.as_str())
+    }
+
     pub fn is_moving(&self) -> bool {
         self.motion.is_some()
     }
@@ -198,6 +204,7 @@ impl Game {
             steps: ((seconds * STEP_HZ as f32).round() as u32).max(1),
         });
         mover.blocked = false;
+        self.events.push(Event::MoverSent(index));
         Ok(())
     }
 

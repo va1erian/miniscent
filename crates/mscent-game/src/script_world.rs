@@ -184,6 +184,7 @@ fn spawn_at(g: &mut Game, kind: &str, pos: Vec3, tag: u16) -> Result<Value, Stri
     let index = g.enemies.len();
     g.enemies.push(Enemy::with_stats(index, pos, base, stats));
     g.script.enemy_tags.push(vec![tag]);
+    g.events.push(crate::Event::EnemySpawned(index));
     Ok(Value::Handle(ENEMY, index as u32))
 }
 

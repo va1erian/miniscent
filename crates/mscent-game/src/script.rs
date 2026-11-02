@@ -75,6 +75,12 @@ pub(crate) struct ScriptState {
     pub inside: Vec<bool>,
     pub rng: Rng,
     pub end: Option<ScriptEnd>,
+    /// Test scripts only: fire is held until this tick.
+    pub fire_until: u64,
+    pub checks: Vec<crate::script_test_api::Check>,
+    pub shots: Vec<String>,
+    /// The tasks running each source's top level. The last is the test's.
+    pub entry_tasks: Vec<u64>,
     /// Which handler each started task belongs to, so an error can end it.
     fired: Vec<(u64, usize)>,
 }
@@ -95,6 +101,10 @@ impl ScriptState {
             inside: vec![false; zones],
             rng: Rng::new(RANDOM_SEED),
             end: None,
+            fire_until: 0,
+            checks: Vec::new(),
+            shots: Vec::new(),
+            entry_tasks: Vec::new(),
             fired: Vec::new(),
         }
     }
@@ -130,6 +140,23 @@ impl Game {
         &mut self,
         sources: &[Source],
     ) -> Result<Vec<ScriptError>, Vec<ScriptError>> {
+        self.load_with(sources, false)
+    }
+
+    /// The same for a test, whose last source is the test script: the test
+    /// functions are available to it, and it keeps running after the level ends.
+    pub fn load_test_script(
+        &mut self,
+        sources: &[Source],
+    ) -> Result<Vec<ScriptError>, Vec<ScriptError>> {
+        self.load_with(sources, true)
+    }
+
+    fn load_with(
+        &mut self,
+        sources: &[Source],
+        test: bool,
+    ) -> Result<Vec<ScriptError>, Vec<ScriptError>> {
         let all: Vec<Source> = std::iter::once(Source {
             name: "<game>",
             text: GAME_LIBRARY,
@@ -145,9 +172,14 @@ impl Game {
                     names: list,
                 })
                 .collect();
-            Vm::load(&all, &natives(), &checks)?
+            let mut table = natives();
+            if test {
+                table.extend_from_slice(crate::script_test_api::NATIVES);
+            }
+            Vm::load(&all, &table, &checks)?
         };
         self.script_program = Some(Box::new(loaded.vm));
+        self.script_test_mode = test;
         self.restart();
         Ok(loaded.warnings)
     }
@@ -160,7 +192,7 @@ impl Game {
             self.vm = None;
             return;
         };
-        vm.start(self);
+        self.script.entry_tasks = vm.start(self);
         self.drain_errors(&mut vm);
         self.vm = Some(vm);
     }
@@ -202,6 +234,31 @@ impl Game {
 
     pub fn has_script(&self) -> bool {
         self.vm.is_some()
+    }
+
+    /// Whether the last source's top level has run to its end.
+    pub fn test_finished(&self) -> bool {
+        let last = self.script.entry_tasks.last();
+        match (&self.vm, last) {
+            (Some(vm), Some(task)) => !vm.task_alive(*task),
+            _ => true,
+        }
+    }
+
+    /// A thing's name in the level, for reports.
+    pub fn thing_name(&self, kind: &str, index: usize) -> Option<String> {
+        let wanted = match kind {
+            "mover" => Thing::Mover(index),
+            "zone" => Thing::Zone(index),
+            "marker" => Thing::Marker(index),
+            "enemy" => Thing::Enemy(index),
+            _ => return None,
+        };
+        let names = self.arena.names.by_name.iter();
+        names
+            .into_iter()
+            .find(|(_, t)| **t == wanted)
+            .map(|(n, _)| n.clone())
     }
 
     /// The script's part of a step: zones, then a task for every handler of an

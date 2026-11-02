@@ -36,6 +36,7 @@ pub mod mover;
 pub mod player;
 pub mod script;
 mod script_api;
+pub mod script_test_api;
 mod script_world;
 pub mod weapon;
 
@@ -52,6 +53,12 @@ pub use menu::{Menu, MenuAction, MenuCommand, Screen};
 pub use mover::{Mover, MoverError, WhenBlocked};
 pub use player::Player;
 pub use script_api::natives;
+pub use script_test_api::Check;
+
+/// The game functions only a test script gets, for `--script-api`.
+pub fn test_natives() -> &'static [(&'static str, mscent_script::Native<Game>)] {
+    script_test_api::NATIVES
+}
 pub use weapon::{Shot, Weapon};
 
 #[cfg(test)]
