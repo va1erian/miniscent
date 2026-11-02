@@ -78,6 +78,16 @@ pub struct Vm<H> {
     live_after_gc: usize,
 }
 
+impl<H> std::fmt::Debug for Vm<H> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Vm")
+            .field("tick", &self.tick)
+            .field("tasks", &self.live_tasks)
+            .field("ops", &self.ops)
+            .finish_non_exhaustive()
+    }
+}
+
 // Not derived: that would demand `H: Clone`, and `H` only appears in fn pointers.
 impl<H> Clone for Vm<H> {
     fn clone(&self) -> Self {
@@ -141,6 +151,13 @@ impl<H> Vm<H> {
 
     pub fn task_alive(&self, id: u64) -> bool {
         self.tasks.iter().any(|t| t.id == id)
+    }
+
+    /// How many parameters a block takes, or `None` if the value is no block.
+    pub fn block_params(&self, block: Value) -> Option<usize> {
+        let (code, _, _) = self.heap.block(block)?;
+        let code = self.program.codes.get(usize::from(code))?;
+        Some(usize::from(code.nparams))
     }
 
     /// Selectors of the natives this VM was loaded with, in table order.

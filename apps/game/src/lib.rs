@@ -20,6 +20,7 @@ pub mod controls;
 mod feedback;
 pub mod levels;
 pub mod lightcache;
+pub mod scripts;
 pub mod session;
 
 pub use session::{FrameStats, GameSession, SessionConfig, SessionError, StepOutcome};

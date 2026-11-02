@@ -84,7 +84,9 @@ pub fn draw_hud(fb: &mut Framebuffer, m: &HudModel) {
     );
     let info = format!(
         "ENEMIES {}  GOAL {}  SPD {}",
-        m.enemies_left, m.goal_distance as u32, m.speed
+        m.enemies_left,
+        goal_text(m.goal_distance),
+        m.speed
     );
     draw_text(fb, MARGIN, MARGIN, &info, WHITE, 1);
 }
@@ -122,4 +124,13 @@ pub fn draw_menu(fb: &mut Framebuffer, menu: &Menu) {
 fn centered(fb: &mut Framebuffer, text: &str, y: i32, color: u32, scale: u32) {
     let tw = text_size(text, scale).0 as i32;
     draw_text(fb, (fb.width() as i32 - tw) / 2, y, text, color, scale);
+}
+
+/// A scripted level can have no goal, and so no distance to one.
+fn goal_text(distance: f32) -> String {
+    if distance == f32::MAX {
+        "-".to_string()
+    } else {
+        (distance as u32).to_string()
+    }
 }

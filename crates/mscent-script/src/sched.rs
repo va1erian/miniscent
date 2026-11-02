@@ -49,6 +49,10 @@ impl<H: Host> Vm<H> {
     /// this pass. Rebuilding the queue in one pass keeps a step linear in the
     /// task count, with no removal from the middle.
     fn run_due(&mut self, host: &mut H) {
+        // Most steps wake nothing, and a step should not allocate for that.
+        if !self.tasks.iter().any(|t| t.wake <= self.tick) {
+            return;
+        }
         let mut pending = std::mem::take(&mut self.tasks);
         let mut kept: VecDeque<Task> = VecDeque::with_capacity(pending.len());
         let mut deferred: VecDeque<Task> = VecDeque::new();

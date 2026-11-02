@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use miniscent_game::app::{self, RunOptions, RunReport};
 use miniscent_game::cli::{self, Options, USAGE};
-use miniscent_game::{GameSession, SessionConfig, assets, levels, lightcache};
+use miniscent_game::{GameSession, SessionConfig, assets, levels, lightcache, scripts};
 use mscent_platform::{HeadlessPlatform, Script};
 use mscent_render::png_encode::encode_png;
 use mscent_render::{BakeCache, LevelRenderer};
@@ -125,8 +125,11 @@ fn real_main() -> Result<(), String> {
     }
     let level = level_of(&o)?;
     let materials = assets::load_materials(o.assets.as_deref())?;
+    let scripts = o.level.as_deref().map(scripts::for_level).transpose()?;
+    let scripts = scripts.flatten();
     let cfg = SessionConfig {
         quality: o.quality,
+        scripted: scripts.is_some(),
         ..SessionConfig::default()
     };
     let name = if o.corridor { "corridor" } else { "showcase" };
@@ -137,6 +140,11 @@ fn real_main() -> Result<(), String> {
     let started = std::time::Instant::now();
     let mut session =
         GameSession::new_cached(&level, materials, &cfg, &mut cache).map_err(|e| e.to_string())?;
+    if let Some(scripts) = &scripts {
+        for warning in scripts::start(&mut session, scripts)? {
+            eprintln!("script warning: {warning}");
+        }
+    }
     println!("level ready in {:.2}s", started.elapsed().as_secs_f32());
     if let Some(rep) = cache.last_report() {
         println!("{}", rep.describe());

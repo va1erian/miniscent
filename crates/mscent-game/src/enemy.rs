@@ -79,6 +79,8 @@ pub struct Enemy {
     /// True for the step in which this enemy fired (hit or miss), so the
     /// game can show where the shot came from.
     pub fired: bool,
+    /// A disabled enemy stays where it is, can still be shot, and does nothing.
+    pub enabled: bool,
     stats: EnemyStats,
     lost_steps: u32,
     cooldown: u32,
@@ -89,7 +91,11 @@ pub struct Enemy {
 impl Enemy {
     /// `index` seeds the generator so each enemy wanders differently.
     pub fn new(index: usize, pos: Vec3, kind: u8) -> Self {
-        let stats = stats_for(kind);
+        Self::with_stats(index, pos, kind, stats_for(kind))
+    }
+
+    /// An enemy that looks like `kind` and plays by `stats`.
+    pub fn with_stats(index: usize, pos: Vec3, kind: u8, stats: EnemyStats) -> Self {
         let mut rng = Rng::new(0x5EED_0000 ^ index as u64);
         let patrol_dir = random_dir(&mut rng);
         Self {
@@ -99,6 +105,7 @@ impl Enemy {
             state: AiState::Patrol,
             last_seen: None,
             fired: false,
+            enabled: true,
             stats,
             lost_steps: 0,
             cooldown: stats.attack_cooldown,
@@ -143,6 +150,11 @@ impl Enemy {
             return None;
         }
         self.fired = false;
+        if !self.enabled {
+            // A mover can still push it, and it draws between these two.
+            self.body.prev_pos = self.body.pos;
+            return None;
+        }
         self.cooldown = self.cooldown.saturating_sub(1);
         let to_player = player.centre - self.body.pos;
         let dist = to_player.length();

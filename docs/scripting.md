@@ -315,12 +315,13 @@ without it. A missing capability is usually a new game function.
 
 ```
 player -> fire -> enemies -> movers -> zones
-    -> start handlers for this step's events -> run due tasks -> apply commands -> win and lose checks
+    -> start handlers for this step's events -> run due tasks -> win and lose checks
 ```
 
-- **Stable world.** Scripts see the world as of the start of the task phase. Commands queue and apply
-  together afterwards, in order.
-- **No same-step chains.** Events caused by commands start handlers on the next step, 8 ms later, so a
+- **`Game` is the host.** A game function reads and changes the game directly, so a bad request is an
+  error on the calling line, and `spawn:` then `alive` on the next line agree. There is no command queue
+  and no snapshot. Handlers run one after another, each seeing what the last one did.
+- **No same-step chains.** A move or a kill a handler causes raises its event on a later step, so a
   script cannot loop inside one step.
 - **Budget.** At most 20,000 operations per task run, and 16 task runs per step. A task that was due but
   over the cap goes to the front of the next step's queue, so none starves. Worst case is about 0.6 ms on the dev machine, reached only by a hostile script. An idle step
@@ -330,17 +331,27 @@ player -> fire -> enemies -> movers -> zones
 
 | Area | Calls |
 |---|---|
-| Lookup | `mover:`, `zone:`, `marker:`, `markers:`, `enemy:`, `tagged:`, `player`, `who` |
+| Lookup | `mover:`, `zone:`, `marker:`, `markers:`, `enemy:`, `tagged:`, `player` |
 | Mover | `pose:move:`, `pose:turn:degrees:about:`, `moveTo:in:`, `poseNow`, `moving`, `whenBlocked:`, `whenBlocked:damage:`, `onArrived:`, `onHit:` |
 | Zone | `onEnter:`, `onceEnter:`, `onExit:`, `hasPlayer` |
-| Group | `alive`, `members`, `onEachDestroyed:`, `onAllDestroyed:`, `setFaction:`, `enable`, `disable` |
+| Group or one enemy | `alive`, `onEachDestroyed:`, `enable`, `disable`; a group also `members`, `onAllDestroyed:`, `setFaction:` |
 | Spawned thing | `onPickup:`, `onUse:hold:`, `onHit:`, `onDestroyed:`, `destroy` |
 | Spawning | `spawn:at:tag:`, `spawnAll:at:tag:` |
-| Tuning | `defineProp:`, `defineEnemy:base:`, then a setter per field: `mesh:`, `radius:`, `hp:`, `speed:` and so on |
+| Tuning | `defineProp:`, `defineEnemy:base:`, then a setter per field: `hp:`, `speed:`, `radius:`, `damage:`, `cooldown:`, `sightRange:`, `attackRange:`; `mesh:` on a prop |
 | Player | `give:`, `has:`, `hp`, `heal:`, `pos` |
 | Game | `say:`, `win`, `lose`, `randomFrom:to:`, `x:y:z:` |
 | Time | `wait:`, `fork:`; in the library: `waitUntil:`, `waitArrived:`, `waitDestroyed:`, `every:do:`, `after:do:` |
 | Test only | `assert:because:`, `teleport:distance:`, `aimAt:`, `fireFor:`, `shot:` |
+
+A handler that takes a parameter is given what its event was about: `[:enemy | ... ]` for a death, the
+mover for `onArrived:` and `onHit:`, the player for a zone.
+
+`markers:` takes a tag or the start of a name. Finding none is an error, because a typo there would
+otherwise spawn nothing and wait forever. `tagged:` accepts any name, since a tag can come into being with
+a spawn, so it has no load-time check.
+
+The rows for spawned things and factions, `defineProp:`, and the test functions are not built yet (M9.6,
+M9.8). `say:` goes to the console until the HUD shows it.
 
 `defineEnemy:base:` setters write the fields of `EnemyStats`, so most tuning needs no rebuild. A new AI
 state does need one: `enemy.rs` stays Rust, because it runs at 120 Hz for every enemy and sight rays are
@@ -357,7 +368,7 @@ among hostiles, with sight checks staggered across steps so the cost stays flat.
 - **Scripts are untrusted**, since they ship with levels. The language has no file, network or clock
   access to remove. Limits: a 1 MiB file cap, nesting depth 64, call depth 128, a 4 MiB heap counted in bytes (32 bytes
   of overhead an object), strings and arrays of at most 4,096, 128 live tasks, 65,535 constants, selectors and
-  functions, 1,024 variables in one scope, and a cap of 1024 spawned things. `cargo fuzz` feeds hostile text through
+  functions, 1,024 variables in one scope, 1,024 handlers, 256 tags, 64 enemy kinds, and 256 spawned enemies alive at once, 4,096 in a run. `cargo fuzz` feeds hostile text through
   compile and run.
 - **Every command is validated in Rust.** An unknown pose, a non-finite vector or a position inside solid
   is a script error, not a game state. Arithmetic that gives a non-finite number is an error.

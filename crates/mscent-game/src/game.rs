@@ -1,7 +1,7 @@
 //! Level flow (M6.4) and the per-step game update.
 //!
 //! `Game::step` is the whole simulation tick: player, weapon, enemies, movers,
-//! then the win and lose checks. It reads no clock and no global state, so a
+//! the level script, then the win and lose checks. It reads no clock and no global state, so a
 //! recorded input trace replays to the same result.
 
 use crate::arena::Arena;
@@ -9,8 +9,10 @@ use crate::enemy::Enemy;
 use crate::input::Input;
 use crate::mover::{Mover, spawn_movers};
 use crate::player::{PLAYER_RADIUS, Player};
+use crate::script::{ScriptEnd, ScriptState};
 use crate::weapon::Weapon;
 use mscent_collide::{FixedStepper, MoverSolid, STEP_HZ, Solids};
+use mscent_script::Vm;
 
 /// Steps the hurt flash stays on after the player is hit.
 pub const HURT_FLASH_STEPS: u32 = (STEP_HZ / 4) as u32;
@@ -40,6 +42,12 @@ pub enum Event {
     MoverBlocked(usize),
     /// The player's shot struck mover `i`.
     MoverHit(usize),
+    /// The player went into zone `i`. Only a level with a script tracks zones.
+    ZoneEntered(usize),
+    /// The player came out of zone `i`.
+    ZoneLeft(usize),
+    ScriptWon,
+    ScriptLost,
 }
 
 #[derive(Clone, Debug)]
@@ -57,6 +65,10 @@ pub struct Game {
     /// Parallel to `movers`: what they collide as, at their current poses.
     pub solids: Vec<MoverSolid>,
     pub(crate) events: Vec<Event>,
+    /// The loaded script, not yet started; a restart runs a copy of it.
+    pub(crate) script_program: Option<Box<Vm<Game>>>,
+    pub(crate) vm: Option<Box<Vm<Game>>>,
+    pub(crate) script: ScriptState,
     stepper: FixedStepper,
 }
 
@@ -64,6 +76,7 @@ impl Game {
     pub fn new(arena: Arena) -> Self {
         let (player, enemies) = spawn(&arena);
         let (movers, solids) = spawn_movers(&arena);
+        let script = ScriptState::new(arena.zones.len(), enemies.len());
         Self {
             arena,
             player,
@@ -75,6 +88,9 @@ impl Game {
             movers,
             solids,
             events: Vec::new(),
+            script_program: None,
+            vm: None,
+            script,
             stepper: FixedStepper::new(),
         }
     }
@@ -94,6 +110,7 @@ impl Game {
         self.stepper = FixedStepper::new();
         self.events.clear();
         self.events.push(Event::Restarted);
+        self.start_script();
     }
 
     /// Returns and clears the events recorded since the last call.
@@ -123,6 +140,7 @@ impl Game {
         if self.phase != Phase::Playing {
             return;
         }
+        let mark = self.events.len();
         self.ticks = self.ticks.saturating_add(1);
         self.hurt_steps = self.hurt_steps.saturating_sub(1);
         let solids = Solids::new(&self.arena.bsp, &self.solids);
@@ -130,6 +148,7 @@ impl Game {
         self.fire(input);
         self.run_enemies();
         self.run_movers();
+        self.run_script(mark);
         self.check_end();
     }
 
@@ -178,6 +197,13 @@ impl Game {
         if self.player.is_dead() {
             self.phase = Phase::Lost;
             self.events.push(Event::PlayerDied);
+        } else if let Some(end) = self.script.end {
+            let (phase, event) = match end {
+                ScriptEnd::Win => (Phase::Won, Event::ScriptWon),
+                ScriptEnd::Lose => (Phase::Lost, Event::ScriptLost),
+            };
+            self.phase = phase;
+            self.events.push(event);
         } else if self.at_goal() {
             self.phase = Phase::Won;
             self.events.push(Event::GoalReached);

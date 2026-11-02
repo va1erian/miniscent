@@ -23,6 +23,7 @@ use mscent_world::Level;
 
 use crate::controls::Controls;
 use crate::feedback::Feedback;
+use mscent_script::{ScriptError, Source};
 
 /// Radians of turn per pixel of mouse movement.
 const DEFAULT_SENSITIVITY: f32 = 0.0022;
@@ -36,6 +37,8 @@ pub struct SessionConfig {
     pub build: BuildConfig,
     /// Radians per mouse pixel.
     pub mouse_sensitivity: f32,
+    /// A script comes with this level, so it may have no goal of its own.
+    pub scripted: bool,
 }
 
 impl Default for SessionConfig {
@@ -44,6 +47,7 @@ impl Default for SessionConfig {
             quality: Quality::High,
             build: BuildConfig::default(),
             mouse_sensitivity: DEFAULT_SENSITIVITY,
+            scripted: false,
         }
     }
 }
@@ -140,7 +144,12 @@ impl GameSession {
         cfg: &SessionConfig,
         cache: &mut BakeCache,
     ) -> Result<Self, SessionError> {
-        let arena = Arena::from_level(level).map_err(SessionError::Load)?;
+        let arena = if cfg.scripted {
+            Arena::from_scripted_level(level)
+        } else {
+            Arena::from_level(level)
+        }
+        .map_err(SessionError::Load)?;
         let renderer = LevelRenderer::from_level_cached(level, materials, &cfg.build, cache)
             .map_err(SessionError::Build)?;
         Ok(Self::with_renderer(arena, renderer, cfg))
@@ -209,6 +218,17 @@ impl GameSession {
         self.stats = stats;
     }
 
+    /// Compiles a level script and starts the level over on it. Returns the
+    /// compiler's warnings, or every error with nothing changed.
+    pub fn load_script(
+        &mut self,
+        sources: &[Source],
+    ) -> Result<Vec<ScriptError>, Vec<ScriptError>> {
+        let warnings = self.game.load_script(sources)?;
+        self.restart();
+        Ok(warnings)
+    }
+
     /// Starts the level over: player, enemies, weapon and menu.
     pub fn restart(&mut self) {
         self.game.restart();
@@ -245,6 +265,7 @@ impl GameSession {
                 self.game.step(&input);
             }
             self.note_events();
+            self.report_script();
             self.menu.sync_phase(self.game.phase);
         } else {
             self.controls.take_mouse();
@@ -252,6 +273,16 @@ impl GameSession {
         StepOutcome {
             quit,
             capture_mouse: self.playing(),
+        }
+    }
+
+    /// Until the HUD shows these (M9.8), the console does.
+    fn report_script(&mut self) {
+        for message in self.game.take_messages() {
+            eprintln!("script says: {message}");
+        }
+        for error in self.game.take_script_errors() {
+            eprintln!("script error: {error}");
         }
     }
 

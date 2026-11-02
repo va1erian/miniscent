@@ -16,6 +16,9 @@
 //!   weapon, enemy sight and enemy fire. [`Weapon`] (`weapon.rs`).
 //! * [`Mover`], [`WhenBlocked`] (`mover.rs`): named poses, eased motion and what
 //!   happens when a body is in the way; driven through `Game`.
+//! * Level scripts (`script.rs`): [`Game::load_script`] compiles `mscent_script`
+//!   sources, and `script_api.rs` and `script_world.rs` are the game functions
+//!   they can call, all in one table, [`natives`].
 //! * [`HudModel`], [`draw_hud`], [`draw_menu`] (`hud.rs`); [`Menu`]
 //!   (`menu.rs`).
 //!
@@ -31,9 +34,15 @@ pub mod input;
 pub mod menu;
 pub mod mover;
 pub mod player;
+pub mod script;
+mod script_api;
+mod script_world;
 pub mod weapon;
 
-pub use arena::{Arena, EnemySpawn, Goal, LightSpec, LoadError, MoverSpec};
+pub use arena::{
+    Arena, EnemySpawn, Goal, LevelNames, LightSpec, LoadError, MarkerSpec, MoverSpec, Thing,
+    ZoneSpec,
+};
 pub use combat::{Hitscan, Sphere, hitscan, line_of_sight, ray};
 pub use enemy::{AiState, Enemy, EnemyStats, stats_for};
 pub use game::{Event, Game, Phase};
@@ -42,6 +51,7 @@ pub use input::Input;
 pub use menu::{Menu, MenuAction, MenuCommand, Screen};
 pub use mover::{Mover, MoverError, WhenBlocked};
 pub use player::Player;
+pub use script_api::natives;
 pub use weapon::{Shot, Weapon};
 
 #[cfg(test)]
@@ -56,5 +66,9 @@ mod hud_tests;
 mod mover_tests;
 #[cfg(test)]
 mod player_tests;
+#[cfg(test)]
+mod script_error_tests;
+#[cfg(test)]
+mod script_tests;
 #[cfg(test)]
 mod test_util;
