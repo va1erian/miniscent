@@ -7,8 +7,9 @@
 //! gives it a proportional partial value instead of a hard 0 or 1; that is
 //! what keeps lightmap shadow borders from turning into a staircase.
 
-use super::ray::segment_clear;
+use super::occluders::Occluders;
 use super::uv::FaceProjection;
+use super::{BakeConfig, PointLight};
 use mscent_math::Vec3;
 
 /// Samples tested first: the lamp centre and three on its rim. If they agree
@@ -22,18 +23,85 @@ const GOLDEN: f32 = 2.399_963_2;
 /// Plastic-number constants of the R2 low-discrepancy sequence.
 const R2: [f32; 2] = [0.754_877_7, 0.569_840_3];
 
-/// The luxel being shaded.
+/// The patch of surface a receiver stands for, which the samples spread over.
+pub(super) enum Footprint<'a> {
+    /// A luxel of a face.
+    Luxel {
+        proj: &'a FaceProjection,
+        verts: &'a [Vec3],
+        /// Luxel column and row.
+        x: u32,
+        y: u32,
+    },
+    /// A voxel cell: a square of side `size` facing `normal`.
+    Cell {
+        normal: Vec3,
+        tangent: Vec3,
+        bitangent: Vec3,
+        size: f32,
+    },
+}
+
+impl Footprint<'_> {
+    pub(super) fn normal(&self) -> Vec3 {
+        match self {
+            Footprint::Luxel { proj, .. } => proj.normal,
+            Footprint::Cell { normal, .. } => *normal,
+        }
+    }
+
+    /// The point at fractions `(a, b)` of the footprint around `centre`.
+    fn point(&self, centre: Vec3, a: f32, b: f32) -> Vec3 {
+        match self {
+            Footprint::Luxel { proj, verts, x, y } => {
+                proj.luxel_sample_at(verts, *x as f32 + a, *y as f32 + b)
+            }
+            Footprint::Cell {
+                tangent,
+                bitangent,
+                size,
+                ..
+            } => centre + *tangent * ((a - 0.5) * size) + *bitangent * ((b - 0.5) * size),
+        }
+    }
+}
+
+/// The surface point being shaded.
 pub(super) struct Receiver<'a> {
-    pub bsp: &'a crate::bsp::Bsp,
-    pub proj: &'a FaceProjection,
-    pub verts: &'a [Vec3],
-    /// Luxel column and row.
-    pub x: u32,
-    pub y: u32,
+    pub occ: &'a Occluders<'a>,
+    pub foot: Footprint<'a>,
     /// Distance rays start off the surface.
     pub bias: f32,
-    /// Luxel centre, which seeds the per-luxel rotation.
+    /// The footprint's centre, which seeds the per-receiver rotation.
     pub centre: Vec3,
+}
+
+/// Light arriving at the receiver from one lamp and the unit direction towards
+/// it, or `None` when out of range, facing away or shadowed.
+pub(super) fn light_at(
+    rx: &Receiver,
+    light: &PointLight,
+    cfg: &BakeConfig,
+) -> Option<(Vec3, Vec3)> {
+    let to = light.position - rx.centre;
+    let dist = to.length();
+    if dist >= light.radius {
+        return None;
+    }
+    let dir = to.normalized()?;
+    let facing = dir.dot(rx.foot.normal());
+    if facing <= 0.0 {
+        return None;
+    }
+    let seen = visibility(rx, light.position, cfg.light_radius, cfg.shadow_samples);
+    if seen <= 0.0 {
+        return None;
+    }
+    let falloff = 1.0 - dist / light.radius;
+    Some((
+        light.color * (falloff * falloff * falloff * facing * seen),
+        dir,
+    ))
 }
 
 /// Fraction of a lamp of `radius` at `light` visible from the luxel.
@@ -41,8 +109,10 @@ pub(super) struct Receiver<'a> {
 /// luxel centre.
 pub(super) fn visibility(r: &Receiver, light: Vec3, radius: f32, samples: u32) -> f32 {
     let samples = samples.max(1);
+    let normal = r.foot.normal();
     let ray = |from: Vec3, to: Vec3| {
-        segment_clear(r.bsp, (from + r.proj.normal * r.bias).to_f64(), to.to_f64())
+        r.occ
+            .segment_clear((from + normal * r.bias).to_f64(), to.to_f64())
     };
     if radius <= 0.0 || samples == 1 {
         return f32::from(u8::from(ray(r.centre, light)));
@@ -68,9 +138,9 @@ pub(super) fn visibility(r: &Receiver, light: Vec3, radius: f32, samples: u32) -
     };
     let sees = |j: u32| {
         let k = lamp_index(j, samples);
-        let fx = r.x as f32 + (shift[0] + j as f32 * R2[0]).fract();
-        let fy = r.y as f32 + (shift[1] + j as f32 * R2[1]).fract();
-        ray(r.proj.luxel_sample_at(r.verts, fx, fy), lamp_at(k))
+        let fx = (shift[0] + j as f32 * R2[0]).fract();
+        let fy = (shift[1] + j as f32 * R2[1]).fract();
+        ray(r.foot.point(r.centre, fx, fy), lamp_at(k))
     };
     let probe = PROBE.min(samples);
     let hits = (0..probe).filter(|&j| sees(j)).count() as u32;

@@ -6,10 +6,13 @@
 //! a surface run past the box on every side: a cell needs both its samples, and
 //! a quad needs all four of its cells.
 
+use mscent_math::Vec3d;
+
 use super::chunk::sample_index;
 use super::context::{Context, apply_cuts};
 use super::volume::Volume;
 use super::{CHUNK_EDGE, edited};
+use crate::brush::Op;
 
 /// Samples along one edge of a block.
 pub(super) const BLOCK_EDGE: usize = CHUNK_EDGE + 4;
@@ -101,7 +104,7 @@ fn fill_from_chunk(
                     (z - r[2].0 * edge) as usize,
                 );
                 let i = sample_index(nx, ny, nz);
-                let (delta, material) = chunk.sample(i);
+                let (delta, stored) = chunk.sample(i);
                 let value = edited(base.get(i), delta);
                 let k = block_index(x, y, z);
                 out.density[k] = if cuts.is_empty() {
@@ -109,7 +112,7 @@ fn fill_from_chunk(
                 } else {
                     apply_cuts(&cuts, value, lattice.position(global(x, y, z)), cell)
                 };
-                out.material[k] = material;
+                out.material[k] = base.material(i, stored);
             }
         }
     }
@@ -129,27 +132,52 @@ fn fill_from_ring(
     let global = |x: i32, y: i32, z: i32| [origin[0] + x, origin[1] + y, origin[2] + z];
     let lo = lattice.position(global(r[0].1, r[1].1, r[2].1));
     let hi = lattice.position(global(r[0].2 - 1, r[1].2 - 1, r[2].2 - 1));
+    let each = || {
+        (r[2].1..r[2].2).flat_map(move |z| {
+            (r[1].1..r[1].2).flat_map(move |y| (r[0].1..r[0].2).map(move |x| [x, y, z]))
+        })
+    };
+    for [x, y, z] in each() {
+        out.material[block_index(x, y, z)] =
+            nearest_material(volume, ctx, global(x, y, z), samples);
+    }
     let world = ctx.world_near(lo, hi);
-    for z in r[2].1..r[2].2 {
-        for y in r[1].1..r[1].2 {
-            for x in r[0].1..r[0].2 {
-                let g = global(x, y, z);
-                let k = block_index(x, y, z);
-                out.density[k] = ctx.ring_sample(&world, lattice.position(g));
-                out.material[k] = nearest_material(volume, g, samples);
-            }
+    for [x, y, z] in each() {
+        let at = lattice.position(global(x, y, z));
+        out.density[block_index(x, y, z)] = ctx.ring_sample(&world, at);
+    }
+    if ctx.has_neighbours() {
+        for [x, y, z] in each() {
+            let at = lattice.position(global(x, y, z));
+            overlay_neighbour(ctx, at, block_index(x, y, z), out);
         }
+    }
+}
+
+/// A subtract volume beside this one owns its box outright, and an add volume
+/// only ever adds to what the brushes put there.
+fn overlay_neighbour(ctx: &mut Context, at: Vec3d, k: usize, out: &mut Block) {
+    let Some((value, material, op)) = ctx.neighbour_sample(at) else {
+        return;
+    };
+    if op == Op::Subtract || value > out.density[k] {
+        out.density[k] = value;
+        out.material[k] = material;
     }
 }
 
 /// The material of the interior sample closest to ring sample `g`, so a
 /// surface closing against the ring keeps the look of what it closes.
-fn nearest_material(volume: &Volume, g: [i32; 3], samples: [i32; 3]) -> u8 {
+fn nearest_material(volume: &Volume, ctx: &mut Context, g: [i32; 3], samples: [i32; 3]) -> u8 {
     let edge = CHUNK_EDGE as i32;
     let at = [0, 1, 2].map(|axis| g[axis].clamp(0, samples[axis] - 1));
     let local = at.map(|v| v.rem_euclid(edge) as usize);
-    let index = volume.lattice.chunk_index(at.map(|v| v.div_euclid(edge)));
-    index.and_then(|i| volume.table.get(i)).map_or(0, |c| {
-        c.sample(sample_index(local[0], local[1], local[2])).1
-    })
+    let coord = at.map(|v| v.div_euclid(edge));
+    let Some(index) = volume.lattice.chunk_index(coord) else {
+        return 0;
+    };
+    let i = sample_index(local[0], local[1], local[2]);
+    ctx.ensure_base(index, coord);
+    let stored = volume.table.get(index).map_or(0, |c| c.sample(i).1);
+    ctx.cached_base(index).map_or(0, |b| b.material(i, stored))
 }

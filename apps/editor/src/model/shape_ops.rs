@@ -37,9 +37,17 @@ pub fn fresh_info(plane: DPlane, material: u16) -> TexInfo {
     info
 }
 
+/// The brush of an entry these operations can cut: a volume is not one.
+fn solid_of(def: &BrushDef) -> Option<Brush> {
+    if def.is_volume() {
+        return None;
+    }
+    def.to_brush(0).ok()
+}
+
 /// The planes and mappings of a brush in its built order.
 pub fn parts(def: &BrushDef) -> Option<Parts> {
-    let b = def.to_brush(0).ok()?;
+    let b = solid_of(def)?;
     Some(Parts {
         planes: b.planes().to_vec(),
         infos: b.texinfos().to_vec(),
@@ -116,7 +124,7 @@ pub fn subtract(target: &BrushDef, cutter: &BrushDef) -> Option<Vec<BrushDef>> {
 /// The distinct corners of a brush, or `None` when there are too many for
 /// the vertex tool.
 pub fn vertices(def: &BrushDef) -> Option<Vec<Vec3d>> {
-    let brush = def.to_brush(0).ok()?;
+    let brush = solid_of(def)?;
     let mut out: Vec<Vec3d> = Vec::new();
     for v in brush.faces().iter().flat_map(|f| f.vertices()) {
         if !out.iter().any(|o| (*o - *v).length() < 1.0e-6) {
@@ -190,7 +198,7 @@ pub fn reshape(old: &BrushDef, points: &[Vec3d]) -> Option<BrushDef> {
 /// The prism that pushes face `plane` of `def` out by `dist` (positive).
 /// Its base is the face itself and its sides stand on the face's edges.
 pub fn prism(id: Id, def: &BrushDef, plane: usize, dist: f64) -> Option<BrushDef> {
-    let brush = def.to_brush(0).ok()?;
+    let brush = solid_of(def)?;
     let n = brush.planes().get(plane)?.normal;
     let v = brush.faces().get(plane)?.vertices();
     let base = *v.first()?;

@@ -20,6 +20,7 @@ use crate::materials::SharedMaterials;
 use crate::model::{Document, FlyCam};
 
 mod highlight;
+mod live;
 mod preview;
 mod scene;
 pub mod worker;
@@ -102,6 +103,17 @@ pub struct Studio {
     highlights: Highlights,
     /// How previews and bakes light the level.
     settings: SessionConfig,
+    /// The voxel batch being meshed.
+    live_job: Option<live::LiveJob>,
+    /// The BSP of the picture, which live batches are meshed against.
+    live_bsp: Option<std::sync::Arc<mscent_world::Bsp>>,
+    /// A stroke is running.
+    stroking: bool,
+    /// The picture has surfaces the game session built with it does not: it
+    /// collides with what the last preview compiled.
+    live_dirty: bool,
+    /// Batches meshed so far.
+    live_count: usize,
 }
 
 /// The internal render size for a pane of `pane` pixels: the pane divided by
@@ -116,6 +128,11 @@ impl Studio {
     pub fn new(doc: &Document) -> Studio {
         Studio {
             preview_job: None,
+            live_job: None,
+            live_bsp: None,
+            stroking: false,
+            live_dirty: false,
+            live_count: 0,
             bake_job: None,
             wanted: None,
             changed_at: Instant::now(),
@@ -150,6 +167,12 @@ impl Studio {
         self.built_doc.as_ref() == Some(doc)
     }
 
+    /// Whether Play can start on what is up right now. After a live edit it needs
+    /// one more preview, as a game collides with what that compiles.
+    pub fn playable_now(&self, doc: &Document) -> bool {
+        self.is_current(doc) && !self.live_dirty
+    }
+
     /// Render threads still running, including ones told to stop.
     #[cfg(test)]
     pub fn worker_threads(&self) -> usize {
@@ -169,6 +192,8 @@ impl Studio {
     fn forget_build(&mut self) {
         self.preview_job = None;
         self.bake_job = None;
+        self.live_job = None;
+        self.live_bsp = None;
         self.retire_worker();
         self.built_doc = None;
         self.wanted = None;
@@ -443,6 +468,8 @@ Q/E: roll   Shift: fast";
 mod cache_lock_tests;
 #[cfg(test)]
 mod large_level_tests;
+#[cfg(test)]
+mod live_tests;
 #[cfg(test)]
 mod material_tests;
 #[cfg(test)]

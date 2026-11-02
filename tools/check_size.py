@@ -13,9 +13,8 @@ import os
 import subprocess
 import sys
 
-# Raised from 1.6 MB for the texture generator, which replaced 757 KB of PNGs in
-# the assets with 7.5 KB of recipes: about 143 KB more binary, 600 KB less to ship.
-BUDGET_BYTES = 1_800_000
+# 1.6 MB until voxel volumes, which took the game from 1,576,960 to 1,885,184 bytes.
+BUDGET_BYTES = 2_200_000
 WARN_FRACTION = 0.8
 
 

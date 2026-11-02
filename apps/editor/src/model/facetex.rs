@@ -133,7 +133,11 @@ impl EditorState {
     /// Faces the panel edits: the picked ones that still exist, else every
     /// face of the selected brush.
     pub fn target_faces(&self) -> Vec<FaceRef> {
-        let planes = |id| self.doc.brush(id).map_or(0, |b| b.full_texinfos().len());
+        // A volume has no faces to texture.
+        let planes = |id| {
+            let brush = self.doc.brush(id).filter(|b| !b.is_volume());
+            brush.map_or(0, |b| b.full_texinfos().len())
+        };
         let picked: Vec<FaceRef> = self
             .faces
             .iter()
@@ -180,7 +184,7 @@ impl EditorState {
     /// picked face; with it (Ctrl) it is toggled in the set. Picking nothing
     /// without `additive` clears the set. Returns the hit.
     pub fn pick_face_at(&mut self, ray: &Ray, additive: bool) -> Option<FaceHit> {
-        let hit = pick::pick_face(&self.doc, ray);
+        let hit = pick::pick_visible_face(&self.doc, ray);
         match (hit, additive) {
             (Some(h), false) => {
                 self.faces = vec![h.face];
@@ -207,7 +211,7 @@ impl EditorState {
     /// Selects the brush whose visible surface is under `ray`, as the Select
     /// tool does from the 3D view. Hitting nothing clears the selection.
     pub fn select_brush_at(&mut self, ray: &Ray) -> Option<FaceHit> {
-        let hit = pick::pick_face(&self.doc, ray);
+        let hit = pick::pick_visible_face(&self.doc, ray);
         self.selection = hit.map(|h| Selection::Brush(h.face.brush));
         hit
     }

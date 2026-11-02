@@ -7,17 +7,30 @@
 //! which way the wall faces.
 
 use super::class::Collide;
+use super::world::FxWorld;
 use mscent_math::Vec3;
 use mscent_math::epsilon::{PARTICLE_NORMAL_PROBE, PARTICLE_REST_SPEED, PLANE_EPSILON_F32};
-use mscent_world::Bsp;
 
-/// `is_solid` calls per tick, over all classes.
+/// Point tests per tick, over all classes, in units of one BSP test. A test
+/// at a point inside a volume costs [`VOXEL_TEST_COST`] of them, and a
+/// bounce in a volume [`VOXEL_SWEEP_COST`] more, because a voxel test takes
+/// about 8 us against the BSP's 0.1 us (docs/voxels.md). The cost is a
+/// compromise: the true ratio would leave one voxel test a tick. With no
+/// volumes every test costs 1.
 pub const MAX_SOLID_TESTS: u32 = 512;
+/// Units one point test inside a volume takes from [`MAX_SOLID_TESTS`].
+pub const VOXEL_TEST_COST: u32 = 16;
+/// Units a bounce whose step touches a volume takes besides its sweep: about
+/// `VOXEL_BISECTIONS + 8` voxel tests that nothing else counts.
+pub const VOXEL_SWEEP_COST: u32 = 128;
 /// Surface queries (the design's "sweeps") per tick, over all classes. Each
 /// is at most `BISECTIONS + 8` extra `is_solid` calls, not counted above.
 pub const MAX_SWEEPS: u32 = 32;
 /// Halvings of a bounce's step; the contact is within step / 2^20 of the wall.
 const BISECTIONS: u32 = 20;
+/// The same in a volume, where each halving costs a voxel test: the contact
+/// is within step / 2^8 of the rock, a few millimetres for a spark.
+const VOXEL_BISECTIONS: u32 = 8;
 
 /// What the tick's collision work has spent so far.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -27,21 +40,33 @@ pub struct Budget {
 }
 
 impl Budget {
-    fn take_test(&mut self) -> bool {
-        take(&mut self.solid_tests, MAX_SOLID_TESTS)
+    /// Charges one point test at `p`: dearer inside a volume.
+    fn take_test(&mut self, world: FxWorld, p: Vec3) -> bool {
+        let cost = if world.in_volume(p) {
+            VOXEL_TEST_COST
+        } else {
+            1
+        };
+        take(&mut self.solid_tests, MAX_SOLID_TESTS, cost)
+    }
+
+    fn take_voxel_sweep(&mut self) -> bool {
+        take(&mut self.solid_tests, MAX_SOLID_TESTS, VOXEL_SWEEP_COST)
     }
 
     fn take_sweep(&mut self) -> bool {
-        take(&mut self.sweeps, MAX_SWEEPS)
+        take(&mut self.sweeps, MAX_SWEEPS, 1)
     }
 }
 
-fn take(used: &mut u32, max: u32) -> bool {
-    if *used >= max {
-        return false;
+fn take(used: &mut u32, max: u32, cost: u32) -> bool {
+    match used.checked_add(cost) {
+        Some(total) if total <= max => {
+            *used = total;
+            true
+        }
+        _ => false,
     }
-    *used += 1;
-    true
 }
 
 /// What happened to a particle that moved from `prev` to `pos`.
@@ -66,7 +91,7 @@ pub enum Outcome {
 /// meet the limit.
 pub fn resolve(
     mode: Collide,
-    bsp: &Bsp,
+    world: FxWorld,
     budget: &mut Budget,
     prev: Vec3,
     pos: Vec3,
@@ -75,25 +100,32 @@ pub fn resolve(
     match mode {
         Collide::None => Outcome::Free,
         Collide::Die => {
-            if budget.take_test() && bsp.is_solid(pos.to_f64()) {
+            if budget.take_test(world, pos) && world.is_solid(pos.to_f64()) {
                 Outcome::Dead
             } else {
                 Outcome::Free
             }
         }
-        Collide::Bounce { keep } => bounce(bsp, budget, prev, pos, vel, keep),
+        Collide::Bounce { keep } => bounce(world, budget, prev, pos, vel, keep),
     }
 }
 
-fn bounce(bsp: &Bsp, budget: &mut Budget, prev: Vec3, pos: Vec3, vel: Vec3, keep: f32) -> Outcome {
-    if !budget.take_test() {
+fn bounce(
+    world: FxWorld,
+    budget: &mut Budget,
+    prev: Vec3,
+    pos: Vec3,
+    vel: Vec3,
+    keep: f32,
+) -> Outcome {
+    if !budget.take_test(world, pos) {
         return Outcome::Dead;
     }
-    if !bsp.is_solid(pos.to_f64()) {
+    if !world.is_solid(pos.to_f64()) {
         return Outcome::Free;
     }
     if vel.length() < PARTICLE_REST_SPEED {
-        return if bsp.is_solid(prev.to_f64()) {
+        return if world.is_solid(prev.to_f64()) {
             Outcome::Dead
         } else {
             Outcome::Bounced {
@@ -105,17 +137,25 @@ fn bounce(bsp: &Bsp, budget: &mut Budget, prev: Vec3, pos: Vec3, vel: Vec3, keep
     if !budget.take_sweep() {
         return Outcome::Dead;
     }
-    let Some(contact) = last_empty_point(bsp, prev, pos) else {
+    let steps = if world.touches_volume(prev, pos) {
+        if !budget.take_voxel_sweep() {
+            return Outcome::Dead;
+        }
+        VOXEL_BISECTIONS
+    } else {
+        BISECTIONS
+    };
+    let Some(contact) = last_empty_point(world, prev, pos, steps) else {
         return Outcome::Dead;
     };
-    let normal = surface_normal(bsp, contact)
+    let normal = surface_normal(world, contact)
         .or_else(|| vel.normalized().map(|d| d * -1.0))
         .unwrap_or(Vec3::ZERO);
     if normal == Vec3::ZERO {
         return Outcome::Dead;
     }
     Outcome::Bounced {
-        pos: stand_off(bsp, contact, normal),
+        pos: stand_off(world, contact, normal),
         vel: reflect(vel, normal, keep),
     }
 }
@@ -124,17 +164,18 @@ fn bounce(bsp: &Bsp, budget: &mut Budget, prev: Vec3, pos: Vec3, vel: Vec3, keep
 /// sweep". `mscent_collide::sweep_sphere` would give an exact normal, but it
 /// builds its cells in a `Vec` on every call, and the particle tick promises
 /// zero allocation. This bisects `prev..pos` with `is_solid`, so the point it
-/// returns is empty by the BSP's own verdict (that is what keeps a bouncing
+/// returns is empty by the world's own verdict (that is what keeps a bouncing
 /// particle out of solid), within `|pos - prev| / 2^BISECTIONS` of the wall.
 /// `None` when `prev` is itself solid, as for a particle born in a wall.
-fn last_empty_point(bsp: &Bsp, prev: Vec3, pos: Vec3) -> Option<Vec3> {
-    if bsp.is_solid(prev.to_f64()) {
+/// `steps` is [`BISECTIONS`], or [`VOXEL_BISECTIONS`] where each test is dear.
+fn last_empty_point(world: FxWorld, prev: Vec3, pos: Vec3, steps: u32) -> Option<Vec3> {
+    if world.is_solid(prev.to_f64()) {
         return None;
     }
     let (mut empty, mut solid) = (prev, pos);
-    for _ in 0..BISECTIONS {
+    for _ in 0..steps {
         let mid = empty.lerp(solid, 0.5);
-        if bsp.is_solid(mid.to_f64()) {
+        if world.is_solid(mid.to_f64()) {
             solid = mid;
         } else {
             empty = mid;
@@ -147,7 +188,15 @@ fn last_empty_point(bsp: &Bsp, prev: Vec3, pos: Vec3) -> Option<Vec3> {
 /// axis neighbours are solid. Exact for axis-aligned walls, and for a 45
 /// degree wall; coarser for other slopes, which a spark's bounce does not
 /// show. `None` when no neighbour is solid or they cancel.
-fn surface_normal(bsp: &Bsp, at: Vec3) -> Option<Vec3> {
+///
+/// A voxel surface within reach gives its own normal instead: its rock is a
+/// smooth mesh, where six axis probes would tilt every slope toward a
+/// diagonal.
+fn surface_normal(world: FxWorld, at: Vec3) -> Option<Vec3> {
+    world.voxel_normal(at).or_else(|| probed_normal(world, at))
+}
+
+fn probed_normal(world: FxWorld, at: Vec3) -> Option<Vec3> {
     let h = PARTICLE_NORMAL_PROBE;
     let mut away = Vec3::ZERO;
     for axis in [
@@ -157,7 +206,7 @@ fn surface_normal(bsp: &Bsp, at: Vec3) -> Option<Vec3> {
     ] {
         for sign in [1.0, -1.0] {
             let step = axis * (sign * h);
-            if bsp.is_solid((at + step).to_f64()) {
+            if world.is_solid((at + step).to_f64()) {
                 away = away - step;
             }
         }
@@ -167,9 +216,9 @@ fn surface_normal(bsp: &Bsp, at: Vec3) -> Option<Vec3> {
 
 /// Moves a contact point a plane-epsilon off the surface so the particle does
 /// not sit exactly on the plane, unless that spot is solid after all.
-fn stand_off(bsp: &Bsp, contact: Vec3, normal: Vec3) -> Vec3 {
+fn stand_off(world: FxWorld, contact: Vec3, normal: Vec3) -> Vec3 {
     let moved = contact + normal * PLANE_EPSILON_F32;
-    if moved.is_finite() && !bsp.is_solid(moved.to_f64()) {
+    if moved.is_finite() && !world.is_solid(moved.to_f64()) {
         moved
     } else {
         contact

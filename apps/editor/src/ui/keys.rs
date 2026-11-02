@@ -8,7 +8,7 @@ use super::icons::Glyph;
 use crate::model::{EntityKind, Tool};
 
 /// The palette: tooltip name, shortcut key, icon and tool.
-pub(super) const TOOLS: [(&str, Key, Glyph, Tool); 11] = [
+pub(super) const TOOLS: [(&str, Key, Glyph, Tool); 12] = [
     (
         "Select / move",
         Key::Q,
@@ -59,6 +59,12 @@ pub(super) const TOOLS: [(&str, Key, Glyph, Tool); 11] = [
         Key::Z,
         Glyph::Lucide(Lucide::Square),
         Tool::Place(EntityKind::Zone),
+    ),
+    (
+        "Voxel: sculpt in the 3D view. Wheel sets the radius, Ctrl swaps add and carve",
+        Key::X,
+        Glyph::Lucide(Lucide::CircleX),
+        Tool::Voxel,
     ),
 ];
 

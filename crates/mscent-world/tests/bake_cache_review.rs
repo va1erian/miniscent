@@ -56,12 +56,12 @@ fn fnv(bytes: &[u8]) -> u64 {
 #[test]
 fn the_baked_bytes_do_not_depend_on_the_worker_count() {
     let (bsp, faces, lights) = scene();
-    let key = input_key(&faces, &lights, &cfg(1));
+    let key = input_key(&faces, &lights, &cfg(1), 0);
     let reference = bake(&bsp, &faces, &lights, &cfg(1))
         .expect("bakes")
         .to_bytes(key);
     for workers in [2, 3, 7, 64] {
-        assert_eq!(input_key(&faces, &lights, &cfg(workers)), key);
+        assert_eq!(input_key(&faces, &lights, &cfg(workers), 0), key);
         let bytes = bake(&bsp, &faces, &lights, &cfg(workers))
             .expect("bakes")
             .to_bytes(key);
@@ -77,7 +77,9 @@ fn the_baked_bytes_do_not_depend_on_the_worker_count() {
 /// between machines do not trip it.
 #[test]
 fn a_change_of_baker_output_needs_a_version_bump() {
-    const PINNED: (u16, u64) = (4, 0xebc4_7bbf_19bb_6735);
+    // Version 5 added the voxel records to the file; the luxels did not change,
+    // which is why the fingerprint is the one version 4 had.
+    const PINNED: (u16, u64) = (5, 0xebc4_7bbf_19bb_6735);
     let (bsp, faces, lights) = scene();
     let map = bake(&bsp, &faces, &lights, &cfg(1)).expect("bakes");
     let mut bytes = Vec::new();

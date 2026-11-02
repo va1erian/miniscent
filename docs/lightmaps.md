@@ -13,6 +13,20 @@ samples), traces shadow rays from each luxel to each lamp, adds one bounce, and
 stores colour plus a dominant light direction per luxel. The result is one
 `Lightmap`.
 
+## Voxel surfaces
+
+Voxel volumes (`docs/voxels.md`) are lit by the same baker but not through the
+atlas. Each surface cell, named by its place in its volume, has a record: colour
+and the direction of the light, lit like a luxel from a point 1.5 cells off the
+surface with the same soft shadows, from the same lamps and gain, so the two
+kinds of surface read the same in the shader (colour times 256). Rays go through
+`Occluders`: the BSP, then the triangles of every volume, so voxels shadow
+brushes and brushes shadow voxels. A cell whose lifted point is inside solid brush
+takes its light from the lit cells within two cells of it. Bounce uses one patch
+per chunk and gathers per block of 4 cells, then blurs; brush luxels do not
+gather from chunk patches. The records are stored in the `.msl.lit` file after
+the luxels, and an old file (version 4) is ignored and rebaked.
+
 ## How big the atlas gets
 
 The atlas is 1024 luxels wide and grows downwards to at most 8192 rows: 201 MiB
@@ -48,9 +62,11 @@ MiB after a cold bake and 314 MiB after a reload, and a frame takes 9.8 ms (`--s
 ## When it runs
 
 Once per distinct set of inputs. The cache key (`store::input_key`) hashes
-exactly what the baker reads: face polygons and normals, lights, the bake
-settings and the baker's `VERSION`. It does **not** include texture mappings,
-materials, enemies, the player start, the camera or the render quality, so
+exactly what the baker reads: face polygons and normals, lights, the shape of
+voxel surfaces (positions, normals and triangles, `cell_sites::shape_key`), the
+bake settings and the baker's `VERSION`. It does **not** include texture
+mappings, materials (painting a voxel volume changes only its materials),
+enemies, the player start, the camera or the render quality, so
 changing any of those never re-bakes. Moving a brush or a light, changing the
 settings, or a baker change (bump `store::VERSION`) does.
 
@@ -67,8 +83,13 @@ document) use the per-user cache directory, found without any dependency:
 git (`*.msl.lit`).
 
 The format is little endian: magic, version, content key, atlas, per-face
-projections, luxels, and a 64 bit checksum of everything before it. The reader
-checks every count against the bytes left and every float for finiteness. A
+projections, luxels, a count and the light records of voxel surface cells (9
+bytes each: three `u16` colours in 1/2048 steps and three `i8` direction
+components), and a 64 bit checksum of everything before it. The reader
+checks every count against the bytes left and every float for finiteness. The
+records are fixed width and any bytes are a valid record, so they need no range
+check, but their count must use every byte that is left and equal the number of
+surface cells of the level being loaded. A
 missing, stale (key differs), old-version, truncated, bit-flipped or hostile
 file is ignored, the reason is logged (`cache file ignored: stale: ...`), the
 level is baked and the file is replaced. Files are written to a temporary name

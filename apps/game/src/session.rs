@@ -9,6 +9,7 @@
 use std::time::Duration;
 
 use mscent_collide::FixedStepper;
+use mscent_game::destruct::VoxelUpdate;
 use mscent_game::fx::combat::{CombatFx, DRONE_TINT, ViewKick};
 use mscent_game::{
     Arena, Event as GameEvent, Game, LoadError, Menu, MenuAction, MenuCommand, Phase, Screen,
@@ -18,6 +19,7 @@ use mscent_platform::{Event, Key, MouseButton};
 use mscent_render::particles::{ParticleDraws, SpriteBank};
 use mscent_render::{
     BakeCache, BuildConfig, BuildError, Framebuffer, LevelRenderer, MaterialTable, Quality, View,
+    VoxelChange,
 };
 use mscent_world::Level;
 
@@ -195,7 +197,7 @@ impl GameSession {
     /// Sets off a blast. Nothing in the game does this yet; damage from one is
     /// a separate gameplay item, and the effect waits for it.
     pub fn blast(&mut self, pos: Vec3, radius: f32) {
-        self.fx.blast(pos, radius, &self.game.arena.bsp);
+        self.fx.blast(pos, radius, self.game.arena.fx_world());
     }
 
     /// The game and the renderer, taken apart again.
@@ -222,6 +224,11 @@ impl GameSession {
 
     pub fn renderer(&self) -> &LevelRenderer {
         &self.renderer
+    }
+
+    /// For changes under a level that stays the same, between frames.
+    pub fn renderer_mut(&mut self) -> &mut LevelRenderer {
+        &mut self.renderer
     }
 
     pub fn set_quality(&mut self, quality: Quality) {
@@ -258,10 +265,28 @@ impl GameSession {
         self.controls.release_all();
         self.menu = Menu::new();
         self.menu.press(MenuCommand::Select);
+        self.sync_voxels();
         (self.hit, self.kill) = (0, 0);
         self.feedback.clear();
         self.fx.clear();
         self.notices.clear();
+    }
+
+    /// Gives the renderer what collision already has, in the same frame.
+    fn sync_voxels(&mut self) {
+        for update in self.game.take_voxel_updates() {
+            self.renderer.apply_voxels(match update {
+                VoxelUpdate::Chunks(list) => VoxelChange::Chunks(list),
+                VoxelUpdate::Reset(world) => VoxelChange::Restore(world),
+            });
+        }
+    }
+
+    /// Takes the shot-up rock of a run back to the level's, for a view of the
+    /// level between runs.
+    pub fn restore_voxels(&mut self) {
+        self.game.restore_voxels();
+        self.sync_voxels();
     }
 
     fn playing(&self) -> bool {
@@ -280,7 +305,7 @@ impl GameSession {
         // stops only on the pause menu.
         if self.menu.screen() != Screen::Paused {
             let ns = u64::try_from(dt.as_nanos()).unwrap_or(u64::MAX);
-            self.fx.advance(ns, &self.game.arena.bsp);
+            self.fx.advance(ns, self.game.arena.fx_world());
         }
         if self.playing() {
             self.look();
@@ -292,6 +317,7 @@ impl GameSession {
                 self.prev_orientation = self.game.player.orientation;
                 self.game.step(&input);
             }
+            self.sync_voxels();
             self.note_events();
             self.report_script();
             self.menu.sync_phase(self.game.phase);

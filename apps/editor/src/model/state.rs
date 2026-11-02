@@ -24,6 +24,8 @@ pub enum Tool {
     Slice,
     /// Drag the selected brush's corners.
     Vertex,
+    /// Sculpt in the 3D view.
+    Voxel,
 }
 
 /// The one selected item.
@@ -69,6 +71,11 @@ pub struct EditorState {
     /// The panel's name and tag fields while they are being typed in.
     pub draft: super::labels::LabelDraft,
     pub(super) script: super::labels::ScriptText,
+    /// The Voxel tool's settings.
+    pub voxel: super::stroke::VoxelTool,
+    pub(super) stroke: Option<super::voxel::Stroke>,
+    /// What Copy captured, for Stamp.
+    pub clip: Option<std::sync::Arc<mscent_world::voxel::Clip>>,
 }
 
 impl Default for EditorState {
@@ -99,11 +106,17 @@ impl EditorState {
             message: "Ready".into(),
             draft: Default::default(),
             script: Default::default(),
+            voxel: Default::default(),
+            stroke: None,
+            clip: None,
         }
     }
 
     /// Replaces the document and clears history and selection.
     pub fn load(&mut self, doc: Document) {
+        self.cancel_stroke();
+        self.voxel.path = None;
+        self.clip = None;
         self.doc = doc;
         self.history.clear();
         self.selection = None;
@@ -147,7 +160,12 @@ impl EditorState {
     }
 
     pub fn undo(&mut self) -> bool {
+        // A held generation is not a step yet: taking it away is all this press does.
+        if self.drop_pending() {
+            return true;
+        }
         self.cancel_drag();
+        self.voxel.path = None;
         let ok = self.history.undo(&mut self.doc);
         self.drop_stale_selection();
         self.draft.filled_for = None;
@@ -156,7 +174,11 @@ impl EditorState {
     }
 
     pub fn redo(&mut self) -> bool {
+        if self.drop_pending() {
+            return true;
+        }
         self.cancel_drag();
+        self.voxel.path = None;
         let ok = self.history.redo(&mut self.doc);
         self.drop_stale_selection();
         self.draft.filled_for = None;
@@ -338,6 +360,7 @@ impl EditorState {
         };
         let mut after = before.clone();
         f(&mut after);
+        self.keep_volume_in_step(&before, &mut after);
         if let Shape::Box { min, max } = &after.shape
             && !box_ok(*min, *max)
         {
@@ -350,6 +373,22 @@ impl EditorState {
         self.history
             .run(&mut self.doc, Command::EditBrush { before, after });
         true
+    }
+
+    /// Turning a volume into its other kind keeps what was sculpted.
+    fn keep_volume_in_step(&self, before: &BrushDef, after: &mut BrushDef) {
+        let Some(volume) = before.volume().filter(|v| v.op() != after.op) else {
+            return;
+        };
+        let Ok(level) = self.doc.to_level() else {
+            after.op = before.op;
+            return;
+        };
+        let brushes = level.static_brushes();
+        let target = volume.with_op(after.op);
+        let mut old = mscent_world::voxel::Context::new(volume, &brushes);
+        let mut new = mscent_world::voxel::Context::new(&target, &brushes);
+        after.shape = Shape::Volume(volume.converted(after.op, &mut old, &mut new));
     }
 
     /// Applies `f` to the selected entity; rejected if it becomes invalid.

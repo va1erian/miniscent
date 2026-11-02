@@ -87,7 +87,7 @@ fn a_png_the_manifest_does_not_list_is_ignored_and_shifts_nothing() {
     f.png("aaa.png", 8, 0xffff_0000);
     f.png("concrete.png", 8, 0xffff_0000);
     let t = f.load().expect("loads");
-    assert_eq!(t.len(), 5);
+    assert_eq!(t.len(), 10);
     assert_eq!(t.find("brick"), Some(MaterialId(0)));
     assert_eq!(t.find("aaa"), None);
     assert_eq!(t.find("concrete"), None);
@@ -95,18 +95,18 @@ fn a_png_the_manifest_does_not_list_is_ignored_and_shifts_nothing() {
 
 #[test]
 fn a_listed_material_with_no_png_is_an_error_unless_retired() {
-    let f = Fixture::with_stock("missing", &format!("{STOCK}5 concrete 40\n"));
+    let f = Fixture::with_stock("missing", &format!("{STOCK}10 concrete 40\n"));
     assert!(matches!(f.load(), Err(TextureError::Io(_))));
     f.write(
         "materials.txt",
-        format!("{STOCK}5 retired\n6 rock2 3\n").as_bytes(),
+        format!("{STOCK}10 retired\n11 rock2 3\n").as_bytes(),
     );
     f.png("rock2.png", 8, 0xffff_0000);
     let t = f.load().expect("loads");
-    assert_eq!(t.len(), 7);
-    assert!(t.get(MaterialId(5)).is_none());
-    assert_eq!(t.find("rock2"), Some(MaterialId(6)));
-    assert_eq!(t.get(MaterialId(6)).expect("there").gloss, 3);
+    assert_eq!(t.len(), 12);
+    assert!(t.get(MaterialId(10)).is_none());
+    assert_eq!(t.find("rock2"), Some(MaterialId(11)));
+    assert_eq!(t.get(MaterialId(11)).expect("there").gloss, 3);
 }
 
 #[test]

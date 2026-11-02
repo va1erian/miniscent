@@ -1,36 +1,26 @@
 //! Edits to a volume. An edit reads and writes `edited` values and stores them
 //! as changes over the base, so the brushes below stay free to move.
 
-use std::sync::Arc;
-
 use mscent_math::Vec3d;
 
-use super::chunk::{Chunk, sample_index};
-use super::context::{BaseChunk, Context};
+use super::context::Context;
+use super::noise::noise3;
 use super::prim::Prim;
-use super::volume::{Lattice, Volume};
-use super::{CHUNK_EDGE, MAX_SAMPLE, edited, quantize};
+use super::span::{Reader, Span, collect_edited, edit_samples};
+use super::volume::Volume;
+use super::{MAX_SAMPLE, quantize};
 
 /// Cells past a shape where an add or carve can still change a sample: the
 /// sample range is two cells deep.
 const BAND_CELLS: f64 = 2.0;
-/// Samples averaged when smoothing: one and its six neighbours.
-const NEIGHBOURS: i32 = 7;
-/// The six samples beside one.
-const SIDES: [[i32; 3]; 6] = [
-    [-1, 0, 0],
-    [1, 0, 0],
-    [0, -1, 0],
-    [0, 1, 0],
-    [0, 0, -1],
-    [0, 0, 1],
-];
 /// How fast a smoothing dab reaches full strength going in from its edge,
 /// against the diagonal of its bounds.
 const CORE_SHARPNESS: f64 = 4.0;
+/// Cells between the bumps a roughening dab makes.
+const BUMP_CELLS: f64 = 3.0;
 
 /// What a dab does inside its shape.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum DabOp {
     /// Fills with solid of a material.
     Add { material: u8 },
@@ -41,138 +31,23 @@ pub enum DabOp {
     Smooth,
     /// Changes the material only.
     Paint { material: u8 },
-}
-
-/// Samples an edit may touch, per axis, as `first..end` in the volume.
-#[derive(Clone, Copy)]
-struct Span {
-    first: [i32; 3],
-    end: [i32; 3],
-}
-
-impl Span {
-    fn around(lattice: &Lattice, lo: Vec3d, hi: Vec3d, band_cells: f64) -> Option<Self> {
-        let cell = lattice.cell.units();
-        let samples = lattice.samples();
-        let (lo, hi) = ([lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]);
-        let at = |axis: usize, v: f64| v / cell - f64::from(lattice.origin[axis]);
-        let first = [0, 1, 2].map(|a| ((at(a, lo[a]) - band_cells).floor() as i32).max(0));
-        let end = [0, 1, 2].map(|a| {
-            ((at(a, hi[a]) + band_cells).ceil() as i32)
-                .saturating_add(1)
-                .min(samples[a])
-        });
-        (0..3)
-            .all(|a| first[a] < end[a])
-            .then_some(Self { first, end })
-    }
-}
-
-/// The changed samples, grown as an edit writes.
-struct Changed(Option<([i32; 3], [i32; 3])>);
-
-impl Changed {
-    fn add(&mut self, g: [i32; 3]) {
-        let (lo, hi) = self.0.get_or_insert((g, g));
-        for a in 0..3 {
-            lo[a] = lo[a].min(g[a]);
-            hi[a] = hi[a].max(g[a]);
-        }
-    }
-
-    /// Every chunk whose mesh reads a changed sample: its own and any that
-    /// holds it as padding.
-    fn chunks(&self, lattice: &Lattice) -> Vec<[u16; 3]> {
-        let Some((lo, hi)) = self.0 else {
-            return Vec::new();
-        };
-        let edge = CHUNK_EDGE as i32;
-        let range = |a: usize| {
-            let last = i32::from(lattice.chunks[a]) - 1;
-            let first = (lo[a] - edge).div_euclid(edge).clamp(0, last);
-            first..=(hi[a] + 1).div_euclid(edge).clamp(0, last)
-        };
-        let mut out = Vec::new();
-        for z in range(2) {
-            for y in range(1) {
-                for x in range(0) {
-                    out.push([x as u16, y as u16, z as u16]);
-                }
-            }
-        }
-        out
-    }
-}
-
-/// Runs `edit` over `span`, copying only chunks where a sample really changes.
-/// `edit` takes a sample's place, world position, `edited` value and material,
-/// and gives its new value and material. Returns the chunks to remesh.
-fn edit_samples(
-    volume: &mut Volume,
-    ctx: &mut Context,
-    span: Span,
-    edit: &mut impl FnMut([i32; 3], Vec3d, i8, u8) -> (i8, u8),
-) -> Vec<[u16; 3]> {
-    let lattice = volume.lattice;
-    let edge = CHUNK_EDGE as i32;
-    let mut changed = Changed(None);
-    let table = Arc::make_mut(&mut volume.table);
-    let first = span.first.map(|g| g.div_euclid(edge));
-    let last = span.end.map(|g| (g - 1).div_euclid(edge));
-    for cz in first[2]..=last[2] {
-        for cy in first[1]..=last[1] {
-            for cx in first[0]..=last[0] {
-                let coord = [cx, cy, cz];
-                let Some(index) = lattice.chunk_index(coord) else {
-                    continue;
-                };
-                ctx.ensure_base(index, coord);
-                if let (Some(base), Some(chunk)) = (ctx.cached_base(index), table.get_mut(index)) {
-                    edit_chunk(&lattice, chunk, base, coord, span, edit, &mut changed);
-                }
-            }
-        }
-    }
-    changed.chunks(&lattice)
-}
-
-/// The part of [`edit_samples`] inside one chunk.
-fn edit_chunk(
-    lattice: &Lattice,
-    chunk: &mut Chunk,
-    base: &BaseChunk,
-    coord: [i32; 3],
-    span: Span,
-    edit: &mut impl FnMut([i32; 3], Vec3d, i8, u8) -> (i8, u8),
-    changed: &mut Changed,
-) {
-    let edge = CHUNK_EDGE as i32;
-    let origin = coord.map(|c| c * edge);
-    let clip = |a: usize| (span.first[a] - origin[a]).max(0)..(span.end[a] - origin[a]).min(edge);
-    let mut wrote = false;
-    for z in clip(2) {
-        for y in clip(1) {
-            for x in clip(0) {
-                let i = sample_index(x as usize, y as usize, z as usize);
-                let b = base.get(i);
-                let (delta, material) = chunk.sample(i);
-                let old = edited(b, delta);
-                let g = [origin[0] + x, origin[1] + y, origin[2] + z];
-                let (value, mat) = edit(g, lattice.position(g), old, material);
-                if value == old && mat == material {
-                    continue;
-                }
-                let data = chunk.data_mut();
-                data.delta[i] = (i16::from(value) - i16::from(b)) as i8;
-                data.material[i] = mat;
-                changed.add(g);
-                wrote = true;
-            }
-        }
-    }
-    if wrote {
-        chunk.normalize();
-    }
+    /// Moves samples toward the plane through `origin` whose unit `normal`
+    /// points out of the solid, fully at the shape's core. Solid it adds is
+    /// of `material`.
+    Flatten {
+        material: u8,
+        origin: Vec3d,
+        normal: Vec3d,
+    },
+    /// Displaces the surface by seeded noise of up to `amplitude` samples (1/32
+    /// of a cell), fully at the shape's core. The same seed bumps the same
+    /// places, so repeated dabs deepen the bumps rather than adding new ones.
+    /// Solid it adds is of `material`.
+    Roughen {
+        seed: u32,
+        amplitude: u8,
+        material: u8,
+    },
 }
 
 /// Applies one dab. A context built for another volume, or a shape that misses
@@ -186,7 +61,7 @@ pub fn apply_dab(volume: &mut Volume, ctx: &mut Context, prim: &Prim, op: DabOp)
     let (lo, hi) = prim.bounds();
     let band = match op {
         DabOp::Add { .. } | DabOp::Carve => BAND_CELLS,
-        DabOp::Smooth | DabOp::Paint { .. } => 0.0,
+        DabOp::Smooth | DabOp::Paint { .. } | DabOp::Flatten { .. } | DabOp::Roughen { .. } => 0.0,
     };
     let Some(span) = Span::around(&lattice, lo, hi, band) else {
         return Vec::new();
@@ -211,14 +86,63 @@ pub fn apply_dab(volume: &mut Volume, ctx: &mut Context, prim: &Prim, op: DabOp)
             )
         }),
         DabOp::Smooth => smooth(volume, ctx, prim, span),
+        DabOp::Flatten {
+            material,
+            origin,
+            normal,
+        } => edit_samples(volume, ctx, span, &mut |_, p, value, old| {
+            let weight = core_weight(prim, p, cell);
+            let plane = quantize(-normal.dot(p - origin), cell);
+            let new = blend(value, plane, weight);
+            (new, grown_material(value, new, material, old))
+        }),
+        DabOp::Roughen {
+            seed,
+            amplitude,
+            material,
+        } => edit_samples(volume, ctx, span, &mut |_, p, value, old| {
+            if value.abs() == MAX_SAMPLE {
+                return (value, old);
+            }
+            let bump = noise3(seed, p * (1.0 / (BUMP_CELLS * cell))) * f64::from(amplitude);
+            let moved = f64::from(value) + bump * core_weight(prim, p, cell);
+            let new = moved
+                .round()
+                .clamp(-f64::from(MAX_SAMPLE), f64::from(MAX_SAMPLE)) as i8;
+            (new, grown_material(value, new, material, old))
+        }),
+    }
+}
+
+/// How far into a shape a point is, from 0 at its edge to 1 at its core.
+fn core_weight(prim: &Prim, p: Vec3d, cell: f64) -> f64 {
+    let (lo, hi) = prim.bounds();
+    let size = (hi - lo).length().max(cell);
+    (-prim.distance(p) / size * CORE_SHARPNESS).clamp(0.0, 1.0)
+}
+
+/// `value` moved `weight` of the way to `target`.
+fn blend(value: i8, target: i8, weight: f64) -> i8 {
+    let moved = f64::from(value) + (f64::from(target) - f64::from(value)) * weight;
+    moved
+        .round()
+        .clamp(-f64::from(MAX_SAMPLE), f64::from(MAX_SAMPLE)) as i8
+}
+
+/// An air sample's material is whatever it last held, so solid it grows into
+/// takes the dab's.
+fn grown_material(before: i8, after: i8, material: u8, old: u8) -> u8 {
+    if before < 0 && after >= 0 {
+        material
+    } else {
+        old
     }
 }
 
 /// Smoothing reads all values first, so the result does not depend on the
 /// order samples are visited in.
 fn smooth(volume: &mut Volume, ctx: &mut Context, prim: &Prim, span: Span) -> Vec<[u16; 3]> {
-    let (lo, hi) = prim.bounds();
-    let size = (hi - lo).length().max(volume.lattice.cell.units());
+    let cell = volume.lattice.cell.units();
     let mut values = Vec::new();
     collect_edited(volume, ctx, span, &mut values);
     let reader = Reader {
@@ -226,73 +150,12 @@ fn smooth(volume: &mut Volume, ctx: &mut Context, prim: &Prim, span: Span) -> Ve
         values: &values,
     };
     edit_samples(volume, ctx, span, &mut |g, p, value, old| {
-        let weight = (-prim.distance(p) / size * CORE_SHARPNESS).clamp(0.0, 1.0);
-        let target = f64::from(reader.average(g));
-        let moved = f64::from(value) + (target - f64::from(value)) * weight;
-        let limit = f64::from(MAX_SAMPLE);
-        let new = moved.round().clamp(-limit, limit) as i8;
+        let new = blend(value, reader.average(g) as i8, core_weight(prim, p, cell));
         // An air sample's material is whatever it last held, never seen until now.
         let grew = value < 0 && new >= 0;
         let material = grew.then(|| reader.solid_material(g)).flatten();
         (new, material.unwrap_or(old))
     })
-}
-
-fn collect_edited(volume: &Volume, ctx: &mut Context, span: Span, out: &mut Vec<(i8, u8)>) {
-    let edge = CHUNK_EDGE as i32;
-    let lattice = volume.lattice;
-    for z in span.first[2]..span.end[2] {
-        for y in span.first[1]..span.end[1] {
-            for x in span.first[0]..span.end[0] {
-                let coord = [x, y, z].map(|g: i32| g.div_euclid(edge));
-                let local = [x, y, z].map(|g: i32| g.rem_euclid(edge) as usize);
-                let i = sample_index(local[0], local[1], local[2]);
-                let value = lattice.chunk_index(coord).and_then(|index| {
-                    ctx.ensure_base(index, coord);
-                    let base = ctx.cached_base(index)?.get(i);
-                    let (delta, material) = volume.table.get(index)?.sample(i);
-                    Some((edited(base, delta), material))
-                });
-                out.push(value.unwrap_or((-MAX_SAMPLE, 0)));
-            }
-        }
-    }
-}
-
-/// `edited` values and materials of a span, for reading neighbours.
-struct Reader<'a> {
-    span: Span,
-    values: &'a [(i8, u8)],
-}
-
-impl Reader<'_> {
-    fn get(&self, g: [i32; 3]) -> (i8, u8) {
-        let at = [0, 1, 2].map(|a| {
-            (g[a].clamp(self.span.first[a], self.span.end[a] - 1) - self.span.first[a]) as usize
-        });
-        let size = [0, 1, 2].map(|a| (self.span.end[a] - self.span.first[a]) as usize);
-        let i = at[0] + at[1] * size[0] + at[2] * size[0] * size[1];
-        self.values.get(i).copied().unwrap_or((-MAX_SAMPLE, 0))
-    }
-
-    fn beside(&self, g: [i32; 3], side: [i32; 3]) -> (i8, u8) {
-        self.get([g[0] + side[0], g[1] + side[1], g[2] + side[2]])
-    }
-
-    fn average(&self, g: [i32; 3]) -> i32 {
-        let sides = SIDES.iter().map(|&s| i32::from(self.beside(g, s).0));
-        let sum = i32::from(self.get(g).0) + sides.sum::<i32>();
-        (sum + NEIGHBOURS / 2).div_euclid(NEIGHBOURS)
-    }
-
-    /// The material of the first solid sample beside `g`.
-    fn solid_material(&self, g: [i32; 3]) -> Option<u8> {
-        SIDES
-            .iter()
-            .map(|&s| self.beside(g, s))
-            .find(|&(value, _)| value >= 0)
-            .map(|(_, material)| material)
-    }
 }
 
 /// Replaces every sample from a field in world units, positive solid: the Fill

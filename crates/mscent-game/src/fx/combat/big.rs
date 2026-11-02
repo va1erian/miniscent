@@ -9,6 +9,7 @@ use mscent_world::materials::LIGHTPANEL;
 
 use super::super::EffectArgs;
 use super::super::recipes_big::{self as big, BLAST_RADIUS};
+use super::super::world::FxWorld;
 use super::super::{MAX_CATCHUP_TICKS, NS_PER_SEC as NS, TICK_HZ};
 use super::{CombatFx, args_at};
 
@@ -94,7 +95,8 @@ impl CombatFx {
     /// A blast of `radius` at `pos`, with four lights: one at the centre and
     /// three pushed toward the walls, as far as stays in the open. A bad
     /// position or radius does nothing.
-    pub fn blast(&mut self, pos: Vec3, radius: f32, bsp: &mscent_world::Bsp) {
+    pub fn blast<'a>(&mut self, pos: Vec3, radius: f32, world: impl Into<FxWorld<'a>>) {
+        let world = world.into();
         if !pos.is_finite() || !radius.is_finite() || radius <= 0.0 {
             return;
         }
@@ -113,13 +115,25 @@ impl CombatFx {
         for push in pushes {
             let mut light = big::BLAST_LIGHT.at(pos, push * scale);
             light.radius *= scale;
-            self.lights.add(light, Some(bsp));
+            self.lights.add_in(light, Some(world));
         }
         self.blast_view.start(pos, radius);
     }
 
     /// What the latest blast does to a view from `eye`, on the particle clock.
     pub fn view_kick(&mut self, scene: &Scene, eye: Vec3) -> ViewKick {
+        self.view_kick_in(scene, eye, scene.bsp())
+    }
+
+    /// [`Self::view_kick`] with the voxel volumes counted as walls too, so the
+    /// shake never carries the eye into rock.
+    pub fn view_kick_in<'a>(
+        &mut self,
+        scene: &Scene,
+        eye: Vec3,
+        world: impl Into<FxWorld<'a>>,
+    ) -> ViewKick {
+        let world = world.into();
         let view = &mut self.blast_view;
         let age = view.age_ns as f32 / NS_PER_SEC;
         if !view.active || age >= SHAKE_LIFE.max(WHITE_LIFE) || !eye.is_finite() {
@@ -131,7 +145,7 @@ impl CombatFx {
         let shake = wobble * (SHAKE_PEAK * felt * fading(age, SHAKE_LIFE));
         ViewKick {
             // Never shake the camera through a wall it is standing against.
-            shake: if scene.bsp().is_solid((eye + shake).to_f64()) {
+            shake: if world.is_solid((eye + shake).to_f64()) {
                 Vec3::ZERO
             } else {
                 shake

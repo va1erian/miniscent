@@ -146,7 +146,7 @@ enum Outline {
 impl Outline {
     fn of(pen: &Pen, scene: &Scene, br: &BrushDef) -> Outline {
         let (a, b) = scene.view.axes();
-        if br.is_box() {
+        if br.is_box() || br.is_volume() {
             let (lo, hi) = br.bounds();
             return Outline::Rect(pen.rect([lo[a], lo[b]], [hi[a], hi[b]]));
         }

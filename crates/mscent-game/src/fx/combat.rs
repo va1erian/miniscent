@@ -8,7 +8,6 @@ use mscent_render::particles::{Mask, ParticleDraws, SpriteDraw, streak_from_worl
 use mscent_render::scene::Scene;
 use mscent_render::shade::mul_rgb;
 use mscent_render::{Camera, DynLight, Fog, Framebuffer, Quality};
-use mscent_world::Bsp;
 
 use super::budget::{self, Keep, Limits, Sink, Tag, Tags, Tally};
 use super::class::Blend;
@@ -18,6 +17,7 @@ use super::decal::{Decal, Decals, FaceOutline, MAX_DECALS};
 use super::layer::{Gate, Screen};
 use super::lights::{LightSpec, Lights};
 use super::recipes;
+use super::world::FxWorld;
 use super::{Effect, EffectArgs, Fx};
 
 mod big;
@@ -183,7 +183,8 @@ impl CombatFx {
     }
 
     /// Runs the particle clock and the bolts forward by `elapsed_ns`.
-    pub fn advance(&mut self, elapsed_ns: u64, bsp: &Bsp) {
+    pub fn advance<'a>(&mut self, elapsed_ns: u64, world: impl Into<FxWorld<'a>>) {
+        let world = world.into();
         self.blast_view.advance(elapsed_ns);
         for slot in &mut self.bolts {
             let Some(bolt) = slot else { continue };
@@ -196,12 +197,12 @@ impl CombatFx {
                     self.decals.push(mark);
                 }
                 if let Some(glow) = bolt.glow {
-                    self.lights.add(glow, Some(bsp));
+                    self.lights.add_in(glow, Some(world));
                 }
                 *slot = None;
             }
         }
-        self.fx.advance(elapsed_ns, bsp);
+        self.fx.advance(elapsed_ns, world);
         self.lights.advance(elapsed_ns);
     }
 

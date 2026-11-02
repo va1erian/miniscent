@@ -33,6 +33,7 @@ pub mod spheres;
 pub mod step;
 pub mod sweep;
 pub mod tuning;
+mod voxel;
 
 pub use mover::{MoverShape, MoverSolid, Pose};
 pub use push::{Push, push_mover};

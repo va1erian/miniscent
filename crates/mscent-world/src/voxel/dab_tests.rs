@@ -3,7 +3,9 @@ use std::sync::Arc;
 use mscent_math::Vec3d;
 
 use super::test_util::{coords, gyroid, mesh_all};
-use super::{CHUNK_EDGE, CellSize, Chunk, Context, DabOp, Prim, Volume, apply_dab, fill};
+use super::{
+    CHUNK_EDGE, CellSize, Chunk, Context, DabOp, INHERIT_MATERIAL, Prim, Volume, apply_dab, fill,
+};
 use crate::brush::{Brush, Op};
 
 fn volume(chunks: [u16; 3]) -> Volume {
@@ -72,7 +74,9 @@ fn removing_everything_returns_chunks_to_the_uniform_form() {
         &mut v,
         &mut ctx,
         &sphere(2.0, 2.0, 2.0, 1.0),
-        DabOp::Add { material: 0 },
+        DabOp::Add {
+            material: INHERIT_MATERIAL,
+        },
     );
     assert_eq!(detail_chunks(&v), 1);
     let all = Prim::cuboid(Vec3d::new(-9.0, -9.0, -9.0), Vec3d::new(9.0, 9.0, 9.0)).expect("ok");

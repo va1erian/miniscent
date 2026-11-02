@@ -7,8 +7,9 @@
 //! so all of this is checked and every failure is an error.
 //!
 //! A directory with no manifest (a test fixture, an `--assets` directory) gets
-//! ids from its sorted file list and, as before there were manifests, the stock
-//! gloss for a stock name and [`DEFAULT_GLOSS`] for any other.
+//! ids from its file list, stock names first and the rest sorted, and, as before
+//! there were manifests, the stock gloss for a known name and [`DEFAULT_GLOSS`]
+//! for any other. A copy of the whole stock folder so keeps every id it has.
 
 use std::collections::HashSet;
 use std::io::Read;
@@ -252,12 +253,17 @@ fn listed_gloss(name: &str) -> u8 {
         "floor" => 90,
         "brick" => 25,
         "rock" => 10,
+        "wax" => 90,
+        "cap" => 70,
+        "coral" => 30,
+        "stem" => 20,
+        "bark" => 8,
         _ => DEFAULT_GLOSS,
     }
 }
 
-/// The entries of a directory with no manifest: every base texture, sorted by
-/// name. Files starting with `_` and the `_n`, `_h` and `_s` companions are not
+/// The entries of a directory with no manifest: every base texture, the stock
+/// names in their places and the others after them by name. Files starting with `_` and the `_n`, `_h` and `_s` companions are not
 /// base textures.
 pub fn from_listing(dir: &Path) -> Result<Vec<Entry>, TextureError> {
     let io = |e: std::io::Error| TextureError::Io(format!("{}: {e}", dir.display()));
@@ -274,7 +280,8 @@ pub fn from_listing(dir: &Path) -> Result<Vec<Entry>, TextureError> {
             names.push(stem.to_string());
         }
     }
-    names.sort();
+    let place = |name: &String| STOCK.iter().position(|n| n == name);
+    names.sort_by_key(|name| (place(name).unwrap_or(usize::MAX), name.clone()));
     names.dedup();
     Ok(names
         .into_iter()

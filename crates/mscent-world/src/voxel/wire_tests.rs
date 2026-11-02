@@ -367,3 +367,22 @@ fn a_volume_sharing_an_order_with_a_brush_is_refused() {
     let apart = level_at(4);
     assert_eq!(format::read(&format::write(&apart)), Ok(apart));
 }
+
+#[test]
+fn a_small_file_cannot_ask_for_more_than_the_chunk_limit() {
+    // Seventeen full volumes of uniform chunks, three bytes each.
+    let volumes = 17;
+    let mut body = Vec::new();
+    put_u32(&mut body, volumes);
+    for i in 0..volumes as i32 {
+        head(&mut body, 0, 1, [i * 256 * 2, 0, 0], [16, 16, 16]);
+        for _ in 0..4096 {
+            body.extend_from_slice(&[0, 0, 0]);
+        }
+    }
+    assert!(super::MAX_TOTAL_CHUNKS < volumes as usize * 4096);
+    assert_eq!(
+        read_for_test(&body, super::MAX_DETAIL_CHUNKS).err(),
+        Some(FormatError::TooMany)
+    );
+}

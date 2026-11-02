@@ -4,6 +4,7 @@
 use super::fx_tests::{args_at, class, emitter, room_bsp};
 use super::*;
 use crate::test_util::v;
+use mscent_world::Bsp;
 
 fn solid(bsp: &Bsp, p: Vec3) -> bool {
     bsp.is_solid(p.to_f64())
