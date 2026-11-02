@@ -11,6 +11,7 @@ use xui::widget::Placeable;
 use xui::xui_canvas::snapshot::{Snapshot, Stage, render_with};
 use xui::{Dip, Key, Theme};
 
+use super::dialogs_tests::NewFormProbe;
 use crate::model::Document;
 use crate::studio::tick_costs::TickCosts;
 use crate::texstudio::{Tab, TexStudio};
@@ -19,7 +20,7 @@ use crate::ui::{Editor, Msg, cmd};
 
 /// What a script reaches in the built editor.
 pub(super) struct Handles {
-    /// Where a widget's middle is, in the window.
+    /// The widgets of the New form.
     pub(super) new_form: Rc<NewFormProbe>,
     pub(super) state: Rc<RefCell<crate::model::EditorState>>,
     pub(super) studio: Rc<RefCell<TexStudio>>,
@@ -28,58 +29,6 @@ pub(super) struct Handles {
     pub(super) preview: Rc<super::TexPreview>,
     /// Where the page is in the window.
     pub(super) origin: Box<dyn Fn() -> (i32, i32)>,
-}
-
-/// The buttons of the New form, to click for real.
-pub(super) struct NewFormProbe {
-    ui: xui::prelude::Ui<Msg>,
-    host: xui::backend::WidgetId,
-    form: xui::backend::WidgetId,
-    pub(super) new: Rc<xui::prelude::Button<Msg>>,
-    pub(super) create: Rc<xui::prelude::Button<Msg>>,
-    pub(super) cancel: Rc<xui::prelude::Button<Msg>>,
-    pub(super) name: Rc<xui::prelude::Edit<Msg>>,
-    pub(super) problem: Rc<xui::prelude::Label<Msg>>,
-    pub(super) open: Rc<Cell<bool>>,
-    pub(super) question: Option<Rc<xui::widget::Dialog<Msg>>>,
-}
-
-impl NewFormProbe {
-    /// Where the middle of a widget is in the window, given the panels it is in:
-    /// bounds are relative to the parent.
-    fn middle_in(
-        &self,
-        panels: &[xui::backend::WidgetId],
-        id: xui::backend::WidgetId,
-    ) -> (i32, i32) {
-        let b = self.ui.bounds(id);
-        let (mut x, mut y) = ((b.left + b.right) / 2, (b.top + b.bottom) / 2);
-        for panel in panels {
-            let p = self.ui.bounds(*panel);
-            (x, y) = (x + p.left, y + p.top);
-        }
-        (x, y)
-    }
-
-    /// Where a button of the form is.
-    pub(super) fn middle(&self, id: xui::backend::WidgetId) -> (i32, i32) {
-        self.middle_in(&[self.host, self.form], id)
-    }
-
-    /// Clicks a button of the form.
-    pub(super) fn click(&self, stage: &Stage<'_, Msg>, id: xui::backend::WidgetId) {
-        self.click_at(stage, self.middle(id));
-    }
-
-    /// Clicks the New button, which is outside the form.
-    pub(super) fn click_new(&self, stage: &Stage<'_, Msg>) {
-        self.click_at(stage, self.middle_in(&[self.host], self.new.id()));
-    }
-
-    fn click_at(&self, stage: &Stage<'_, Msg>, (x, y): (i32, i32)) {
-        stage.inject(mouse_event(0, x, y, MouseButton::Left));
-        stage.inject(mouse_event(2, x, y, MouseButton::Left));
-    }
 }
 
 /// Builds the editor and runs `script` with the workspace open on a new material.
@@ -97,18 +46,7 @@ pub(super) fn with_workspace(script: impl FnOnce(&Stage<'_, Msg>, &Handles) + 's
                 let (outer, inner) = (root.bounds(host.id()), root.bounds(page_id));
                 (outer.left + inner.left, outer.top + inner.top)
             });
-            let new_form = Rc::new(NewFormProbe {
-                ui: ui.clone(),
-                host: app.tex.host.get().id(),
-                form: app.tex.new_form.host.get().id(),
-                new: app.tex.new_button.get(),
-                create: app.tex.new_form.create.get(),
-                cancel: app.tex.new_form.cancel.get(),
-                name: app.tex.new_form.name.get(),
-                problem: app.tex.new_form.problem.get(),
-                open: app.tex.new_form.open.clone(),
-                question: app.tex.overwrite.clone(),
-            });
+            let new_form = Rc::new(NewFormProbe::of(ui, &app.tex));
             *h2.borrow_mut() = Some(Handles {
                 new_form,
                 state: app.state.clone(),

@@ -207,6 +207,7 @@ impl Editor {
                         .plain()
                         .bind(&app.work_host),
                         app.tex.layout(),
+                        app.tex.new_form.layout(),
                         build(View3d::new).bind(&app.play),
                     ))
                     .fill(1),

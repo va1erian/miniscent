@@ -194,7 +194,6 @@ impl Workspace {
                     .on_click(tex(TexMsg::AskNew))
                     .bind(&self.new_button),
             )
-            .child(self.new_form.layout())
             .child(label("").bind(&self.size_note[0]))
             .child(label("").bind(&self.size_note[1]))
             .child(label("Gloss"))
@@ -280,6 +279,7 @@ impl Workspace {
         self.params.attach(ui);
         self.menu = Some(page_menu(ui, self.menu_cell.clone()));
         self.overwrite = dialogs::overwrite_dialog(ui).ok().map(Rc::new);
+        self.new_form.attach(ui);
     }
 
     pub fn is_open(&self) -> bool {
@@ -315,6 +315,7 @@ impl Workspace {
             }
             self.rows_shown = rows;
             self.row_buttons = buttons;
+            self.new_form.keep_on_top();
         }
         for (row, button) in self.rows_shown.iter().zip(&self.row_buttons) {
             if let Some(button) = button.try_get() {

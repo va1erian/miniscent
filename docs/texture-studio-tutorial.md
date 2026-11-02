@@ -42,8 +42,8 @@ Mouse controls on the page:
 
 ## 1. Make a new material
 
-Click **New...**. A small form opens under the button: type `slate` as the name, keep
-the size at 128, and click **Create** or press **Enter**. You get a starter page:
+Click **New...**. In the dialog, type `slate` as the name, keep the size at 128, and
+click **Create** or press **Enter**. You get a starter page:
 a `flat` block with an `out-albedo` under it. `out-albedo` means "this image is the
 material's colour".
 
