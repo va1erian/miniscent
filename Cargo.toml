@@ -35,3 +35,16 @@ opt-level = 2
 opt-level = 2
 [profile.dev.package.mscent-game]
 opt-level = 2
+
+# Release builds optimize for size (the game has a binary size budget,
+# tools/check_size.py), except the renderer and the vector math under it, whose
+# hot paths set the frame time. Panics still unwind: Instant Play catches a
+# panic in the scene, so `panic = "abort"` is not an option.
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+[profile.release.package.mscent-render]
+opt-level = 3
+[profile.release.package.mscent-math]
+opt-level = 3
