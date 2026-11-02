@@ -9,6 +9,7 @@ use xui::xui_canvas::snapshot::Stage;
 use super::{Run, pump};
 use crate::ui::script_pane::ScriptMsg;
 use crate::ui::{Msg, Probe, cmd};
+use xui::widget::DialogAction;
 
 /// Paints until the guide has laid its page out, and once more to show it. The
 /// view hands its page to its thread when painted and picks the frame up when
@@ -105,6 +106,31 @@ pub(super) fn in_window(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     run.check(
         matches!(shot, Some(Ok(()))),
         "snapshot of the guide's window",
+    );
+}
+
+/// Inserting an example leaves edits unsaved. Going elsewhere then asks, on the
+/// default backend too, and whatever was asked for waits for the answer.
+pub(super) fn unsaved_edits(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
+    let dirty = || probe.state().borrow().script.dirty();
+    run.check(dirty(), "an inserted example is an unsaved edit");
+    let text = probe.code().text();
+    stage.emit(Msg::Menu(cmd::NEW));
+    pump(stage, 2);
+    run.check(probe.code().text() == text, "New waits for the answer");
+    run.shot(stage, "13-discard-prompt.png");
+    stage.emit(Msg::Discard(DialogAction::Cancel));
+    pump(stage, 2);
+    run.check(
+        probe.code().text() == text && dirty(),
+        "keeping the edits keeps them and stays on the level",
+    );
+    stage.emit(Msg::Menu(cmd::NEW));
+    stage.emit(Msg::Discard(DialogAction::Accept(String::new())));
+    pump(stage, 2);
+    run.check(
+        probe.code().text().is_empty() && !dirty(),
+        "discarding lets it go ahead",
     );
 }
 

@@ -453,6 +453,7 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     kit(run, stage, probe);
     own_window(run, stage, probe);
     guide::guide(run, stage, probe);
+    guide::unsaved_edits(run, stage, probe);
     // Last: its Save dialog stays up, as nobody is there to answer it.
     unsaved(run, stage, probe);
 }

@@ -2,7 +2,6 @@
 
 mod app;
 mod commands;
-mod discard_dialog;
 pub mod facepanel;
 mod faces;
 mod guide_html;
