@@ -5,6 +5,7 @@
 //! after each stage. PNGs go to `<dir>`; the exit code is 0 only when every
 //! check held.
 
+use crate::studio::gpu_view;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -261,6 +262,10 @@ fn select_biggest(probe: &Probe) {
 fn wide_script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     let p = wait_for_preview(stage, probe);
     run.check(p == Preview::Full, &format!("preview by itself: {p:?}"));
+    pump(stage, 5);
+    // A machine with no GPU has software to fall back on, and that is all.
+    let on_gpu = gpu_view::active() || !gpu_view::wanted() || mscent_gpu::Gpu::new().is_err();
+    run.check(on_gpu, "the 3D pane draws on the GPU when it can");
     select_biggest(probe);
     stage.emit(Msg::Tool(0));
     pump(stage, 20);
@@ -348,6 +353,10 @@ fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     // Nobody asks for it: the 3D pane shows the reloaded level, fully lit.
     let p = wait_for_preview(stage, probe);
     run.check(p == Preview::Full, &format!("preview by itself: {p:?}"));
+    pump(stage, 5);
+    // A machine with no GPU has software to fall back on, and that is all.
+    let on_gpu = gpu_view::active() || !gpu_view::wanted() || mscent_gpu::Gpu::new().is_err();
+    run.check(on_gpu, "the 3D pane draws on the GPU when it can");
     select_biggest(probe);
     stage.emit(Msg::Tool(0));
     pump(stage, 20);

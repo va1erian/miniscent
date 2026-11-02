@@ -1,15 +1,18 @@
 # Hardware renderer: plan
 
-Status: accepted, M14.1 to M14.3 done and the rest not started ([status.md](status.md)). Figures
+Status: accepted, M14.1 to M14.4 done and the rest not started ([status.md](status.md)). Figures
 under "Measured" were run for this plan; all others are targets to measure. The work
 items are in [work-items.md](work-items.md) as M14.
 
 ## Goal
 
 Hold 4K at full quality on a desktop GPU, with the same picture the software
-renderer draws, **in the editor's 3D pane first** and then in the game. The software
-renderer stays: LazyOS has no GPU driver, it is the reference for the look, and it
-is the fallback on any machine where the GPU path fails to start.
+renderer draws, **in the editor's 3D pane first** and then in the game.
+
+**This becomes the primary renderer**, by the owner's decision of 2026-11-02. The
+software renderer's main target becomes LazyOS, which has no GPU driver. It stays the
+fallback on any machine where the GPU path fails to start, and for now the parity test
+still holds the two to one picture.
 
 - **Fast.** Native 4K with every feature on, no upscale.
 - **Small.** One crate, a few thousand lines, one dependency.
@@ -237,8 +240,10 @@ change to xui.
 (`studio/worker.rs`), a one-slot mailbox hands them over, and the UI thread paints them
 through `View3d::set_rgba`. The UI never waits for a frame.
 
-**The change is on that thread alone.** `Scene::render` calls a `FrameRenderer`, which
-is now the GPU one, and the mailbox, the pane and the UI thread do not change. wgpu needs
+**The change is on that thread alone.** `LevelScene::render` draws through a
+`GpuView` (`studio/gpu_view.rs`) when it can, and the mailbox, the pane and the UI
+thread do not change. `GpuRenderer` borrows the level each frame instead of owning it,
+as the session owns it and Play draws it in software until M14.6. wgpu needs
 no window here because it draws offscreen. Highlights, banners and picking keep working:
 `highlight::draw` reads the depth in `fb`, so depth is read back on frames that have
 highlights, and only those. Checksums, `frame_pixels` and `--selftest` read the same
@@ -250,23 +255,40 @@ paints from the UI thread, which would break the rule that a slow scene never sl
 UI, and it is OpenGL through `glow`, a second renderer. The render thread does the same
 job with the code the game will use.
 
-**One device, many scenes.** A new scene replaces the old one on every edit, and the
-edit-to-picture figure today is 15 ms (`studio/preview_tests.rs`), so that must hold. The
-device and material textures live with the thread and survive a scene swap; only
-geometry and the lightmap are uploaded again. `relight` replaces the lightmap alone.
+**One device, many scenes.** A new scene replaces the old one on every edit, on one
+device for the life of the editor, and uploads the level again. Measured on the
+showcase, a new scene's first frame at 1080p costs 6.8 ms, about 5 ms over an ordinary
+one, so nothing needs caching yet. Opening the device costs about 230 ms, once.
 
-**Fallback.** Hardware is on by default in the pane, with a View menu toggle back to
-software that is remembered. No adapter or a failed device means software with the
-reason in the log panel. Until voxels land (M14.5), a level with voxel volumes takes the
-software path and says so, rather than showing a picture with holes. Until particles
-land (M14.6), Play stays software. The pane may therefore switch renderer on entering
-Play, which the existing scene swap already handles.
+**Size of the frame.** Software caps the pane's frame at 960 pixels wide and scales up.
+While the GPU is drawing, the frame is the pane's own size, which also takes xui's
+unscaled path for the image.
 
-**What this does not fix.** The UI thread still paints the frame through the software
-canvas, and that cost was not measured at 4K. M14.4 measures it. If it turns out to be
-the bottleneck, the next step is a native child surface over the pane, which is a change
-in xui: it needs a handle per node, and must deal with xui's own tooltips and menus,
-which a child surface would cover. That goes under "Later" and is decided on that number.
+**Fallback.** Hardware is on by default in the editor, with `--software` and a View menu
+command to switch, which is not remembered between runs. No adapter or a failed device
+means software with the reason in the log panel. Until they are ported, a level with
+voxel volumes or viewports takes the software path and says so, rather than showing a
+picture with holes. Until particles land (M14.6), Play stays software. Tests stay on
+software unless they ask, as they read exact pixels.
+
+**What this does not fix: the paint.** The UI thread still paints each frame through
+xui's software canvas, and that is now **the bottleneck at 4K**. `--ui-timing`, in "a new
+3D frame, painted", measures it on the offscreen backend:
+
+| Window | Pane | A new frame painted |
+|---|---|---|
+| 1280x800 | about 400x370 | 26 ms |
+| 3840x2160 | 1683x1049 | 175 to 182 ms |
+
+The render thread needs 5.6 ms for that 4K frame, so the UI thread is over thirty times
+the cost. It blocks the UI, not just the picture, and it is the same on both renderers,
+so it predates this work. The cost follows the window and not the pane or the frame:
+a whole-window repaint takes about the same (179 ms), and neither a tiny frame scaled up
+nor leaving out the pane's clear brings it down. Why a damaged pane costs what the window
+costs was not found, and the windowed backend's own path was not run. Either finding the
+cause in xui's repaint or a native surface for the pane (below) would remove it. A native
+surface also removes the readback, but needs a handle per node, and must deal with xui's
+tooltips and menus, which it would cover.
 
 ## Two traps in the game path
 
@@ -423,8 +445,9 @@ Targets, on the dev machine, at 3840x2160, High:
 
 | Step | Target |
 |---|---|
-| Editor pane: edit to picture, showcase | No worse than today's 15 ms |
-| Editor pane: frame including readback | Under 10 ms |
+| Editor pane: a new scene's first frame, 1080p | 6.8 ms measured; software's edit to picture is 15 ms |
+| Editor pane: frame including readback | 5.6 ms measured, 11.7 ms with a highlight |
+| Editor pane: a new frame painted by the UI thread | **175 to 182 ms measured, against a budget of 16 ms** |
 | Game, direct route: CPU side of a frame | Under 1.5 ms |
 | Game, direct route: GPU side | Under 4 ms |
 | Game, direct route: worst frame in the flythrough | Under 8.3 ms (120 Hz) |
@@ -443,8 +466,7 @@ A GPU that cannot hold native size renders smaller and scales up, using the exis
 - **Vulkan only.** No Vulkan driver means no acceleration on that machine, with no second
   GPU path to fall to. Software covers it, slow at 4K but correct. The HD 620's Vulkan
   support on the reference machine has not been tried.
-- **The pane's paint.** Readback gets the frame to the UI thread quickly, but the software
-  canvas may then be the slowest part at 4K. Unmeasured; M14.4 finds out.
+- **The pane's paint.** Measured, and it is the limit at 4K: see "What this does not fix".
 - **Mesa in CI.** Passes on `ubuntu-latest`. A Mesa update could move a result, and two
   cases sit close to the block limit. The fallback is under "In CI".
 - **Tolerance as a loophole.** Filtering, 16-pixel span subdivision against exact
@@ -482,7 +504,6 @@ M14.6 can then run side by side.
 
 ## Later
 
-- **A native surface for the pane,** if M14.4 shows the canvas paint is the limit. A change
-  in xui, decided on that number.
+- **The canvas paint** is M14.10, now it has a number.
 - **Texture Studio's lit preview** on the GPU, which stays software until something asks.
 - **A self-hosted runner** with a real GPU, and 4K in CI, if local runs miss something.

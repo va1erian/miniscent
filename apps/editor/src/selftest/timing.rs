@@ -92,5 +92,19 @@ pub(super) fn script(_run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
             let _ = stage.ui().capture();
         }),
     );
+    report("a new 3D frame, painted", new_frame(stage, probe));
     pane_states(stage, probe);
+}
+
+/// What the UI thread pays for each picture the render thread sends: a frame the
+/// size of the pane through the pane's own path, then a picture of the window.
+fn new_frame(stage: &Stage<'_, Msg>, probe: &Probe) -> (f64, f64) {
+    let pane = probe.view_pane();
+    let (w, h) = pane.size();
+    let rgba = |i: usize| vec![(i % 256) as u8; w as usize * h as usize * 4];
+    let frames = [rgba(40), rgba(200)];
+    measure(|i| {
+        pane.set_rgba(w, h, frames[i % 2].clone());
+        let _ = stage.ui().capture();
+    })
 }

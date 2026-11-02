@@ -12,6 +12,7 @@ path = "src/main.rs"
 mscent-math.workspace = true
 mscent-world.workspace = true
 mscent-render.workspace = true
+mscent-gpu.workspace = true
 mscent-texgen.workspace = true
 mscent-game.workspace = true
 mscent-script.workspace = true

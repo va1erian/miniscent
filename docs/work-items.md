@@ -196,6 +196,8 @@ Design in [hardware-renderer.md](hardware-renderer.md).
 | M14.7 | Game window, direct route: `gpu_window`, swapchain, `--renderer`, HUD layer, shared particle estimate | M14.6 | M | A real window at 4K with no readback; a forced failure reaches software; any software picture change recorded |
 | M14.8 | Failure paths: device loss, hostile corpus, limits | M14.4 | S | Tests above |
 | M14.9 | Speed and default: measure, resolution control on a slow GPU, `auto` by default | All | M | Numbers in `docs/perf/`; a person has played it |
+| M14.10 | The pane's paint: find why a new frame costs what the window costs, fix it in xui or give the pane a native surface | M14.4 | L | A new 4K frame painted in under 16 ms, in a real window |
+| M14.11 | Viewports on the GPU: viewport faces, vista layers, masked textures, removing the pane's viewport exception | M14.5 | L | Rows for vista, parallax and cutout pass; `facing.msl` draws on the GPU |
 
 ## Suggested order
 

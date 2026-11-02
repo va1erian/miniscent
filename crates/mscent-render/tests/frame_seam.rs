@@ -33,6 +33,7 @@ fn drawn(r: &mut dyn FrameRenderer, actors: &[mscent_render::Actor]) -> Vec<u32>
         quality: Quality::High,
         actors,
         effects: Effects::default(),
+        wants_depth: true,
     };
     r.draw(&mut fb, &input).expect("a frame");
     fb.pixels().to_vec()

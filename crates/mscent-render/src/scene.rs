@@ -144,6 +144,11 @@ impl Scene {
     /// This scene with viewport faces, each paired with its slot. Like voxels,
     /// they count towards the bounds of their leaves: a room walled only by them
     /// has no faces of its own, and the walk would cull it.
+    /// Whether any face of the level is a viewport.
+    pub fn has_viewports(&self) -> bool {
+        !self.holes.polys.is_empty()
+    }
+
     pub(crate) fn with_holes(mut self, faces: &[(Face, u8)]) -> Self {
         self.holes = holes::Holes::new(self.bsp.leaves().len(), faces);
         self.refresh_bounds();

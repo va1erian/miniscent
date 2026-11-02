@@ -3,8 +3,8 @@
 
 use mscent_render::scene::Scene;
 use mscent_render::specular::SpecTable;
-use mscent_render::{EMISSIVE, LevelAssets, UNLIT};
-use mscent_world::materials::LIGHTPANEL;
+use mscent_render::{EMISSIVE, LevelAssets, SELF_LIT, UNLIT};
+use mscent_world::materials::{LIGHTPANEL, is_self_lit};
 
 use crate::lightmap::{FaceRects, LightAtlas};
 
@@ -34,6 +34,9 @@ fn flat_light(
 ) -> Option<u32> {
     if material == LIGHTPANEL {
         return Some(EMISSIVE);
+    }
+    if is_self_lit(material) {
+        return Some(SELF_LIT);
     }
     let lit = assets.uv_map(index).is_some() && rects.is_some_and(|r| !r.levels.is_empty());
     (!lit).then_some(UNLIT)

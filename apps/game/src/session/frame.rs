@@ -97,6 +97,8 @@ impl GameSession {
             quality: self.quality,
             actors: &actors,
             effects,
+            // The particle budget reads it, next frame.
+            wants_depth: true,
         };
         let drawn = self.renderer.draw(&mut fb, &input);
         if drawn.is_some() {

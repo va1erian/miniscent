@@ -7,8 +7,7 @@ use std::time::Instant;
 use mscent_math::Vec3;
 use mscent_render::png_encode::encode_png;
 use mscent_render::{
-    BuildConfig, Effects, FrameInput, FrameRenderer, Framebuffer, LevelRenderer, MaterialTable,
-    Quality, View,
+    BuildConfig, Effects, FrameInput, Framebuffer, LevelRenderer, MaterialTable, Quality, View,
 };
 use mscent_world::showcase_level;
 
@@ -27,21 +26,21 @@ fn main() -> Result<(), String> {
         .map_err(|e| format!("{e:?}"))?;
     let gpu = mscent_gpu::Gpu::new().map_err(|e| e.to_string())?;
     println!("adapter: {}", gpu.adapter());
-    let actors = software.actors().to_vec();
-    let mut renderer = mscent_gpu::GpuRenderer::new(gpu, software.into_assets())
-        .map_err(|(why, _)| why.to_string())?;
+    let assets = software.assets();
+    let mut renderer = mscent_gpu::GpuRenderer::new(gpu, assets).map_err(|why| why.to_string())?;
     let mut fb = Framebuffer::new(width, height).ok_or("bad size")?;
     let view = View::from_angles(Vec3::new(3.0, 3.0, 2.5), -0.78, 0.0, 0.0);
     let frame = FrameInput {
         view: &view,
         quality: Quality::High,
-        actors: &actors,
+        actors: assets.actors(),
         effects: Effects::default(),
+        wants_depth: false,
     };
     let mut costs = Vec::with_capacity(FRAMES);
     for _ in 0..FRAMES {
         let start = Instant::now();
-        renderer.draw(&mut fb, &frame).ok_or("no frame")?;
+        renderer.draw(assets, &mut fb, &frame).ok_or("no frame")?;
         costs.push(start.elapsed().as_secs_f64() * 1000.0);
     }
     if let Some(error) = renderer.take_error() {

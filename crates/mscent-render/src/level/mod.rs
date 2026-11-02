@@ -54,7 +54,7 @@ pub use view::View;
 /// Light scale of emissive surfaces (256 is the plain texture colour).
 pub const EMISSIVE: u32 = 330;
 /// Light scale of a self-lit sky: the texture as it is.
-const SELF_LIT: u32 = 256;
+pub const SELF_LIT: u32 = 256;
 /// Light scale of a face that has no lightmap data.
 pub const UNLIT: u32 = 200;
 const NEAR: f32 = 0.1;
@@ -179,6 +179,10 @@ impl LevelRenderer {
         self.assets
     }
 
+    pub fn assets(&self) -> &LevelAssets {
+        &self.assets
+    }
+
     pub fn scene(&self) -> &Scene {
         self.assets.scene()
     }
@@ -285,6 +289,7 @@ impl LevelRenderer {
             quality,
             actors,
             effects: *effects,
+            wants_depth: true,
         };
         let stats = self.draw_frame(fb, &input)?;
         if let Some(o) = hud {

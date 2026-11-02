@@ -113,8 +113,11 @@ impl Targets {
     }
 
     /// Records the copies [`Self::read_into`] will read.
-    pub(crate) fn copy_for_reading(&self, encoder: &mut wgpu::CommandEncoder) {
+    pub(crate) fn copy_for_reading(&self, encoder: &mut wgpu::CommandEncoder, with_depth: bool) {
         self.copy_out(encoder, self.color.as_image_copy(), &self.color_read);
+        if !with_depth {
+            return;
+        }
         let depth = wgpu::TexelCopyTextureInfo {
             aspect: wgpu::TextureAspect::DepthOnly,
             ..self.depth.as_image_copy()
@@ -122,11 +125,20 @@ impl Targets {
         self.copy_out(encoder, depth, &self.depth_read);
     }
 
-    /// Copies the finished frame into `fb`, which must be this size. `None`
-    /// when the device has gone or the buffers cannot be read.
-    pub(crate) fn read_into(&self, gpu: &Gpu, cam: &Camera, fb: &mut Framebuffer) -> Option<()> {
+    /// Copies the finished frame into `fb`, which must be this size, leaving its
+    /// depth as it was unless `with_depth`. `None` when the device has gone or the
+    /// buffers cannot be read.
+    pub(crate) fn read_into(
+        &self,
+        gpu: &Gpu,
+        cam: &Camera,
+        fb: &mut Framebuffer,
+        with_depth: bool,
+    ) -> Option<()> {
         map(gpu, &self.color_read)?;
-        map(gpu, &self.depth_read)?;
+        if with_depth {
+            map(gpu, &self.depth_read)?;
+        }
         let (row, width) = (self.row_bytes as usize, self.size.0 as usize);
         let (pixels, depths) = fb.planes_mut();
         {
@@ -136,15 +148,19 @@ impl Targets {
                     *pixel = u32::from_le_bytes(*texel);
                 }
             }
-            let depth = self.depth_read.get_mapped_range(..).ok()?;
-            for (texels, out) in rows(&depth, row, depths, width) {
-                for (stored, texel) in out.iter_mut().zip(texels) {
-                    *stored = cam.inv_z_of_gpu_depth(f32::from_le_bytes(*texel));
-                }
-            }
         }
         self.color_read.unmap();
-        self.depth_read.unmap();
+        if with_depth {
+            {
+                let depth = self.depth_read.get_mapped_range(..).ok()?;
+                for (texels, out) in rows(&depth, row, depths, width) {
+                    for (stored, texel) in out.iter_mut().zip(texels) {
+                        *stored = cam.inv_z_of_gpu_depth(f32::from_le_bytes(*texel));
+                    }
+                }
+            }
+            self.depth_read.unmap();
+        }
         Some(())
     }
 }

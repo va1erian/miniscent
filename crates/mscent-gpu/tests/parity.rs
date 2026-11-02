@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use compare::{Frame, compare};
 use mscent_gpu::{Gpu, GpuError, GpuRenderer};
 use mscent_render::png_encode::encode_png;
-use mscent_render::{Effects, FrameInput, FrameRenderer, Framebuffer, Quality};
+use mscent_render::{Effects, FrameInput, Framebuffer, LevelRenderer, Quality};
 use scenes::{Framing, Pose, Scene, Taken};
 
 const WIDTH: u32 = 320;
@@ -84,7 +84,7 @@ fn software(scene: &Scene, frame: &Framing, quality: Quality, without: Option<Ta
     Frame::of(&fb)
 }
 
-fn hardware(renderer: &mut GpuRenderer, frame: &Framing, case: &Case) -> Frame {
+fn hardware(on_gpu: &mut OnGpu, frame: &Framing, case: &Case) -> Frame {
     let mut fb = Framebuffer::new(WIDTH, HEIGHT).expect("a framebuffer");
     let input = FrameInput {
         view: &frame.view,
@@ -94,8 +94,12 @@ fn hardware(renderer: &mut GpuRenderer, frame: &Framing, case: &Case) -> Frame {
             poses: &frame.poses,
             ..Effects::default()
         },
+        wants_depth: true,
     };
-    renderer.draw(&mut fb, &input).expect("a frame");
+    let OnGpu { level, renderer } = on_gpu;
+    renderer
+        .draw(level.assets(), &mut fb, &input)
+        .expect("a frame");
     if let Some(error) = renderer.take_error() {
         panic!("{}: the GPU reported: {error}", case.name);
     }
@@ -143,17 +147,22 @@ fn gpu() -> Option<Gpu> {
     }
 }
 
-fn on_gpu(gpu: Gpu, scene: &Scene) -> GpuRenderer {
-    GpuRenderer::new(gpu, scene.software(None).into_assets())
-        .map_err(|(why, _)| why)
-        .expect("the level fits on the GPU")
+/// A level, and what of it is on the GPU.
+struct OnGpu {
+    level: LevelRenderer,
+    renderer: GpuRenderer,
+}
+
+fn on_gpu(gpu: Gpu, scene: &Scene) -> OnGpu {
+    let level = scene.software(None);
+    let renderer = GpuRenderer::new(gpu, level.assets()).expect("the level fits on the GPU");
+    OnGpu { level, renderer }
 }
 
 #[test]
 fn the_renderers_draw_the_same_frames() {
-    let (Some(first), Some(second), Some(third)) = (gpu(), gpu(), gpu()) else {
-        return;
-    };
+    let Some(first) = gpu() else { return };
+    let (second, third) = (first.clone(), first.clone());
     eprintln!("adapter: {}", first.adapter());
     let (showcase, door, hard) = (Scene::showcase(), Scene::door(), Scene::hard_shadows());
     let mut showcase_gpu = on_gpu(first, &showcase);

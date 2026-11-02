@@ -1,5 +1,6 @@
 //! Menu commands: files, play and the edit operations.
 
+use crate::studio::gpu_view;
 use std::path::{Path, PathBuf};
 
 use xui::prelude::Ui;
@@ -50,6 +51,7 @@ pub mod cmd {
     pub const SCRIPT_WINDOW: MenuId = MenuId::new(29);
     pub const NEW_VISTA: MenuId = MenuId::new(30);
     pub const NEW_MOUNTAINS: MenuId = MenuId::new(31);
+    pub const GPU_TOGGLE: MenuId = MenuId::new(32);
 }
 
 /// Fog the dialog starts from for a level without a world entity.
@@ -87,6 +89,7 @@ pub(super) fn menus(m: &mut xui::widget::MenuScope<'_>) {
     m.submenu(MenuId::new(102), "&View", |v| {
         v.item(cmd::FIT, "&Fit views to level");
         v.item(cmd::RESET_CAMERA, "&Reset 3D camera");
+        v.item(cmd::GPU_TOGGLE, "Switch 3D view between &GPU and software");
         v.separator();
         v.item(cmd::LAYOUT_CLASSIC, "&Classic layout");
         v.item(cmd::LAYOUT_QUAD, "&Quad layout (2 x 2)");
@@ -128,6 +131,10 @@ impl Editor {
             return;
         }
         match id {
+            cmd::GPU_TOGGLE => {
+                gpu_view::set_wanted(!gpu_view::wanted());
+                self.studio.redraw();
+            }
             cmd::NEW => {
                 self.install(Document::new(), None, "New level");
             }

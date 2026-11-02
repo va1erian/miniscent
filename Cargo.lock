@@ -1892,6 +1892,7 @@ version = "0.1.0"
 dependencies = [
  "miniscent-game",
  "mscent-game",
+ "mscent-gpu",
  "mscent-math",
  "mscent-platform",
  "mscent-render",

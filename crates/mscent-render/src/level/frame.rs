@@ -19,12 +19,15 @@ pub struct FrameInput<'a> {
     pub quality: Quality,
     pub actors: &'a [Actor],
     pub effects: Effects<'a>,
+    /// Whether anything reads the frame's depth after it is drawn. Software has it
+    /// anyway; a GPU has to copy it back, which is half the cost of a readback.
+    pub wants_depth: bool,
 }
 
 /// Something that can draw a level's frames.
 pub trait FrameRenderer {
-    /// Leaves the frame's colour and depth in `fb`. `None` when the view or
-    /// the framebuffer size cannot make a camera.
+    /// Leaves the frame's colour in `fb`, and its depth if `frame` asks for it.
+    /// `None` when the view or the framebuffer size cannot make a camera.
     fn draw(&mut self, fb: &mut Framebuffer, frame: &FrameInput) -> Option<SceneStats>;
 }
 
@@ -48,6 +51,7 @@ impl LevelRenderer {
             quality,
             actors,
             effects,
+            ..
         } = *input;
         let assets = &self.assets;
         let lights = &effects.lights[..effects.lights.len().min(MAX_DYN_LIGHTS)];

@@ -26,6 +26,7 @@ use ui::Editor;
 
 fn main() -> xui::backend::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    studio::gpu_view::set_wanted(!args.iter().any(|a| a == "--software"));
     if let Some(i) = args.iter().position(|a| a == "--selftest") {
         let Some(dir) = args.get(i + 1) else {
             eprintln!("--selftest needs an output directory");

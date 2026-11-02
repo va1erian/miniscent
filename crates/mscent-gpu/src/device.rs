@@ -40,7 +40,8 @@ fn block_on<F: Future>(future: F) -> F::Output {
     }
 }
 
-/// An open GPU.
+/// An open GPU. A clone is the same device, for the next level drawn on it.
+#[derive(Clone)]
 pub struct Gpu {
     pub(crate) device: wgpu::Device,
     pub(crate) queue: wgpu::Queue,

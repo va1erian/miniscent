@@ -1,10 +1,11 @@
 //! The hardware renderer: the same frames as [`mscent_render::LevelRenderer`],
 //! drawn on a GPU through wgpu and read back into a [`Framebuffer`].
 //!
-//! So far it draws the sky, faces, movers and actors, and a frame's voxels,
-//! viewports, dynamic lights and particles are not drawn. They arrive item by item
-//! (`docs/hardware-renderer.md`), each with a case in `tests/parity.rs`, which
-//! holds the two renderers to the same picture.
+//! So far it draws the sky, faces, movers and actors, and a frame's dynamic lights
+//! and particles are not drawn. A level with voxels or viewports must not come here
+//! ([`GpuRenderer::cannot_draw`]). These arrive item by item
+//! (`docs/hardware-renderer.md`), each with a case in `tests/parity.rs`, which holds
+//! the two renderers to the same picture.
 
 mod actors;
 mod device;
@@ -18,7 +19,7 @@ mod textures;
 pub use device::{Gpu, GpuError};
 
 use mscent_render::scene::SceneStats;
-use mscent_render::{Camera, FrameInput, FrameRenderer, Framebuffer, LevelAssets, Quality};
+use mscent_render::{Camera, FrameInput, Framebuffer, LevelAssets, Quality};
 
 use actors::ActorPass;
 use faces::FacePass;
@@ -28,10 +29,10 @@ use targets::Targets;
 /// The `Frame` of `common.wgsl`.
 const FRAME_BYTES: u64 = 96;
 
-/// A level on a GPU.
+/// A level on a GPU. It keeps what it uploaded and borrows the level to draw it,
+/// so the level can stay with its owner and with the software renderer.
 pub struct GpuRenderer {
     gpu: Gpu,
-    assets: LevelAssets,
     frame_uniform: wgpu::Buffer,
     sky: SkyPass,
     faces: FacePass,
@@ -65,29 +66,33 @@ fn frame_bytes(assets: &LevelAssets, cam: &Camera, quality: Quality, atlas: (u32
 }
 
 impl GpuRenderer {
-    /// Puts `assets` on `gpu`. On failure the level comes back with the reason,
-    /// for the software renderer to take.
-    pub fn new(gpu: Gpu, assets: LevelAssets) -> Result<Self, (GpuError, Box<LevelAssets>)> {
+    /// Puts `assets` on `gpu`.
+    pub fn new(gpu: Gpu, assets: &LevelAssets) -> Result<Self, GpuError> {
         let frame_uniform = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("frame"),
             size: FRAME_BYTES,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let faces = match FacePass::new(&gpu, &assets, &frame_uniform) {
-            Ok(faces) => faces,
-            Err(why) => return Err((why, Box::new(assets))),
-        };
         Ok(Self {
+            faces: FacePass::new(&gpu, assets, &frame_uniform)?,
             sky: SkyPass::new(&gpu, assets.config()),
             actors: ActorPass::new(&gpu, &frame_uniform),
             frame_uniform,
-            faces,
             gpu,
-            assets,
             targets: None,
             chunks: Vec::new(),
         })
+    }
+
+    /// What of `assets` this renderer cannot draw yet, which must go to software
+    /// rather than show as a hole in the picture.
+    pub fn cannot_draw(assets: &LevelAssets) -> Option<&'static str> {
+        let scene = assets.scene();
+        if !scene.voxels().is_empty() {
+            return Some("voxel volumes");
+        }
+        scene.has_viewports().then_some("viewports")
     }
 
     /// The first GPU error since the last call, if any.
@@ -95,32 +100,31 @@ impl GpuRenderer {
         self.gpu.take_error()
     }
 
-    /// The level again, for another renderer to take.
-    pub fn into_assets(self) -> LevelAssets {
-        self.assets
-    }
-}
-
-impl FrameRenderer for GpuRenderer {
-    /// The stats have no `pixels` or `spans`, which a GPU does not count.
-    fn draw(&mut self, fb: &mut Framebuffer, frame: &FrameInput) -> Option<SceneStats> {
+    /// Draws a frame of `assets`, the level this was made from, into `fb`. The
+    /// stats have no `pixels` or `spans`, which a GPU does not count. `None` when
+    /// the view or the size cannot make a camera, or the device has gone.
+    pub fn draw(
+        &mut self,
+        assets: &LevelAssets,
+        fb: &mut Framebuffer,
+        frame: &FrameInput,
+    ) -> Option<SceneStats> {
         let (width, height) = (fb.width(), fb.height());
-        let cam = self.assets.camera(frame.view, width, height)?;
-        let stats = self.assets.scene().visible_set(&cam, &mut self.chunks);
+        let cam = assets.camera(frame.view, width, height)?;
+        let stats = assets.scene().visible_set(&cam, &mut self.chunks);
         if self.targets.as_ref().map(Targets::size) != Some((width, height)) {
             self.targets = Some(Targets::new(&self.gpu, width, height));
         }
         let targets = self.targets.as_ref()?;
-        let uniform = frame_bytes(&self.assets, &cam, frame.quality, self.faces.atlas_size);
+        let uniform = frame_bytes(assets, &cam, frame.quality, self.faces.atlas_size);
         self.gpu
             .queue
             .write_buffer(&self.frame_uniform, 0, &uniform);
         self.sky.prepare(&self.gpu, height);
         let poses = frame.effects.poses;
         self.faces
-            .prepare(&self.gpu, &self.assets, &cam, &stats.drawn, poses);
-        self.actors
-            .prepare(&self.gpu, &self.assets, &cam, frame.actors);
+            .prepare(&self.gpu, assets, &cam, &stats.drawn, poses);
+        self.actors.prepare(&self.gpu, assets, &cam, frame.actors);
         let mut encoder = self.gpu.device.create_command_encoder(&Default::default());
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -150,9 +154,9 @@ impl FrameRenderer for GpuRenderer {
             self.faces.draw(&mut pass);
             self.actors.draw(&mut pass);
         }
-        targets.copy_for_reading(&mut encoder);
+        targets.copy_for_reading(&mut encoder, frame.wants_depth);
         self.gpu.queue.submit([encoder.finish()]);
-        targets.read_into(&self.gpu, &cam, fb)?;
+        targets.read_into(&self.gpu, &cam, fb, frame.wants_depth)?;
         Some(stats)
     }
 }
