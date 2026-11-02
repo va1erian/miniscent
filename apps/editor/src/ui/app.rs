@@ -69,7 +69,7 @@ pub mod cmd {
     pub const SAVE_AS: MenuId = MenuId::new(7);
     pub const UNDO: MenuId = MenuId::new(10);
     pub const REDO: MenuId = MenuId::new(11);
-    pub const MAKE_MOVER: MenuId = MenuId::new(25);
+    pub const MAKE_MOVER: MenuId = MenuId::new(26);
     pub const DELETE: MenuId = MenuId::new(12);
     pub const FLIP: MenuId = MenuId::new(13);
     pub const FORWARD: MenuId = MenuId::new(14);
@@ -83,6 +83,7 @@ pub mod cmd {
     pub const RESET_CAMERA: MenuId = MenuId::new(21);
     pub const LAYOUT_CLASSIC: MenuId = MenuId::new(23);
     pub const LAYOUT_QUAD: MenuId = MenuId::new(24);
+    pub const LEVEL_SETTINGS: MenuId = MenuId::new(25);
 }
 
 pub struct Editor {
@@ -144,7 +145,7 @@ impl Editor {
             state: state.clone(),
             classic: Arrangement::default(),
             quad: Arrangement::default(),
-            disposition: Disposition::Classic,
+            disposition: Disposition::Quad,
             play: Handle::new(),
             menu: Handle::new(),
             status: Handle::new(),
@@ -182,9 +183,7 @@ impl Editor {
             row()
                 .gap(2)
                 .children((tool_button(6), tool_button(7), tool_button(8))),
-            row()
-                .gap(2)
-                .children((tool_button(9), tool_button(10), tool_button(11))),
+            row().gap(2).children((tool_button(9), tool_button(10))),
         ));
         let op_button = |i: usize| {
             let (tip, glyph) = OPS[i];
@@ -230,7 +229,7 @@ impl Editor {
         ui.on_key(shortcut);
         ui.every(16, Msg::Tick);
         app.play.get().set_visible(false);
-        app.set_disposition(Disposition::Classic);
+        app.set_disposition(Disposition::Quad);
         app.log_view.get().set_enabled(false);
         app.refresh();
         app.show_prompt();
@@ -421,7 +420,7 @@ F5 plays it.
     pub fn probe(&self) -> Probe {
         Probe {
             state: self.state.clone(),
-            view3d: self.classic.view3d.get(),
+            view3d: self.pane3d(),
             play: self.play.get(),
             preview: self.preview.clone(),
         }
@@ -442,6 +441,7 @@ impl App for Editor {
 
     fn update(&mut self, msg: Msg, ui: &mut Ui<Msg>) {
         match msg {
+            Msg::Menu(cmd::LEVEL_SETTINGS) => self.level_settings(ui),
             Msg::Menu(id) => self.menu_command(id),
             Msg::Tool(i) => self
                 .state

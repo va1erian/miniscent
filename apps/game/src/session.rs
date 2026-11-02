@@ -403,8 +403,9 @@ impl GameSession {
         let alpha = self.stepper.alpha();
         let p = &self.game.player;
         View {
-            pos: p.body.prev_pos.lerp(p.body.pos, alpha),
-            orientation: nlerp(self.prev_orientation, p.orientation, alpha),
+            pos: p.body.prev_pos.lerp(p.body.pos, alpha) + p.bob_offset(),
+            orientation: (nlerp(self.prev_orientation, p.orientation, alpha) * p.bank_rotation())
+                .normalized(),
         }
     }
 

@@ -222,6 +222,27 @@ fn every_quality_draws_every_face_of_a_turned_door() {
 }
 
 #[test]
+fn every_tiling_draws_a_door_as_one_band_on_one_worker_does() {
+    let mut r = renderer(true);
+    let turn = MoverPose {
+        rot: Quat::from_axis_angle(Vec3::new(0.3, 0.5, 1.0), 0.8),
+        pivot: Vec3::new(0.0, 8.0, 0.0),
+        offset: Vec3::ZERO,
+    };
+    for quality in [Quality::Low, Quality::Medium, Quality::High] {
+        r.set_tiling(H, 1);
+        let want = picture(&r, quality, &[turn]);
+        for (rows, workers) in [(24, 1), (24, 4), (7, 3), (1, 8), (999, 2)] {
+            r.set_tiling(rows, workers);
+            assert!(
+                picture(&r, quality, &[turn]) == want,
+                "{quality:?}, {rows} rows, {workers} workers"
+            );
+        }
+    }
+}
+
+#[test]
 fn a_hostile_pose_draws_nothing_wrong_and_does_not_panic() {
     let r = renderer(true);
     for bad in [

@@ -1,41 +1,33 @@
-//! The front-to-back BSP walk that issues the draw calls.
+//! The front-to-back BSP walk that lists a frame's polygons in draw order.
 
 use mscent_math::{Aabb, Vec3};
-use mscent_world::{Child, Face, LeafId};
+use mscent_world::{Child, LeafId};
 
 use super::Scene;
 use crate::camera::{Camera, Frustum};
-use crate::framebuffer::Framebuffer;
-use crate::raster::draw_polygon;
-use crate::shade::SpanShader;
+use crate::raster::PolyList;
 use crate::texture::Texture;
 
-pub(super) struct Walk<'a, F> {
+pub(super) struct Walk<'a> {
     scene: &'a Scene,
-    fb: &'a mut Framebuffer,
+    list: &'a mut PolyList,
     cam: &'a Camera,
     frustum: Frustum,
     eye: Vec3,
     visible: Vec<bool>,
     drawn: Vec<bool>,
     texture: Option<&'a Texture>,
-    shader_for: &'a mut F,
     stats: super::SceneStats,
 }
 
-impl<'a, S, F> Walk<'a, F>
-where
-    S: SpanShader,
-    F: FnMut(usize, &Face) -> S,
-{
+impl<'a> Walk<'a> {
     pub(super) fn new(
         scene: &'a Scene,
-        fb: &'a mut Framebuffer,
+        list: &'a mut PolyList,
         cam: &'a Camera,
         eye: Vec3,
         visible: Vec<bool>,
         texture: Option<&'a Texture>,
-        shader_for: &'a mut F,
     ) -> Self {
         let stats = super::SceneStats {
             leaves_visible: visible.iter().filter(|&&v| v).count() as u32,
@@ -44,14 +36,13 @@ where
         };
         Self {
             scene,
-            fb,
+            list,
             cam,
             frustum: cam.frustum(),
             eye,
             visible,
             drawn: vec![false; scene.faces.len()],
             texture,
-            shader_for,
             stats,
         }
     }
@@ -63,7 +54,7 @@ where
     /// Visit `child` and everything below it, nearest side first.
     pub(super) fn visit(&mut self, child: Child) {
         match child {
-            Child::Leaf(id) => self.draw_leaf(id),
+            Child::Leaf(id) => self.list_leaf(id),
             Child::Node(id) => {
                 let Some(node) = self.scene.bsp.node(id) else {
                     return;
@@ -103,7 +94,7 @@ where
         })
     }
 
-    fn draw_leaf(&mut self, leaf: LeafId) {
+    fn list_leaf(&mut self, leaf: LeafId) {
         if !self.visible.get(leaf.0 as usize).copied().unwrap_or(false) {
             return;
         }
@@ -116,11 +107,11 @@ where
                 Some(done) if !*done => *done = true,
                 _ => continue,
             }
-            self.draw_face(fi);
+            self.list_face(fi);
         }
     }
 
-    fn draw_face(&mut self, fi: u32) {
+    fn list_face(&mut self, fi: u32) {
         let (Some(face), Some(poly)) = (
             self.scene.faces.get(fi as usize),
             self.scene.polys.get(fi as usize),
@@ -134,10 +125,7 @@ where
         let tex = self
             .texture
             .unwrap_or_else(|| self.scene.texture_of(face.material));
-        let mut shader = (self.shader_for)(fi as usize, face);
-        let st = draw_polygon(self.fb, self.cam, poly, tex, &mut shader);
-        self.stats.pixels += st.pixels;
-        self.stats.spans += st.spans;
+        self.list.push(self.cam, poly, tex, fi);
         self.stats.drawn.push(fi);
     }
 }

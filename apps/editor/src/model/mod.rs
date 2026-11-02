@@ -6,6 +6,7 @@ pub mod entity;
 pub mod facetex;
 pub mod fly;
 pub mod labels;
+pub mod outline;
 pub mod pick;
 pub mod pointer;
 pub mod shape_ops;
@@ -17,6 +18,8 @@ pub mod view;
 mod facetex_tests;
 #[cfg(test)]
 mod hostile_tests;
+#[cfg(test)]
+mod outline_tests;
 #[cfg(test)]
 mod review_tests;
 #[cfg(test)]

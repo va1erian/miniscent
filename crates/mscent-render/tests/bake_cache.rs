@@ -42,6 +42,13 @@ fn temp_file(name: &str) -> PathBuf {
     dir.join(name)
 }
 
+/// For a test that counts temporary files: the other tests write some too.
+fn own_dir(name: &str) -> PathBuf {
+    let dir = temp_file(name);
+    std::fs::create_dir_all(&dir).expect("own dir");
+    dir
+}
+
 #[test]
 fn rebuilding_an_unchanged_level_does_not_bake_again() {
     let level = showcase_level();
@@ -188,7 +195,7 @@ fn unusable_files_are_ignored_with_a_reason_and_replaced() {
 #[test]
 fn writes_are_atomic_and_rebake_overwrites() {
     let level = showcase_level();
-    let path = temp_file("atomic.msl.lit");
+    let path = own_dir("atomic").join("atomic.msl.lit");
     let _ = std::fs::remove_file(&path);
     let mut cache = BakeCache::with_file(path.clone());
     build(&level, &mut cache);
@@ -226,14 +233,18 @@ fn a_warm_start_beats_a_cold_one_on_the_showcase() {
     let mut cold = BakeCache::with_file(path.clone());
     build(&level, &mut cold);
     let cold_ms = cold.last_report().expect("report").ms;
-    let mut warm = BakeCache::with_file(path.clone());
-    build(&level, &mut warm);
-    let warm_ms = warm.last_report().expect("report").ms;
+    // The best of a few: a load descheduled on a busy machine says nothing.
+    let mut warm_ms = f64::INFINITY;
+    for _ in 0..5 {
+        let mut warm = BakeCache::with_file(path.clone());
+        build(&level, &mut warm);
+        assert_eq!(warm.last_source(), Some(Source::File));
+        warm_ms = warm_ms.min(warm.last_report().expect("report").ms);
+    }
     let size = std::fs::metadata(&path).expect("file").len();
     println!(
         "showcase lightmap: cold bake {cold_ms:.1} ms, warm load {warm_ms:.1} ms, {size} bytes"
     );
-    assert_eq!(warm.last_source(), Some(Source::File));
     assert!(warm_ms < cold_ms, "{warm_ms} vs {cold_ms}");
 }
 
@@ -247,7 +258,8 @@ fn concurrent_writers_in_one_process_leave_a_valid_file() {
     let (mut ca, mut cb) = (BakeCache::new(), BakeCache::new());
     build(&a, &mut ca);
     build(&b, &mut cb);
-    let path = temp_file("race.msl.lit");
+    let dir = own_dir("race");
+    let path = dir.join("race.msl.lit");
     let failures = std::sync::atomic::AtomicUsize::new(0);
     std::thread::scope(|s| {
         for cache in [&mut ca, &mut cb] {
@@ -274,8 +286,7 @@ fn concurrent_writers_in_one_process_leave_a_valid_file() {
         hit |= cache.last_source() == Some(Source::File);
     }
     assert!(hit, "the racing writers left an unusable file");
-    let dir = path.parent().expect("dir");
-    let leftovers = std::fs::read_dir(dir)
+    let leftovers = std::fs::read_dir(&dir)
         .expect("dir")
         .filter_map(Result::ok)
         .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))

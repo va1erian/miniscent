@@ -99,10 +99,13 @@ one. Reported by the user from a real Windows session, and what was done:
 - **Threaded Instant Play.** Play runs on a render thread (`studio/worker.rs`): input goes in over a
   bounded `try_send` channel, frames come out through a one-slot mailbox read with `try_lock`, stale
   frames are dropped, and a slow scene lowers the adaptive resolution instead of stalling the UI. A
-  panic in the scene is caught and reported. `studio/tests.rs`: with a scene that needs 100 ms per
-  frame, 200 UI ticks had a worst tick of 6.7 microseconds (mean 1.3); the scene made 6 frames and
-  the UI showed 6. `studio/race_tests.rs` covers start and stop races. Not verified: responsiveness
-  of a real window under load.
+  panic in the scene is caught and reported. `studio/tests.rs`: 200 UI ticks run while the test holds
+  a frame open, so a tick that waited for it is caught with no clock (release: p90 1 microsecond,
+  worst 2.5); uncollected frames are replaced by the newest. `studio/cache_lock_tests.rs` does the
+  same for preview and bake jobs by holding the cache lock. Tick cost is asserted at the 90th
+  percentile (`studio/tick_costs.rs`), as a single worst case measures the scheduler.
+  `studio/race_tests.rs` covers start and stop races. Not verified: responsiveness of a real window
+  under load.
 - **Hammer-style UV controls.** See the next section.
 
 Not verified: any real window, keyboard or multi-monitor use, the AVX2 paths on the i3-7100U, any
@@ -140,6 +143,27 @@ generated at runtime. Findings and changes:
   visible at the real window size; the AVX2 paths on the i3-7100U.
 - `cargo test --workspace` passes (one run saw `bake_cache::concurrent_writers_in_one_process_leave_a_valid_file`
   fail under full-workspace load; it passed alone and on rerun, so it is timing sensitive).
+
+## Parallel frames by default (M9.0, the groundwork of `docs/particles.md`)
+
+`LevelRenderer::render` draws in 24-row bands with `available_parallelism().max(4)` workers on a
+pool of parked threads (`jobs.rs`). Visibility, the BSP walk and the clipping and projection of every
+polygon run once per frame (`PolyList` in `raster.rs`); a band fills only the polygons in its rows.
+`LevelRenderer::set_tiling` overrides the band height and worker count. Game bench on the dev
+machine: 9.29 to 1.20 ms per frame. Pixels and depth equal one band on one worker at every tiling
+tried (`tests/tiled_level.rs`), and the scripted flythrough PNGs are byte-identical to the
+single-threaded renderer's. Allocations are unchanged (256 per frame, 1379 with actors;
+`tests/frame_alloc.rs`). Numbers and the scaling table are in `docs/particles.md`.
+
+Not verified: a real window, the i3-7100U (its 2 cores and 2 hyperthreads), and any LazyOS thread;
+no LazyOS backend passes the one-worker override yet. `frame_bench` still draws through `Scene::render`
+per band, on one worker, so the CI ratio does not measure this path.
+
+Seen failing on the code before this change as well as after it, and not addressed: the editor
+selftest check "a click on the picture picked the framed wall"; `tools/check_frame_cost.py` on the
+dev machine (ratio about 8.5 against a 7.61 baseline); intermittently
+`a_100_ms_scene_does_not_slow_the_ui_ticks_and_the_newest_frame_is_shown` (a 5 ms limit, under load)
+and `bake_cache::writes_are_atomic_and_rebake_overwrites`.
 
 ## Per-face texture mapping (TexInfo)
 
@@ -208,7 +232,7 @@ GUI itself was not driven by hand, only the model through the pointer API and th
 | M3.3 | Done | `raster.rs`; `tests/snapshot.rs::brick_quad_facing_the_camera` against `tests/ref/brick_quad.ppm` |
 | M3.4 | Done | `scene.rs` and `scene/walk.rs`; `scene_tests::flythrough_matches_brute_force_with_no_doubled_faces` |
 | M3.5 | Done | `snapshot::brick_wall_in_perspective_with_fog`, `flat_lit_fallback_scales_brightness`, `framebuffer_tests::sky_gradient_runs_from_top_to_bottom_colour`; the level renderer draws sky, fog and lit surfaces in the flythrough PNGs |
-| M3.6 | Partial | `tiles.rs`, `simd.rs`, `simd_x86.rs`; `tiles_tests::one_and_many_workers_give_identical_pixels`. Scaling not measured on multiple cores, AVX2 path unmeasured, no-syscall property not asserted |
+| M3.6 | Partial | `tiles.rs`, `jobs.rs`, `simd.rs`, `simd_x86.rs`; `tiles_tests::one_and_many_workers_give_identical_pixels`, `tests/tiled_level.rs`. Default in the game since M9.0; scaling measured on the dev machine only (`docs/particles.md`), AVX2 path unmeasured, no-syscall property not asserted |
 | M3.7 | Done | `resolution.rs` controller plus `upscale_nearest` (`resolution_tests`), wired in `apps/game/src/app.rs` (adaptive path, `--no-adaptive` to disable; headless runs fix the scale). Scale stayed at 1000 in the bench, so a drop under real load was not seen in the game itself |
 | M3.8 | Done | `crates/mscent-render/examples/frame_bench.rs`, `tools/check_frame_cost.py`, `docs/perf/baseline.json`, run in CI. The 10% regression failure was not demonstrated |
 | M3.9 | Done | `mesh.rs`; `mesh_tests` (fog, lighting, poses) |
@@ -291,6 +315,7 @@ Design in `docs/scripting.md`. Nothing a script can do exists yet.
 | M10.8 | Done | `mscent-game`: `prop.rs`, `script_props.rs`, factions in `game.rs`; `apps/game/src/notices.rs` shows `say:` and script errors on screen. `script_prop_tests.rs` plays props through `Game::step`, and `agent_tools.rs` runs the keycard and the terminal end to end through `--test`. Writing that test caught a real bug: events a script raised while running were lost. A PNG of props, the use prompt and a friendly and a hostile drone was looked at. Not verified: a physical `G` key, and fights between many friendly and hostile enemies at frame rate |
 | Sample | Done | `assets/levels/facility.txt`, packed to `.msl`, with `facility.st` and `facility.test.st`: shoot three switches for one door, a keycard for the next, a terminal that turns two guards friendly, a spawned wave, a goal. `apps/game/tests/sample_level.rs` plays it through the real binary and checks the packed file matches its text. `flyTo:` is a teleport, so that test does not walk through the doors; mover collision is `mover_tests`. A screenshot of the first room was looked at. Nobody has played it by hand: `cargo run --release -p miniscent-game -- --level assets/levels/facility.msl` |
 | M10.9 | Done | `apps/editor/src/model/labels.rs`, `ui/props.rs` Script names panel, Edit > Make mover, Marker and Zone tools (M, Z), movers orange in the 2D views; `build.rs` loads the script beside a saved level, and a broken one refuses Play with its file and line; `studio/scene.rs` reloads it during Play. Evidence: `selftest/scripting.rs` runs through the editor's messages: names a brush and a marker, refuses a bad name, saves and reopens, is told about a broken script, then plays and samples the Play pane: door shut, opened by the script, shut again after a script saved during Play. The three shots were looked at. `label` tests cover undo, duplicates and subtract brushes. Fixing the selftest showed its face-tool index had pointed at the World tool since #6, so that check was already failing; corrected. An independent review then found, and tests now cover: Save overwriting a level with clashing names, slice and carve leaving part of a mover behind as world, stale fields after undo, joining a group wiping its tags, and an unbounded script read on the UI thread. It also found a reload error wiped from the screen on entering Play, now fixed with no test. Known and left: unapplied typing is lost on a new selection and Enter does not apply it; extruding a mover's face adds a static brush; adding a box and undoing leaves [modified] on, because `next_id` counts as a change (older than M10). Not verified: typing in the fields with a real keyboard, placing with the M and Z tools by clicking a view, and how a reload error looks on screen in Play |
+| Merge with `main` | Done | Numbered M10 because M9 is the particle system (`docs/particles.md`). Movers now list once and fill per band, like the level: `mover_render::every_tiling_draws_a_door_as_one_band_on_one_worker_does`. The World tool is gone from the palette (fog is in Level settings), so Marker and Zone close it at 11 tools. `MAKE_MOVER` and main's `LEVEL_SETTINGS` had the same menu id, which the `--selftest` caught; the timing tests take main's `TickCosts` fix over the one here. Binary 1,425,920 bytes, 89% of the budget. `check_frame_cost.py` still reads 8.44 against the 7.61 baseline on this machine, as `main` does |
 
 ## Deviations from the plan
 

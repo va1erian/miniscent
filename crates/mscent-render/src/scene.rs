@@ -6,8 +6,10 @@
 //!    leaves that can be seen ([`visible`]).
 //! 2. Walk the BSP front to back from the eye, skipping subtrees whose
 //!    bounds are outside the view frustum.
-//! 3. At each visible leaf, draw its faces that face the eye, each face at
+//! 3. At each visible leaf, list its faces that face the eye, each face at
 //!    most once per frame even when it borders several leaves.
+//! 4. Fill the listed faces. Only this step depends on the rows being drawn,
+//!    so a frame in parallel bands lists once and fills per band.
 //!
 //! Front-to-back order does not change the picture (the z-buffer decides) but
 //! it makes the nearest surface win ties and keeps overdraw low once a shader
@@ -23,7 +25,7 @@ use mscent_world::{Bsp, Face, LeafKind, Portals};
 
 use crate::camera::Camera;
 use crate::framebuffer::Framebuffer;
-use crate::raster::Vertex;
+use crate::raster::{DrawStats, PolyList, Vertex};
 use crate::shade::{FlatShader, Fog, SpanShader};
 use crate::texture::{MaterialId, MaterialTable, Texture};
 
@@ -143,6 +145,25 @@ impl Scene {
         S: SpanShader,
         F: FnMut(usize, &Face) -> S,
     {
+        let mut list = PolyList::default();
+        let mut stats = self.list_frame(cam, texture, &mut list);
+        let drawn = self.fill_frame(fb, &list, texture, shader_for);
+        stats.pixels = drawn.pixels;
+        stats.spans = drawn.spans;
+        stats
+    }
+
+    /// The part of a frame that does not depend on the rows being drawn:
+    /// visibility and the clipped, projected faces in draw order, replacing
+    /// `list`. Run it once per frame, then [`Self::fill_frame`] per band. The
+    /// stats lack `pixels` and `spans`, which only filling knows.
+    pub(crate) fn list_frame(
+        &self,
+        cam: &Camera,
+        texture: Option<&Texture>,
+        list: &mut PolyList,
+    ) -> SceneStats {
+        list.clear();
         let eye = eye_of(cam);
         let leaf = self.bsp.leaf_at_f32(eye);
         let visible = if self.bsp.leaf_kind(leaf) == LeafKind::Empty {
@@ -150,9 +171,36 @@ impl Scene {
         } else {
             vec![true; self.bsp.leaves().len()]
         };
-        let mut w = walk::Walk::new(self, fb, cam, eye, visible, texture, shader_for);
+        let mut w = walk::Walk::new(self, list, cam, eye, visible, texture);
         w.visit(self.bsp.root());
         w.finish()
+    }
+
+    /// Fills the faces of `list` that touch the rows `fb` holds. `texture` must
+    /// be what the list was made with.
+    pub(crate) fn fill_frame<S, F>(
+        &self,
+        fb: &mut Framebuffer,
+        list: &PolyList,
+        texture: Option<&Texture>,
+        shader_for: &mut F,
+    ) -> DrawStats
+    where
+        S: SpanShader,
+        F: FnMut(usize, &Face) -> S,
+    {
+        let mut total = DrawStats::default();
+        for poly in list.in_rows(fb.row_range()) {
+            let Some(face) = self.faces.get(poly.tag as usize) else {
+                continue;
+            };
+            let tex = texture.unwrap_or_else(|| self.texture_of(face.material));
+            let mut shader = shader_for(poly.tag as usize, face);
+            let st = list.fill(fb, poly, tex, &mut shader);
+            total.pixels += st.pixels;
+            total.spans += st.spans;
+        }
+        total
     }
 
     /// Albedo texture of a material id, or the grey fallback.

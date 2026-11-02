@@ -11,15 +11,11 @@
 use mscent_math::{Quat, Vec3};
 
 use super::LevelRenderer;
-use super::shader::FaceShader;
 use crate::Quality;
 use crate::camera::Camera;
 use crate::framebuffer::Framebuffer;
-use crate::raster::{Vertex, draw_polygon};
+use crate::raster::{DrawStats, PolyList, Vertex};
 use crate::scene::eye_of;
-use crate::shade::FlatShader;
-use crate::texture::Texture;
-use mscent_world::materials::LIGHTPANEL;
 
 /// Where a mover is, relative to how it was authored: a point `x` goes to
 /// `rot (x - pivot) + pivot + offset`.
@@ -54,6 +50,16 @@ pub(super) struct MoverFaces {
     pub radius: f32,
 }
 
+/// This frame's movers, listed once and filled by every band, as the level is.
+#[derive(Default)]
+pub(super) struct MoverList {
+    polys: PolyList,
+    /// By a polygon's tag: its face, and the eye in the space it was authored in.
+    faces: Vec<(usize, Vec3)>,
+    /// Kept so a frame does not allocate it again.
+    moved: Vec<Vertex>,
+}
+
 /// The sphere around a set of polygons.
 pub(super) fn bounding_sphere(polys: &[Vec<Vertex>]) -> (Vec3, f32) {
     let points = || polys.iter().flatten().map(|v| v.pos);
@@ -67,15 +73,11 @@ pub(super) fn bounding_sphere(polys: &[Vec<Vertex>]) -> (Vec3, f32) {
 }
 
 impl LevelRenderer {
-    /// Draws every mover, each at its entry in `poses` or as authored.
-    pub(super) fn draw_movers(
-        &self,
-        fb: &mut Framebuffer,
-        cam: &Camera,
-        quality: Quality,
-        poses: &[MoverPose],
-    ) {
-        let mut moved: Vec<Vertex> = Vec::new();
+    /// Replaces `list` with every mover's faces, each mover at its entry in
+    /// `poses` or as authored.
+    pub(super) fn list_movers(&self, cam: &Camera, poses: &[MoverPose], list: &mut MoverList) {
+        list.polys.clear();
+        list.faces.clear();
         for (i, mover) in self.mover_faces.iter().enumerate() {
             let pose = poses.get(i).copied().unwrap_or(MoverPose::AUTHORED);
             // View is along -Z, so all of it is behind the eye past this.
@@ -83,20 +85,12 @@ impl LevelRenderer {
                 continue;
             }
             for face in mover.faces.clone() {
-                self.draw_mover_face(fb, cam, quality, &pose, face, &mut moved);
+                self.list_mover_face(cam, &pose, face, list);
             }
         }
     }
 
-    fn draw_mover_face(
-        &self,
-        fb: &mut Framebuffer,
-        cam: &Camera,
-        quality: Quality,
-        pose: &MoverPose,
-        index: usize,
-        moved: &mut Vec<Vertex>,
-    ) {
+    fn list_mover_face(&self, cam: &Camera, pose: &MoverPose, index: usize, list: &mut MoverList) {
         let scene = self.scene();
         let (Some(face), Some(poly)) = (scene.faces().get(index), scene.polys().get(index)) else {
             return;
@@ -106,17 +100,39 @@ impl LevelRenderer {
         if face.plane.signed_distance(eye.to_f64()) <= 0.0 {
             return;
         }
-        moved.clear();
-        moved.extend(poly.iter().map(|v| Vertex {
+        list.moved.clear();
+        list.moved.extend(poly.iter().map(|v| Vertex {
             pos: pose.to_world(v.pos),
             uv: v.uv,
         }));
-        let texture: &Texture = scene.texture_of(face.material);
-        let mut shader = if face.material == LIGHTPANEL {
-            FaceShader::Flat(FlatShader::new(super::EMISSIVE, self.fog()))
-        } else {
-            self.face_shader(index, face, eye, quality)
-        };
-        draw_polygon(fb, cam, moved, texture, &mut shader);
+        let tag = list.faces.len() as u32;
+        let texture = scene.texture_of(face.material);
+        list.polys.push(cam, &list.moved, texture, tag);
+        list.faces.push((index, eye));
+    }
+
+    /// Fills the listed faces that touch the rows `fb` holds.
+    pub(super) fn fill_movers(
+        &self,
+        fb: &mut Framebuffer,
+        list: &MoverList,
+        quality: Quality,
+    ) -> DrawStats {
+        let scene = self.scene();
+        let mut total = DrawStats::default();
+        for poly in list.polys.in_rows(fb.row_range()) {
+            let Some(&(index, eye)) = list.faces.get(poly.tag as usize) else {
+                continue;
+            };
+            let Some(face) = scene.faces().get(index) else {
+                continue;
+            };
+            let mut shader = self.face_shader(index, face, eye, quality);
+            let texture = scene.texture_of(face.material);
+            let st = list.polys.fill(fb, poly, texture, &mut shader);
+            total.pixels += st.pixels;
+            total.spans += st.spans;
+        }
+        total
     }
 }

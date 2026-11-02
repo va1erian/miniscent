@@ -36,8 +36,8 @@ impl Editor {
         }
     }
 
-    /// A press on the 3D picture while the face tool is active: pick, copy
-    /// (Alt + left) or paste (Alt + right).
+    /// A press on the 3D picture. The Select tool selects the brush under it;
+    /// the face tool picks, copies (Alt + left) or pastes (Alt + right).
     pub(super) fn pick_click(&mut self, click: Click) {
         let view = self.studio.fly_camera().view();
         let fov = BuildConfig::default().fov_y;
@@ -45,6 +45,12 @@ impl Editor {
             return;
         };
         let mut st = self.state.borrow_mut();
+        if st.tool == Tool::Select {
+            if !click.right {
+                st.select_brush_at(&ray);
+            }
+            return;
+        }
         if st.tool != Tool::Face {
             return;
         }

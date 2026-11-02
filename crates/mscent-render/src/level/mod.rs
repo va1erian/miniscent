@@ -16,22 +16,24 @@ mod overlay;
 mod shader;
 pub mod view;
 
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use mscent_math::Vec3;
 use mscent_world::lightmap::{Lightmap, LightmapError, PointLight};
 use mscent_world::materials::{self, LIGHTPANEL};
 use mscent_world::{CsgError, Entity, Face, Level};
 
-use crate::camera::Camera;
 use crate::framebuffer::Framebuffer;
 use crate::lighting_shader::{FaceLight, LightingShader, UvToLuxel};
 use crate::lightmap_mips::LightMips;
 use crate::mesh::{MeshLighting, PointLight as MeshLight};
+use crate::raster::{DrawStats, PolyList};
 use crate::scene::{Scene, SceneStats, eye_of};
 use crate::shade::{FlatShader, Fog};
 use crate::specular::SpecTable;
 use crate::texture::{MaterialId, MaterialTable};
+use crate::tiles::TileRenderer;
 use shader::FaceShader;
 
 pub use cache::{BakeCache, BakeReport, BakedLight, Source};
@@ -46,6 +48,10 @@ const EMISSIVE: u32 = 330;
 const UNLIT: u32 = 200;
 const NEAR: f32 = 0.1;
 const FAR: f32 = 400.0;
+/// Rows per band of a frame.
+const TILE_ROWS: u32 = 24;
+/// Fewest workers a renderer starts with, whatever the CPU reports.
+const MIN_WORKERS: usize = 4;
 
 /// How much of the lighting model a frame uses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -121,6 +127,18 @@ pub struct LevelRenderer {
     meshes: overlay::ActorMeshes,
     mover_faces: Vec<movers::MoverFaces>,
     cfg: BuildConfig,
+    /// Band height and worker count of [`Self::render`].
+    tiling: (u32, usize),
+    frame: Mutex<Option<FrameState>>,
+}
+
+/// What [`LevelRenderer::render`] keeps between frames, so a frame does not
+/// remake it: the bands, the worker threads and the polygon lists' storage.
+struct FrameState {
+    tiles: TileRenderer,
+    faces: PolyList,
+    actors: PolyList,
+    movers: movers::MoverList,
 }
 
 fn check_materials(table: &MaterialTable) -> Result<(), BuildError> {
@@ -200,6 +218,14 @@ fn mesh_lighting(lights: &[PointLight], ambient: Vec3) -> MeshLighting {
             })
             .collect(),
     }
+}
+
+/// Workers of a new renderer: every hardware thread, and at least
+/// [`MIN_WORKERS`].
+fn default_workers() -> usize {
+    std::thread::available_parallelism()
+        .map_or(MIN_WORKERS, usize::from)
+        .max(MIN_WORKERS)
 }
 
 /// One specular table per material id, plus a last one for unknown ids.
@@ -285,6 +311,8 @@ impl LevelRenderer {
             uv_maps,
             spec,
             cfg,
+            tiling: (TILE_ROWS, default_workers()),
+            frame: Mutex::new(None),
         }
     }
 
@@ -309,8 +337,16 @@ impl LevelRenderer {
         Fog::new(self.cfg.sky_bottom, self.cfg.fog_start, self.cfg.fog_end)
     }
 
-    /// Draw one frame: sky, level, `actors`, then the HUD. `None` when the
-    /// view or the framebuffer size cannot make a camera.
+    /// Band height and worker count of later frames (workers are clamped to
+    /// `1..=MAX_WORKERS`, rows to at least one).
+    pub fn set_tiling(&mut self, rows: u32, workers: usize) {
+        self.tiling = (rows.max(1), workers);
+        *self.frame.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    }
+
+    /// Draw one frame: visibility and projection once, then sky, level and
+    /// `actors` in parallel bands, then the HUD. `None` when the view or the
+    /// framebuffer size cannot make a camera.
     pub fn render(
         &self,
         fb: &mut Framebuffer,
@@ -334,25 +370,65 @@ impl LevelRenderer {
         poses: &[MoverPose],
     ) -> Option<SceneStats> {
         let cam = view.camera(self.cfg.fov_y, NEAR, FAR, fb.width(), fb.height())?;
-        fb.clear_sky(self.cfg.sky_top, self.cfg.sky_bottom);
-        // First, so the z-buffer saves shading whatever a door covers.
-        self.draw_movers(fb, &cam, quality, poses);
-        let stats = self.draw_level(fb, &cam, quality);
+        let mut slot = self.frame.lock().unwrap_or_else(PoisonError::into_inner);
+        let frame = self.frame_for(&mut slot, fb.width(), fb.height())?;
+        let mut stats = self.scene.list_frame(&cam, None, &mut frame.faces);
+        self.list_movers(&cam, poses, &mut frame.movers);
         self.meshes
-            .draw(fb, &cam, actors, &self.lighting, self.fog());
+            .list(&cam, actors, &self.lighting, &mut frame.actors);
+        let (faces, meshes, movers) = (&frame.faces, &frame.actors, &frame.movers);
+        let (pixels, spans) = (AtomicU32::new(0), AtomicU32::new(0));
+        let eye = eye_of(&cam);
+        frame.tiles.pass(&|band: &mut Framebuffer| {
+            band.clear_sky(self.cfg.sky_top, self.cfg.sky_bottom);
+            // First, so the z-buffer saves shading whatever a door covers.
+            let moved = self.fill_movers(band, movers, quality);
+            let st = self.fill_level(band, faces, quality, eye);
+            self.meshes.fill(band, meshes, self.fog());
+            pixels.fetch_add(moved.pixels + st.pixels, Ordering::Relaxed);
+            spans.fetch_add(moved.spans + st.spans, Ordering::Relaxed);
+        });
+        frame.tiles.composite(fb).ok()?;
+        drop(slot);
         if let Some(o) = hud {
             overlay::draw_overlay(fb, o);
         }
+        stats.pixels = pixels.into_inner();
+        stats.spans = spans.into_inner();
         Some(stats)
     }
 
-    fn draw_level(&self, fb: &mut Framebuffer, cam: &Camera, quality: Quality) -> SceneStats {
-        let eye = eye_of(cam);
-        let fog = self.fog();
-        self.scene.render_with(fb, cam, None, &mut |i, face| {
-            if face.material == LIGHTPANEL {
-                return FaceShader::Flat(FlatShader::new(EMISSIVE, fog));
-            }
+    /// The per-frame state for a target of this size, made on first use so a
+    /// renderer that never draws has no threads.
+    fn frame_for<'a>(
+        &self,
+        slot: &'a mut Option<FrameState>,
+        width: u32,
+        height: u32,
+    ) -> Option<&'a mut FrameState> {
+        if slot.is_none() {
+            *slot = Some(FrameState {
+                tiles: TileRenderer::new(width, height, self.tiling.0, self.tiling.1)?,
+                faces: PolyList::default(),
+                actors: PolyList::default(),
+                movers: movers::MoverList::default(),
+            });
+        }
+        let frame = slot.as_mut()?;
+        if frame.tiles.size() != (width, height) {
+            frame.tiles.resize(width, height)?;
+        }
+        Some(frame)
+    }
+
+    fn fill_level(
+        &self,
+        fb: &mut Framebuffer,
+        list: &PolyList,
+        quality: Quality,
+        eye: Vec3,
+    ) -> DrawStats {
+        self.scene.fill_frame(fb, list, None, &mut |i, face| {
             self.face_shader(i, face, eye, quality)
         })
     }
@@ -362,6 +438,9 @@ impl LevelRenderer {
     fn face_shader(&self, i: usize, face: &Face, eye: Vec3, quality: Quality) -> FaceShader<'_> {
         let fog = self.fog();
         let flat = |light| FaceShader::Flat(FlatShader::new(light, fog));
+        if face.material == LIGHTPANEL {
+            return flat(EMISSIVE);
+        }
         let map = self.uv_maps.get(i).copied().flatten();
         let Some(map) = map else {
             return flat(UNLIT);
@@ -386,5 +465,15 @@ impl LevelRenderer {
             return FaceShader::Spec(s);
         }
         LightingShader::new(fl).map_or_else(|| flat(UNLIT), FaceShader::Lit)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_new_renderer_gets_at_least_the_minimum_workers() {
+        assert!(default_workers() >= MIN_WORKERS);
     }
 }

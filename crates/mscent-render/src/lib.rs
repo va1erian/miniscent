@@ -11,6 +11,7 @@ pub mod draw2d;
 pub mod font;
 pub mod framebuffer;
 pub mod inflate;
+pub mod jobs;
 pub mod level;
 pub mod light_sampler;
 pub mod lighting_shader;
@@ -32,6 +33,7 @@ pub mod uv_luxel;
 pub use camera::{Camera, Frustum, ScreenPoint};
 pub use draw2d::{Sprite, blit, draw_text, fill_rect, stroke_rect, text_size};
 pub use framebuffer::Framebuffer;
+pub use jobs::JobPool;
 pub use level::{
     Actor, ActorKind, BakeCache, BakeReport, BakedLight, BuildConfig, BuildError, Compiled,
     LevelRenderer, MoverPose, Overlay, Quality, Source, View,

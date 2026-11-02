@@ -12,6 +12,7 @@ use xui::widget::{Control, Placeable};
 use xui::{Key, MouseButton};
 
 use super::paint2d::{Scene, paint};
+use crate::model::outline::OutlineCache;
 use crate::model::{Camera2D, EditorState, Pointer, View};
 
 /// What a view tells the app.
@@ -47,6 +48,7 @@ impl<M: 'static> Viewport<M> {
         let control = Control::new(ui, &spec)?;
         let cam = Rc::new(RefCell::new(Camera2D::default()));
         let auto_fit = Rc::new(Cell::new(true));
+        let outlines = RefCell::new(OutlineCache::default());
         {
             let (state, cam, auto_fit) = (state.clone(), cam.clone(), auto_fit.clone());
             let theme = ui.theme_handle();
@@ -62,6 +64,7 @@ impl<M: 'static> Viewport<M> {
                     view,
                     cam: *cam.borrow(),
                     theme: theme.get(),
+                    outlines: &outlines,
                 };
                 paint(canvas, &scene);
             }));

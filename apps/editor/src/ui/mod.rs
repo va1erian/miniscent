@@ -7,6 +7,7 @@ mod faces;
 mod icons;
 mod keys;
 mod layouts;
+mod level_dialog;
 mod paint2d;
 pub mod props;
 mod toolbar;

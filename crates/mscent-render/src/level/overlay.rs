@@ -5,8 +5,10 @@ use mscent_math::Vec3;
 use crate::camera::Camera;
 use crate::draw2d::{draw_text, fill_rect, stroke_rect};
 use crate::framebuffer::Framebuffer;
-use crate::mesh::{Mesh, MeshLighting, Pose, draw_mesh};
+use crate::mesh::{Mesh, MeshLighting, Pose, fill_meshes, list_mesh};
+use crate::raster::PolyList;
 use crate::shade::Fog;
+use crate::texture::Texture;
 
 /// What kind of thing an [`Actor`] is, which picks its mesh.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,6 +43,8 @@ pub(super) struct ActorMeshes {
     keycard: Mesh,
     terminal: Mesh,
     crate_box: Mesh,
+    /// Carries the vertex light in its `u` coordinate; its texel is unused.
+    carrier: Texture,
 }
 
 impl ActorMeshes {
@@ -53,17 +57,19 @@ impl ActorMeshes {
             keycard: Mesh::keycard(),
             terminal: Mesh::terminal(),
             crate_box: Mesh::crate_box(),
+            carrier: Texture::solid(0xffff_ffff),
         }
     }
 
-    pub(super) fn draw(
+    /// Replaces `list` with this frame's actor triangles.
+    pub(super) fn list(
         &self,
-        fb: &mut Framebuffer,
         cam: &Camera,
         actors: &[Actor],
         lighting: &MeshLighting,
-        fog: Option<Fog>,
+        list: &mut PolyList,
     ) {
+        list.clear();
         for a in actors {
             let mesh = match a.kind {
                 ActorKind::Enemy => &self.enemy,
@@ -79,8 +85,13 @@ impl ActorMeshes {
                 yaw: a.yaw,
                 scale: ACTOR_SCALE,
             };
-            draw_mesh(fb, cam, mesh, &pose, lighting, fog);
+            list_mesh(cam, mesh, &pose, lighting, &self.carrier, list);
         }
+    }
+
+    /// Fills the listed triangles into the rows `fb` holds.
+    pub(super) fn fill(&self, fb: &mut Framebuffer, list: &PolyList, fog: Option<Fog>) {
+        fill_meshes(fb, list, &self.carrier, fog);
     }
 }
 
