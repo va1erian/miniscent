@@ -5,7 +5,7 @@
 //! in those units. The weights come from the measured table in
 //! `docs/particles.md`, as multiples of the 0.55 ns of that pixel.
 
-use mscent_render::particles::{ParticleDraws, SpriteDraw, StreakDraw};
+use mscent_render::particles::{DecalDraw, ParticleDraws, SpriteDraw, StreakDraw};
 use mscent_render::shade::mul_rgb;
 use mscent_render::{Framebuffer, Quality};
 
@@ -19,6 +19,11 @@ const ROW_SETUP: f32 = 36.0;
 /// About 25 ns per streak and 5.7 ns per pixel of its width.
 const STREAK_SETUP: f32 = 45.0;
 const STREAK_PIXEL: f32 = 10.0;
+/// Decals, from `fx_bench`: about 4.2 ns per pixel of the polygon, against
+/// 0.55 ns for an additive one, because the row loop is scalar (a mask lookup
+/// and a divide every 16 pixels) and about 300 ns to set up each.
+const DECAL_WEIGHT: f32 = 7.5;
+const DECAL_SETUP: f32 = 550.0;
 /// A hidden pixel costs its depth test: 0.08 ns against 0.55 ns.
 const OCCLUDED_WEIGHT: f32 = 0.15;
 /// Sprites wider than this are worth five depth probes.
@@ -108,6 +113,11 @@ impl Sink<'_> {
         self.out.streaks.push(s);
         self.tags.streaks.push(tag);
     }
+
+    /// Decals carry no tag: they are never thinned, only counted.
+    pub fn decal(&mut self, d: DecalDraw) {
+        self.out.decals.push(d);
+    }
 }
 
 impl Tags {
@@ -184,6 +194,7 @@ impl Tally {
         for (s, tag) in draws.streaks.iter().zip(&tags.streaks) {
             t.add(*tag, streak_cost(s, w, h));
         }
+        t.add(Tag::ESSENTIAL, decals_cost(draws, w, h));
         t
     }
 
@@ -284,6 +295,15 @@ pub fn cost_of(draws: &ParticleDraws, depth: Option<&Framebuffer>, w: f32, h: f3
             .iter()
             .map(|s| streak_cost(s, w, h))
             .sum::<f32>()
+        + decals_cost(draws, w, h)
+}
+
+/// What the decals of a frame cost. They are not probed against the depth of
+/// the last frame: a hidden one still pays its depth test per pixel, and the
+/// ring and the area cap in `Decals::collect` bound the total.
+fn decals_cost(draws: &ParticleDraws, w: f32, h: f32) -> f32 {
+    let pixels: f32 = draws.decals.iter().map(|d| d.screen_area(w, h)).sum();
+    DECAL_SETUP * draws.decals.len() as f32 + DECAL_WEIGHT * pixels
 }
 
 fn clipped_box(s: &SpriteDraw, w: f32, h: f32) -> (f32, f32) {

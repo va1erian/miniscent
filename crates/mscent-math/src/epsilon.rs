@@ -47,3 +47,10 @@ pub const UNIT_NORM_TOLERANCE: f32 = 1.0e-4;
 /// for solid when estimating a surface normal. Larger than the bisection
 /// error of a bounce, smaller than any wall the editor snaps to.
 pub const PARTICLE_NORMAL_PROBE: f32 = 5.0e-2;
+
+/// How much nearer than the scene a scorch decal may be and still show: the
+/// decal's `1/z` times one plus this must reach the stored `1/z`. A decal lies
+/// in the plane of the wall it marks, so the two differ only by rounding in
+/// two interpolations; this is relative, so it holds from near to far. Far
+/// below the gap between a wall and anything in front of it.
+pub const DECAL_DEPTH_BIAS: f32 = 2.0e-3;

@@ -53,6 +53,12 @@ impl Scene {
     /// off the wall, then its faces on that plane. `None` when no face is
     /// there, including for values that trace back to bad input.
     pub fn surface_at(&self, point: Vec3, normal: Vec3) -> Option<Surface> {
+        self.face_at(point, normal)
+            .map(|face| self.surface_of(face))
+    }
+
+    /// The face behind [`Self::surface_at`], for effects that need its shape.
+    pub fn face_at(&self, point: Vec3, normal: Vec3) -> Option<&Face> {
         let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
         if !finite(point) || !finite(normal) {
             return None;
@@ -71,11 +77,11 @@ impl Scene {
         let mut first = None;
         for (face, dist) in on_plane {
             if contains(face, p - face.plane.normal * dist) {
-                return Some(self.surface_of(face));
+                return Some(face);
             }
             first = first.or(Some(face));
         }
-        first.map(|face| self.surface_of(face))
+        first
     }
 
     fn surface_of(&self, face: &Face) -> Surface {

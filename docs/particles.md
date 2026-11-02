@@ -1,6 +1,6 @@
 # Particles: combat effects in a software renderer
 
-M9.0 to M9.4 are built; the rest is design. It replaces the screen-space tracer that was in
+M9.0 to M9.4 and M9.7 are built; the rest is design. It replaces the screen-space tracer that was in
 [`apps/game/src/feedback.rs`](../apps/game/src/feedback.rs) with a world-space particle system
 that covers the shots, hits and explosions of combat and can later serve a destructible brush.
 See [What was built](#what-was-built-m91-to-m93) for where the code differs from this design.
@@ -238,6 +238,79 @@ Not built, and needed before this design is finished:
 - **Hiding particle cost from the resolution controller**, for the same reason. Until then a big
   explosion can lower the internal resolution for a while after it ends. Not measured.
 - **Moving large sprites to the half-res layer** arrives with the layer, in M9.6.
+
+## What was built (M9.7)
+
+A shot that strikes a wall leaves a dark mark that stays on its face, in a ring of 64.
+
+- `mscent-game/src/fx/decal.rs`: `Decal` (a convex polygon of at most 12 points on the struck plane),
+  `FaceOutline` (the plane and the inward edge half-spaces of a `Face`, up to 24 edges) and the
+  `Decals` ring. Storage is a fixed array, the 65th mark replaces the first, and nothing allocates.
+  `CombatFx::shot_on(shot, Some(&outline))` cuts the mark to its face once, when the shot is made;
+  `shot` is the same without a face. The mark is added when the bolt arrives, and `clear` empties
+  the ring. The session gets the face from the new `Scene::face_at`, which `surface_at` now uses.
+- `recipes::surface_mark(material)`: half-side and darkness per material, next to the hit rows.
+  Metal is the smallest (0.18 against 0.38 for brick), a light panel only dims.
+- `mscent-render/src/particles/decal.rs`: `ParticleDraws::decals` holds `DecalDraw`s, drawn before
+  every sprite in the same band pass. A pixel is darkened by a puff mask from the bank, multiplied
+  into the colour, and depth is read, never written. `1/z`, `s/z` and `t/z` are fitted as planes
+  through the polygon's points, so a pixel is the same in a band as in a whole frame, and the mask
+  position is exact every 16 pixels. A decal seen from behind is dropped when it is projected.
+- The depth bias is `epsilon::DECAL_DEPTH_BIAS`, relative: 0.2% of `1/z`. The mark lies in the
+  wall's plane, so what it has to absorb is rounding, and the margin is wide. With the bias at 1e-4
+  the tests in `apps/game/tests/decals.rs` still passed; at zero the flicker test failed, with the
+  mark breaking up between adjacent camera positions.
+- Fog scales a mark's darkness by the fade, the way an "over" tint is faded, because a black mark
+  in fog would stand out from the haze around it.
+
+**Cost**, `cargo run --release -p mscent-render --example fx_bench`, 640x360, one thread, dev
+machine, measured per pixel of the polygon over a wall:
+
+| Case | ns per pixel | ns per decal |
+|---|---|---|
+| 1 decal, 320 px | 3.6 | |
+| 1 decal, 80 px | 3.8 | 24,300 |
+| 64 decals, 40 px | 4.1 | 6,500 |
+| 64 decals, 16 px | 4.7 | 1,200 |
+| 64 decals, 40 px, hidden behind the scene | 1.2 | 1,900 |
+| 64 decals, 16 px, hidden | 1.9 | 480 |
+
+That is about 8 times an additive pixel (0.46 to 0.55 ns), because the row loop is scalar. `Tally`
+charges 7.5 units per pixel of screen area plus 550 per decal as Essential (`budget.rs`). A whole
+ring of 40 px marks all in view is 0.42 ms on the dev machine, about 2 ms on the reference at the 5x
+guess, before the bands split it.
+
+**Decals are never thinned, so they have a bound of their own**: `Decals::collect` walks the ring
+newest first and stops once the marks fill half a screen. Without it, 64 marks piled up against a
+wall next to the player could each cover the whole frame.
+
+Tests: `crates/mscent-render/src/particles/decal_tests.rs` (bias, bands, no depth write, hostile
+values), `crates/mscent-game/src/fx_decal_tests.rs` (ring, clipping, fog, facing, area cap, hostile
+values), `crates/mscent-game/tests/fx_collect_alloc.rs` (a full ring of marks in view collects with
+zero allocations) and `apps/game/tests/decals.rs`, through a real baked level: from six views every
+changed pixel reconstructs, from the depth buffer, to a point on the pillar's face inside the mark's
+square and inside the face; the same mark uncut changes pixels off the face; a mark behind a wall is
+in the draw list and changes no pixel; the pixel sets of 40 adjacent camera positions along three
+paths flip by under 0.5%; one worker and four give the same pixels at four tilings.
+
+Where it differs from the design above:
+
+- **No hot glow on metal.** Left out: the metal hit row already has a glow sprite that lasts 0.4 s.
+- **Clipped to the face, not to the world.** A mark on one face of a coplanar pair with another
+  material stops at the seam. A face with more than 24 distinct edges is not clipped. A cut that
+  would pass 12 points is skipped, so the mark can be a little over that edge, never invalid.
+- **A concave corner needs no clip.** A mark that runs past a wall into the next is behind that
+  wall's surface and loses the depth test. The cut matters at convex edges and ledges, where the
+  overhang would hang in the air, so the test uses a pillar.
+- **A mark is not lit.** It multiplies the finished pixel, so it darkens a lit wall by the same
+  fraction as an unlit one.
+- **Looked at once.** One screenshot of brick-wall shots at a glancing angle (below). Metal, rock,
+  floor and light panel marks, a face-on view and a moving camera were not looked at by a person.
+
+Seen in a screenshot of the start room (a script firing at the near brick wall, 640x360): three
+near-black marks with soft, ragged edges lying along the wall, stretched by perspective to follow
+its slant, each about the size of a brick and running across mortar lines and bricks alike. They
+are very dark; the darkness values are starting points like the rest of the recipes.
 
 ## Design overview
 
@@ -539,6 +612,7 @@ crates/mscent-render/src/particles/
   beam.rs      near clip, streaks, beams
   layer.rs     half-res layer: depth downsample, composite
   budget.rs    cost weights, probes, keep
+  decal.rs     scorch decals: polygon raster, depth bias
 crates/mscent-game/src/fx/
   mod.rs       Fx: spawn, tick, collect
   pool.rs      SoA pool, swap-remove
@@ -546,6 +620,7 @@ crates/mscent-game/src/fx/
   emit.rs      shapes, delayed queue, density
   collide.rs   the three collision levels and their limits
   effects.rs   Effect, Emitter and the recipe tables; effects_surface.rs for the material rows
+  decal.rs     the ring of 64 scorch marks and the face outline they are cut to
 ```
 
 ## Work items
@@ -559,7 +634,7 @@ crates/mscent-game/src/fx/
 | M9.4 | **Done**, without the adaptive multiplier. Budget: costs, probes, tiers, `keep`, Quality rows | M9.2 | M | A frame at 100 full-screen sprites stays within 10% of budget, Essential is untouched, and a scripted run is pixel-identical twice |
 | M9.5 | Dynamic lights: per-face shader variant, reach flood, mesh lights | M9.3 | M | No cost when no light is active (frame bench unchanged); wall behind a wall stays unlit; per-span cost measured |
 | M9.6 | Drone explosion and `Blast`, half-res layer, shake, overlay | M9.4, M9.5 | L | `fx_gallery` contact sheets looked at by a person; peak cost of `Blast` reported at 640x360 |
-| M9.7 | Scorch decals: blended polygon raster, ring of 64, depth bias | M9.3 | S | Decal stays on its face from several angles without z-fighting |
+| M9.7 | **Done.** Scorch decals: blended polygon raster, ring of 64, depth bias | M9.3 | S | `apps/game/tests/decals.rs`: the decal stays on its face from six views, changes no pixel behind a wall, does not flicker between adjacent camera positions, and is pixel-identical at every worker count; `fx_collect_alloc.rs`: zero allocation |
 | M9.8 | `Effect::Shatter` and material rows | M9.6 | S | Gallery shows each material; a 1000-unit box stays within pool and budget |
 
 **Evidence.** A new `examples/fx_gallery.rs` renders each effect at fixed times over the showcase

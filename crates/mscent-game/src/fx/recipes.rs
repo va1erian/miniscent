@@ -235,6 +235,29 @@ pub fn surface_hit(material: u16) -> Effect {
     }
 }
 
+/// A scorch left on a wall: the half-side of its square in world units, and
+/// how far its centre darkens the wall, `0..=256` (256 is black).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Mark {
+    pub radius: f32,
+    pub darkness: u16,
+}
+
+/// The mark a shot leaves on a surface of this material. Metal takes a small
+/// one, since its sparks carry the energy away; brick and rock char widely;
+/// a light panel only dims. Unknown ids get a middle one.
+pub const fn surface_mark(material: u16) -> Mark {
+    let (radius, darkness) = match material {
+        METAL => (0.18, 200),
+        BRICK => (0.38, 230),
+        ROCK => (0.32, 215),
+        FLOOR => (0.3, 220),
+        LIGHTPANEL => (0.2, 150),
+        _ => (0.25, 190),
+    };
+    Mark { radius, darkness }
+}
+
 /// A cone around the reflected direction, which `EffectArgs::dir` carries.
 pub static HIT_DRONE: Effect = &[
     em(

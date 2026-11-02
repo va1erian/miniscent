@@ -149,7 +149,7 @@ fn nearest(pos: f32, scale: f32, side: usize) -> u8 {
 
 /// The smallest mip at least as large as the sprite, so scaling is a
 /// downsample (the next mip up).
-fn mip_for(diameter: f32) -> usize {
+pub(super) fn mip_for(diameter: f32) -> usize {
     (0..MIPS - 1)
         .find(|&level| (8usize << level) as f32 >= diameter)
         .unwrap_or(MIPS - 1)
