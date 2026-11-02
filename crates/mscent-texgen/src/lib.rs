@@ -8,10 +8,15 @@
 //! Parameters and recipes are untrusted input, so failures are [`TexError`]s.
 
 pub mod error;
+pub mod graph;
 pub mod image;
 pub mod math;
 pub mod noise;
 pub mod ops;
+pub mod pack;
+pub mod recipe;
 
 pub use error::TexError;
 pub use image::{Frame, Image, Px, Size};
+pub use pack::{Maps, bake};
+pub use recipe::Recipe;

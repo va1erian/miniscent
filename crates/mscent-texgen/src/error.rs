@@ -14,6 +14,14 @@ pub enum TexError {
     NotTiling(&'static str),
     /// An operator received the wrong number of inputs, or inputs of another size.
     BadInputs(&'static str),
+    /// A recipe file could not be read. Line 0 is the file as a whole.
+    Parse { line: usize, why: String },
+    /// A page's blocks do not connect.
+    Graph(String),
+    /// A page would hold more images at once than a run may.
+    TooLarge,
+    /// The caller stopped the run.
+    Cancelled,
 }
 
 impl fmt::Display for TexError {
@@ -24,6 +32,10 @@ impl fmt::Display for TexError {
             Self::BadParam(p) => write!(f, "bad value for parameter {p}"),
             Self::NotTiling(why) => write!(f, "does not tile: {why}"),
             Self::BadInputs(op) => write!(f, "{op}: wrong inputs"),
+            Self::Parse { line, why } => write!(f, "line {line}: {why}"),
+            Self::Graph(why) => write!(f, "{why}"),
+            Self::TooLarge => write!(f, "the page holds too many images at once"),
+            Self::Cancelled => write!(f, "cancelled"),
         }
     }
 }
