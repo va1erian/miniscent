@@ -1,23 +1,23 @@
 //! The page of blocks: one custom-painted xui node. A click selects, a drag moves
 //! a block, a drag of its right edge resizes it, the right button opens the menu,
 //! and the wheel or a middle-button drag scrolls. A drag changes the recipe only
-//! when it ends, so it is one undo step and costs no evaluation on its way.
+//! when it ends, so it is one undo step and costs no evaluation on its way. How it
+//! is drawn is in `page_paint`.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use mscent_texgen::recipe::Block;
 use xui::app::Ui;
-use xui::backend::{
-    Canvas, Cursor, Event, NodeKind, NodeSpec, Result, TextStyle, TextVAlign, WidgetId,
-};
+use xui::backend::{Cursor, Event, NodeKind, NodeSpec, Result, WidgetId};
 use xui::geometry::{Rect, Size};
 use xui::layout::Constraints;
-use xui::units::Dip;
 use xui::widget::{Control, Placeable};
-use xui::{Image, MouseButton, Theme};
+use xui::{Image, MouseButton};
 
 use super::TexMsg;
 use super::page_geom::Grid;
+use super::page_paint::paint;
 use crate::model::texdoc::clamp_to_page;
 use crate::texstudio::TexStudio;
 use crate::ui::Msg;
@@ -29,7 +29,7 @@ const WHEEL: i32 = 56;
 
 /// What the pointer is doing.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
-enum Drag {
+pub(super) enum Drag {
     #[default]
     None,
     /// Pressed on a block, not yet moved.
@@ -53,147 +53,18 @@ enum Drag {
 }
 
 #[derive(Default)]
-struct Shared {
-    scroll: Cell<(i32, i32)>,
-    drag: Cell<Drag>,
+pub(super) struct Shared {
+    pub(super) scroll: Cell<(i32, i32)>,
+    pub(super) drag: Cell<Drag>,
     /// By block index, as the worker last made them.
-    thumbs: RefCell<Vec<Option<Image>>>,
+    pub(super) thumbs: RefCell<Vec<Option<Image>>>,
 }
 
 /// The widget.
 pub struct Page {
     control: Control<Msg>,
     shared: Rc<Shared>,
-}
-
-fn paint_grid(canvas: &mut dyn Canvas, grid: &Grid, theme: &Theme) {
-    let b = canvas.bounds();
-    canvas.clear(theme.input_background);
-    let line = theme.border.lerp(theme.input_background, 0.6);
-    let mut x = b.left - grid.scroll.0.rem_euclid(grid.cell.0);
-    while x < b.right {
-        canvas.fill_rect(Rect::new(x, b.top, x + 1, b.bottom), line);
-        x += grid.cell.0;
-    }
-    let mut y = b.top - grid.scroll.1.rem_euclid(grid.cell.1);
-    while y < b.bottom {
-        canvas.fill_rect(Rect::new(b.left, y, b.right, y + 1), line);
-        y += grid.cell.1;
-    }
-}
-
-/// What a block looks like this frame.
-struct Look<'a> {
-    name: &'a str,
-    selected: bool,
-    broken: bool,
-    thumb: Option<&'a Image>,
-}
-
-fn paint_block(canvas: &mut dyn Canvas, rect: Rect, look: &Look, theme: &Theme) {
-    let inner = Rect::new(rect.left + 1, rect.top + 1, rect.right - 1, rect.bottom - 1);
-    let (fill, ink, frame, width) = if look.broken {
-        // Red, with a heavy frame: it reads as wrong without reading the text.
-        let fill = theme.danger.lerp(theme.raised, 0.55);
-        (fill, theme.text, theme.danger, 2.0)
-    } else if look.selected {
-        (theme.raised, theme.text, theme.accent, 2.0)
-    } else {
-        (theme.raised, theme.text, theme.border, 1.0)
-    };
-    canvas.fill_rounded_rect(inner, 3.0, fill);
-    let pad = 4;
-    let side = inner.height() - pad * 2;
-    let thumb = Rect::new(
-        inner.left + pad,
-        inner.top + pad,
-        inner.left + pad + side,
-        inner.top + pad + side,
-    );
-    if let Some(image) = look.thumb.filter(|_| !look.broken) {
-        canvas.draw_image(image, thumb);
-    } else {
-        canvas.fill_rect(thumb, theme.input_background);
-    }
-    canvas.stroke_rect(thumb, theme.border, 1.0);
-    let text = Rect::new(
-        thumb.right + pad,
-        inner.top,
-        inner.right - pad,
-        inner.bottom,
-    );
-    let style = TextStyle::new(ink, Dip(11.0)).middle();
-    canvas.push_clip(text);
-    canvas.draw_text(look.name, text, &style);
-    canvas.pop_clip();
-    canvas.stroke_rounded_rect(inner, 3.0, frame, width);
-    if look.broken {
-        let mut mark = TextStyle::new(theme.danger, Dip(14.0)).bold();
-        mark.valign = TextVAlign::Middle;
-        canvas.draw_text("!", thumb.shrink(side / 3), &mark);
-    }
-}
-
-fn paint(canvas: &mut dyn Canvas, studio: &TexStudio, shared: &Shared, theme: &Theme) {
-    let grid = Grid::new(canvas.dpi(), shared.scroll.get());
-    paint_grid(canvas, &grid, theme);
-    let Some(doc) = studio.doc() else {
-        let style = TextStyle::new(theme.text_secondary, Dip(12.0)).middle();
-        let mut area = canvas.bounds();
-        area.left += 12;
-        canvas.draw_text(
-            "Pick a material on the left, or make a new one",
-            area,
-            &style,
-        );
-        return;
-    };
-    let bounds = canvas.bounds();
-    // The grid is in the node's pixels; a canvas is in the window's.
-    let placed = |r: Rect| {
-        Rect::new(
-            r.left + bounds.left,
-            r.top + bounds.top,
-            r.right + bounds.left,
-            r.bottom + bounds.top,
-        )
-    };
-    let (broken, _) = studio.trouble();
-    let thumbs = shared.thumbs.borrow();
-    for (i, block) in doc.recipe().blocks.iter().enumerate() {
-        let rect = placed(grid.rect(block));
-        if rect.left >= bounds.right || rect.top >= bounds.bottom {
-            continue;
-        }
-        if rect.right <= bounds.left || rect.bottom <= bounds.top {
-            continue;
-        }
-        let look = Look {
-            name: block.spec.name,
-            selected: doc.selected() == Some(i),
-            broken: broken.contains(&i),
-            thumb: thumbs.get(i).and_then(Option::as_ref),
-        };
-        paint_block(canvas, rect, &look, theme);
-    }
-    // Where the drag would put the block.
-    let ghost = match shared.drag.get() {
-        Drag::Move { block, cell, .. } => doc.recipe().blocks.get(block).map(|b| {
-            let mut at = b.clone();
-            (at.x, at.y) = cell;
-            grid.rect(&at)
-        }),
-        Drag::Resize { block, w } => doc.recipe().blocks.get(block).map(|b| {
-            let mut at = b.clone();
-            at.w = w;
-            grid.rect(&at)
-        }),
-        _ => None,
-    };
-    if let Some(rect) = ghost {
-        canvas.stroke_rounded_rect(placed(rect), 3.0, theme.accent, 2.0);
-    }
-    canvas.stroke_rect(bounds, theme.border, 1.0);
+    ui: Ui<Msg>,
 }
 
 /// One message from a mouse button going down.
@@ -247,6 +118,12 @@ struct Ctx<'a> {
     shared: &'a Shared,
 }
 
+/// The node's size in pixels: how much of the page shows.
+fn viewport(ui: &Ui<Msg>, id: WidgetId) -> (i32, i32) {
+    let b = ui.bounds(id);
+    (b.width(), b.height())
+}
+
 impl Ctx<'_> {
     fn grid(&self) -> Grid {
         Grid::new(self.ui.dpi(), self.shared.scroll.get())
@@ -257,7 +134,7 @@ impl Ctx<'_> {
         let blocks = studio
             .doc()
             .map_or(&[][..], |d| d.recipe().blocks.as_slice());
-        let limit = self.grid().scroll_limit(blocks);
+        let limit = self.grid().scroll_limit(blocks, viewport(self.ui, self.id));
         let (sx, sy) = self.shared.scroll.get();
         self.shared.scroll.set((
             sx.saturating_add(dx).clamp(0, limit.0),
@@ -420,7 +297,11 @@ impl Page {
                 )
             });
         }
-        Ok(Page { control, shared })
+        Ok(Page {
+            control,
+            shared,
+            ui: ui.clone(),
+        })
     }
 
     pub fn invalidate(&self) {
@@ -435,6 +316,43 @@ impl Page {
     pub fn set_thumbs(&self, thumbs: Vec<Option<Image>>) {
         *self.shared.thumbs.borrow_mut() = thumbs;
         self.control.invalidate();
+    }
+
+    pub fn reset_scroll(&self) {
+        self.shared.scroll.set((0, 0));
+        self.control.invalidate();
+    }
+
+    /// Scrolls the least that shows `block`, which is selected from somewhere
+    /// other than the page, or is just where a stock recipe has it. False when the
+    /// page has no size yet, as before its first layout: nothing was done.
+    pub fn reveal(&self, block: &Block, blocks: &[Block]) -> bool {
+        let grid = Grid::new(self.ui.dpi(), self.shared.scroll.get());
+        let view = viewport(&self.ui, self.control.id());
+        if view.0 <= 0 || view.1 <= 0 {
+            return false;
+        }
+        let (x, y) = grid.revealing(block, view);
+        let limit = grid.scroll_limit(blocks, view);
+        self.shared
+            .scroll
+            .set((x.clamp(0, limit.0), y.clamp(0, limit.1)));
+        self.control.invalidate();
+        true
+    }
+
+    /// How far the page is scrolled, for scripted runs.
+    #[cfg(test)]
+    pub fn scroll(&self) -> (i32, i32) {
+        self.shared.scroll.get()
+    }
+
+    /// Whether all of `block` is in view, for scripted runs.
+    #[cfg(test)]
+    pub fn shows(&self, block: &Block) -> bool {
+        let view = viewport(&self.ui, self.control.id());
+        let r = Grid::new(self.ui.dpi(), self.shared.scroll.get()).rect(block);
+        r.left >= 0 && r.top >= 0 && r.right <= view.0 && r.bottom <= view.1
     }
 }
 

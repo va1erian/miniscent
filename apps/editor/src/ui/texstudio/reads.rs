@@ -6,13 +6,13 @@ use mscent_texgen::ops::{Role, Value};
 
 use crate::model::texdoc::TexDoc;
 
-/// The name a `load` reads, from its text parameter.
-pub fn load_name(doc: &TexDoc, block: usize) -> Option<&str> {
+/// The name a `store` keeps or a `load` reads, from its text parameter.
+pub fn slot_name(doc: &TexDoc, block: usize) -> Option<&str> {
     let b = doc
         .recipe()
         .blocks
         .get(block)
-        .filter(|b| b.spec.role == Role::Load)?;
+        .filter(|b| matches!(b.spec.role, Role::Load | Role::Store))?;
     b.params.values().iter().find_map(|v| match v {
         Value::Text(t) => Some(t.as_str()),
         _ => None,
@@ -27,7 +27,7 @@ pub fn describe(doc: &TexDoc, block: usize) -> String {
     let Ok(graph) = doc.page() else {
         return "Inputs show once the page compiles".to_string();
     };
-    if let Some(name) = load_name(doc, block) {
+    if let Some(name) = slot_name(doc, block).filter(|_| b.spec.role == Role::Load) {
         return format!("reads \"{name}\"");
     }
     let sources = graph.inputs_of(block);
@@ -79,8 +79,9 @@ mod tests {
         );
         assert_eq!(describe(&d, 2), "reads 2 inputs: noise, flat");
         assert_eq!(describe(&d, 4), "reads \"a\"");
-        assert_eq!(load_name(&d, 4), Some("a"));
-        assert_eq!(load_name(&d, 0), None);
+        assert_eq!(slot_name(&d, 4), Some("a"));
+        assert_eq!(slot_name(&d, 3), Some("a"), "a store has its name too");
+        assert_eq!(slot_name(&d, 0), None);
     }
 
     #[test]

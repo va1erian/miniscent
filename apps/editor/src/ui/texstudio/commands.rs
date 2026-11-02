@@ -127,6 +127,7 @@ impl Editor {
             self.tex_refresh();
         } else {
             self.tex.sync_trouble();
+            self.tex.follow_selection();
         }
     }
 

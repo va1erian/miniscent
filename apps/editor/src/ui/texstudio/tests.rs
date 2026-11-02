@@ -25,7 +25,7 @@ pub(super) struct Handles {
     pub(super) menu: Rc<xui::widget::Menu<Msg>>,
     pub(super) preview: Rc<super::TexPreview>,
     /// Where the page is in the window.
-    origin: Box<dyn Fn() -> (i32, i32)>,
+    pub(super) origin: Box<dyn Fn() -> (i32, i32)>,
 }
 
 /// Builds the editor and runs `script` with the workspace open on a new material.
@@ -116,7 +116,7 @@ const CTRL: Modifiers = Modifiers {
 
 /// The middle of a cell of the page, in the page's pixels at 96 DPI.
 fn cell(x: i32, y: i32) -> (i32, i32) {
-    (x * 128 + 50, y * 56 + 28)
+    (x * 144 + 50, y * 56 + 28)
 }
 
 fn blocks(h: &Handles) -> Vec<(u16, u16, u16)> {
@@ -150,11 +150,11 @@ fn a_click_selects_a_drag_moves_and_the_right_edge_resizes() {
         at_page(stage, h, 2, tx, ty);
         assert_eq!(blocks(h)[1], (2, 3, 1));
         // The right edge: one column more.
-        let right = 3 * 128 - 3;
+        let right = 3 * 144 - 3;
         let top = 3 * 56 + 20;
         at_page(stage, h, 0, right, top);
-        at_page(stage, h, 1, right + 128, top);
-        at_page(stage, h, 2, right + 128, top);
+        at_page(stage, h, 1, right + 144, top);
+        at_page(stage, h, 2, right + 144, top);
         assert_eq!(blocks(h)[1], (2, 3, 2));
         // Two edits, two undo steps, by the keyboard, leaving the level alone.
         let level = h.state.borrow().doc.clone();
@@ -227,7 +227,7 @@ fn changed_box(a: &xui::Image, b: &xui::Image) -> Option<(u32, u32, u32, u32)> {
 /// A picture once the window has stopped changing. The parameter panel is rebuilt
 /// for a new selection and lays out a frame after the first picture that shows it,
 /// so a "before" taken at once would count that as part of what a popup changed.
-fn steady_shot(stage: &Stage<'_, Msg>) -> xui::Image {
+pub(super) fn steady_shot(stage: &Stage<'_, Msg>) -> xui::Image {
     let mut last = stage.ui().capture().expect("captures");
     for _ in 0..8 {
         let next = stage.ui().capture().expect("captures");
@@ -296,7 +296,7 @@ fn the_add_menu_is_grouped_and_fits_the_window_at_the_page_bottom() {
     with_workspace(|stage, h| {
         let (ox, oy) = (h.origin)();
         let closed = steady_shot(stage);
-        let (x, y) = cell(3, 4);
+        let (x, y) = cell(3, 6);
         for kind in [0, 2] {
             stage.inject(mouse_event(kind, ox + x, oy + y, MouseButton::Right));
         }

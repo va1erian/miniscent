@@ -26,6 +26,8 @@ mod keys;
 mod materials;
 mod scripting;
 mod texture;
+mod texture_paint;
+mod texture_stock;
 
 /// Ticks the UI `n` times, 16 ms apart, so the render thread's frames arrive
 /// and show before a snapshot.

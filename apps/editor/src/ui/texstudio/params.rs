@@ -254,7 +254,7 @@ fn panel_layout(doc: &TexDoc, panel: &mut ParamPanel, brush: Brush) -> Layout<Ms
     let mut content = column()
         .gap(6)
         .child(label(spec.name).title())
-        .child(label(&reads::describe(doc, index)).bind(&panel.reads));
+        .child(label(reads::describe(doc, index)).bind(&panel.reads));
     if spec.params.is_empty() {
         content = content.child(label("No parameters"));
     }

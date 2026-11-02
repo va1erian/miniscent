@@ -11,14 +11,14 @@ use mscent_texgen::{bake, ops};
 use mscent_world::materials::NAMES;
 use xui::xui_canvas::snapshot::Stage;
 
-use super::{Run, pump, wait_for_preview};
+use super::{Run, pump, texture_paint, texture_stock, wait_for_preview};
 use crate::studio::Preview;
 use crate::texstudio::Tab;
 use crate::ui::texstudio::TexMsg;
 use crate::ui::{Msg, Probe, cmd};
 
 /// Emits steps until the studio has caught up; false when it never did.
-fn settle(stage: &Stage<'_, Msg>, probe: &Probe) -> bool {
+pub(super) fn settle(stage: &Stage<'_, Msg>, probe: &Probe) -> bool {
     for _ in 0..30_000 {
         stage.emit(Msg::Step);
         let tex = probe.tex();
@@ -32,7 +32,7 @@ fn settle(stage: &Stage<'_, Msg>, probe: &Probe) -> bool {
     false
 }
 
-fn tex(stage: &Stage<'_, Msg>, msg: TexMsg) {
+pub(super) fn tex(stage: &Stage<'_, Msg>, msg: TexMsg) {
     stage.emit(Msg::Tex(msg));
 }
 
@@ -42,7 +42,7 @@ fn op_index(name: &str) -> usize {
         .unwrap_or(usize::MAX)
 }
 
-fn add(stage: &Stage<'_, Msg>, name: &str, cell: (u16, u16)) {
+pub(super) fn add(stage: &Stage<'_, Msg>, name: &str, cell: (u16, u16)) {
     tex(
         stage,
         TexMsg::Add {
@@ -110,7 +110,7 @@ fn set_colour(stage: &Stage<'_, Msg>, block: usize, index: usize, c: [f32; 3]) {
 }
 
 /// What the page should show on the Albedo tab, by the generator's own bake.
-fn expected_albedo(probe: &Probe) -> Option<Vec<u8>> {
+pub(super) fn expected_albedo(probe: &Probe) -> Option<Vec<u8>> {
     let studio = probe.tex();
     let studio = studio.borrow();
     let recipe = studio.doc()?.recipe();
@@ -124,7 +124,7 @@ fn expected_albedo(probe: &Probe) -> Option<Vec<u8>> {
 }
 
 /// A copy of the stock manifest and textures, so saving touches nothing real.
-fn copy_of_assets(probe: &Probe, to: &Path) -> Result<(), String> {
+pub(super) fn copy_of_assets(probe: &Probe, to: &Path) -> Result<(), String> {
     let from = probe.materials().dir().ok_or("no texture directory")?;
     let _ = std::fs::remove_dir_all(to);
     std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
@@ -332,6 +332,7 @@ fn check_save(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe, dir: PathBuf
     if let Err(why) = copy_of_assets(probe, &dir) {
         return run.check(false, &format!("a copy of the assets: {why}"));
     }
+    let original = probe.materials().dir();
     probe.materials().set_dir(dir.clone());
     tex(stage, TexMsg::Open("selftest-mat".to_string()));
     tex(
@@ -402,6 +403,10 @@ fn check_save(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe, dir: PathBuf
     );
     let dirty = probe.tex().borrow().doc().is_some_and(|d| d.dirty());
     run.check(dirty, "still to be saved, with the edit");
+    // What follows saves into a copy of the real assets, not into this one.
+    if let Some(original) = original {
+        probe.materials().set_dir(original);
+    }
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -411,6 +416,7 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     let level = probe.state().borrow().doc.clone();
     stage.emit(Msg::Menu(cmd::TEX_OPEN));
     run.check(probe.tex().borrow().is_open(), "the workspace opens");
+    texture_stock::script(run, stage, probe);
     build_recipe(run, stage, probe);
     check_tabs(run, stage, probe);
     check_pixels(run, stage, probe);
@@ -427,6 +433,8 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     settle(stage, probe);
     run.shot(stage, "texture-03-lit.png");
     check_save(run, stage, probe, run.dir.join("texture-assets"));
+    let dir = run.dir.join("texture-paint-assets");
+    texture_paint::script(run, stage, probe, &dir);
     run.check(
         probe.state().borrow().doc == level,
         "the level was never touched",

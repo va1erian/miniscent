@@ -29,6 +29,7 @@ mod msg;
 mod page;
 mod page_geom;
 mod page_menu;
+mod page_paint;
 mod params;
 mod preview;
 mod reads;
@@ -47,8 +48,9 @@ pub type TexPreview = Preview<Msg>;
 const LEFT_WIDTH: i32 = 190;
 /// Width of the parameter column, in dip.
 const RIGHT_WIDTH: i32 = 300;
-/// Height of the block page, in dip: six rows, a real recipe.
-const PAGE_HEIGHT: i32 = 300;
+/// Height of the block page, in dip: seven rows, so a stock recipe's chain shows in
+/// pieces long enough to read; the rest scrolls.
+const PAGE_HEIGHT: i32 = 392;
 
 const TABS: [(Tab, &str); 6] = [
     (Tab::Block, "Block"),
@@ -89,6 +91,8 @@ pub struct Workspace {
     menu: Option<Menu<Msg>>,
     /// The cell its last opening was over.
     menu_cell: Rc<std::cell::Cell<(u16, u16)>>,
+    /// The material and block the page was last scrolled to show.
+    revealed: RefCell<Option<(String, Option<usize>)>>,
 }
 
 fn gloss_msg(v: f64, live: bool) -> Option<Msg> {
@@ -149,6 +153,7 @@ impl Workspace {
             gloss_of: None,
             menu: None,
             menu_cell: Rc::new(std::cell::Cell::new((0, 0))),
+            revealed: RefCell::new(None),
         }
     }
 
@@ -327,8 +332,33 @@ impl Workspace {
             self.preview.get().set_tiled(studio.tiled());
         }
         self.sync_trouble();
+        self.follow_selection();
         self.page.get().invalidate();
         Ok(())
+    }
+
+    /// Scrolls the page to the selected block when the selection is another one
+    /// than it last showed. Left for the next call while the page has no size yet.
+    fn follow_selection(&self) {
+        let studio = self.studio.borrow();
+        let Some(doc) = studio.doc() else {
+            return;
+        };
+        let key = Some((doc.name().to_string(), doc.selected()));
+        if *self.revealed.borrow() == key {
+            return;
+        }
+        // Another material starts at the top: the last one's place means nothing.
+        let same_material =
+            self.revealed.borrow().as_ref().map(|k| k.0.as_str()) == Some(doc.name());
+        if !same_material {
+            self.page.get().reset_scroll();
+        }
+        let blocks = &doc.recipe().blocks;
+        let block = doc.selected().and_then(|s| blocks.get(s));
+        if block.is_none_or(|b| self.page.get().reveal(b, blocks)) {
+            *self.revealed.borrow_mut() = key;
+        }
     }
 
     /// Says what is wrong with the page, and repaints it if that changed. Only on a
@@ -383,6 +413,8 @@ impl Workspace {
     }
 }
 
+#[cfg(test)]
+mod page_tests;
 #[cfg(test)]
 mod paint_tests;
 #[cfg(test)]

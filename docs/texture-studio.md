@@ -1,6 +1,6 @@
 # Texture Studio: plan
 
-Status: M12.1 to M12.7 are built, and the workspace is on the Texture menu. The
+Status: M12.1 to M12.8 are built, and the workspace is on the Texture menu. The
 sections below are the plan as written, with the changes noted under "As built".
 Time and size figures are targets to measure, not results. The work items move
 to [work-items.md](work-items.md) as M12 once this is accepted.
@@ -27,6 +27,26 @@ to [work-items.md](work-items.md) as M12 once this is accepted.
 - **Lit view.** `mscent_render::texel_light` holds the steps the lighting shader
   takes for a pixel once it knows the light, inlined into the shader, and
   `shade_texel` is those steps in one call. The tile is drawn at most 512 px wide.
+- **The page shows what a block reads.** Each input a block actually reads, from
+  the compiled graph, is a small mark on its top edge, and the parameter panel
+  says it in words ("reads 1 input: noise", or the name a `load` reads). The marks
+  are the compiled graph's, so a page with an error shows none and the error text
+  says why. The page scrolls by the wheel, a middle-button drag or by selecting a
+  block, which brings it into view; a bar along the edge shows where the window
+  is on a longer page.
+- **Paint.** With a `paint` block selected and the Block tab showing, a drag on the
+  preview draws a stroke. Positions are in tiles, the 2x tiled view included, and
+  a stroke is kept as one continuous run of coordinates, so one that crosses an edge
+  continues on the other side. A stroke is one undo step, and its points are thinned
+  to a quarter of the brush radius apart (at least 1/1024 tile) so a long one stays
+  small. It stops growing at `MAX_POINTS` with a message, and a block past
+  `MAX_STROKES` refuses a new one. While the pointer is down the worker runs the
+  draft path, as for a slider, and the full picture comes on release. The brush
+  (radius, hardness, colour) belongs to the workspace, so it is no undo step. The
+  recipe reader holds `stroke` lines to `mscent_texgen::ops::stroke_fits`, the same
+  predicate the kernel uses, so a file that loads also runs; the operator's work
+  limit is separate and shows as a failed page, not a failed load, for a page of
+  many thick strokes.
 - **A material with no recipe** (PNG files) opens on a new page of its size, and
   nothing replaces the files until it is saved, which asks first for a stock one.
 - **Bump fade at 512 px.** A tile's world size is `texture_size * scale`, so at the
@@ -51,7 +71,7 @@ node graphs, animated textures, and custom emissive materials (see "Lit view").
 
 | Fact | Where | What it means here |
 |---|---|---|
-| Five textures come from Python: fractal noise through FFT upsampling, plus masks built by hand per material | [gen_textures.py](../tools/gen_textures.py) | The operators below must be able to rebuild all five; that is the test of the op set |
+| Five textures come from Python: fractal noise through FFT upsampling, plus masks built by hand per material | `tools/gen_textures.py` (since removed) | The operators below must be able to rebuild all five; that is the test of the op set |
 | Normals: wrapped central differences per texel, `(-dx, dy, 1)` | `to_normal` in the same file | Keep this sign convention, or every bump flips. Per-texel differences also mean relief changes with resolution; see "Resolution" |
 | Height is 8-bit on disk, and normals are computed before quantizing | same | The generator keeps more bits so gentle slopes do not stair-step |
 | Material ids are positions in the sorted file list, and levels store the id | [materials.rs](../crates/mscent-world/src/materials.rs), `check_materials` in [level/mod.rs](../crates/mscent-render/src/level/mod.rs) | Adding `concrete.png` shifts `floor` and later ids, and the level no longer builds. **This blocks custom materials** |
@@ -199,6 +219,13 @@ op 1 3 1 out-height normal_strength=5
 | Combine | `merge` (add, subtract, multiply, min, max, screen, blend), `mask` (three inputs: a, b, mask), `paste` | |
 | Height tools | | `bump` (bake light into albedo), `cavity`, `slope` (specular from height) |
 | Flow | `store`, `load`, `out-albedo`, `out-height`, `out-specular` | |
+
+A block reads the blocks above it, so a position is a connection and there are no
+wires to show it. An operator whose input is optional (`rect`, `dots`, `paint` and
+the other shapes) therefore draws over the block above it if there is one, and on
+its own background only if there is none. The page marks every input a block reads
+on its top edge, and the parameter panel says how many and from which blocks, so a
+shape placed under another block is seen to read it.
 
 A recipe needs `out-albedo`. Without `out-height` the normal map is flat, and
 without `out-specular` the mask is full. Height and specular read channel R.

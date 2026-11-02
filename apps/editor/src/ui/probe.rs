@@ -75,6 +75,12 @@ impl Probe {
         self.tex_preview.pixels()
     }
 
+    /// The window's pixel at `u`, `v` tiles from the corner of the picture on the
+    /// Texture Studio's preview, for a scripted pointer to go to.
+    pub fn tex_pixel_at(&self, u: f32, v: f32) -> (i32, i32) {
+        self.tex_preview.pixel_at(u, v)
+    }
+
     /// The Instant Play pane (covers the work area while playing).
     pub fn play_pane(&self) -> Rc<View3d<Msg>> {
         self.play.clone()

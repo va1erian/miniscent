@@ -122,6 +122,32 @@ fn bit_flips_and_truncations_never_panic() {
     }
 }
 
+/// Flipped bits in stroke lines, which carry the most numbers, never panic, and
+/// whatever still reads is a stroke the operator would run.
+#[test]
+fn bit_flips_in_stroke_lines_never_panic_and_what_reads_is_drawable() {
+    let text = painted(
+        "stroke 0.03 0.5 1,0.5,0.25,1 -0.25,0.5 0.5,0.5 1.125,0.75\nstroke 0.2 0 0,0,0,0.5 2,2",
+    );
+    let bytes = text.as_bytes();
+    let mut rng = Rng::new(0x5712_0be5);
+    for _ in 0..20_000 {
+        let mut b = bytes.to_vec();
+        for _ in 0..1 + rng.below(4) {
+            let at = rng.below(b.len() as u32) as usize;
+            b[at] ^= 1 << rng.below(8);
+        }
+        let Ok(r) = read(&b) else { continue };
+        for block in &r.blocks {
+            for value in block.params.values() {
+                if let Value::Strokes(list) = value {
+                    assert!(list.iter().all(ops::stroke_fits));
+                }
+            }
+        }
+    }
+}
+
 fn painted(stroke_lines: &str) -> String {
     format!("miniscent-recipe 1\nsize 8 8\nop 0 0 1 paint\n{stroke_lines}\n")
 }
