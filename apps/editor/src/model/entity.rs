@@ -8,6 +8,9 @@ use mscent_world::entity::{
 use mscent_world::materials::VIEW_SLOTS;
 use mscent_world::vista_scale::{parallax_of_scale, scale_of_parallax};
 
+/// Largest value a field of any entity but a vista layer takes.
+const MAX_PLAIN_PARAM: f64 = 4096.0;
+
 /// What the entity tools can place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EntityKind {
@@ -182,6 +185,12 @@ pub fn params(e: &Entity) -> Vec<(&'static str, f64)> {
 
 /// Sets field `i` of [`params`]; out-of-range indices change nothing.
 pub fn set_param(e: &mut Entity, i: usize, v: f64) {
+    // The panel's fields are wide for a vista layer's fog, which holds its own limits.
+    let v = if matches!(e, Entity::VistaLayer { .. }) {
+        v
+    } else {
+        v.clamp(-MAX_PLAIN_PARAM, MAX_PLAIN_PARAM)
+    };
     match e {
         Entity::Light {
             color,

@@ -341,3 +341,20 @@ fn scale_is_the_inverse_of_parallax_with_zero_for_infinite() {
     set_param(&mut e, 2, f64::NAN);
     assert_eq!(scale(&e).1, 0.0, "not a number changes nothing");
 }
+
+#[test]
+fn only_a_vista_layer_takes_a_value_past_the_plain_limit() {
+    let mut light = EntityKind::Light.make([0.0, 0.0, 0.0]);
+    let count = params(&light).len();
+    for i in 0..count {
+        set_param(&mut light, i, 100_000.0);
+    }
+    assert!(
+        params(&light).iter().all(|&(_, v)| v <= 4096.0),
+        "{light:?}"
+    );
+    let mut layer = EntityKind::VistaLayer.make([0.0, 0.0, 0.0]);
+    set_param(&mut layer, 3, 100_000.0);
+    let centre_x = params(&layer)[3].1;
+    assert_eq!(centre_x, 100_000.0);
+}

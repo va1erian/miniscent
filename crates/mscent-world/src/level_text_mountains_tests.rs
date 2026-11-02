@@ -109,7 +109,7 @@ fn a_vista_scale_reads_as_its_inverse() {
     assert_eq!(parallax("x2.5"), 0.4);
     assert_eq!(parallax("0.0625"), 0.0625);
     for bad in [
-        "x0", "x0.5", "x", "x-4", "xnan", "xinf", "x1e999", "xx4", "X16",
+        "x0", "x0.5", "x", "x-4", "xnan", "xinf", "x1e999", "xx4", "X16", "x4097",
     ] {
         assert!(from_text(&text(&[&vista(bad)])).is_err(), "{bad}");
     }

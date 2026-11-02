@@ -50,13 +50,18 @@ impl<'a> Walk<'a> {
             leaves_total: visible.len() as u32,
             ..Default::default()
         };
+        // A layer's walk lists no viewport faces, so it has none to remember.
+        let hole_drawn = match lists.holes {
+            Some(_) => vec![false; scene.holes.polys.len()],
+            None => Vec::new(),
+        };
         Self {
             scene,
             list: lists.faces,
             chunks: lists.chunks,
             holes: lists.holes,
             pan: lists.pan,
-            hole_drawn: vec![false; scene.holes.polys.len()],
+            hole_drawn,
             cam,
             frustum: cam.frustum(),
             eye,

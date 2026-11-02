@@ -18,6 +18,16 @@ fn bytes(v: &Volume) -> Vec<u8> {
 }
 
 #[test]
+fn a_column_off_the_table_is_air_and_never_another_row() {
+    let volume = mountains(&range()).unwrap();
+    let heights = Heights::new(&volume, &range());
+    assert!(heights.at(0, 0).is_some());
+    assert_eq!(heights.at(heights.stride, 0), None);
+    assert_eq!(heights.at(usize::MAX, 1), None);
+    assert_eq!(heights.at(0, usize::MAX), None);
+}
+
+#[test]
 fn the_same_seed_gives_the_same_bytes_and_another_seed_another_range() {
     let a = mountains(&range()).unwrap();
     assert_eq!(bytes(&a), bytes(&mountains(&range()).unwrap()));

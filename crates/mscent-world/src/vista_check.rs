@@ -76,13 +76,6 @@ fn movers_with_viewport(level: &Level) -> impl Iterator<Item = VistaWarning> + '
     })
 }
 
-fn player_start(level: &Level) -> Option<mscent_math::Vec3> {
-    level.entities.iter().find_map(|e| match *e {
-        Entity::PlayerStart { pos, .. } => Some(pos),
-        _ => None,
-    })
-}
-
 /// What is worth telling the mapper about the vistas of `level`. A level that
 /// cannot be compiled has none to judge, and a bad one is reported where it is
 /// built.
@@ -97,7 +90,9 @@ pub fn vista_warnings(level: &Level) -> Vec<VistaWarning> {
         return out;
     };
     let islands = Islands::build(&bsp, &Portals::build(&bsp));
-    let home = player_start(level).and_then(|p| islands.island_of(bsp.leaf_at_f32(p)));
+    let home = level
+        .player_start()
+        .and_then(|p| islands.island_of(bsp.leaf_at_f32(p)));
     let mut fed = [false; VIEW_SLOTS as usize];
     for entity in layers.iter().filter(|e| e.is_valid()) {
         let Entity::VistaLayer {

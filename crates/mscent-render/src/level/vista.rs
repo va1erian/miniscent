@@ -103,11 +103,7 @@ fn pan_texels(pan: [f32; 2], time: f32) -> Option<[f32; 2]> {
 
 /// The island the first player start is in, if the level has one in empty space.
 fn player_island(level: &Level, bsp: &Bsp, islands: &Islands) -> Option<u32> {
-    let start = level.entities.iter().find_map(|e| match *e {
-        Entity::PlayerStart { pos, .. } => Some(pos),
-        _ => None,
-    })?;
-    islands.island_of(bsp.leaf_at_f32(start))
+    islands.island_of(bsp.leaf_at_f32(level.player_start()?))
 }
 
 /// Fog at this range or further means a layer asked for none, and pays for none.

@@ -194,6 +194,14 @@ impl Level {
 }
 
 impl Level {
+    /// Where the first player start is, which is the one that counts.
+    pub fn player_start(&self) -> Option<Vec3> {
+        self.entities.iter().find_map(|e| match *e {
+            Entity::PlayerStart { pos, .. } => Some(pos),
+            _ => None,
+        })
+    }
+
     /// The vista layers, the first of each `(slot, layer)` only, in file order.
     /// A later entity for the same place is ignored, as with [`Entity::World`].
     pub fn vista_layers(&self) -> Vec<&Entity> {

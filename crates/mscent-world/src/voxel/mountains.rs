@@ -201,7 +201,11 @@ impl Heights {
     }
 
     fn at(&self, i: usize, j: usize) -> Option<f64> {
-        self.z.get(j * self.stride + i).copied()
+        if i >= self.stride {
+            return None;
+        }
+        let at = j.checked_mul(self.stride)?.checked_add(i)?;
+        self.z.get(at).copied()
     }
 
     /// Height above the surface at `p` over the length of the slope, positive

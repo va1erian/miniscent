@@ -2,6 +2,8 @@
 
 use mscent_math::{Vec3, Vec3d};
 
+use crate::vista_scale::{MAX_VISTA_SCALE, MIN_SCALE, parallax_of_scale};
+
 /// The words of one line, read in order.
 pub(super) struct Words<'a> {
     pub(super) rest: std::str::SplitWhitespace<'a>,
@@ -62,9 +64,9 @@ impl<'a> Words<'a> {
                 .ok_or_else(|| format!("expected {what}, not '{}'", clip(w)));
         };
         match scale.parse::<f32>() {
-            Ok(s) if s.is_finite() && s >= 1.0 => Ok(1.0 / s),
+            Ok(s) if (MIN_SCALE..=MAX_VISTA_SCALE).contains(&s) => Ok(parallax_of_scale(s)),
             _ => Err(format!(
-                "a scale is x then a number of at least 1, not '{}'",
+                "a scale is x then a number from {MIN_SCALE} to {MAX_VISTA_SCALE}, not '{}'",
                 clip(w)
             )),
         }
