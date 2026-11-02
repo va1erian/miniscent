@@ -535,11 +535,11 @@ and directions, best of 20 passes, from the same example:
 |---|---|
 | `VoxelWorld::build` (meshing, level of detail, index) | about 70 ms for 256 chunks |
 | Cell index | about 82 µs a chunk, 2.5 MiB for 220k triangles (12 bytes a triangle) |
-| Sweep at radius 0.5, one step of 0.1 | about 12 µs, of which about 8 µs is the start-in-rock test |
+| Sweep at radius 0.5, one step of 0.1 | about 24 µs, most of it the start-in-rock test |
 | Sweep at radius 0.5, a move of 4 units | about 46 µs |
-| Sweep as a ray (radius 0), 0.1 and 4 units | about 8 µs and 28 µs |
+| Sweep as a ray (radius 0), 0.1 and 4 units | about 17 µs and 31 µs |
 | `slide_move`, 10 units/s for one step, radius 0.5 | about 33 µs (up to four sweeps) |
-| `is_solid`, BSP and voxels | about 8 µs |
+| `is_solid`, BSP and voxels | about 17 µs, doubled when the nearest-surface search was corrected: it had been stopping a ring early and sometimes giving the wrong answer |
 | The same step with the BSP alone | 0.17 µs |
 
 The cave is far denser than a level: a chunk here holds about 860 triangles. At 120 steps a second one
@@ -672,6 +672,7 @@ apps/editor/src/selftest/voxel.rs
 | Wireframe ghost for generators | The real result, held until Commit | `highlight.rs` only fills polygons; a second overlay path was not worth it |
 | Ctrl+wheel strength, Shift locks a plane | Not built | Roughen's strength is fixed |
 | Add, Carve as sphere, box or capsule | Capsule between pointer samples | A sphere is the zero-length case |
+| Generators in the tool's material | Living things in their own: bark, cap, stem, coral, wax | It is most of what makes them read; the tool's material applies to drips |
 | Destructible flag on the material, in level data | `materials::is_destructible`: rock | No format change for a game with five materials |
 
 Known limits:
