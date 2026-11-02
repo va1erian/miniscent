@@ -4,6 +4,11 @@ use crate::brush::{Brush, Op};
 use crate::csg::compile;
 use mscent_math::{Vec3, Vec3d};
 
+/// The key of a level with no volumes.
+fn key(faces: &[LightFace], lights: &[PointLight], cfg: &BakeConfig) -> u64 {
+    input_key(faces, lights, cfg, 0)
+}
+
 fn v3(x: f32, y: f32, z: f32) -> Vec3 {
     Vec3::new(x, y, z)
 }
@@ -44,7 +49,7 @@ fn cfg() -> BakeConfig {
 
 fn baked() -> (Lightmap, u64) {
     let (faces, lights) = (vec![floor()], vec![lamp(10.0)]);
-    let key = input_key(&faces, &lights, &cfg());
+    let key = key(&faces, &lights, &cfg());
     (bake(&room(), &faces, &lights, &cfg()).unwrap(), key)
 }
 
@@ -61,28 +66,28 @@ fn round_trip_reproduces_every_byte() {
 #[test]
 fn key_follows_inputs_but_not_worker_count() {
     let (faces, lights) = (vec![floor()], vec![lamp(10.0)]);
-    let base = input_key(&faces, &lights, &cfg());
-    let moved = input_key(&faces, &[lamp(10.5)], &cfg());
+    let base = key(&faces, &lights, &cfg());
+    let moved = key(&faces, &[lamp(10.5)], &cfg());
     assert_ne!(base, moved, "a moved light must invalidate");
     let finer = BakeConfig {
         luxel_size: 2.0,
         ..cfg()
     };
-    assert_ne!(base, input_key(&faces, &lights, &finer));
+    assert_ne!(base, key(&faces, &lights, &finer));
     let softer = BakeConfig {
         shadow_samples: 9,
         ..cfg()
     };
-    assert_ne!(base, input_key(&faces, &lights, &softer));
+    assert_ne!(base, key(&faces, &lights, &softer));
     let mut taller = floor();
     taller.vertices[0].z = 1.0;
-    assert_ne!(base, input_key(&[taller], &lights, &cfg()));
+    assert_ne!(base, key(&[taller], &lights, &cfg()));
     let more_workers = BakeConfig {
         workers: 7,
         ..cfg()
     };
-    assert_eq!(base, input_key(&faces, &lights, &more_workers));
-    assert_eq!(base, input_key(&faces, &lights, &cfg()), "stable");
+    assert_eq!(base, key(&faces, &lights, &more_workers));
+    assert_eq!(base, key(&faces, &lights, &cfg()), "stable");
 }
 
 #[test]

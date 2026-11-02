@@ -3,12 +3,13 @@
 //! [`BakeCache`] remembers the last bake in memory under a content key (see
 //! [`mscent_world::lightmap::store::input_key`]) and can mirror it to a file
 //! next to the level (`<level>.msl.lit`). The key covers face geometry,
-//! lights, the bake settings and the baker's version, and nothing else: a new
-//! texture mapping or camera does not invalidate it. A rebuild whose key did
-//! not change gets the same `Arc<Lightmap>` back without any shadow ray; a
-//! missing, stale, damaged or hostile file is ignored (with a reason in the
-//! [`BakeReport`]) and the level is baked again. Files are written through a
-//! temporary file and renamed, so they are never half written.
+//! lights, the shape of voxel surfaces, the bake settings and the baker's
+//! version, and nothing else: a new texture mapping, a painted volume or a
+//! camera does not invalidate it. A rebuild whose key did not change gets the
+//! same `Arc<Lightmap>` back without any shadow ray; a missing, stale,
+//! damaged or hostile file is ignored (with a reason in the [`BakeReport`])
+//! and the level is baked again. Files are written through a temporary file
+//! and renamed, so they are never half written.
 //!
 //! A slow bake need not hold the cache: [`super::Compiled`] asks it for a
 //! stored lightmap, bakes with no reference to it and hands the result back,
@@ -20,9 +21,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;
 
-use mscent_world::Bsp;
-use mscent_world::lightmap::store::{self, StoreError, input_key};
-use mscent_world::lightmap::{BakeConfig, LightFace, Lightmap, LightmapError, PointLight, bake};
+use mscent_world::lightmap::store::{self, StoreError};
+use mscent_world::lightmap::{Lightmap, LightmapError};
 
 /// Where the last lightmap came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -202,34 +202,41 @@ impl BakeCache {
         Ok(wrote)
     }
 
-    /// The lightmap for these inputs: from memory, from the file, or baked.
+    /// The lightmap for `key`: from memory, from the file, or from `bake`.
+    /// `counts` is the number of faces and of voxel cells it must hold.
     pub(super) fn get_or_bake(
         &mut self,
-        bsp: &Bsp,
-        faces: &[LightFace],
-        lights: &[PointLight],
-        cfg: &BakeConfig,
+        key: u64,
+        counts: (usize, usize),
+        asked_luxel: f32,
+        bake: impl FnOnce() -> Result<Lightmap, LightmapError>,
     ) -> Result<Arc<Lightmap>, LightmapError> {
-        let key = input_key(faces, lights, cfg);
         self.miss_note = None;
         if !std::mem::take(&mut self.rebake)
-            && let Some(map) = self.lookup(key, faces.len())
+            && let Some(map) = self.lookup(key, counts.0, counts.1)
         {
             return Ok(map);
         }
         let t = Instant::now();
-        let map = bake(bsp, faces, lights, cfg)?;
+        let map = bake()?;
         let ms = ms_since(t);
         Ok(self.store(BakedLight {
             key,
             map,
             ms,
-            asked_luxel: cfg.luxel_size,
+            asked_luxel,
         }))
     }
 
-    /// The lightmap for `key` from memory or the file, without baking.
-    pub(super) fn lookup(&mut self, key: u64, face_count: usize) -> Option<Arc<Lightmap>> {
+    /// The lightmap for `key` from memory or the file, without baking. One
+    /// that does not hold a luxel grid for each of `face_count` faces and a
+    /// record for each of `cell_count` voxel cells is refused.
+    pub(super) fn lookup(
+        &mut self,
+        key: u64,
+        face_count: usize,
+        cell_count: usize,
+    ) -> Option<Arc<Lightmap>> {
         let mut report = self.new_report();
         if let Some((_, map)) = self.slot.as_ref().filter(|(k, _)| *k == key) {
             let map = Arc::clone(map);
@@ -237,7 +244,7 @@ impl BakeCache {
             return Some(map);
         }
         let t = Instant::now();
-        match self.read_file(key, face_count) {
+        match self.read_file(key, face_count, cell_count) {
             Ok(Some(map)) => {
                 let map = Arc::new(map);
                 report.source = Source::File;
@@ -295,7 +302,12 @@ impl BakeCache {
     }
 
     /// `Ok(None)`: no file. `Err`: a file that must not be used, and why.
-    fn read_file(&self, key: u64, face_count: usize) -> Result<Option<Lightmap>, String> {
+    fn read_file(
+        &self,
+        key: u64,
+        face_count: usize,
+        cell_count: usize,
+    ) -> Result<Option<Lightmap>, String> {
         let Some(path) = &self.path else {
             return Ok(None);
         };
@@ -317,6 +329,9 @@ impl BakeCache {
         let map = Lightmap::from_bytes(&bytes, key).map_err(why)?;
         if map.projections().len() != face_count {
             return Err("face count differs".into());
+        }
+        if map.cells().len() != cell_count {
+            return Err("voxel cell count differs".into());
         }
         Ok(Some(map))
     }

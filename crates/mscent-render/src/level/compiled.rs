@@ -9,9 +9,11 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
-use mscent_math::Vec3;
 use mscent_world::lightmap::store::input_key;
-use mscent_world::lightmap::{BakeConfig, LightFace, Lightmap, PointLight, bake, bake_cancellable};
+use mscent_world::lightmap::{
+    BakeConfig, CellRecord, CellSites, LightFace, Lightmap, LightmapError, Occluders, PointLight,
+    bake_in, shape_key,
+};
 use mscent_world::materials::NO_DRAW;
 use mscent_world::voxel::{ChunkMesh, VoxelWorld};
 use mscent_world::{Bsp, Face, Level, Portals, brush_faces, compile, extract_faces};
@@ -53,45 +55,46 @@ pub(super) struct Parts {
     pub actors: Vec<Actor>,
     pub cfg: BuildConfig,
     pub voxels: VoxelWorld,
+    /// The surface cells of `voxels`, which the lightmap holds a record for each of.
+    pub sites: CellSites,
 }
 
-/// Unshadowed light at a vertex: lamps and ambient, standing in until voxel
-/// surfaces are baked.
-fn vertex_light(mesh: &ChunkMesh, lights: &[PointLight], ambient: Vec3) -> Vec<VertexLight> {
+/// The light of a mesh's vertices: the record of the cell each stands in, or of
+/// the cell a merged vertex was named for. A vertex with no record, which only a
+/// lightmap of another level can cause, is dark rather than wrong.
+fn vertex_light(
+    sites: &CellSites,
+    records: &[CellRecord],
+    chunk: usize,
+    mesh: &ChunkMesh,
+) -> Vec<VertexLight> {
     mesh.vertices
         .iter()
         .map(|v| {
-            let mut color = ambient;
-            let mut dir = Vec3::ZERO;
-            for l in lights {
-                let to = l.position - v.pos;
-                let d = to.length();
-                if d <= 0.0 || d >= l.radius {
-                    continue;
-                }
-                let fall = 1.0 - d / l.radius;
-                let lambert = (v.normal.dot(to) / d).max(0.0);
-                let got = l.color * (fall * fall * lambert);
-                color = color + got;
-                dir = dir + to * (1.0 / d) * (got.x + got.y + got.z);
-            }
+            let record = sites
+                .lookup(chunk, v.cell)
+                .and_then(|i| records.get(i))
+                .copied()
+                .unwrap_or_default();
+            // No light arrived: the normal keeps the bump maps flat.
+            let dir = Some(record.dir()).filter(|d| d.length_squared() > 0.0);
             VertexLight {
-                color: color * 256.0,
-                dir: dir.normalized().unwrap_or(v.normal),
+                color: record.color() * 256.0,
+                dir: dir.unwrap_or(v.normal),
             }
         })
         .collect()
 }
 
-/// The voxel surfaces of a level with their light.
+/// The voxel surfaces of a level with the light `lightmap` holds for them.
 pub(super) fn lit_voxels(
     world: VoxelWorld,
     leaves: usize,
-    lights: &[PointLight],
-    ambient: Vec3,
+    sites: &CellSites,
+    lightmap: &Lightmap,
 ) -> VoxelScene {
-    VoxelScene::new(world, leaves, |_, _, mesh| {
-        vertex_light(mesh, lights, ambient)
+    VoxelScene::new(world, leaves, |chunk, _, mesh| {
+        vertex_light(sites, lightmap.cells(), chunk, mesh)
     })
 }
 
@@ -100,6 +103,8 @@ pub struct Compiled {
     parts: Parts,
     light_faces: Vec<LightFace>,
     bake_cfg: BakeConfig,
+    /// [`shape_key`] of the volumes, which the light key holds.
+    voxel_shape: u64,
 }
 
 impl Compiled {
@@ -122,6 +127,8 @@ impl Compiled {
             shadow_samples: cfg.shadow_samples,
             ..BakeConfig::default()
         };
+        let voxel_shape = shape_key(&voxels);
+        let sites = CellSites::of(&voxels);
         let parts = Parts {
             bsp,
             faces,
@@ -131,34 +138,53 @@ impl Compiled {
             actors: actors_of(level),
             cfg: with_level_fog(cfg, level),
             voxels,
+            sites,
         };
         Ok(Self {
             parts,
             light_faces,
             bake_cfg,
+            voxel_shape,
         })
     }
 
     /// Identifies the full lightmap of this level: two levels with the same
-    /// key can share one.
+    /// key can share one. It holds the shape of the voxel surfaces and not
+    /// their materials, so painting a volume keeps it.
     pub fn light_key(&self) -> u64 {
-        input_key(&self.light_faces, &self.parts.lights, &self.bake_cfg)
+        input_key(
+            &self.light_faces,
+            &self.parts.lights,
+            &self.bake_cfg,
+            self.voxel_shape,
+        )
     }
 
     /// The full lightmap, if `cache` holds it in memory or in its file.
     pub fn stored(&self, cache: &mut BakeCache) -> Option<Arc<Lightmap>> {
-        cache.lookup(self.light_key(), self.light_faces.len())
+        cache.lookup(
+            self.light_key(),
+            self.light_faces.len(),
+            self.parts.sites.len(),
+        )
     }
 
     pub(super) fn get_or_bake(&self, cache: &mut BakeCache) -> Result<Arc<Lightmap>, BuildError> {
         cache
             .get_or_bake(
-                &self.parts.bsp,
-                &self.light_faces,
-                &self.parts.lights,
-                &self.bake_cfg,
+                self.light_key(),
+                (self.light_faces.len(), self.parts.sites.len()),
+                self.bake_cfg.luxel_size,
+                || self.bake_with(&self.bake_cfg, &AtomicBool::new(false)),
             )
             .map_err(BuildError::Bake)
+    }
+
+    /// Bakes with `cfg`: brush faces and voxel cells, each shadowing the other.
+    fn bake_with(&self, cfg: &BakeConfig, cancel: &AtomicBool) -> Result<Lightmap, LightmapError> {
+        let occ = Occluders::new(&self.parts.bsp, &self.parts.voxels);
+        let (faces, lights) = (&self.light_faces, &self.parts.lights);
+        bake_in(&occ, &self.parts.sites, faces, lights, cfg, cancel)
     }
 
     /// A coarse lightmap in milliseconds: large luxels, hard shadows, no
@@ -172,7 +198,8 @@ impl Compiled {
             bounce_gain: 0.0,
             ..self.bake_cfg
         };
-        bake(&self.parts.bsp, &self.light_faces, &self.parts.lights, &cfg).map_err(BuildError::Bake)
+        self.bake_with(&cfg, &AtomicBool::new(false))
+            .map_err(BuildError::Bake)
     }
 
     /// The full bake on `workers` threads, touching no cache. Setting `cancel`
@@ -183,14 +210,7 @@ impl Compiled {
             ..self.bake_cfg
         };
         let t = Instant::now();
-        let map = bake_cancellable(
-            &self.parts.bsp,
-            &self.light_faces,
-            &self.parts.lights,
-            &cfg,
-            cancel,
-        )
-        .map_err(BuildError::Bake)?;
+        let map = self.bake_with(&cfg, cancel).map_err(BuildError::Bake)?;
         Ok(BakedLight {
             key: self.light_key(),
             map,

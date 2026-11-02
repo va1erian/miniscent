@@ -209,11 +209,12 @@ impl LevelRenderer {
             actors,
             cfg,
             voxels,
+            sites,
         } = parts;
         let spec = spec_tables(&materials);
         // The game path pays for smooth texture sampling; the raw
         // rasterizer benchmark does not.
-        let voxels = compiled::lit_voxels(voxels, bsp.leaves().len(), &lights, cfg.ambient);
+        let voxels = compiled::lit_voxels(voxels, bsp.leaves().len(), &sites, &lightmap);
         let scene = Scene::with_voxels(bsp, faces, portals, materials.filtered(), voxels);
         let uv_maps = (0..scene.faces().len())
             .map(|i| {

@@ -263,19 +263,38 @@ Faces keep the atlas. Voxels add a **light record per surface cell**, keyed by t
 (colour and direction, 9 bytes), about the density of the lightmap at the same size. A vertex in a
 border cell reads the record of the chunk that owns the cell, so neighbouring chunks shade identically.
 
-Changes to the baker (`mscent-world/src/lightmap/`):
+As built (M11.5), in `mscent-world/src/lightmap/`:
 
-- **Occluders:** `segment_clear(bsp, a, b)` has two callers (`soft.rs`, `bounce.rs`). Both move to an
-  `Occluders` type: the BSP, then a grid walk through the volumes that skips uniform chunks. **Voxels
-  shadow brushes and brushes shadow voxels.**
-- **Receivers:** a cell is lit like a luxel from a point lifted 1.5 cells along its normal, with the
-  same soft shadow sampling. A cell whose point is in solid takes its value from lit neighbours, so
-  a stalagmite's root does not get a black rim where it meets the floor.
-- **Bounce:** a mixed chunk becomes one patch. Cells gather in 4³ blocks and interpolate, because
-  today's bounce is luxels x faces rays and voxels would make that explode.
-- **Cache:** `input_key` adds a hash of the resolved field's shape, not its materials, so painting
-  never re-bakes. `.msl.lit` gains the records and `store::VERSION` is bumped; the reader's checks
-  (counts, finiteness, checksum, ignore and rebake) apply as they do today.
+- **Occluders** (`occluders.rs`, `voxel_rays.rs`): both callers of `segment_clear` (`soft.rs`,
+  `bounce.rs`) ask `Occluders`: the BSP, then each volume's full-detail triangles in a grid of
+  blocks four cells wide, walked with a 3D DDA that visits only the blocks a ray crosses, so a
+  chunk with no surface costs nothing. **Voxels shadow brushes and brushes shadow voxels.** With
+  no volumes it is the BSP query alone, and the luxels are bit for bit what they were.
+- **Records** (`cell_sites.rs`, `cells.rs`): 9 bytes a cell as designed, a `u16` per colour channel
+  in 1/2048 steps (the most it holds is 32, far past the shader's soft limit) and an `i8` per
+  direction component. They are keyed by the global cell, ordered by volume, owning chunk and cell,
+  so a vertex in a border cell reads the one record every chunk that draws it reads. Which cells
+  exist follows from the world, so a cache file holds records and no keys. A level of detail reads
+  the record at its merged vertex's `cell`.
+- **Receivers:** a cell is lit like a luxel from a point lifted 1.5 cells along its normal
+  (`VOXEL_LIGHT_LIFT_CELLS`), with the same soft shadow sampling over a square of its size. A cell
+  whose lifted point is inside solid brush takes the mean of the lit cells within two cells, nearer
+  ones counting more, so a stalagmite's root does not get a black rim. Only brush solid is tested:
+  a lifted point inside voxel rock (a normal that curves into the surface within 1.5 cells) is not
+  found and is dark.
+- **Bounce:** a chunk with a surface becomes one omnidirectional patch. Cells gather in 4x4x4
+  blocks, one ray from the block's middle per patch, and the result is blurred over the 26
+  neighbours. Brush luxels still gather from face patches only: voxels do not bounce onto brushes.
+- **Cache:** `input_key` takes `cell_sites::shape_key`, a hash of every chunk's vertices (position,
+  normal, cell) and triangles, and no materials, so painting never re-bakes and carving does.
+  `.msl.lit` holds a count and the records after the luxels and `store::VERSION` is 5. The reader
+  refuses a count that does not use the bytes left, and `BakeCache` refuses a file whose count is
+  not this level's number of cells. Any 9 bytes are a record, so nothing in them can be out of range.
+- **Draft:** `Compiled::draft` bakes with hard shadows and no bounce and lights the cells the same
+  way, so a voxel floor shows its shadows at once.
+- **Per chunk:** `light_cells(&CellLighting, &CellSites, &[usize])` lights any set of sites with the
+  direct light the full bake gives them (a test holds it to that), and `CellSites::of_chunk` names a
+  chunk's sites. The stroke-time refinement below is built on these in the editor work.
 
 ### Light must never flash during a stroke
 
@@ -496,7 +515,29 @@ What it does not say:
   for the whole showcase frame. A voxel pixel at High must cost no more than a brush pixel; the prototype
   does not show that. M11.4 measures it.
 - **It has no near-plane clipping** and no shader variants.
-- **Baking with voxel occluders was not measured.**
+- **Baking with voxel occluders** is measured below.
+
+Baking, from `cargo run --release -p mscent-render --example voxel_bake`: a room around the same
+kind of warped gyroid, 8x8x4 chunks of 0.25 cells (256 chunks, 295k triangles, 147 554 surface
+cells, 1.27 MiB of records), four lamps, the game's bake settings, 24 threads. The machine is
+noisy; these are the range of three runs.
+
+| What | Result |
+|---|---|
+| Sites (which cells exist) | about 18 ms |
+| Occluders built (grids of 295k triangles) | about 35 ms |
+| Whole bake, brush faces only (6 faces) | 12 to 13 ms |
+| Same, rays also tested against the voxels | 93 to 116 ms |
+| Faces and cells, shadows from brushes only | 70 to 81 ms |
+| Faces and cells, shadows from brushes and voxels | 410 to 450 ms |
+| Cells' direct light alone, 1 thread, brushes only | about 60 ms, 0.4 us a cell |
+| Same, with voxel occluders | 2.3 to 2.7 s, 15 to 18 us a cell |
+
+So voxel occluders cost about 6 times the bake of the cells, and a ray against the voxels costs
+about 2 us where one against the BSP of a room costs a tenth of that. The scene's brush part is
+tiny; in a level whose brush bake takes seconds this adds well under one. The bake runs once per
+distinct level and not on a stroke, but the editor's draft and the per-chunk refinement call the
+same rays, so they pay these costs for the cells they touch. Not measured on the i3-7100U.
 
 ### Budgets
 
@@ -520,7 +561,7 @@ Crate edges do not change: field and meshing live in `mscent-world`, so render a
 ```text
 crates/mscent-world/src/voxel/   volume, chunk, context and block (fold, base, ring), prim, dab,
                                  surface (nets), lod, connectivity, wire (section 5), query (grid walk)
-crates/mscent-world/src/lightmap/occluders.rs, cells.rs
+crates/mscent-world/src/lightmap/occluders.rs, voxel_rays.rs, cell_sites.rs, cells.rs, cells_bounce.rs
 crates/mscent-collide/src/voxel.rs, solids.rs
 crates/mscent-render/src/voxel/  prepare, fill, flood, shader, governor
 crates/mscent-game/src/combat.rs (carve), destruct.rs (queue)
