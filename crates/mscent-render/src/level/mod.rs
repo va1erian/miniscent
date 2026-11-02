@@ -47,7 +47,7 @@ pub use compiled::Compiled;
 pub use config::BuildConfig;
 pub use effects::Effects;
 pub use frame::{FrameInput, FrameRenderer};
-pub use movers::MoverPose;
+pub use movers::{MoverFaces, MoverPose};
 pub use overlay::{Actor, ActorKind, Overlay};
 pub use view::View;
 
@@ -56,7 +56,7 @@ pub const EMISSIVE: u32 = 330;
 /// Light scale of a self-lit sky: the texture as it is.
 const SELF_LIT: u32 = 256;
 /// Light scale of a face that has no lightmap data.
-const UNLIT: u32 = 200;
+pub const UNLIT: u32 = 200;
 const NEAR: f32 = 0.1;
 const FAR: f32 = 400.0;
 /// Far plane of a vista layer. `1/z` keeps its precision here, and each layer

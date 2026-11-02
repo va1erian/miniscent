@@ -33,18 +33,18 @@ impl MoverPose {
         offset: Vec3::ZERO,
     };
 
-    fn to_world(self, p: Vec3) -> Vec3 {
+    pub fn to_world(self, p: Vec3) -> Vec3 {
         self.rot.rotate(p - self.pivot) + self.pivot + self.offset
     }
 
-    fn to_authored(self, p: Vec3) -> Vec3 {
+    pub fn to_authored(self, p: Vec3) -> Vec3 {
         self.rot.conjugate().rotate(p - self.pivot - self.offset) + self.pivot
     }
 }
 
 /// One mover's faces, and a sphere around them for culling.
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct MoverFaces {
+pub struct MoverFaces {
     pub faces: std::ops::Range<usize>,
     pub centre: Vec3,
     pub radius: f32,

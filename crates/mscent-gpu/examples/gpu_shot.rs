@@ -27,6 +27,7 @@ fn main() -> Result<(), String> {
         .map_err(|e| format!("{e:?}"))?;
     let gpu = mscent_gpu::Gpu::new().map_err(|e| e.to_string())?;
     println!("adapter: {}", gpu.adapter());
+    let actors = software.actors().to_vec();
     let mut renderer = mscent_gpu::GpuRenderer::new(gpu, software.into_assets())
         .map_err(|(why, _)| why.to_string())?;
     let mut fb = Framebuffer::new(width, height).ok_or("bad size")?;
@@ -34,7 +35,7 @@ fn main() -> Result<(), String> {
     let frame = FrameInput {
         view: &view,
         quality: Quality::High,
-        actors: &[],
+        actors: &actors,
         effects: Effects::default(),
     };
     let mut costs = Vec::with_capacity(FRAMES);

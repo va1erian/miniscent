@@ -105,11 +105,7 @@ impl LevelRenderer {
             fog,
             bump: quality != Quality::Low,
         };
-        let table = self
-            .assets
-            .spec
-            .get(usize::from(face.material))
-            .or(self.assets.spec.last());
+        let table = self.assets.spec_table(face.material);
         let spec = table
             .filter(|t| quality == Quality::High && t.is_visible())
             .and_then(|t| LightingShader::with_specular(fl, eye, t));

@@ -18,7 +18,7 @@ use crate::texture::Texture;
 /// Largest vertex index a mesh can address.
 pub const MAX_VERTICES: usize = 1 << 16;
 /// Brightest light factor, where 1.0 leaves the colour unchanged.
-const MAX_LIGHT: f32 = 2.0;
+pub const MAX_LIGHT: f32 = 2.0;
 
 /// One mesh vertex in model space. `normal` should be unit length.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -406,10 +406,24 @@ pub(crate) fn list_mesh(
     carrier: &Texture,
     list: &mut PolyList,
 ) {
+    each_lit_triangle(mesh, pose, lighting, eye_of(cam), |corners, color| {
+        let verts = corners.map(|(pos, light)| Vertex::new(pos, light, 0.0));
+        list.push(cam, &verts, carrier, color);
+    });
+}
+
+/// Each triangle of `mesh` at `pose` that faces `eye`: its corners in world
+/// space, each with its light factor, and its flat colour.
+pub(crate) fn each_lit_triangle(
+    mesh: &Mesh,
+    pose: &Pose,
+    lighting: &MeshLighting,
+    eye: Vec3,
+    mut visit: impl FnMut([(Vec3, f32); 3], u32),
+) {
     if !pose.pos.is_finite() || !pose.yaw.is_finite() || !pose.scale.is_finite() {
         return;
     }
-    let eye = eye_of(cam);
     let world: Vec<(Vec3, f32)> = mesh
         .verts
         .iter()
@@ -427,8 +441,7 @@ pub(crate) fn list_mesh(
         if facing <= 0.0 {
             continue;
         }
-        let verts = [a, b, c].map(|(pos, light)| Vertex::new(pos, light, 0.0));
-        list.push(cam, &verts, carrier, tri.color);
+        visit([a, b, c], tri.color);
     }
 }
 

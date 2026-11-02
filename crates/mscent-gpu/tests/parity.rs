@@ -5,132 +5,95 @@
 //!
 //! A machine with no GPU skips this, unless `MSCENT_REQUIRE_GPU` is set, as CI
 //! sets it.
-//!
-//! The hardware renderer draws flat faces so far, so the reference is
-//! `Scene::render`, the flat-lit software path. It becomes the real frame when
-//! the shading arrives.
 
 #[path = "support/compare.rs"]
 mod compare;
+#[path = "support/scenes.rs"]
+mod scenes;
 
 use std::path::{Path, PathBuf};
 
 use compare::{Frame, compare};
 use mscent_gpu::{Gpu, GpuError, GpuRenderer};
-use mscent_math::Vec3;
 use mscent_render::png_encode::encode_png;
-use mscent_render::{
-    BuildConfig, Effects, FrameInput, FrameRenderer, Framebuffer, LevelAssets, LevelRenderer,
-    Material, MaterialTable, Quality, Texture, View,
-};
-use mscent_world::{materials, showcase_level};
+use mscent_render::{Effects, FrameInput, FrameRenderer, Framebuffer, Quality};
+use scenes::{Framing, Pose, Scene, Taken};
 
 const WIDTH: u32 = 320;
 const HEIGHT: u32 = 180;
 
-/// What a case leaves out of its software frame to prove it can fail.
-#[derive(Clone, Copy)]
-enum Without {
-    /// The gradient, for one flat colour.
-    Sky,
-    /// The level's faces, leaving the sky.
-    Faces,
-}
-
+/// A case: what to draw, and what to take out to prove it can fail.
 struct Case {
     name: &'static str,
-    eye: [f32; 3],
-    yaw: f32,
-    pitch: f32,
-    without: Without,
+    pose: Pose,
+    quality: Quality,
+    without: Taken,
 }
 
-const CASES: &[Case] = &[
-    // Far outside the level and looking away, where only the sky is.
-    Case {
-        name: "sky",
-        eye: [-500.0, 0.0, 0.0],
-        yaw: std::f32::consts::PI,
-        pitch: 0.0,
-        without: Without::Sky,
-    },
-    Case {
-        name: "faces_room",
-        eye: [3.0, 3.0, 2.5],
-        yaw: -0.78,
-        pitch: 0.0,
-        without: Without::Faces,
-    },
-    Case {
-        name: "faces_floor",
-        eye: [36.0, 4.0, 3.0],
-        yaw: 0.5,
-        pitch: -0.8,
-        without: Without::Faces,
-    },
-    Case {
-        name: "faces_through_a_door",
-        eye: [18.0, 40.0, 3.0],
-        yaw: 1.6,
-        pitch: 0.1,
-        without: Without::Faces,
-    },
-];
-
-/// Every material one flat colour, as the flat faces have no texture yet. Not a
-/// grey: a grey would not see the channels swapped.
-fn flat_materials() -> MaterialTable {
-    let mut table = MaterialTable::new();
-    for name in materials::NAMES {
-        table.add(Material {
-            name: name.to_string(),
-            gloss: 0,
-            texture: Texture::solid(0xff40_80c0),
-        });
-    }
-    table
-}
-
-/// The showcase without spending time on light, which nothing here reads yet.
-fn level() -> LevelAssets {
-    let cfg = BuildConfig {
-        light_radius: 0.0,
-        shadow_samples: 1,
-        ..BuildConfig::default()
+fn cases() -> Vec<Case> {
+    use Pose::*;
+    use Quality::*;
+    let case = |name, pose, quality, without| Case {
+        name,
+        pose,
+        quality,
+        without,
     };
-    LevelRenderer::from_level(&showcase_level(), flat_materials(), &cfg)
-        .expect("the showcase builds")
-        .into_assets()
+    vec![
+        case("sky", OutsideTheLevel, High, Taken::SkyColors),
+        case("fog", FarFromMaterial("floor"), Low, Taken::Fog),
+        case("texture", AtMaterial("brick"), Low, Taken::Textures),
+        case("mips", FarFromMaterial("floor"), Low, Taken::Textures),
+        case("lightmap", DownTheHall, Low, Taken::Lamps),
+        case("light_mips", AtTheFloor, Low, Taken::Lamps),
+        case("emissive", AtMaterial("lightpanel"), High, Taken::Textures),
+        case("bump", AtMaterial("brick"), Medium, Taken::Quality(Low)),
+        case(
+            "specular",
+            AtMaterial("metal"),
+            High,
+            Taken::Quality(Medium),
+        ),
+        case("actor", AtActor, High, Taken::Actors),
+        case("mover", AtDoor, High, Taken::MoverPose),
+    ]
 }
 
-fn view_of(case: &Case) -> View {
-    let [x, y, z] = case.eye;
-    View::from_angles(Vec3::new(x, y, z), case.yaw, case.pitch, 0.0)
-}
-
-fn software(assets: &LevelAssets, case: &Case, leave_out: Option<Without>) -> Frame {
+fn software(scene: &Scene, frame: &Framing, quality: Quality, without: Option<Taken>) -> Frame {
+    let renderer = scene.software(without);
     let mut fb = Framebuffer::new(WIDTH, HEIGHT).expect("a framebuffer");
-    let cfg = assets.config();
-    let cam = assets
-        .camera(&view_of(case), WIDTH, HEIGHT)
-        .expect("a camera");
-    match leave_out {
-        Some(Without::Sky) => fb.clear(0xff80_8080),
-        _ => fb.clear_sky(cfg.sky_top, cfg.sky_bottom),
-    }
-    if !matches!(leave_out, Some(Without::Faces)) {
-        assets.scene().render(&mut fb, &cam, None);
-    }
+    let quality = match without {
+        Some(Taken::Quality(lower)) => lower,
+        _ => quality,
+    };
+    let actors = match without {
+        Some(Taken::Actors) => &[][..],
+        _ => &frame.actors[..],
+    };
+    let poses = match without {
+        Some(Taken::MoverPose) => &[][..],
+        _ => &frame.poses[..],
+    };
+    let effects = Effects {
+        poses,
+        ..Effects::default()
+    };
+    renderer
+        .render_with_effects(&mut fb, &frame.view, quality, actors, None, &effects)
+        .expect("a frame");
     Frame::of(&fb)
 }
 
-fn hardware(renderer: &mut GpuRenderer, case: &Case) -> Frame {
+fn hardware(renderer: &mut GpuRenderer, frame: &Framing, case: &Case) -> Frame {
     let mut fb = Framebuffer::new(WIDTH, HEIGHT).expect("a framebuffer");
     let input = FrameInput {
-        view: &view_of(case),
-        quality: Quality::High,
-        actors: &[],
-        effects: Effects::default(),
+        view: &frame.view,
+        quality: case.quality,
+        actors: &frame.actors,
+        effects: Effects {
+            poses: &frame.poses,
+            ..Effects::default()
+        },
     };
     renderer.draw(&mut fb, &input).expect("a frame");
     if let Some(error) = renderer.take_error() {
@@ -180,29 +143,40 @@ fn gpu() -> Option<Gpu> {
     }
 }
 
+fn on_gpu(gpu: Gpu, scene: &Scene) -> GpuRenderer {
+    GpuRenderer::new(gpu, scene.software(None).into_assets())
+        .map_err(|(why, _)| why)
+        .expect("the level fits on the GPU")
+}
+
 #[test]
 fn the_renderers_draw_the_same_frames() {
-    let Some(gpu) = gpu() else { return };
-    eprintln!("adapter: {}", gpu.adapter());
-    let reference_assets = level();
-    let mut renderer = GpuRenderer::new(gpu, level())
-        .map_err(|(why, _)| why)
-        .expect("the showcase fits on the GPU");
+    let (Some(first), Some(second), Some(third)) = (gpu(), gpu(), gpu()) else {
+        return;
+    };
+    eprintln!("adapter: {}", first.adapter());
+    let (showcase, door, hard) = (Scene::showcase(), Scene::door(), Scene::hard_shadows());
+    let mut showcase_gpu = on_gpu(first, &showcase);
+    let mut door_gpu = on_gpu(second, &door);
+    let mut hard_gpu = on_gpu(third, &hard);
     let mut failures = Vec::new();
-    for case in CASES {
-        let reference = software(&reference_assets, case, None);
-        let drawn = hardware(&mut renderer, case);
+    for case in cases() {
+        let (scene, renderer) = match (case.name, case.pose) {
+            (_, Pose::AtDoor) => (&door, &mut door_gpu),
+            ("light_mips", _) => (&hard, &mut hard_gpu),
+            _ => (&showcase, &mut showcase_gpu),
+        };
+        let framing = scene.framing(case.pose);
+        let reference = software(scene, &framing, case.quality, None);
+        let drawn = hardware(renderer, &framing, &case);
         let report = compare(&reference, &drawn);
         eprintln!("{}: {report:?}", case.name);
         if !report.alike() {
             let dir = write_pictures(case.name, &reference, &drawn);
-            failures.push(format!(
-                "{}: {report:?}, pictures in {}",
-                case.name,
-                dir.display()
-            ));
+            let where_ = dir.display();
+            failures.push(format!("{}: {report:?}, pictures in {where_}", case.name));
         }
-        let stripped = software(&reference_assets, case, Some(case.without));
+        let stripped = software(scene, &framing, case.quality, Some(case.without));
         let report = compare(&reference, &stripped);
         if report.alike() {
             failures.push(format!("{}: cannot fail, {report:?}", case.name));
@@ -213,7 +187,8 @@ fn the_renderers_draw_the_same_frames() {
 
 #[test]
 fn the_sky_case_sees_only_sky() {
-    let assets = level();
-    let frame = software(&assets, &CASES[0], None);
+    let showcase = Scene::showcase();
+    let framing = showcase.framing(Pose::OutsideTheLevel);
+    let frame = software(&showcase, &framing, Quality::High, None);
     assert!(frame.depth.iter().all(|&d| d == 0.0));
 }

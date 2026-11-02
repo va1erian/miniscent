@@ -3,6 +3,8 @@
 
 use std::sync::Arc;
 
+use mscent_math::Vec3;
+
 use mscent_world::lightmap::{CellSites, Lightmap, PointLight};
 
 use super::setup::{mesh_lighting, spec_tables};
@@ -149,6 +151,38 @@ impl LevelAssets {
     /// The level's fog, for effects drawn in the same frame.
     pub fn fog(&self) -> Option<Fog> {
         Fog::new(self.cfg.sky_bottom, self.cfg.fog_start, self.cfg.fog_end)
+    }
+
+    /// The pre-filtered light of every face, finest level first.
+    pub fn light_mips(&self) -> &LightMips {
+        &self.light_mips
+    }
+
+    /// The fit from a face's texels to its luxels; `None` draws it unlit.
+    pub fn uv_map(&self, face: usize) -> Option<UvToLuxel> {
+        self.uv_maps.get(face).copied().flatten()
+    }
+
+    /// The power table of a material.
+    pub fn spec_table(&self, material: u16) -> Option<&SpecTable> {
+        self.spec.get(usize::from(material)).or(self.spec.last())
+    }
+
+    /// Each mover's faces, by its order in the level.
+    pub fn movers(&self) -> &[movers::MoverFaces] {
+        &self.mover_faces
+    }
+
+    /// Each triangle of `actors` that faces `eye`: its corners in world space
+    /// with their light factors (see [`MeshLighting::at`]), and its flat colour.
+    pub fn actor_triangles(
+        &self,
+        actors: &[Actor],
+        eye: Vec3,
+        visit: impl FnMut([(Vec3, f32); 3], u32),
+    ) {
+        self.meshes
+            .each_triangle(actors, &self.lighting, eye, visit);
     }
 
     /// The camera a frame uses for this view and target size.

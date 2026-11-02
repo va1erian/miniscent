@@ -2,6 +2,13 @@
 //! renderers may fairly disagree about who owns them; which pixels those are
 //! comes from the software frame alone, so a hole in the other cannot excuse
 //! itself.
+//!
+//! A colour is also compared with its neighbours and the nearest counts. The
+//! software renderer corrects perspective every 16 pixels and a GPU at each one,
+//! so on a steep wall a texel lands up to a pixel apart, and a mortar line shows
+//! as a line of error though both are right. Shortening the software spans to 4
+//! pixels took the worst block of the mover case from 14.7 levels to 2.9. A shift
+//! of more than a pixel still counts, and so does any change of level.
 
 use mscent_math::epsilon::{
     PARITY_BLOCK_LEVELS, PARITY_DEPTH_RELATIVE, PARITY_EDGE_DEPTH, PARITY_MEAN_LEVELS,
@@ -77,6 +84,18 @@ fn channel_error(a: u32, b: u32) -> u32 {
         .sum()
 }
 
+/// The error of `wanted` against the nearest colour within a pixel of `(x, y)`.
+fn nearest_error(wanted: u32, other: &Frame, x: usize, y: usize) -> u32 {
+    let rows = y.saturating_sub(1)..=(y + 1).min(other.height - 1);
+    rows.flat_map(|ny| {
+        let columns = x.saturating_sub(1)..=(x + 1).min(other.width - 1);
+        columns.map(move |nx| ny * other.width + nx)
+    })
+    .map(|i| channel_error(wanted, other.pixels[i]))
+    .min()
+    .unwrap_or(0)
+}
+
 fn depth_error(a: f32, b: f32) -> f32 {
     if a == b {
         return 0.0;
@@ -96,7 +115,7 @@ pub fn compare(reference: &Frame, other: &Frame) -> Report {
                 continue;
             }
             let i = y * w + x;
-            let error = u64::from(channel_error(reference.pixels[i], other.pixels[i]));
+            let error = u64::from(nearest_error(reference.pixels[i], other, x, y));
             total += error;
             depth += f64::from(depth_error(reference.depth[i], other.depth[i]));
             counted += 1;
@@ -132,6 +151,33 @@ fn a_small_patch_fails_on_its_block_though_the_mean_barely_moves() {
     let report = compare(&frame, &patched);
     assert!(report.mean <= PARITY_MEAN_LEVELS, "{report:?}");
     assert!(!report.alike(), "{report:?}");
+}
+
+/// Vertical stripes, three pixels wide on and off.
+fn striped_frame(shift: usize) -> Frame {
+    let mut frame = flat_frame(0xff40_6080, 0.5);
+    for y in 0..frame.height {
+        for x in 0..frame.width {
+            if ((x + shift) / 6).is_multiple_of(2) {
+                frame.pixels[y * frame.width + x] = 0xffc0_c0c0;
+            }
+        }
+    }
+    frame
+}
+
+#[test]
+fn a_texture_a_pixel_off_is_forgiven_but_two_pixels_off_is_not() {
+    let frame = striped_frame(0);
+    assert!(compare(&frame, &striped_frame(1)).alike());
+    assert!(!compare(&frame, &striped_frame(3)).alike());
+}
+
+#[test]
+fn a_change_of_level_fails_though_every_neighbour_has_it() {
+    let frame = flat_frame(0xff40_6080, 0.5);
+    let brighter = flat_frame(0xff42_6282, 0.5);
+    assert!(!compare(&frame, &brighter).alike());
 }
 
 #[test]

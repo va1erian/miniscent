@@ -48,8 +48,8 @@ pub use framebuffer::Framebuffer;
 pub use jobs::JobPool;
 pub use level::{
     Actor, ActorKind, BakeCache, BakeReport, BakedLight, BuildConfig, BuildError, Compiled,
-    EMISSIVE, Effects, FrameInput, FrameRenderer, LevelAssets, LevelRenderer, MoverPose, Overlay,
-    Quality, Source, View, VoxelChange,
+    EMISSIVE, Effects, FrameInput, FrameRenderer, LevelAssets, LevelRenderer, MoverFaces,
+    MoverPose, Overlay, Quality, Source, UNLIT, View, VoxelChange,
 };
 pub use lighting_shader::{FaceLight, LightingShader, UvToLuxel};
 pub use lightmap_mips::LightMips;

@@ -1,45 +1,87 @@
 //! The hardware renderer: the same frames as [`mscent_render::LevelRenderer`],
 //! drawn on a GPU through wgpu and read back into a [`Framebuffer`].
 //!
-//! So far it draws the sky and each face in one flat colour. The rest of the
-//! look arrives item by item (`docs/hardware-renderer.md`), each with a case in
-//! `tests/parity.rs`, which holds the two renderers to the same picture.
+//! So far it draws the sky, faces, movers and actors, and a frame's voxels,
+//! viewports, dynamic lights and particles are not drawn. They arrive item by item
+//! (`docs/hardware-renderer.md`), each with a case in `tests/parity.rs`, which
+//! holds the two renderers to the same picture.
 
+mod actors;
 mod device;
+mod face_data;
 mod faces;
+mod lightmap;
 mod sky;
 mod targets;
+mod textures;
 
 pub use device::{Gpu, GpuError};
 
 use mscent_render::scene::SceneStats;
-use mscent_render::{FrameInput, FrameRenderer, Framebuffer, LevelAssets};
+use mscent_render::{Camera, FrameInput, FrameRenderer, Framebuffer, LevelAssets, Quality};
 
+use actors::ActorPass;
 use faces::FacePass;
 use sky::SkyPass;
 use targets::Targets;
+
+/// The `Frame` of `common.wgsl`.
+const FRAME_BYTES: u64 = 96;
 
 /// A level on a GPU.
 pub struct GpuRenderer {
     gpu: Gpu,
     assets: LevelAssets,
+    frame_uniform: wgpu::Buffer,
     sky: SkyPass,
     faces: FacePass,
+    actors: ActorPass,
     targets: Option<Targets>,
     /// The visible voxel chunks, kept so a frame does not allocate them again.
     chunks: Vec<u32>,
+}
+
+/// What every shader reads about a frame, as the bytes of `Frame`.
+fn frame_bytes(assets: &LevelAssets, cam: &Camera, quality: Quality, atlas: (u32, u32)) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(FRAME_BYTES as usize);
+    let matrix = cam.gpu_clip_matrix();
+    for c in &matrix.cols {
+        for value in [c.x, c.y, c.z, c.w] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+    }
+    let fog = assets.fog();
+    let color = fog.map_or(0, |f| f.color);
+    let (start, end): (f32, f32) = fog.map_or((0.0, 1.0), |f| (f.start, f.end));
+    bytes.extend_from_slice(&color.to_le_bytes());
+    bytes.extend_from_slice(&start.to_le_bytes());
+    bytes.extend_from_slice(&end.to_le_bytes());
+    bytes.extend_from_slice(&u32::from(fog.is_some()).to_le_bytes());
+    bytes.extend_from_slice(&u32::from(quality != Quality::Low).to_le_bytes());
+    bytes.extend_from_slice(&u32::from(quality == Quality::High).to_le_bytes());
+    bytes.extend_from_slice(&(atlas.0 as f32).to_le_bytes());
+    bytes.extend_from_slice(&(atlas.1 as f32).to_le_bytes());
+    bytes
 }
 
 impl GpuRenderer {
     /// Puts `assets` on `gpu`. On failure the level comes back with the reason,
     /// for the software renderer to take.
     pub fn new(gpu: Gpu, assets: LevelAssets) -> Result<Self, (GpuError, Box<LevelAssets>)> {
-        let faces = match FacePass::new(&gpu, assets.scene()) {
+        let frame_uniform = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("frame"),
+            size: FRAME_BYTES,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let faces = match FacePass::new(&gpu, &assets, &frame_uniform) {
             Ok(faces) => faces,
             Err(why) => return Err((why, Box::new(assets))),
         };
         Ok(Self {
             sky: SkyPass::new(&gpu, assets.config()),
+            actors: ActorPass::new(&gpu, &frame_uniform),
+            frame_uniform,
             faces,
             gpu,
             assets,
@@ -69,8 +111,16 @@ impl FrameRenderer for GpuRenderer {
             self.targets = Some(Targets::new(&self.gpu, width, height));
         }
         let targets = self.targets.as_ref()?;
+        let uniform = frame_bytes(&self.assets, &cam, frame.quality, self.faces.atlas_size);
+        self.gpu
+            .queue
+            .write_buffer(&self.frame_uniform, 0, &uniform);
         self.sky.prepare(&self.gpu, height);
-        self.faces.prepare(&self.gpu, &cam, &stats.drawn);
+        let poses = frame.effects.poses;
+        self.faces
+            .prepare(&self.gpu, &self.assets, &cam, &stats.drawn, poses);
+        self.actors
+            .prepare(&self.gpu, &self.assets, &cam, frame.actors);
         let mut encoder = self.gpu.device.create_command_encoder(&Default::default());
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -98,6 +148,7 @@ impl FrameRenderer for GpuRenderer {
             });
             self.sky.draw(&mut pass);
             self.faces.draw(&mut pass);
+            self.actors.draw(&mut pass);
         }
         targets.copy_for_reading(&mut encoder);
         self.gpu.queue.submit([encoder.finish()]);

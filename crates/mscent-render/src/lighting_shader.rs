@@ -44,8 +44,8 @@ const MAX_KNOT_LUXELS: f32 = 8.0;
 
 /// Texels per pixel up to which bump mapping keeps full strength, and the
 /// rate at which it has faded out (the normal map aliases beyond that).
-pub(crate) const BUMP_FULL: f32 = 1.0;
-pub(crate) const BUMP_GONE: f32 = 3.0;
+pub const BUMP_FULL: f32 = 1.0;
+pub const BUMP_GONE: f32 = 3.0;
 
 /// Everything the shader needs about the face being drawn.
 #[derive(Clone, Copy)]

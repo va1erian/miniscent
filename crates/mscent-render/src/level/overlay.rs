@@ -6,7 +6,7 @@ use crate::camera::Camera;
 use crate::draw2d::{draw_text, fill_rect, stroke_rect};
 use crate::dynlight::DynLight;
 use crate::framebuffer::Framebuffer;
-use crate::mesh::{Mesh, MeshLighting, Pose, fill_meshes, list_mesh};
+use crate::mesh::{Mesh, MeshLighting, Pose, each_lit_triangle, fill_meshes, list_mesh};
 use crate::raster::PolyList;
 use crate::scene::Scene;
 use crate::shade::Fog;
@@ -90,6 +90,21 @@ impl ActorMeshes {
             ActorKind::Keycard => &self.keycard,
             ActorKind::Terminal => &self.terminal,
             ActorKind::Crate => &self.crate_box,
+        }
+    }
+
+    /// Each triangle of `actors` that faces `eye`, lit by `lighting`: its corners
+    /// in world space with their light factors, and its flat colour.
+    pub(super) fn each_triangle(
+        &self,
+        actors: &[Actor],
+        lighting: &MeshLighting,
+        eye: Vec3,
+        mut visit: impl FnMut([(Vec3, f32); 3], u32),
+    ) {
+        for a in actors {
+            let pose = pose_of(a);
+            each_lit_triangle(self.mesh_of(a.kind), &pose, lighting, eye, &mut visit);
         }
     }
 

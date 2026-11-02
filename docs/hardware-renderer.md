@@ -1,6 +1,6 @@
 # Hardware renderer: plan
 
-Status: accepted, M14.1 and M14.2 done and the rest not started ([status.md](status.md)). Figures
+Status: accepted, M14.1 to M14.3 done and the rest not started ([status.md](status.md)). Figures
 under "Measured" were run for this plan; all others are targets to measure. The work
 items are in [work-items.md](work-items.md) as M14.
 
@@ -206,7 +206,7 @@ Each of these carries a software fact over unchanged, so there is less to reconc
 | Mips are box-filtered by `mips.rs` and `lightmap_mips.rs` | Upload those levels, so there is no second mip generator and the GPU's own is never called |
 | `dither_of` is an integer hash of the screen position | The same hash in WGSL, on `u32` |
 | `KNEE`, `SPEC_GAIN`, `BUMP_FULL`, `EMISSIVE`, `UNLIT` | **Never retyped.** Passed from the Rust constants as pipeline overrides |
-| `SpecTable` is a power table per gloss | A 1D texture made from that table, not `pow()` |
+| `SpecTable` is a power table per gloss | The table's entries in a storage buffer, read with its interpolation, not `pow()` |
 | Voxel axis chosen per pixel from the normal, with a seam band | Same formula: a fragment shader suits this better than spans did |
 | No anisotropic filtering | Samplers set to match, with the same `texel_rate` formula for level of detail where derivatives disagree |
 
@@ -324,17 +324,20 @@ const CASES: &[Case] = &[
 ];
 ```
 
-The features: sky, fog, texture and mips, lightmap, bump, specular, emissive, mover,
-actor, dynamic light, voxel, voxel blend, sprite, decal, depth test. A feature adds a row
-when it is ported, and a new feature adds one in the PR that makes it.
+The features: sky, fog, texture, mips, lightmap, light mips, emissive, bump, specular,
+actor and mover so far, then voxel, voxel blend, dynamic light, sprite, decal and depth
+test. A feature adds a row when it is ported, and a new feature adds one in the PR that
+makes it.
 
 Each case makes two checks:
 
 1. **Hardware against software.** After excluding pixels on an edge, the mean error per
-   channel and the worst 8x8 block mean must be under one pair of limits. The block
+   channel and the worst 8x8 block mean must be under one pair of limits, 1.5 and 3
+   levels, which live in `mscent_math::epsilon` with every other tolerance. The block
    measure catches a shadow or highlight that moved, which a global mean would average
-   away. Starting at 1.5 and 3 levels, they are calibrated once in M14.2 and live in
-   `mscent_math::epsilon` with every other tolerance.
+   away. Each colour is compared with its nearest within one pixel, as software corrects
+   perspective every 16 pixels and a GPU at each one: a texel on a steep wall lands up to
+   a pixel apart, and past that on a very steep one, with both right.
 2. **The case can fail.** The same frame in software with the feature removed must
    *fail* that comparison. Otherwise the case is not looking at its feature. The repo has
    met this before: `examples/crawl.rs` exists because `stability` passed on a crawling
@@ -360,12 +363,11 @@ test. Runners have no GPU, so it uses Mesa's lavapipe, a CPU Vulkan driver:
           MSCENT_REQUIRE_GPU: "1" # no adapter is a failure here, a skip elsewhere
 ```
 
-Measured in a `rust:1.98` container with no build cache, on the dev machine: 6 s for the
-package and 32 s to build the crate with its dependencies and run its tests, of which the
-parity test is 0.8 s. A GitHub runner has fewer cores, so target under 2 minutes added
-to a cold run and 1 to a cached one. If it costs more or proves flaky, the fallback is to
-take those lines out and rely on the local run below. Parity must not be what makes CI
-slow.
+On `ubuntu-latest` the package takes 9 s. In a `rust:1.98` container on the dev machine
+the crate and its dependencies built and ran its tests in 32 s, without real shading. The
+target is under 2 minutes added to a cold run and 1 to a cached one. If it costs more or
+proves flaky, the fallback is to take those lines out and rely on the local run below.
+Parity must not be what makes CI slow.
 
 ### Locally
 
@@ -443,12 +445,14 @@ A GPU that cannot hold native size renders smaller and scales up, using the exis
   support on the reference machine has not been tried.
 - **The pane's paint.** Readback gets the frame to the UI thread quickly, but the software
   canvas may then be the slowest part at 4K. Unmeasured; M14.4 finds out.
-- **Mesa in CI.** Run in a container here, not yet on `ubuntu-latest`, whose Mesa is a
-  different version. The fallback is under "In CI".
+- **Mesa in CI.** Passes on `ubuntu-latest`. A Mesa update could move a result, and two
+  cases sit close to the block limit. The fallback is under "In CI".
 - **Tolerance as a loophole.** Filtering, 16-pixel span subdivision against exact
   perspective, and per-span against per-pixel level of detail all differ slightly, so
-  limits can't be zero. Mitigated by block error and the failing check. Software is the
-  reference: if glancing surfaces dominate, the shader moves toward it.
+  limits can't be zero. Mitigated by block error and the failing check. On a very steep
+  wall the spans part by more than the pixel allowed, by up to about 4 levels in a block,
+  so the mover case stands in a wide room. Copying the spans would make the GPU slower
+  and its picture worse, so this is a known difference rather than a bug.
 - **Friction.** Every look change now costs twice. It is the point, and the reason the
   Texture Studio, levels and bake are shared and only drawing is duplicated.
 - **Driver differences behind one API.** A bug on Intel may never show on Mesa or NVIDIA.

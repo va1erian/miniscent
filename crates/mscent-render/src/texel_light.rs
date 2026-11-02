@@ -15,16 +15,16 @@ use crate::specular::SpecTable;
 
 /// Highlight strength: the table peaks at gloss/255 of the light colour,
 /// which on dim baked light would be invisible.
-pub(crate) const SPEC_GAIN: f32 = 1.1;
+pub const SPEC_GAIN: f32 = 1.1;
 
 /// Table response below which a highlight adds nothing visible (the light
 /// level tops out near 300 of 256, so 1/300 is under one level).
-pub(crate) const MIN_SPEC: f32 = 1.0 / 300.0;
+pub const MIN_SPEC: f32 = 1.0 / 300.0;
 
 /// Light level (256 = full) above which [`soft_limit`] starts rolling off.
-pub(crate) const KNEE: f32 = 190.0;
+pub const KNEE: f32 = 190.0;
 /// Distance past the knee at which the roll-off reaches its ceiling.
-pub(crate) const ROLL: f32 = 110.0;
+pub const ROLL: f32 = 110.0;
 
 /// Multiply the colour channels by per-channel light `k` (256 = unchanged).
 /// Negative or NaN products saturate to zero in the float-to-int cast.

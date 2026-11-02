@@ -17,7 +17,7 @@ use crate::raster::SPAN_LEN;
 pub const MAX_RUN: usize = SPAN_LEN as usize;
 
 /// Below this level fraction the finer level is used alone.
-const MIN_BLEND: f32 = 1.0 / 64.0;
+pub const MIN_BLEND: f32 = 1.0 / 64.0;
 
 fn zip(a: Rgbx, b: Rgbx, f: impl Fn(f32, f32) -> f32) -> Rgbx {
     std::array::from_fn(|k| f(a[k], b[k]))

@@ -71,6 +71,16 @@ impl UvToLuxel {
         (m[0] * m[4] - m[1] * m[3]).abs().sqrt()
     }
 
+    /// The map as `[a, b, c, d, e, f]`: `lx = a u + b v + c`, `ly = d u + e v + f`.
+    pub fn coefficients(&self) -> [f32; 6] {
+        self.m
+    }
+
+    /// What [`Self::to_texture_frame`] multiplies by.
+    pub fn frame(&self) -> [f32; 4] {
+        self.frame
+    }
+
     /// Luxel coordinates of texel coordinates `(u, v)`.
     pub fn apply(&self, u: f32, v: f32) -> (f32, f32) {
         let m = &self.m;

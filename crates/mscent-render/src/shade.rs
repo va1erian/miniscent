@@ -45,8 +45,8 @@ pub trait SpanShader {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Fog {
     pub color: u32,
-    start: f32,
-    end: f32,
+    pub start: f32,
+    pub end: f32,
 }
 
 impl Fog {
