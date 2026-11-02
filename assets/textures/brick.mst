@@ -1,0 +1,48 @@
+miniscent-recipe 1
+size 128 128
+gloss 25
+# The shared parts: where the bricks are, a tone per brick, and grain.
+op 0 0 1 bricks rows=8 cols=4 offset=0.5 mortar=0.125 seed=7 mode=mask
+op 0 1 1 store name=wall
+op 0 2 1 bricks rows=8 cols=4 offset=0.5 mortar=0.125 seed=7 mode=tint
+op 0 3 1 store name=tone
+op 0 4 1 noise freq_x=8 freq_y=8 octaves=5 persistence=0.55 seed=1
+op 0 5 1 store name=grain
+# Brick colour: dark to light by tone, then grain.
+op 0 6 1 flat color=0.47,0.19,0.13
+op 1 6 1 flat color=0.8,0.32,0.21
+op 2 6 1 load name=tone
+op 0 7 3 mask
+op 0 8 1 store name=clay
+op 0 9 1 load name=grain
+op 0 10 1 range out_low=0.6
+op 1 10 1 load name=clay
+op 0 11 2 merge mode=multiply
+op 0 12 1 color amount=1.25
+op 0 13 1 store name=bricks
+# Mortar, with its own mottling.
+op 0 14 1 noise freq_x=16 freq_y=16 octaves=4 persistence=0.55 seed=2 color0=0.36,0.344,0.32 color1=0.54,0.516,0.48
+op 0 15 1 store name=mortar
+# Laid together.
+op 0 16 1 load name=mortar
+op 1 16 1 load name=bricks
+op 2 16 1 load name=wall
+op 0 17 3 mask
+op 0 18 1 out-albedo
+# Height: mortar is the floor, brick tops carry the grain. Half of it softened,
+# which keeps a crisp edge with a rounded shoulder.
+op 0 19 1 load name=grain
+op 0 20 1 range out_low=0.7
+op 0 21 1 store name=tops
+op 0 22 1 flat color=0,0,0
+op 1 22 1 load name=tops
+op 2 22 1 load name=wall
+op 0 23 3 mask
+op 0 24 1 store name=edged
+op 1 25 1 load name=edged
+op 1 26 1 blur radius=0.004
+op 1 27 1 range out_high=0.5
+op 0 26 1 load name=edged
+op 0 27 1 range out_high=0.5
+op 0 28 2 merge mode=add
+op 0 29 1 out-height normal_strength=6

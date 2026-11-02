@@ -1,0 +1,47 @@
+miniscent-recipe 1
+size 128 128
+gloss 90
+# Shared parts: wear, and the tile grid (white tiles, black grout).
+op 0 0 1 noise freq_x=8 freq_y=8 octaves=5 persistence=0.55 seed=21
+op 0 1 1 store name=wear
+op 0 2 1 bricks rows=4 cols=4 offset=0 mortar=0.0625 mode=mask
+op 0 3 1 store name=tiles
+# Checkered tiles, worn, faintly blue.
+op 0 4 1 checker cols=4 rows=4 color0=0.3,0.3,0.3 color1=0.4,0.4,0.4
+op 1 4 1 noise freq_x=8 freq_y=8 octaves=5 persistence=0.55 seed=21 color1=0.12,0.12,0.12
+op 0 5 2 merge mode=add
+op 0 6 1 color gain=0.857,0.952,1 amount=1.05
+op 0 7 1 store name=plain
+# The hazard band: chevrons, worn, across the middle row.
+op 1 8 1 load name=wear
+op 1 9 1 range out_low=0.7
+op 0 9 1 stripes cycles_x=8 cycles_y=8 duty=0.5 color0=0.08,0.08,0.08 color1=0.85,0.65,0.05
+op 0 10 2 merge mode=multiply
+op 0 11 1 store name=hazard
+op 0 12 1 load name=plain
+op 1 12 1 load name=hazard
+op 2 12 1 rect x=0.5 y=0.5 w=1 h=0.25
+op 0 13 3 mask
+op 0 14 1 store name=tops
+# Grout darkens whatever it crosses.
+op 1 15 1 load name=tiles
+op 1 16 1 range out_low=0.35
+op 0 16 1 load name=tops
+op 0 17 2 merge mode=multiply
+op 0 18 1 out-albedo
+# Height: grout is the floor, tiles carry a little wear.
+op 0 19 1 load name=wear
+op 0 20 1 range out_low=0.8 out_high=0.9
+op 0 21 1 store name=raised
+op 0 22 1 flat color=0,0,0
+op 1 22 1 load name=raised
+op 2 22 1 load name=tiles
+op 0 23 3 mask
+op 0 24 1 out-height normal_strength=4
+# Shine: worn tiles dull, grout has none.
+op 0 25 1 load name=wear
+op 0 26 1 invert
+op 0 27 1 range out_low=0.45
+op 1 27 1 load name=tiles
+op 0 28 2 merge mode=multiply
+op 0 29 1 out-specular

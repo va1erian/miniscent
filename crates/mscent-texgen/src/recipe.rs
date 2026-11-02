@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use crate::error::TexError;
 use crate::image::Size;
-use crate::ops::{self, OpSpec, ParamKind, Params, Stroke, Value};
+use crate::ops::{self, MAX_STROKES, OpSpec, ParamKind, Params, Stroke, Value};
 
 const HEADER: &str = "miniscent-recipe 1";
 
@@ -28,8 +28,7 @@ pub const MAX_FILE: usize = 4 * 1024 * 1024;
 pub const MAX_LINE: usize = 64 * 1024;
 /// Most blocks on a page.
 pub const MAX_BLOCKS: usize = 256;
-/// Most strokes one operator may hold.
-pub const MAX_STROKES: usize = 4096;
+
 /// Gloss when a recipe does not give one.
 const DEFAULT_GLOSS: u8 = 40;
 /// How far outside the tile a stroke may run. A path is wrapped when it is

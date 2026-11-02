@@ -1,0 +1,61 @@
+miniscent-recipe 1
+size 128 128
+gloss 200
+# Brushed grain: streaks along x, plus fine scratches.
+op 0 0 1 noise freq_x=0 freq_y=2 octaves=4 persistence=0.55 seed=31 color1=0.5,0.5,0.5
+op 1 0 1 noise freq_x=8 freq_y=8 octaves=6 persistence=0.65 seed=32 color1=0.5,0.5,0.5
+op 0 1 2 merge mode=add
+op 0 2 1 store name=brushed
+# Panels (white) and seams (black).
+op 0 3 1 bricks rows=2 cols=2 offset=0 mortar=0.047 mode=mask
+op 0 4 1 store name=panels
+# Rivets near each panel's corners: one grid of cones, moved four ways.
+op 1 5 1 dots count_x=2 count_y=2 radius=0.027 softness=0.027
+op 1 6 1 store name=dot
+op 0 7 1 load name=dot
+op 1 7 1 load name=dot
+op 0 8 1 rotozoom shift_x=0.1875
+op 1 8 1 rotozoom shift_x=0.8125
+op 0 9 2 merge mode=max
+op 0 10 1 store name=row
+op 0 11 1 load name=row
+op 1 11 1 load name=row
+op 0 12 1 rotozoom shift_y=0.1875
+op 1 12 1 rotozoom shift_y=0.8125
+op 0 13 2 merge mode=max
+op 0 14 1 store name=rivets
+# Colour: cold steel, lighter on rivets, dark in seams.
+op 0 15 1 load name=brushed
+op 0 16 1 range out_low=0.38 out_high=0.6
+op 0 17 1 color gain=0.876,0.924,1 amount=1.05
+op 0 18 1 store name=steel
+op 0 19 1 load name=steel
+op 1 19 1 load name=steel
+op 2 19 1 load name=rivets
+op 1 20 1 color amount=1.25
+op 0 20 1 load name=steel
+op 2 20 1 range in_high=0.05
+op 0 21 3 mask
+op 3 21 1 load name=panels
+op 3 22 1 range out_low=0.45
+op 0 22 3 store name=lit
+op 0 23 4 merge mode=multiply
+op 0 24 1 out-albedo
+# Height: plate level with a little grain, cones on top, seams cut in.
+op 1 26 1 load name=rivets
+op 1 27 1 range out_high=0.35
+op 0 26 1 load name=brushed
+op 0 27 1 range out_low=0.48 out_high=0.52
+op 0 28 2 merge mode=add
+op 0 29 1 store name=plate
+op 0 30 1 flat color=0.1,0.1,0.1
+op 1 30 1 load name=plate
+op 2 30 1 load name=panels
+op 0 31 3 mask
+op 0 32 1 out-height normal_strength=4
+# Shine: follows the grain, none in seams.
+op 0 33 1 load name=brushed
+op 0 34 1 range out_low=0.55
+op 1 34 1 load name=panels
+op 0 35 2 merge mode=multiply
+op 0 36 1 out-specular
