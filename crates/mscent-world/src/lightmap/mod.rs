@@ -26,6 +26,8 @@ pub mod uv;
 mod voxel_rays;
 
 #[cfg(test)]
+mod density_tests;
+#[cfg(test)]
 mod review_tests;
 #[cfg(test)]
 mod soft_tests;
@@ -52,6 +54,37 @@ pub struct LightFace {
     pub vertices: Vec<Vec3>,
     /// Surface normal, the side that receives light. Need not be unit length.
     pub normal: Vec3,
+    /// How finely the face is baked.
+    pub density: LuxelDensity,
+}
+
+/// How finely a face is baked. Every face keeps its place in the bake's input
+/// and output whatever its density, so indexes stay aligned.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum LuxelDensity {
+    /// At the bake's luxel size.
+    #[default]
+    Full,
+    /// At the bake's luxel size times this factor, for a face seen from afar.
+    /// Below 1 or not a number counts as 1, and past [`Self::MAX_COARSE`] as that.
+    Coarse(f32),
+    /// No luxels: no rays, no bounce, no atlas area. The face has no light map.
+    None,
+}
+
+impl LuxelDensity {
+    /// The coarsest factor a face may ask for, so a luxel size stays finite.
+    pub const MAX_COARSE: f32 = 1024.0;
+
+    /// The factor on the luxel size, or `None` for a face with no luxels.
+    pub(super) fn scale(self) -> Option<f32> {
+        match self {
+            Self::Full => Some(1.0),
+            Self::Coarse(k) if k.is_nan() => Some(1.0),
+            Self::Coarse(k) => Some(k.clamp(1.0, Self::MAX_COARSE)),
+            Self::None => None,
+        }
+    }
 }
 
 impl From<&crate::faces::Face> for LightFace {
@@ -59,6 +92,7 @@ impl From<&crate::faces::Face> for LightFace {
         Self {
             vertices: f.polygon.vertices().iter().map(|v| v.to_f32()).collect(),
             normal: f.plane.normal.to_f32(),
+            density: LuxelDensity::Full,
         }
     }
 }

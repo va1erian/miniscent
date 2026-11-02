@@ -68,7 +68,10 @@ pub(super) struct Parts {
     /// For each mover, which of `faces` are its own.
     pub mover_ranges: Vec<Range<usize>>,
     pub portals: Portals,
+    /// Every lamp, which the bake takes, since solid stops the rays of a far one.
     pub lights: Vec<PointLight>,
+    /// The lamps of the play space: meshes and voxels light without shadows.
+    pub play_lights: Vec<PointLight>,
     pub actors: Vec<Actor>,
     pub cfg: BuildConfig,
     pub voxels: VoxelWorld,
@@ -169,7 +172,10 @@ impl Compiled {
         let mover_ranges = append_mover_faces(level, &mut faces);
         let portals = Portals::build(&bsp);
         let vistas = Vistas::new(level, &bsp, &portals);
-        let light_faces = faces.iter().map(LightFace::from).collect();
+        let mut light_faces: Vec<LightFace> = faces.iter().map(LightFace::from).collect();
+        vistas.set_densities(&faces, &mut light_faces);
+        let lights = lights_of(level, cfg.light_gain);
+        let play_lights = vistas.play_lights(&bsp, &lights);
         let bake_cfg = BakeConfig {
             luxel_size: cfg.luxel_size,
             ambient: cfg.ambient,
@@ -187,7 +193,8 @@ impl Compiled {
             vistas,
             mover_ranges,
             portals,
-            lights: lights_of(level, cfg.light_gain),
+            lights,
+            play_lights,
             actors: actors_of(level),
             cfg: with_level_fog(cfg, level),
             voxels,
@@ -310,6 +317,16 @@ mod tests {
         r.render(&mut fb, &view, Quality::Low, r.actors(), None)
             .expect("renders");
         fb.pixels().to_vec()
+    }
+
+    #[test]
+    fn a_level_without_vistas_or_skies_keeps_its_key_and_its_lamps() {
+        let c = compiled();
+        let full: Vec<LightFace> = c.parts.faces.iter().map(LightFace::from).collect();
+        let key = input_key(&full, &c.parts.lights, &c.bake_cfg, c.voxel_shape);
+        assert_eq!(c.light_key(), key, "no density reaches the key");
+        assert!(!c.parts.lights.is_empty());
+        assert_eq!(c.parts.play_lights, c.parts.lights);
     }
 
     #[test]

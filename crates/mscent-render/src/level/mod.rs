@@ -56,6 +56,8 @@ pub use view::View;
 
 /// Light scale of emissive surfaces (256 is the plain texture colour).
 const EMISSIVE: u32 = 330;
+/// Light scale of a self-lit sky: the texture as it is.
+const SELF_LIT: u32 = 256;
 /// Light scale of a face that has no lightmap data.
 const UNLIT: u32 = 200;
 const NEAR: f32 = 0.1;
@@ -191,7 +193,8 @@ impl LevelRenderer {
             vistas,
             mover_ranges,
             portals,
-            lights,
+            lights: _,
+            play_lights: lights,
             actors,
             cfg,
             voxels,

@@ -14,6 +14,7 @@ fn check(info: TexInfo, normal: Vec3d, quad: [Vec3; 4]) {
     let face = LightFace {
         vertices: quad.to_vec(),
         normal: normal.to_f32(),
+        density: Default::default(),
     };
     let proj = project_face(&face, 0, 4.0).expect("projection");
     let verts: Vec<Vertex> = quad

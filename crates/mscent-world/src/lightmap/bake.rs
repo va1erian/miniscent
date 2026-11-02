@@ -86,7 +86,8 @@ impl Lightmap {
     /// The finest luxel size of any face, in world units: the size asked for
     /// unless the level had to be coarsened to fit the atlas.
     pub fn finest_luxel(&self) -> Option<f32> {
-        let sizes = self.proj.iter().map(|p| p.luxel_size);
+        let lit = self.proj.iter().filter(|p| p.width > 0 && p.height > 0);
+        let sizes = lit.map(|p| p.luxel_size);
         sizes.reduce(f32::min)
     }
 
@@ -109,9 +110,13 @@ impl Lightmap {
     }
 
     /// Direct view of one face's luxels for per-pixel lookups, or `None` for
-    /// an unknown face.
+    /// an unknown face and for one with no luxels.
     pub fn face_grid(&self, face: usize) -> Option<FaceGrid<'_>> {
-        let r = self.atlas.rects().get(face)?;
+        let r = self
+            .atlas
+            .rects()
+            .get(face)
+            .filter(|r| **r != Rect::EMPTY)?;
         let stride = self.atlas.width() as usize;
         Some(FaceGrid {
             texels: &self.texels,
@@ -365,6 +370,9 @@ fn compose(atlas: &Atlas, grids: &[Vec<Luxel>]) -> Vec<Luxel> {
     let aw = atlas.width() as usize;
     let mut texels = vec![Luxel::DARK; aw * atlas.height() as usize];
     for (r, grid) in atlas.rects().iter().zip(grids) {
+        if *r == Rect::EMPTY {
+            continue;
+        }
         for (y, row) in grid.chunks(r.w as usize).enumerate() {
             let start = (r.y as usize + y) * aw + r.x as usize;
             texels[start..start + row.len()].copy_from_slice(row);

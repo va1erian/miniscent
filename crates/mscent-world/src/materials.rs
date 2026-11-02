@@ -28,6 +28,12 @@ pub const STEM: u16 = 8;
 /// Honey-coloured comb wax.
 pub const WAX: u16 = 9;
 
+/// The first of the four stock sky materials: stars, clouds, ridge, planet. Their
+/// textures come with the masked-texture item; until then they draw as the fallback.
+pub const FIRST_SKY: u16 = 10;
+/// The last of the sky materials.
+pub const LAST_SKY: u16 = 13;
+
 /// A face with this material is never drawn or lit: the shell of a voxel volume,
 /// where the voxel surface closes in front of it. Not a texture.
 pub const NO_DRAW: u16 = u16::MAX;
@@ -63,6 +69,14 @@ pub const fn is_destructible(material: u8) -> bool {
     material as u16 == ROCK
 }
 
+/// Whether a face of this material draws flat at full brightness and gets no
+/// luxels, so a sky room of any size costs no atlas and no rays. A table of the
+/// game's own materials, like [`is_destructible`]. `LIGHTPANEL` stays out of it:
+/// it is lit as before, so existing pixels hold.
+pub const fn is_self_lit(material: u16) -> bool {
+    material >= FIRST_SKY && material <= LAST_SKY
+}
+
 /// Stock texture names in id order.
 pub const NAMES: [&str; 5] = ["brick", "floor", "lightpanel", "metal", "rock"];
 
@@ -82,5 +96,14 @@ mod tests {
             assert_eq!(view_slot(view_material(slot).unwrap()), Some(slot));
         }
         assert_eq!(view_material(VIEW_SLOTS), None);
+    }
+
+    #[test]
+    fn only_the_four_sky_materials_are_self_lit() {
+        let lit: Vec<u16> = (0..=20).filter(|&m| is_self_lit(m)).collect();
+        assert_eq!(lit, [10, 11, 12, 13]);
+        for m in [LIGHTPANEL, BRICK, WAX, VIEW_FIRST, NO_DRAW] {
+            assert!(!is_self_lit(m), "{m}");
+        }
     }
 }

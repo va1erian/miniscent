@@ -36,6 +36,7 @@ fn lit_floor(w: f32) -> (Lightmap, usize) {
             Vec3::new(0.0, 10.0, 0.0),
         ],
         normal: Vec3::new(0.0, 0.0, 1.0),
+        density: Default::default(),
     };
     let lamp = PointLight {
         position: Vec3::new(w / 2.0, 5.0, 5.0),

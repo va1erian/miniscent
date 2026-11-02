@@ -7,8 +7,9 @@
 //! See `docs/viewports.md`.
 
 use mscent_math::Vec3;
-use mscent_world::materials::VIEW_SLOTS;
-use mscent_world::{Bsp, Entity, Islands, Level, Portals};
+use mscent_world::lightmap::{LightFace, LuxelDensity, PointLight};
+use mscent_world::materials::{VIEW_SLOTS, is_self_lit};
+use mscent_world::{Bsp, Entity, Face, Islands, LeafId, Level, Portals};
 
 use super::{FAR_VISTA, LevelRenderer, NEAR, Quality, View};
 use crate::camera::Camera;
@@ -28,11 +29,18 @@ struct Layer {
     fog: Option<Fog>,
 }
 
+/// How much coarser than the play space a face in a layer's room is lit. Its
+/// light is seen from far away, and a big room at the play space's density
+/// would take the atlas from it.
+const VIEW_LUXEL_SCALE: f32 = 32.0;
+
 /// A level's vista layers, far to near within each slot.
 #[derive(Clone, Debug)]
 pub(super) struct Vistas {
     layers: Vec<Layer>,
     islands: Islands,
+    /// Islands that hold a layer and are not the player start's, sorted.
+    remote: Vec<u32>,
 }
 
 /// One layer's polygons for a frame. No camera: its slot is not seen.
@@ -40,6 +48,15 @@ pub(super) struct Vistas {
 pub(super) struct LayerList {
     faces: PolyList,
     cam: Option<Camera>,
+}
+
+/// The island the first player start is in, if the level has one in empty space.
+fn player_island(level: &Level, bsp: &Bsp, islands: &Islands) -> Option<u32> {
+    let start = level.entities.iter().find_map(|e| match *e {
+        Entity::PlayerStart { pos, .. } => Some(pos),
+        _ => None,
+    })?;
+    islands.island_of(bsp.leaf_at_f32(start))
 }
 
 /// Fog at this range or further means a layer asked for none, and pays for none.
@@ -86,10 +103,50 @@ impl Vistas {
             }
         }
         found.sort_by_key(|&(order, layer)| (layer.slot, order));
+        let home = player_island(level, bsp, &islands);
+        let mut remote: Vec<u32> = (found.iter().map(|(_, l)| l.island))
+            .filter(|&island| Some(island) != home)
+            .collect();
+        remote.sort_unstable();
+        remote.dedup();
         Self {
             layers: found.into_iter().map(|(_, layer)| layer).collect(),
             islands,
+            remote,
         }
+    }
+
+    /// Whether a point is in a layer's room that the player does not start in.
+    fn holds(&self, bsp: &Bsp, pos: Vec3) -> bool {
+        self.in_remote(bsp.leaf_at_f32(pos))
+    }
+
+    /// The lamps that light the play space. The bake keeps them all, since solid
+    /// stops a far lamp's rays; meshes and voxels light without shadows, so a lamp
+    /// in a layer's room must not reach them.
+    pub(super) fn play_lights(&self, bsp: &Bsp, lights: &[PointLight]) -> Vec<PointLight> {
+        let kept = lights.iter().filter(|l| !self.holds(bsp, l.position));
+        kept.copied().collect()
+    }
+
+    /// Sets how finely each face is baked: sky materials not at all, faces in a
+    /// layer's room coarsely. A mover face has no leaves, so it stays as it was.
+    pub(super) fn set_densities(&self, faces: &[Face], light_faces: &mut [LightFace]) {
+        for (face, light) in faces.iter().zip(light_faces) {
+            let remote = face.front_leaves.iter().any(|&leaf| self.in_remote(leaf));
+            light.density = if is_self_lit(face.material) {
+                LuxelDensity::None
+            } else if remote {
+                LuxelDensity::Coarse(VIEW_LUXEL_SCALE)
+            } else {
+                LuxelDensity::Full
+            };
+        }
+    }
+
+    fn in_remote(&self, leaf: LeafId) -> bool {
+        let island = self.islands.island_of(leaf);
+        island.is_some_and(|island| self.remote.binary_search(&island).is_ok())
     }
 }
 

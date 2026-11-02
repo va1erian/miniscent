@@ -3,11 +3,11 @@
 
 use mscent_math::Vec3;
 use mscent_world::Face;
-use mscent_world::materials::LIGHTPANEL;
+use mscent_world::materials::{LIGHTPANEL, is_self_lit};
 
 use super::overlay::LitActors;
 use super::shader::FaceShader;
-use super::{Actor, EMISSIVE, FrameState, LevelRenderer, Quality, UNLIT};
+use super::{Actor, EMISSIVE, FrameState, LevelRenderer, Quality, SELF_LIT, UNLIT};
 use crate::camera::Camera;
 use crate::dynlight::{DynLight, MAX_DYN_LIGHTS};
 use crate::framebuffer::Framebuffer;
@@ -82,6 +82,10 @@ impl LevelRenderer {
         let flat = |light| FaceShader::Flat(FlatShader::new(light, fog));
         if face.material == LIGHTPANEL {
             return flat(EMISSIVE);
+        }
+        // No luxels to look up: a sky shows its texture as it is.
+        if is_self_lit(face.material) {
+            return flat(SELF_LIT);
         }
         let map = self.uv_maps.get(i).copied().flatten();
         let Some(map) = map else {

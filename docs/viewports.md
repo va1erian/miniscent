@@ -152,13 +152,16 @@ a flood over `Portals`. Each layer belongs to the island around `pos`.
 - The layer's flood stays in its island. If the eye has moved out of it (small
   rooms, high parallax) every leaf **of the island** counts as visible, and frustum
   and back-face culling do the rest. The whole-level fallback is not used.
-- Lamps in another island than the player start leave `mesh_lighting` and
-  `lamp_light`. The bake needs no change for correct results, since solid stops the
-  rays. Skip those lamps per luxel only if bake time shows it matters.
-- A face in a layer's island bakes at a coarser luxel: `luxel_size * 32` as the
-  starting point (4 units), which `LightFace` carries. The input key hashes it only
-  when it differs from 1, so existing caches stay valid. The play space keeps its
-  density whatever the view's size.
+- Lamps in a layer's island that is not the player start's leave `mesh_lighting`
+  and the voxel lights. The bake keeps them all, since solid stops the rays and a
+  key made of the same lamps stays valid. Skip them per luxel only if bake time
+  shows it matters.
+- A face in such an island bakes at a coarser luxel: `luxel_size * 32` as the
+  starting point (4 units), as `LuxelDensity::Coarse` on its `LightFace`. A
+  self-lit face is `LuxelDensity::None`: an empty rectangle in the atlas, no rays,
+  no bounce. The input key hashes a density only when it is not `Full`, so
+  existing caches stay valid. The play space keeps its density whatever the
+  view's size. A level with no player start treats no island as the player's.
 
 Editor and `--check` warnings, not errors: the view shares an island with the player
 start (a leak), a layer in solid, a viewport face on a slot with no layer, a mover
