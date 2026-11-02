@@ -135,6 +135,37 @@ fn a_directory_with_no_manifest_gets_sorted_ids_and_the_default_gloss() {
 }
 
 #[test]
+fn stock_names_with_no_manifest_keep_their_gloss_and_draw_the_same() {
+    let listed = Fixture::with_stock("no_manifest", STOCK);
+    std::fs::remove_file(listed.0.join("materials.txt")).expect("removed");
+    let t = listed.load().expect("loads");
+    let got: Vec<(u16, &str, u8)> = t
+        .iter()
+        .map(|(i, m)| (i.0, m.name.as_str(), m.gloss))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            (0, "brick", 25),
+            (1, "floor", 90),
+            (2, "lightpanel", 120),
+            (3, "metal", 200),
+            (4, "rock", 10),
+        ]
+    );
+    let stock = MaterialTable::load_dir(&stock_dir()).expect("stock");
+    let cfg = light_cfg();
+    let mut cache = BakeCache::new();
+    let level = room(3);
+    let a = LevelRenderer::from_level_cached(&level, t, &cfg, &mut cache).expect("builds");
+    let b = LevelRenderer::from_level_cached(&level, stock, &cfg, &mut cache).expect("builds");
+    assert_eq!(
+        pictures(&a, Vec3::new(0.0, -2.0, 0.0)),
+        pictures(&b, Vec3::new(0.0, -2.0, 0.0))
+    );
+}
+
+#[test]
 fn a_png_the_manifest_does_not_list_is_ignored_and_shifts_nothing() {
     let f = Fixture::with_stock("unlisted", STOCK);
     f.png("aaa.png", 8, 0xffff_0000);
@@ -231,10 +262,26 @@ fn forged_specular_files_are_errors() {
 }
 
 #[test]
+fn a_specular_file_with_no_normal_map_is_an_error() {
+    let f = Fixture::new("no_normals");
+    f.write("materials.txt", b"0 a 9\n");
+    f.png("a.png", 2, 0xff00_0000);
+    assert!(f.load().is_ok(), "no specular file, no problem");
+    f.png("a_s.png", 2, 0xff40_ffff);
+    assert!(matches!(
+        f.load(),
+        Err(TextureError::SpecularWithoutNormals)
+    ));
+    f.png("a_n.png", 2, 0xff80_80ff);
+    assert!(f.load().is_ok(), "the map it needs");
+}
+
+#[test]
 fn the_first_channel_of_a_specular_file_is_the_mask() {
     let f = Fixture::new("channel");
     f.write("materials.txt", b"0 a 9\n");
     f.png("a.png", 2, 0xff00_0000);
+    f.png("a_n.png", 2, 0xff80_80ff);
     f.png("a_s.png", 2, 0xff40_ffff);
     let t = f.load().expect("loads");
     let tex = &t.get(MaterialId(0)).expect("there").texture;
@@ -307,6 +354,7 @@ fn adding_a_material_leaves_stock_ids_and_the_pixels_of_a_level_unchanged() {
     let text = format!("{STOCK}5 aaa 200\n6 retired\n7 zzz 40\n");
     let f = Fixture::with_stock("added", &text);
     f.png("aaa.png", 128, 0xffff_00ff);
+    f.png("aaa_n.png", 128, 0xff80_80ff);
     f.png("aaa_s.png", 128, 0xff40_4040);
     f.png("zzz.png", 64, 0xff00_ff00);
     let bigger = f.load().expect("loads");

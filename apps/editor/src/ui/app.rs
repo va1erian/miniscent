@@ -162,8 +162,10 @@ impl Editor {
         };
         app.panel.attach(ui);
         let (generation, table) = app.studio.materials().current();
-        state.borrow_mut().texture_sizes =
-            app.panel.show_materials(generation, table.ok().as_ref());
+        state.borrow_mut().texture_sizes = app
+            .panel
+            .show_materials(generation, table.ok().as_ref())
+            .unwrap_or_default();
         let emit: Rc<dyn Fn(ViewEvent) -> Msg> = Rc::new(Msg::View);
         let views = stack().children((
             layouts::classic(&app.classic, &state, &emit).fill(1),

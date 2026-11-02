@@ -52,17 +52,27 @@ impl MaterialChoices {
 
 impl Editor {
     /// A new generation of the material table reaches the panels here: their
-    /// lists are remade and faces measure against the new texture sizes. The 3D
-    /// view follows through the preview path by itself.
+    /// lists are remade and faces measure against the new texture sizes. Only the
+    /// lists are refreshed, since a field may hold text being typed, and lists
+    /// that could not be made are tried again on the next tick. The 3D view
+    /// follows through the preview path by itself.
     pub(super) fn follow_materials(&mut self) {
         let store = self.studio.materials();
         if store.generation() == self.panel.materials_shown() {
             return;
         }
         let (generation, table) = store.current();
-        let sizes = self.panel.show_materials(generation, table.ok().as_ref());
-        self.state.borrow_mut().texture_sizes = sizes;
-        self.refresh();
+        match self.panel.show_materials(generation, table.ok().as_ref()) {
+            Ok(sizes) => {
+                self.state.borrow_mut().texture_sizes = sizes;
+                self.panel.sync_material_lists(&self.state.borrow());
+            }
+            Err(e) => {
+                if self.panel.note_failure(generation) {
+                    self.push_log(&[format!("ERROR: material lists not updated: {e:?}")]);
+                }
+            }
+        }
     }
 }
 

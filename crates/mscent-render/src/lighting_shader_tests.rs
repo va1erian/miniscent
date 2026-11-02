@@ -6,8 +6,8 @@ use crate::texture::load_texture;
 use mscent_world::lightmap::{BakeConfig, LightFace, PointLight, bake};
 use mscent_world::{Brush, Op, compile};
 
-pub(super) const SIZE: u32 = 64;
-pub(super) const WHITE: u32 = 0xffff_ffff;
+const SIZE: u32 = 64;
+const WHITE: u32 = 0xffff_ffff;
 
 /// 64x64 target, 90 degree fov, camera at the origin looking down -Z.
 pub(super) fn setup() -> (Framebuffer, Camera) {

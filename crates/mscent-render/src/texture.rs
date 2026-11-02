@@ -15,9 +15,6 @@ use crate::manifest::ManifestError;
 use crate::mips;
 use crate::png::{self, Image, PngError};
 
-/// A normal texel pointing straight out of the surface, with a full mask.
-const FLAT_TEXEL: u32 = 0xff80_80ff;
-
 /// Why a texture could not be built or loaded.
 #[derive(Debug)]
 pub enum TextureError {
@@ -29,6 +26,8 @@ pub enum TextureError {
     Io(String),
     /// The PNG could not be decoded.
     Png(PngError),
+    /// A specular map came with no normal map, whose alpha is where it lives.
+    SpecularWithoutNormals,
     /// `materials.txt` is not acceptable.
     Manifest(ManifestError),
 }
@@ -127,14 +126,15 @@ impl Texture {
     }
 
     /// Attach a specular mask, one byte per texel, 255 for the full highlight.
-    /// A texture with no normal map gets a flat one to carry the mask: the
-    /// normal array is the only thing the specular path fetches per pixel.
+    /// It needs a normal map to live in: a made-up flat one would not be quite
+    /// flat at 8 bits, and would cost the diffuse path a normal fetch per pixel.
     pub fn with_specular(mut self, mask: &[u8]) -> Result<Self, TextureError> {
         if mask.len() != self.albedo.len() {
             return Err(TextureError::SizeMismatch);
         }
-        let len = self.albedo.len();
-        let normals = self.normals.get_or_insert_with(|| vec![FLAT_TEXEL; len]);
+        let Some(normals) = &mut self.normals else {
+            return Err(TextureError::SpecularWithoutNormals);
+        };
         for (n, &m) in normals.iter_mut().zip(mask) {
             *n = (*n & 0x00ff_ffff) | u32::from(m) << 24;
         }
@@ -305,7 +305,7 @@ impl NormalView<'_> {
     #[inline]
     pub fn texel(&self, x: i32, y: i32) -> u32 {
         let i = (y as u32 & self.my) as usize * self.w + (x as u32 & self.mx) as usize;
-        self.px.get(i).copied().unwrap_or(FLAT_TEXEL)
+        self.px.get(i).copied().unwrap_or(0xff80_80ff)
     }
 }
 

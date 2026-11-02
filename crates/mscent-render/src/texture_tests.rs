@@ -68,16 +68,16 @@ fn filtering_twice_keeps_the_same_chain() {
 fn a_mask_needs_one_byte_per_texel_and_defaults_to_full() {
     let t = Texture::new(2, 2, vec![0; 4]).unwrap();
     assert_eq!(t.spec_mean(), 1.0, "no mask at all is exactly full");
-    assert!(matches!(
-        t.clone().with_specular(&[0; 3]),
-        Err(TextureError::SizeMismatch)
-    ));
-    assert!(matches!(
-        t.clone().with_specular(&[0; 5]),
-        Err(TextureError::SizeMismatch)
-    ));
     let full = t.clone().with_normals(vec![0xff80_80ff; 4]).unwrap();
     assert_eq!(full.spec_mean(), 1.0);
+    assert!(matches!(
+        full.clone().with_specular(&[0; 3]),
+        Err(TextureError::SizeMismatch)
+    ));
+    assert!(matches!(
+        full.clone().with_specular(&[0; 5]),
+        Err(TextureError::SizeMismatch)
+    ));
 }
 
 #[test]
@@ -97,6 +97,7 @@ fn a_mask_goes_into_the_normal_alpha_and_leaves_the_normal_alone() {
     // mask has a mean of 255.
     assert_eq!(t.spec_mean(), 138.0 / 255.0);
     let nearly = Texture::new(16, 16, vec![0; 256]).unwrap();
+    let nearly = nearly.with_normals(vec![0xff80_80ff; 256]).unwrap();
     let mut mask = [255; 256];
     mask[7] = 0;
     assert!(nearly.with_specular(&mask).unwrap().spec_mean() < 1.0);
@@ -112,12 +113,10 @@ fn a_mask_goes_into_the_normal_alpha_and_leaves_the_normal_alone() {
 }
 
 #[test]
-fn a_mask_with_no_normal_map_makes_a_flat_one() {
-    let t = Texture::new(2, 1, vec![0; 2])
-        .unwrap()
-        .with_specular(&[10, 20])
-        .unwrap();
-    assert!(t.has_normals());
-    assert_eq!(t.normal_texel(0, 0), Some(0x0a80_80ff));
-    assert_eq!(t.normal_texel(1, 0), Some(0x1480_80ff));
+fn a_mask_with_no_normal_map_is_an_error() {
+    let t = Texture::new(2, 2, vec![0; 4]).unwrap();
+    assert!(matches!(
+        t.with_specular(&[0; 4]),
+        Err(TextureError::SpecularWithoutNormals)
+    ));
 }

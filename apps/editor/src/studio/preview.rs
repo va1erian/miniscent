@@ -191,6 +191,9 @@ impl Studio {
         let waiting = self.bake_job.is_some()
             || self.preview_job.is_some()
             || self.refresh
+            // The bake's end would ask for the preview that just failed, and
+            // that would bake again. A new document or table clears this.
+            || self.error.is_some()
             || self.worker.is_none()
             || self.light == Light::Full
             || self.failed_bake == Some(self.light_key)
@@ -292,8 +295,9 @@ impl Studio {
         match result {
             Ok(Some(report)) => {
                 out.log.push(build::log_line(&report));
-                // The next preview finds the lightmap in the cache.
-                self.refresh = true;
+                // The next preview finds the lightmap in the cache. While the
+                // level cannot be shown, whatever clears that makes one anyway.
+                self.refresh |= self.error.is_none();
             }
             Ok(None) => {}
             Err(e) => self.bake_failed(e, out),

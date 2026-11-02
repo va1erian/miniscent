@@ -1,7 +1,7 @@
 //! The specular mask, read from real pixels: where it may be fetched, where it
 //! must fall back to the mean, and that a full mask changes nothing.
 
-use super::lighting_shader_tests::{SIZE, WHITE, baked, face, pack, px, red, render, setup, wall};
+use super::lighting_shader_tests::{baked, face, pack, px, red, render, setup, wall};
 use super::*;
 use crate::raster::{Vertex, draw_polygon};
 
@@ -161,34 +161,25 @@ fn the_mask_fades_towards_the_mean_while_the_map_is_minified() {
 }
 
 #[test]
-fn a_mask_with_no_normal_map_masks_and_leaves_the_diffuse_alone() {
-    let plain = Texture::new(8, 8, vec![GREY; 64]).unwrap();
-    let off_rows = |i: u32| matches!(i / 8, 2 | 3);
-    let mask: Vec<u8> = (0..64).map(|i| if off_rows(i) { 0 } else { 255 }).collect();
-    let masked = plain.clone().with_specular(&mask).unwrap();
-    let (on, off) = pictures(&masked, 1.0, true);
-    assert_eq!(px(&on, 20, 26), px(&off, 20, 26), "masked row");
-    assert!(
-        red(px(&on, 20, 37)) > red(px(&off, 20, 37)) + 30,
-        "open row"
-    );
-    // The flat normal array is flat to 8 bits, not exactly: under a level or two.
-    let (_, base) = pictures(&plain, 1.0, true);
-    assert_eq!(base.len(), (SIZE * SIZE) as usize);
-    for (a, b) in off.iter().zip(&base) {
-        assert!(red(*a).abs_diff(red(*b)) <= 2, "{a:#x} vs {b:#x}");
-    }
-}
-
-#[test]
 fn a_texture_with_no_map_at_all_has_an_unchanged_highlight() {
+    // On black the picture is the highlight alone, and half grey shows the light
+    // level. At the mirror point of lamp and eye the normal faces the half vector,
+    // so the highlight must be the table's peak of that light, with no mask in it.
     let lm = baked();
-    let tex = Texture::new(8, 8, vec![WHITE; 64]).unwrap();
-    assert_eq!(tex.spec_mean(), 1.0);
-    let table = SpecTable::new(255);
-    let f = face(&lm, &tex, true);
+    let table = SpecTable::new(128);
+    let black = Texture::new(8, 8, vec![0xff00_0000; 64]).unwrap();
+    assert_eq!(black.spec_mean(), 1.0);
+    let f = face(&lm, &black, true);
     let mut sh = LightingShader::with_specular(f, Vec3::ZERO, &table).unwrap();
-    let on = render(&tex, &mut sh);
-    let off = render(&tex, &mut LightingShader::new(f).unwrap());
-    assert_ne!(on, off);
+    let highlight = red(px(&render(&black, &mut sh), 20, 32)) as f32;
+    let half = Texture::new(8, 8, vec![0xff80_8080; 64]).unwrap();
+    let f = face(&lm, &half, true);
+    let img = render(&half, &mut LightingShader::new(f).unwrap());
+    let light = red(px(&img, 20, 32)) as f32 * 2.0;
+    let want = light * table.response(1.0) * SPEC_GAIN;
+    assert!(want > 50.0, "a highlight worth measuring: {want}");
+    assert!(
+        (highlight - want).abs() < want * 0.1,
+        "highlight {highlight}, a full one is {want}"
+    );
 }

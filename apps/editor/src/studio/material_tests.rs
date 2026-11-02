@@ -149,3 +149,71 @@ fn a_table_without_the_stock_materials_is_reported_and_the_picture_stays() {
     }
     settle(&mut studio, &doc);
 }
+
+/// Ticks for `span`, returning the log lines, with the jobs left to finish first.
+fn idle_log(studio: &mut Studio, doc: &Document, span: Duration) -> Vec<String> {
+    let mut log = Vec::new();
+    let give_up = Instant::now() + Duration::from_secs(120);
+    let mut end = Instant::now() + span;
+    while Instant::now() < end {
+        log.extend(studio.tick(&[], PANE, doc).log);
+        if studio.bake_job.is_some() {
+            end = Instant::now() + span;
+        }
+        assert!(
+            Instant::now() < give_up,
+            "never went quiet: {} lines",
+            log.len()
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    log
+}
+
+#[test]
+fn a_bad_table_on_a_draft_picture_settles_and_a_good_one_recovers() {
+    let doc = showcase();
+    let mut studio = Studio::new(&doc);
+    let bakes = |s: &Studio| s.cache().lock().expect("cache").bakes();
+    let end = Instant::now() + Duration::from_secs(60);
+    while !studio.is_current(&doc) {
+        studio.tick(&[], PANE, &doc);
+        assert!(Instant::now() < end, "no preview");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(studio.light, Light::Draft);
+
+    // No bake is in flight: it fails once and nothing starts.
+    studio.materials().replace(MaterialTable::new());
+    let log = idle_log(&mut studio, &doc, Duration::from_secs(1));
+    assert_eq!(log.len(), 1, "{log:?}");
+    assert_eq!(studio.preview(&doc), Preview::Failed);
+    assert!(studio.preview_job.is_none() && studio.bake_job.is_none());
+    assert_eq!(bakes(&studio), 0);
+
+    // A good table recovers with no edit; catch its bake on the way.
+    studio.materials().replace(painted(0xff20_c040));
+    let end = Instant::now() + Duration::from_secs(60);
+    while studio.bake_job.is_none() {
+        studio.tick(&[], PANE, &doc);
+        assert_ne!(studio.light, Light::Full, "the bake was missed");
+        assert!(Instant::now() < end, "no bake after recovering");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(studio.preview(&doc), Preview::Baking);
+    assert!(studio.error.is_none());
+
+    // With that bake in flight it ends once, and only one more preview fails.
+    studio.materials().replace(MaterialTable::new());
+    let log = idle_log(&mut studio, &doc, Duration::from_secs(1));
+    assert!(log.len() <= 2, "the bake's line and the error: {log:?}");
+    assert_eq!(studio.preview(&doc), Preview::Failed);
+    assert!(studio.preview_job.is_none() && studio.bake_job.is_none());
+    assert_eq!(bakes(&studio), 1);
+
+    // And the bake is there for the next good table.
+    studio.materials().replace(painted(0xff20_c040));
+    settle(&mut studio, &doc);
+    assert_eq!(studio.light, Light::Full);
+    assert_eq!(bakes(&studio), 1);
+}

@@ -7,8 +7,8 @@
 //! so all of this is checked and every failure is an error.
 //!
 //! A directory with no manifest (a test fixture, an `--assets` directory) gets
-//! ids from its sorted file list and [`DEFAULT_GLOSS`], as all directories did
-//! before there were manifests.
+//! ids from its sorted file list and, as before there were manifests, the stock
+//! gloss for a stock name and [`DEFAULT_GLOSS`] for any other.
 
 use std::collections::HashSet;
 use std::io::Read;
@@ -20,7 +20,7 @@ use crate::texture::TextureError;
 
 /// The manifest's file name in a texture directory.
 pub const FILE: &str = "materials.txt";
-/// Gloss of materials in a directory with no manifest: mildly glossy.
+/// Gloss of what has no other: mildly glossy.
 pub const DEFAULT_GLOSS: u8 = 40;
 /// Most ids a manifest may hold, retired ones included.
 pub const MAX_MATERIALS: usize = 1024;
@@ -175,6 +175,19 @@ pub fn read(path: &Path) -> Result<Option<Vec<Entry>>, TextureError> {
     parse(&bytes).map(Some).map_err(TextureError::Manifest)
 }
 
+/// The gloss of a name in a directory with no manifest, which must draw as it
+/// did before manifests. Directories with one say it themselves.
+fn listed_gloss(name: &str) -> u8 {
+    match name {
+        "metal" => 200,
+        "lightpanel" => 120,
+        "floor" => 90,
+        "brick" => 25,
+        "rock" => 10,
+        _ => DEFAULT_GLOSS,
+    }
+}
+
 /// The entries of a directory with no manifest: every base texture, sorted by
 /// name. Files starting with `_` and the `_n`, `_h` and `_s` companions are not
 /// base textures.
@@ -195,8 +208,8 @@ pub fn from_listing(dir: &Path) -> Result<Vec<Entry>, TextureError> {
     Ok(names
         .into_iter()
         .map(|name| Entry::Material {
+            gloss: listed_gloss(&name),
             name,
-            gloss: DEFAULT_GLOSS,
         })
         .collect())
 }

@@ -10,9 +10,10 @@ use xui::widget::{CheckBox, GroupBox, HasText};
 
 use super::Msg;
 use super::app::cmd;
+use super::props::Mount;
 use super::toolbar::IconButton;
 use crate::model::EditorState;
-use crate::model::facetex::{DEFAULT_TEXTURE, FaceEdit};
+use crate::model::facetex::{DEFAULT_TEXTURE, FaceEdit, FaceView};
 
 /// Side of a material preview, in dip.
 const THUMB: i32 = 40;
@@ -89,52 +90,65 @@ fn small(text: &str, msg: Msg) -> Build<Button<Msg>, Msg> {
     button(text).on_click(msg)
 }
 
+/// The material browser, in a layout of its own to mount in its container.
+fn thumbnails(
+    previews: &[Preview],
+    handles: &[Handle<IconButton<Msg>>],
+    root: Option<Ui<Msg>>,
+) -> Layout<Msg> {
+    let mut thumbs = wrap().gap(4);
+    for (preview, handle) in previews.iter().zip(handles) {
+        let tip = format!("{} (material {})", preview.name, preview.id);
+        let (image, msg) = (preview.image.clone(), edit(FaceEdit::Material(preview.id)));
+        let root = root.clone();
+        thumbs = thumbs.child(
+            build(move |ui| {
+                IconButton::picture(ui, root.as_ref().unwrap_or(ui), image, &tip, msg, THUMB)
+            })
+            .bind(handle),
+        );
+    }
+    thumbs
+}
+
 fn round(v: f32) -> f64 {
     (f64::from(v) * 1.0e4).round() / 1.0e4
 }
 
 impl FacePanel {
+    /// The number of thumbnails, for tests.
+    #[cfg(test)]
+    pub fn thumb_count(&self) -> usize {
+        self.thumbs.len()
+    }
+
     /// Makes the previews of `table`, remaking the thumbnails if they exist, and
     /// returns the texel sizes by material id: a retired id, which draws the grey
     /// fallback, has the size the scene gives that. Without textures the browser
-    /// is empty. `root` is as in [`Self::layout`].
-    pub fn show_materials(
+    /// is empty. `root` is as in [`Self::layout`]. After an error the old
+    /// thumbnails work as they did.
+    pub(super) fn show_materials(
         &mut self,
         table: Option<&MaterialTable>,
         root: Option<&Ui<Msg>>,
-    ) -> Vec<(u32, u32)> {
+        mount: &Mount<'_>,
+    ) -> xui::backend::Result<Vec<(u32, u32)>> {
         let mut sizes = vec![DEFAULT_TEXTURE; table.map_or(0, MaterialTable::len)];
-        self.previews.clear();
+        let mut previews = Vec::new();
         for (id, m) in table.iter().flat_map(|t| t.iter()) {
             sizes[usize::from(id.0)] = (m.texture.width(), m.texture.height());
             if let Some(image) = preview_of(&m.texture) {
                 let (id, name) = (id.0, m.name.clone());
-                self.previews.push(Preview { id, name, image });
+                previews.push(Preview { id, name, image });
             }
         }
-        self.thumbs = self.previews.iter().map(|_| Handle::new()).collect();
+        let thumbs: Vec<_> = previews.iter().map(|_| Handle::new()).collect();
         if let Some(host) = self.thumb_host.try_get() {
-            // A failure leaves an empty browser; the fields still work.
-            let _ = host.set_layout(self.thumbnails(root.cloned()));
+            mount(&host, thumbnails(&previews, &thumbs, root.cloned()))?;
         }
-        sizes
-    }
-
-    /// The material browser, in a layout of its own to mount in `thumb_host`.
-    fn thumbnails(&self, root: Option<Ui<Msg>>) -> Layout<Msg> {
-        let mut thumbs = wrap().gap(4);
-        for (preview, handle) in self.previews.iter().zip(&self.thumbs) {
-            let tip = format!("{} (material {})", preview.name, preview.id);
-            let (image, msg) = (preview.image.clone(), edit(FaceEdit::Material(preview.id)));
-            let root = root.clone();
-            thumbs = thumbs.child(
-                build(move |ui| {
-                    IconButton::picture(ui, root.as_ref().unwrap_or(ui), image, &tip, msg, THUMB)
-                })
-                .bind(handle),
-            );
-        }
-        thumbs
+        self.previews = previews;
+        self.thumbs = thumbs;
+        Ok(sizes)
     }
 
     /// Whether `id` is one of the section's text fields.
@@ -149,7 +163,8 @@ impl FacePanel {
     /// `root` is the window-level handle the thumbnails' tooltips are made
     /// through, so they are not clipped to this panel.
     pub fn layout(&self, root: Option<Ui<Msg>>) -> impl IntoEntry<Msg> + use<> {
-        let thumbs = panel(self.thumbnails(root)).plain().bind(&self.thumb_host);
+        let thumbs = thumbnails(&self.previews, &self.thumbs, root);
+        let thumbs = panel(thumbs).plain().bind(&self.thumb_host);
         let scale_range = (-1000.0, 1000.0, 0.0625);
         let shift_range = (-65_536.0, 65_536.0, 1.0);
         let pair = |label_text: &str,
@@ -256,6 +271,21 @@ impl FacePanel {
         let view = st.face_view();
         show(self.group.get().id(), view.is_some());
         let Some(v) = view else { return };
+        self.sync_lists(&v);
+        let t = &v.info;
+        for (h, value) in self.scale.iter().zip([t.u_scale, t.v_scale]) {
+            h.get().set_value(round(value));
+        }
+        for (h, value) in self.shift.iter().zip([t.u_shift, t.v_shift]) {
+            h.get().set_value(round(value));
+        }
+        self.rotation.get().set_value(round(t.rotation_deg));
+        self.follow.get().set_checked(!t.lock_to_world);
+    }
+
+    /// Shows the target faces in what depends on the material table, leaving the
+    /// fields alone.
+    pub(super) fn sync_lists(&self, v: &FaceView) {
         let t = &v.info;
         let faces = if v.count == 1 {
             "1 face".to_string()
@@ -271,14 +301,6 @@ impl FacePanel {
         for (h, p) in self.thumbs.iter().zip(&self.previews) {
             h.get().set_checked(p.id == t.material);
         }
-        for (h, value) in self.scale.iter().zip([t.u_scale, t.v_scale]) {
-            h.get().set_value(round(value));
-        }
-        for (h, value) in self.shift.iter().zip([t.u_shift, t.v_shift]) {
-            h.get().set_value(round(value));
-        }
-        self.rotation.get().set_value(round(t.rotation_deg));
-        self.follow.get().set_checked(!t.lock_to_world);
         self.info.get().set_text(&format!(
             "{} x {} texels, tile {:.2} x {:.2} units",
             v.texture.0, v.texture.1, v.tile.0, v.tile.1
