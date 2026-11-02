@@ -66,6 +66,9 @@ pub struct EditorState {
     pub texture_sizes: Vec<(u32, u32)>,
     /// The last thing the user should be told.
     pub message: String,
+    /// The panel's name and tag fields while they are being typed in.
+    pub draft: super::labels::LabelDraft,
+    pub(super) script: super::labels::ScriptText,
 }
 
 impl Default for EditorState {
@@ -94,6 +97,8 @@ impl EditorState {
             face_key: None,
             texture_sizes: Vec::new(),
             message: "Ready".into(),
+            draft: Default::default(),
+            script: Default::default(),
         }
     }
 
@@ -107,6 +112,9 @@ impl EditorState {
         self.face_key = None;
         self.drag = None;
         self.cut = None;
+        self.draft = Default::default();
+        self.script = Default::default();
+        self.poll_script();
     }
 
     pub fn snap(&self, v: f64) -> f64 {

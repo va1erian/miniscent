@@ -15,7 +15,7 @@ use crate::ui::facepanel::FaceMsg;
 use crate::ui::{Msg, Probe, cmd};
 
 /// The Face tool's index in the palette.
-const FACE_TOOL: usize = 6;
+const FACE_TOOL: usize = 7;
 
 fn edit(stage: &Stage<'_, Msg>, e: FaceEdit) {
     stage.emit(Msg::Face(FaceMsg::Edit(e)));

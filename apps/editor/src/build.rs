@@ -6,11 +6,13 @@
 //! panic in a job) come back as text and never take the editor down.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use miniscent_game::assets::load_materials;
+use miniscent_game::scripts::{self, ScriptFiles, ScriptWatcher};
 use miniscent_game::{GameSession, SessionConfig};
 use mscent_game::{Arena, LoadError};
 use mscent_render::{
@@ -44,6 +46,8 @@ pub struct Built {
     pub light_key: u64,
     /// The cache's account of a [`Light::Full`] lightmap.
     pub report: Option<BakeReport>,
+    /// Reloads the level's script while it is played, for a saved level.
+    pub watch: Option<ScriptWatcher>,
 }
 
 pub enum Product {
@@ -229,16 +233,49 @@ fn preview(doc: &Document, cache: &SharedCache) -> Result<Built, String> {
         .into_renderer(map, materials()?)
         .map_err(|e| format!("cannot prepare the level: {e:?}"))?;
     Ok(Built {
-        product: product(&level, renderer, &cfg),
+        product: product(&level, renderer, &cfg, doc.level_path()),
         light,
         light_key,
         report,
+        watch: doc.level_path().map(ScriptWatcher::new),
     })
 }
 
-fn product(level: &Level, renderer: LevelRenderer, cfg: &SessionConfig) -> Product {
-    match Arena::from_level(level) {
-        Ok(arena) => Product::Playable(Box::new(GameSession::with_renderer(arena, renderer, cfg))),
+/// A session on the level's script, or why there cannot be one. The renderer
+/// comes back either way, so a broken script still leaves a picture to look at.
+fn scripted(
+    arena: Arena,
+    renderer: LevelRenderer,
+    cfg: &SessionConfig,
+    files: &ScriptFiles,
+) -> Product {
+    let mut session = GameSession::with_renderer(arena, renderer, cfg);
+    match scripts::start(&mut session, files) {
+        Ok(_warnings) => Product::Playable(Box::new(session)),
+        Err(why) => Product::ViewOnly(Box::new(session.into_renderer()), why),
+    }
+}
+
+fn product(
+    level: &Level,
+    renderer: LevelRenderer,
+    cfg: &SessionConfig,
+    path: Option<&Path>,
+) -> Product {
+    let files = match path.map(scripts::for_level).transpose() {
+        Ok(files) => files.flatten(),
+        Err(why) => return Product::ViewOnly(Box::new(renderer), why),
+    };
+    let arena = if files.is_some() {
+        Arena::from_scripted_level(level)
+    } else {
+        Arena::from_level(level)
+    };
+    match arena {
+        Ok(arena) => match &files {
+            Some(files) => scripted(arena, renderer, cfg, files),
+            None => Product::Playable(Box::new(GameSession::with_renderer(arena, renderer, cfg))),
+        },
         Err(LoadError::NoPlayerStart) => {
             Product::ViewOnly(Box::new(renderer), "the level has no player start".into())
         }
@@ -355,6 +392,42 @@ mod tests {
         let job = start_preview(&doc, &SharedCache::default()).expect("starts");
         let built = wait(&job).expect("builds");
         assert!(built.unplayable().is_some());
+    }
+
+    #[test]
+    fn a_script_beside_the_level_decides_whether_it_plays() {
+        let text = "miniscent-level 1
+box subtract 0 1  -8 -8 -8  8 8 8
+player 0 0 0 0
+";
+        let level = mscent_world::level_text::from_text(text).expect("level");
+        let dir = std::env::temp_dir().join(format!("mscent-build-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let mut doc = Document::from_level(&level);
+        let cache = SharedCache::default();
+        let build = |doc: &Document| wait(&start_preview(doc, &cache).expect("starts"));
+
+        let without = build(&doc).expect("builds");
+        assert!(without.unplayable().is_some(), "no script, no goal");
+        doc.set_level_path(Some(dir.join("l.msl")));
+        std::fs::write(
+            dir.join("l.st"),
+            "say: 'hello'.
+",
+        )
+        .expect("writes");
+        let scripted = build(&doc).expect("builds");
+        assert_eq!(scripted.unplayable(), None, "a script can decide the win");
+        std::fs::write(
+            dir.join("l.st"),
+            "marker: 'gone'.
+",
+        )
+        .expect("writes");
+        let broken = build(&doc).expect("builds");
+        let why = broken.unplayable().expect("a broken script does not play");
+        assert!(why.contains("l.st:1:"), "{why}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

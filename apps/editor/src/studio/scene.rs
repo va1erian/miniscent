@@ -11,14 +11,34 @@ use super::highlight;
 use super::worker::{Request, Scene};
 use crate::build::Built;
 
+/// How often a running level's script is checked for changes, in game time.
+const WATCH_EVERY: Duration = Duration::from_millis(250);
+
 pub struct LevelScene {
     built: Built,
     fb: Option<Framebuffer>,
+    since_watch: Duration,
 }
 
 impl LevelScene {
     pub fn new(built: Built) -> LevelScene {
-        LevelScene { built, fb: None }
+        LevelScene {
+            built,
+            fb: None,
+            since_watch: Duration::ZERO,
+        }
+    }
+
+    /// Runs the level on its script as saved now. A broken one leaves the old
+    /// one running, and says so on the screen.
+    fn reload_script(&mut self) {
+        let Built { product, watch, .. } = &mut self.built;
+        let (Some(watch), crate::build::Product::Playable(session)) = (watch, product) else {
+            return;
+        };
+        if let Err(problem) = watch.reload_if_changed(session) {
+            session.show_script_problem(&problem);
+        }
     }
 
     /// The running game, for tests that look inside.
@@ -30,12 +50,18 @@ impl LevelScene {
 
 impl Scene for LevelScene {
     fn restart(&mut self) {
+        self.reload_script();
         if let Some(s) = self.built.session_mut() {
             s.restart();
         }
     }
 
     fn step(&mut self, dt: Duration, events: &[Event], stats: FrameStats) -> bool {
+        self.since_watch += dt;
+        if self.since_watch >= WATCH_EVERY {
+            self.since_watch = Duration::ZERO;
+            self.reload_script();
+        }
         self.built.session_mut().is_some_and(|s| {
             s.set_stats(stats);
             s.step(dt, events).quit

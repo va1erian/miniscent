@@ -46,7 +46,9 @@ pub fn load(path: &Path) -> Result<Document, String> {
     let data = std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     let level = format::read(&data)
         .map_err(|e| format!("{} is not a valid level ({e:?})", path.display()))?;
-    Ok(Document::from_level(&level))
+    let mut doc = Document::from_level(&level);
+    doc.set_level_path(Some(path.to_path_buf()));
+    Ok(doc)
 }
 
 /// Where the last used path is remembered.

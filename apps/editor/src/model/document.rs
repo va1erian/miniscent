@@ -8,6 +8,7 @@
 use mscent_math::{DPlane, Vec3d};
 use mscent_world::{Brush, BrushError, Entity, EntityLabel, Level, MoverGroup, Op, TexInfo};
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 /// A stable identity that survives reordering, deletion and undo.
 pub type Id = u32;
@@ -213,6 +214,8 @@ pub struct Document {
     labels: BTreeMap<Id, LabelDef>,
     groups: Vec<GroupDef>,
     next_id: Id,
+    /// Where the level is saved; its script is beside it. `None` until saved.
+    level_path: Option<PathBuf>,
 }
 
 impl Document {
@@ -341,7 +344,46 @@ impl Document {
         &self.entities
     }
 
-    #[cfg(test)]
+    pub fn label(&self, id: Id) -> Option<&LabelDef> {
+        self.labels.get(&id)
+    }
+
+    pub(super) fn set_label(&mut self, id: Id, label: Option<LabelDef>) {
+        match label {
+            Some(label) => {
+                self.labels.insert(id, label);
+            }
+            None => {
+                self.labels.remove(&id);
+            }
+        }
+    }
+
+    pub(super) fn set_groups(&mut self, groups: Vec<GroupDef>) {
+        self.groups = groups;
+    }
+
+    /// The mover group a brush belongs to, if any.
+    pub fn group_of(&self, brush: Id) -> Option<&GroupDef> {
+        self.groups.iter().find(|g| g.brushes.contains(&brush))
+    }
+
+    pub(super) fn name_taken(&self, name: &str) -> bool {
+        self.groups.iter().any(|g| g.name == name)
+            || self
+                .labels
+                .values()
+                .any(|l| l.name.as_deref() == Some(name))
+    }
+
+    pub fn level_path(&self) -> Option<&Path> {
+        self.level_path.as_deref()
+    }
+
+    pub fn set_level_path(&mut self, path: Option<PathBuf>) {
+        self.level_path = path;
+    }
+
     pub fn groups(&self) -> &[GroupDef] {
         &self.groups
     }

@@ -140,7 +140,10 @@ fn brushes(pen: &mut Pen, scene: &Scene) {
     for br in scene.state.doc.brushes() {
         let (lo, hi) = br.bounds();
         let r = pen.rect([lo[a], lo[b]], [hi[a], hi[b]]);
+        // A mover stands out: it is no part of the world.
+        let moves = scene.state.doc.group_of(br.id).is_some();
         let color = match br.op {
+            Op::Add if moves => Color::rgb(230, 150, 40),
             Op::Add => ADD,
             Op::Subtract => SUBTRACT,
         };

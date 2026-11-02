@@ -291,6 +291,14 @@ impl GameSession {
         }
     }
 
+    /// Tells the player a script could not be reloaded.
+    pub fn show_script_problem(&mut self, problem: &str) {
+        for line in problem.lines() {
+            eprintln!("{line}");
+            self.notices.error(line);
+        }
+    }
+
     /// On screen for the player, and on the console for whoever is scripting.
     fn report_script(&mut self) {
         for message in self.game.take_messages() {
