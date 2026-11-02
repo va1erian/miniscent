@@ -550,7 +550,8 @@ faces. The first frame of a view can run far over budget until the governor acts
 | Brush room, cost per screen pixel | 26 ns | 45 ns | 46 ns |
 
 So on this dense scene a voxel pixel at High costs about 10% more than a brush pixel, which **misses** the
-aim of no more. The rest is triangle setup, at about 120 ns per triangle against the 22 ns the prototype
+aim of no more. The rest is probably triangle setup: an estimate from these frame times, not a
+profile, puts it near 120 ns per triangle against the 22 ns the prototype
 suggested. The machine is noisy, and the Medium and High rows swap on some runs.
 
 The prototype this replaced, on the same frames, for the record:
