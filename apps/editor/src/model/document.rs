@@ -253,7 +253,7 @@ impl Document {
         self.groups.iter().find(|g| g.brushes.contains(&brush))
     }
 
-    pub(super) fn name_taken(&self, name: &str) -> bool {
+    pub(crate) fn name_taken(&self, name: &str) -> bool {
         self.groups.iter().any(|g| g.name == name)
             || self
                 .labels

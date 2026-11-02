@@ -24,7 +24,9 @@ use crate::ui::{Editor, Msg, Probe, cmd};
 mod faces;
 mod keys;
 mod materials;
+mod script_pane;
 mod scripting;
+mod timing;
 mod voxel;
 
 /// Ticks the UI `n` times, 16 ms apart, so the render thread's frames arrive
@@ -67,6 +69,11 @@ struct Holder {
     editor: Probe,
 }
 
+/// `--ui-timing`: prints what the UI thread's everyday work costs.
+pub fn ui_timing(dir: &Path) -> i32 {
+    run_theme(dir, Theme::light(), (1280.0, 800.0), timing::script)
+}
+
 /// Runs the script; returns the process exit code.
 pub fn run(dir: &Path) -> i32 {
     let scripted = run_theme(
@@ -74,6 +81,18 @@ pub fn run(dir: &Path) -> i32 {
         Theme::light(),
         (1280.0, 800.0),
         scripting::script,
+    );
+    let pane = run_theme(
+        &dir.join("script-pane"),
+        Theme::light(),
+        (1280.0, 800.0),
+        script_pane::script,
+    );
+    let pane_dark = run_theme(
+        &dir.join("script-pane-dark"),
+        Theme::dark(),
+        (1280.0, 800.0),
+        script_pane::script,
     );
     let light = run_theme(dir, Theme::light(), (1280.0, 800.0), script);
     let dark = run_theme(&dir.join("dark"), Theme::dark(), (1280.0, 800.0), script);
@@ -90,7 +109,13 @@ pub fn run(dir: &Path) -> i32 {
         (1280.0, 800.0),
         voxel::script,
     );
-    light.max(dark).max(wide).max(scripted).max(voxels)
+    light
+        .max(dark)
+        .max(wide)
+        .max(scripted)
+        .max(pane)
+        .max(pane_dark)
+        .max(voxels)
 }
 
 fn run_theme(

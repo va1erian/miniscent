@@ -49,6 +49,7 @@ impl Editor {
             target.set_rgba(f.w, f.h, f.rgba);
         }
         if self.studio.mode == Mode::Edit {
+            self.sync_script();
             self.pane_wheel(wheel);
             let busy = sculpted || !clicks.is_empty() || !drags.is_empty() || wheel != 0;
             for click in clicks {

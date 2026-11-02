@@ -5,11 +5,45 @@ use std::path::{Path, PathBuf};
 use xui::prelude::Ui;
 use xui::widget::MenuId;
 
-use super::app::{Editor, Msg, cmd};
+use super::app::{Editor, Msg};
 use super::level_dialog;
+use super::script_actions::{KIT_MENU, SAMPLE_MENU};
 use crate::files;
 use crate::model::Document;
+use crate::script::kit::KIT;
+use crate::script::samples::SAMPLES;
 use crate::studio::Mode;
+
+/// Menu command ids.
+pub mod cmd {
+    use xui::widget::MenuId;
+    pub const NEW: MenuId = MenuId::new(1);
+    pub const OPEN: MenuId = MenuId::new(2);
+    pub const SAVE: MenuId = MenuId::new(3);
+    pub const PLAY: MenuId = MenuId::new(5);
+    pub const SHOWCASE: MenuId = MenuId::new(6);
+    pub const SAVE_AS: MenuId = MenuId::new(7);
+    pub const UNDO: MenuId = MenuId::new(10);
+    pub const REDO: MenuId = MenuId::new(11);
+    pub const MAKE_MOVER: MenuId = MenuId::new(26);
+    pub const DELETE: MenuId = MenuId::new(12);
+    pub const FLIP: MenuId = MenuId::new(13);
+    pub const FORWARD: MenuId = MenuId::new(14);
+    pub const BACK: MenuId = MenuId::new(15);
+    pub const SLICE: MenuId = MenuId::new(16);
+    pub const SLICE_SIDE: MenuId = MenuId::new(17);
+    pub const CARVE: MenuId = MenuId::new(18);
+    pub const EXTRUDE: MenuId = MenuId::new(19);
+    pub const EXTRUDE_IN: MenuId = MenuId::new(22);
+    pub const FIT: MenuId = MenuId::new(20);
+    pub const RESET_CAMERA: MenuId = MenuId::new(21);
+    pub const LAYOUT_CLASSIC: MenuId = MenuId::new(23);
+    pub const LAYOUT_QUAD: MenuId = MenuId::new(24);
+    pub const LEVEL_SETTINGS: MenuId = MenuId::new(25);
+    pub const SCRIPT_PANE: MenuId = MenuId::new(27);
+    pub const GUIDE: MenuId = MenuId::new(28);
+    pub const SCRIPT_WINDOW: MenuId = MenuId::new(29);
+}
 
 /// Fog the dialog starts from for a level without a world entity.
 const DEFAULT_FOG: (f32, f32) = (4.0, 26.0);
@@ -51,6 +85,24 @@ pub(super) fn menus(m: &mut xui::widget::MenuScope<'_>) {
     m.submenu(MenuId::new(103), "&Play", |p| {
         p.item(cmd::PLAY, "&Play   F5");
     });
+    m.submenu(MenuId::new(104), "S&cript", |s| {
+        s.item(cmd::SCRIPT_PANE, "Show or hide &script   F6");
+        s.item(cmd::SCRIPT_WINDOW, "Script in its own &window, or docked");
+        s.separator();
+        s.submenu(MenuId::new(105), "&Add entity", |a| {
+            for (id, entry) in KIT_MENU.iter().zip(&KIT) {
+                a.item(*id, entry.label);
+            }
+        });
+        s.submenu(MenuId::new(106), "Open s&ample", |a| {
+            for (id, sample) in SAMPLE_MENU.iter().zip(&SAMPLES) {
+                a.item(*id, sample.title);
+            }
+        });
+    });
+    m.submenu(MenuId::new(107), "&Help", |h| {
+        h.item(cmd::GUIDE, "Scripting &guide   F7");
+    });
 }
 
 impl Editor {
@@ -72,19 +124,43 @@ impl Editor {
                 }
                 self.open_dialog.open();
             }
-            cmd::SAVE => match self.path.clone() {
-                Some(p) => self.save_path(p),
-                None => self.save_dialog.open(),
-            },
+            cmd::SAVE => self.save_command(),
             cmd::SAVE_AS => self.save_dialog.open(),
             cmd::PLAY => self.play_command(),
             cmd::RESET_CAMERA => {
                 self.studio.reset_camera(&self.state.borrow().doc);
             }
             cmd::FIT => self.refit(),
+            cmd::SCRIPT_PANE => self.toggle_script(),
+            cmd::GUIDE => self.show_guide(),
+            cmd::SCRIPT_WINDOW => {
+                let floats = !self.script.floats();
+                self.set_script_floating(floats);
+            }
             _ if self.layout_command(id) => {}
+            _ if self.script_list_command(id) => {}
             _ => self.edit_command(id),
         }
+    }
+
+    /// The Script pane's Save is File > Save: a level and its script go together.
+    pub(super) fn save_command(&mut self) {
+        match self.path.clone() {
+            Some(p) => self.save_path(p),
+            None => self.save_dialog.open(),
+        }
+    }
+
+    /// The Script menu's lists; `false` for any other command.
+    fn script_list_command(&mut self, id: MenuId) -> bool {
+        if let Some(i) = KIT_MENU.iter().position(|m| *m == id) {
+            self.pick_kit(i);
+        } else if let Some(i) = SAMPLE_MENU.iter().position(|m| *m == id) {
+            self.open_sample(i);
+        } else {
+            return false;
+        }
+        true
     }
 
     fn edit_command(&mut self, id: MenuId) {
@@ -153,6 +229,9 @@ impl Editor {
             st.load(doc);
             st.message = message.into();
         }
+        if !self.state.borrow().script.text().is_empty() {
+            self.script.set_open(true);
+        }
         self.refit();
         self.show_prompt();
     }
@@ -192,25 +271,19 @@ impl Editor {
                     .doc
                     .set_level_path(Some(path.clone()));
                 self.saved = doc;
+                let script = self.save_script(&path);
+                if matches!(script, Ok(true)) {
+                    // F5 straight after must not find the old build current.
+                    self.studio.script_changed();
+                }
                 self.path = Some(path);
-                lit.map_or(msg.clone(), |l| format!("{msg}; {l}"))
+                let saved = lit.map_or(msg.clone(), |l| format!("{msg}; {l}"));
+                match script {
+                    Ok(true) => format!("{saved}; script saved"),
+                    Ok(false) => saved,
+                    Err(e) => format!("{saved}; THE SCRIPT WAS NOT SAVED: {e}"),
+                }
             }
-            Err(e) => e,
-        };
-        self.state.borrow_mut().message = message;
-    }
-
-    /// F5: play the level as it is, as soon as the preview has caught up.
-    /// Lighting still being baked arrives during the game.
-    fn play_command(&mut self) {
-        self.state.borrow_mut().commit_pending();
-        let doc = self.state.borrow().doc.clone();
-        if self.studio.playable_now(&doc) {
-            self.begin_play();
-            return;
-        }
-        let message = match self.studio.play_when_ready(&doc) {
-            Ok(()) => "Preparing the level...".to_string(),
             Err(e) => e,
         };
         self.state.borrow_mut().message = message;

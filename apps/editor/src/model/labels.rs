@@ -2,18 +2,10 @@
 //! uses them. Every change is checked against the rules a saved level must meet
 //! before it is applied, so the document stays one that can be saved.
 
-use std::path::Path;
-use std::time::{Duration, Instant};
-
-use miniscent_game::scripts::MAX_SOURCE;
-
 use super::command::Command;
 use super::document::{Document, GroupDef, Id, LabelDef};
 use super::state::{EditorState, Selection};
 use mscent_world::Op;
-
-/// How often the script beside the level is read again.
-const SCRIPT_POLL: Duration = Duration::from_secs(1);
 
 /// The panel's name and tag fields, while being typed in.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -22,13 +14,6 @@ pub struct LabelDraft {
     pub tags: String,
     /// What the fields were filled from, so a new selection fills them again.
     pub filled_for: Option<Selection>,
-}
-
-/// The script beside the level, as last read.
-#[derive(Clone, Debug, Default)]
-pub struct ScriptText {
-    text: Option<String>,
-    read_at: Option<Instant>,
 }
 
 fn split_tags(tags: &str) -> Vec<String> {
@@ -65,15 +50,6 @@ fn label_of(name: &str, tags: &str) -> Option<LabelDef> {
         name: (!name.is_empty()).then(|| name.to_string()),
         tags,
     })
-}
-
-/// A file past the limit would be refused anyway, and this runs on the UI thread.
-fn read_script(path: &Path) -> Option<String> {
-    let len = std::fs::metadata(path).ok()?.len();
-    if len > MAX_SOURCE as u64 {
-        return None;
-    }
-    std::fs::read_to_string(path).ok()
 }
 
 impl Document {
@@ -223,20 +199,6 @@ impl EditorState {
         done
     }
 
-    /// Reads the script beside the level again, at most once a second.
-    pub fn poll_script(&mut self) {
-        let due = self
-            .script
-            .read_at
-            .is_none_or(|t| t.elapsed() >= SCRIPT_POLL);
-        if !due {
-            return;
-        }
-        let path = self.doc.level_path().map(|p| p.with_extension("st"));
-        self.script.text = path.and_then(|p| read_script(&p));
-        self.script.read_at = Some(Instant::now());
-    }
-
     /// Which lines of the script name the selection, for the panel. Read only:
     /// the wiring lives in the script, and this shows where.
     pub fn script_uses(&self) -> String {
@@ -244,11 +206,11 @@ impl EditorState {
         if name.is_empty() {
             return String::new();
         }
-        let Some(text) = &self.script.text else {
+        if !self.script.has_file() && self.script.text().is_empty() {
             return "No script beside this level".into();
-        };
+        }
         let quoted = format!("'{name}'");
-        let lines = text.lines().enumerate();
+        let lines = self.script.text().lines().enumerate();
         let found: Vec<String> = lines
             .filter(|(_, l)| l.contains(&quoted))
             .map(|(i, _)| (i + 1).to_string())
@@ -455,15 +417,6 @@ mod tests {
     }
 
     #[test]
-    fn a_script_past_the_limit_is_not_read() {
-        let dir = std::env::temp_dir().join(format!("mscent-label-big-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("l.st"), vec![b' '; MAX_SOURCE + 1]).unwrap();
-        assert_eq!(read_script(&dir.join("l.st")), None);
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
     fn a_new_selection_fills_the_fields_and_typing_is_kept_until_it_changes() {
         let mut st = state();
         let a = st.place_entity(EntityKind::Marker, [1.0, 1.0, 1.0]);
@@ -491,7 +444,7 @@ mod tests {
         draft(&mut st, "door", "");
         assert!(st.apply_draft());
         st.doc.set_level_path(Some(dir.join("l.msl")));
-        st.poll_script();
+        st.script.open(Some(&dir.join("l.st")));
         assert_eq!(st.script_uses(), "Script lines: 2, 3");
         let _ = std::fs::remove_dir_all(dir);
     }

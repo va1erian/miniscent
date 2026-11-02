@@ -128,6 +128,7 @@ Design in [scripting.md](scripting.md), language choice in
 | M10.7 | Mover rendering and lightmaps | M10.3 | M | Pixel tests read a door at both poses; `frame_bench` with movers recorded in `docs/perf/` |
 | M10.8 | Props, pickups, use key, factions, HUD messages | M10.5 | M | Keycard and terminal end to end through `--test` |
 | M10.9 | Editor: mover command, names, tags, script errors, reload in Play | M10.2, M10.5 | M | `--selftest` steps |
+| M10.10 | Editor: script pane with completion and live checking, basic entities, samples, in-app guide | M10.9 | M | Each sample passes its `--test`; `--selftest` types with real key events; every guide example compiles |
 
 ## M11 Voxel volumes
 
