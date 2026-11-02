@@ -318,11 +318,17 @@ pub fn evaluate(
     )
 }
 
-/// A page's finished maps, for a material. Not cancelled by edits: what was asked
-/// for is this page, and it is carried in the job.
-pub fn bake(recipe: &Recipe, graph: &Graph, cache: &mut Cache) -> Result<Texture, String> {
+/// Makes the texture of a page. `cache`, when given, reuses what the previews
+/// computed; `cancel` stops it between blocks.
+fn make(
+    recipe: &Recipe,
+    graph: &Graph,
+    cache: Option<&mut Cache>,
+    cancel: &AtomicBool,
+) -> Result<Texture, String> {
     let options = RunOptions {
-        cache: Some(cache),
+        cache,
+        cancel: Some(cancel),
         ..Default::default()
     };
     let outcome = graph::run(recipe, graph, recipe.size, options).map_err(|e| e.to_string())?;
@@ -330,4 +336,26 @@ pub fn bake(recipe: &Recipe, graph: &Graph, cache: &mut Cache) -> Result<Texture
     let texture = texture_from_maps(maps).map_err(|e| format!("{e:?}"))?;
     // The mips are made here, not on the UI thread when the table is installed.
     Ok(texture.filtered())
+}
+
+/// A page's finished maps, for Apply. Edits do not cancel it: what was asked for is
+/// this page, and it is carried in the job. `cancel` is for the thread ending.
+pub fn bake(
+    recipe: &Recipe,
+    graph: &Graph,
+    cache: &mut Cache,
+    cancel: &AtomicBool,
+) -> Result<Texture, String> {
+    make(recipe, graph, Some(cache), cancel)
+}
+
+/// A page's texture as the game will make it from the file Save will write: the
+/// recipe's text read back, compiled and run with no cache, which is what
+/// `mscent_texgen::bake` does. A page the cached previews can run and the game
+/// cannot would otherwise put a row in the manifest that stops every material
+/// loading.
+pub fn bake_saved(recipe: &Recipe, cancel: &AtomicBool) -> Result<Texture, String> {
+    let (_, back) = super::save::proved(recipe)?;
+    let graph = graph::compile(&back).map_err(|e| e.to_string())?;
+    make(&back, &graph, None, cancel)
 }

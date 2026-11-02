@@ -8,14 +8,9 @@
 //! edits, and a failed Save loses none either.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Read;
 use std::time::{Duration, Instant};
 
 use mscent_render::MaterialTable;
-use mscent_render::manifest::{DEFAULT_GLOSS, name_is_valid};
-use mscent_render::recipe_texture::EXTENSION;
-use mscent_texgen::recipe::{self, MAX_FILE};
-use mscent_texgen::{Recipe, Size};
 use mscent_world::materials::{LIGHTPANEL, NAMES};
 
 use crate::materials::SharedMaterials;
@@ -24,6 +19,7 @@ use crate::model::texdoc::TexDoc;
 mod eval;
 mod lit;
 mod material;
+mod open;
 mod paint;
 mod save;
 mod worker;
@@ -32,6 +28,7 @@ use eval::Request;
 pub use eval::{Failure, Picture, Tab, Thumbs};
 use material::PendingBake;
 pub use material::SaveStart;
+use open::PendingOpen;
 pub use paint::{Brush, Stroking};
 pub(crate) use save::{updated_manifest, write_atomic};
 use worker::Worker;
@@ -88,6 +85,10 @@ pub struct TexStudio {
     /// When a parameter was last dragged.
     dragged_at: Option<Instant>,
     bake: Option<PendingBake>,
+    opening: Option<PendingOpen>,
+    /// Materials applied under a new id and not saved: levels drawn with them name
+    /// an id the disk does not have.
+    unsaved: BTreeSet<String>,
     /// Stock materials whose overwriting was agreed to.
     overwrite_ok: BTreeSet<String>,
     /// The worker has yet to hear that the workspace went away.
@@ -97,16 +98,6 @@ pub struct TexStudio {
     cleared: bool,
     /// The paint tool: the workspace's, so none of it is in a recipe or its undo.
     tool: paint::Tool,
-}
-
-fn read_recipe_file(path: &std::path::Path) -> Result<Recipe, String> {
-    let describe = |e: &dyn std::fmt::Display| format!("cannot open {}: {e}", path.display());
-    let file = std::fs::File::open(path).map_err(|e| describe(&e))?;
-    let mut bytes = Vec::new();
-    file.take(MAX_FILE as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|e| describe(&e))?;
-    recipe::read(&bytes).map_err(|e| describe(&e))
 }
 
 impl TexStudio {
@@ -127,6 +118,8 @@ impl TexStudio {
             failure: None,
             dragged_at: None,
             bake: None,
+            opening: None,
+            unsaved: BTreeSet::new(),
             overwrite_ok: BTreeSet::new(),
             idle_unsent: false,
             message: None,
@@ -146,7 +139,7 @@ impl TexStudio {
     /// Whether anything is left for ticks to do. While nothing is, the workspace
     /// costs the UI tick nothing.
     pub fn needs_ticks(&self) -> bool {
-        self.open || self.idle_unsent || self.bake.is_some()
+        self.open || self.idle_unsent || self.bake.is_some() || self.opening.is_some()
     }
 
     pub fn is_open(&self) -> bool {
@@ -229,64 +222,6 @@ impl TexStudio {
         self.cleared = true;
     }
 
-    /// Opens a material of the table: where it was left if it is open, else its
-    /// recipe. A material with no recipe is PNG files, so it starts on a new page
-    /// of its size, and nothing replaces the files until it is saved. A recipe that
-    /// cannot be read is a message, and the current material stays.
-    pub fn open_material(&mut self, name: &str) {
-        if self.docs.contains_key(name) {
-            self.switch_to(name);
-            return;
-        }
-        let Some(table) = self.table() else {
-            self.message = Some("no material table to open from".to_string());
-            return;
-        };
-        let material = table.find(name).and_then(|id| table.get(id));
-        let Some(material) = material else {
-            self.message = Some(format!("there is no material {name}"));
-            return;
-        };
-        let file = self
-            .store
-            .dir()
-            .map(|d| d.join(format!("{name}{EXTENSION}")))
-            .filter(|p| p.is_file());
-        let doc = match file {
-            Some(path) => match read_recipe_file(&path) {
-                Ok(recipe) => TexDoc::open(name, recipe, material.gloss),
-                Err(why) => {
-                    self.message = Some(why);
-                    return;
-                }
-            },
-            None => {
-                let texture = &material.texture;
-                let Ok(size) = Size::new(texture.width(), texture.height()) else {
-                    self.message = Some(format!("{name} has a size recipes do not have"));
-                    return;
-                };
-                self.message = Some(format!(
-                    "{name} has no recipe: this new page replaces its PNG files if saved"
-                ));
-                TexDoc::first_page(name, size, material.gloss)
-            }
-        };
-        self.docs.insert(name.to_string(), doc);
-        self.switch_to(name);
-    }
-
-    /// Makes a new material, not yet in the table. Names follow the manifest's
-    /// rules, and one already in use is refused: its saved id belongs to it.
-    pub fn create(&mut self, name: &str, side: u32) -> Result<(), String> {
-        check_new_name(name, self.table().as_ref(), &self.docs)?;
-        let size = Size::new(side, side).map_err(|e| e.to_string())?;
-        self.docs
-            .insert(name.to_string(), TexDoc::starter(name, size, DEFAULT_GLOSS));
-        self.switch_to(name);
-        Ok(())
-    }
-
     /// Runs an edit of the current recipe; an error goes to the status bar.
     pub fn edit<T>(&mut self, f: impl FnOnce(&mut TexDoc) -> Result<T, String>) -> Option<T> {
         let doc = self.doc_mut()?;
@@ -352,6 +287,7 @@ impl TexStudio {
             self.asked = None;
             // Whatever it was making is gone, and nothing would ever say so.
             self.bake = None;
+            self.opening = None;
             self.message = Some("the texture thread stopped; starting another".to_string());
         }
         if self.worker.is_none() {
@@ -429,6 +365,9 @@ impl TexStudio {
         if let Some(baked) = outbox.baked {
             self.finish_bake(baked);
         }
+        if let Some(opened) = outbox.opened {
+            self.finish_open(opened);
+        }
     }
 
     /// One UI tick. Never waits: when a lock is busy the work is left for the next.
@@ -437,10 +376,11 @@ impl TexStudio {
             cleared: std::mem::take(&mut self.cleared),
             ..TexTick::default()
         };
-        if self.open || self.bake.is_some() {
+        if self.open || self.bake.is_some() || self.opening.is_some() {
             self.worker();
         }
         self.post_bake();
+        self.post_open();
         if self.idle_unsent {
             // Busy this moment, or never started: left for the next tick.
             self.idle_unsent = self.worker.as_ref().is_some_and(|w| !w.post_idle());
@@ -448,7 +388,7 @@ impl TexStudio {
         if self.open {
             self.ask();
         }
-        if self.open || self.bake.is_some() {
+        if self.open || self.bake.is_some() || self.opening.is_some() {
             self.collect(&mut tick);
         }
         tick.message = self.message.take();
@@ -456,28 +396,12 @@ impl TexStudio {
     }
 }
 
-/// Why `name` cannot be a new material, if it cannot.
-fn check_new_name(
-    name: &str,
-    table: Option<&MaterialTable>,
-    docs: &BTreeMap<String, TexDoc>,
-) -> Result<(), String> {
-    if !name_is_valid(name) {
-        return Err(format!(
-            "{name:?}: names are 1 to 48 of a-z, 0-9 and -, with a letter or digit at each \
-             end, and no Windows device name"
-        ));
-    }
-    if docs.contains_key(name) || table.is_some_and(|t| t.find(name).is_some()) {
-        return Err(format!("there is already a material {name}"));
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod hostile_tests;
 #[cfg(test)]
 mod paint_tests;
+#[cfg(test)]
+mod save_flow_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

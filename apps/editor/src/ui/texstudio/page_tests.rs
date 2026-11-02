@@ -8,7 +8,7 @@ use xui::{Image, backend::Event};
 
 use super::TexMsg;
 use super::page_geom::Grid;
-use super::tests::{Handles, mouse_event, steady_shot, with_workspace};
+use super::tests::{Handles, mouse_event, open, steady_shot, with_workspace};
 use crate::ui::Msg;
 use mscent_texgen::ops;
 
@@ -126,7 +126,7 @@ fn block_of(h: &Handles, index: usize) -> mscent_texgen::recipe::Block {
 #[test]
 fn the_wheel_reaches_the_last_block_of_a_stock_recipe_and_back() {
     with_workspace(|stage, h| {
-        stage.emit(Msg::Tex(TexMsg::Open("brick".to_string())));
+        open(stage, h, "brick");
         let _ = steady_shot(stage);
         let count = h.studio.borrow().doc().expect("open").recipe().blocks.len();
         assert!(count >= 30, "brick is a recipe of {count} blocks");
@@ -148,7 +148,7 @@ fn the_wheel_reaches_the_last_block_of_a_stock_recipe_and_back() {
 fn selecting_any_block_of_any_stock_recipe_brings_it_into_view() {
     with_workspace(|stage, h| {
         for name in ["brick", "floor", "lightpanel", "metal", "rock"] {
-            stage.emit(Msg::Tex(TexMsg::Open(name.to_string())));
+            open(stage, h, name);
             let _ = steady_shot(stage);
             let count = h.studio.borrow().doc().expect("open").recipe().blocks.len();
             assert!(count > 1, "{name} opened as a recipe, not a blank page");
@@ -168,7 +168,7 @@ fn selecting_any_block_of_any_stock_recipe_brings_it_into_view() {
 #[test]
 fn a_click_on_the_page_still_selects_what_is_under_the_pointer_after_scrolling() {
     with_workspace(|stage, h| {
-        stage.emit(Msg::Tex(TexMsg::Open("brick".to_string())));
+        open(stage, h, "brick");
         let _ = steady_shot(stage);
         // Four notches of the wheel, a row each.
         for _ in 0..4 {

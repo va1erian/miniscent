@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use mscent_render::{Material, MaterialId, Texture};
 use mscent_texgen::bake;
 use mscent_texgen::ops::{self, Value};
+use mscent_texgen::recipe;
 use mscent_world::materials::NAMES;
 
 use super::*;
@@ -14,11 +15,17 @@ use crate::materials::MaterialStore;
 /// Long enough for any page here on a busy machine; only reached by a failure.
 const PATIENCE: Duration = Duration::from_secs(60);
 
-/// A store with the stock names, a 16 px texture each, so no test reads assets.
+/// A store with the renderer's five stock names, a 16 px texture each, so no test
+/// reads assets.
 pub(super) fn store() -> SharedMaterials {
+    store_of(&NAMES)
+}
+
+/// A store with these materials, a 16 px texture each.
+pub(super) fn store_of(names: &[&str]) -> SharedMaterials {
     let store = SharedMaterials::new(MaterialStore::default());
     let mut table = MaterialTable::new();
-    for name in NAMES {
+    for name in names {
         table.add(Material {
             name: name.to_string(),
             gloss: 40,
@@ -51,6 +58,20 @@ pub(super) fn settle(s: &mut TexStudio) -> (Option<Picture>, Option<Thumbs>) {
         assert!(Instant::now() < end, "never settled");
         std::thread::sleep(Duration::from_millis(1));
     }
+}
+
+/// Opens a material and ticks until its file is read; what the last tick said,
+/// which is the reason when it could not be.
+pub(super) fn open_and_wait(s: &mut TexStudio, name: &str) -> Option<String> {
+    s.open_material(name);
+    let end = Instant::now() + PATIENCE;
+    let mut said = None;
+    while s.is_opening() {
+        said = s.tick().message;
+        assert!(Instant::now() < end, "never opened");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    said
 }
 
 /// Replaces the page with this one, as a recipe file would.
@@ -269,7 +290,7 @@ fn names_follow_the_manifests_rules_and_cannot_be_taken() {
 }
 
 /// Waits for Apply or Save to finish; its message.
-fn wait_bake(s: &mut TexStudio) -> String {
+pub(super) fn wait_bake(s: &mut TexStudio) -> String {
     let end = Instant::now() + PATIENCE;
     let mut said = String::new();
     while s.is_baking() || said.is_empty() {
@@ -345,37 +366,25 @@ fn a_page_with_no_albedo_output_says_so_and_changes_nothing() {
 }
 
 fn stock_dir(name: &str) -> std::path::PathBuf {
-    let d = std::env::temp_dir().join(format!("mscent-texstudio-{name}-{}", std::process::id()));
+    dir_of(name, &NAMES)
+}
+
+/// A directory of these materials, ids in order, each a flat recipe.
+pub(super) fn dir_of(tag: &str, names: &[&str]) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!("mscent-texstudio-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).expect("dir");
-    let rows: String = NAMES
+    let rows: String = names
         .iter()
         .enumerate()
         .map(|(i, n)| format!("{i} {n} 40\n"))
         .collect();
     std::fs::write(d.join("materials.txt"), rows).expect("manifest");
-    for n in NAMES {
+    for n in names {
         let text = "miniscent-recipe 1\nsize 16 16\nop 0 0 1 flat\nop 0 1 1 out-albedo\n";
         std::fs::write(d.join(format!("{n}.mst")), text).expect("recipe");
     }
     d
-}
-
-#[test]
-fn save_asks_about_stock_materials_and_nothing_else() {
-    let mut s = studio();
-    let d = stock_dir("consent");
-    s.store.set_dir(d.clone());
-    s.open_material("rock");
-    assert_eq!(s.save(), SaveStart::NeedsConsent("rock".to_string()));
-    assert!(!s.is_baking(), "nothing happens until the answer");
-    s.consent("rock");
-    assert_eq!(s.save(), SaveStart::Started);
-    assert!(wait_bake(&mut s).starts_with("Saved rock"));
-    s.create("mine", 16).expect("creates");
-    assert_eq!(s.save(), SaveStart::Started);
-    assert!(wait_bake(&mut s).starts_with("Saved mine (id 5)"));
-    let _ = std::fs::remove_dir_all(d);
 }
 
 #[test]

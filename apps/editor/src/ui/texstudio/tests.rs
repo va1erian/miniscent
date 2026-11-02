@@ -61,6 +61,8 @@ pub(super) fn with_workspace(script: impl FnOnce(&Stage<'_, Msg>, &Handles) + 's
                 name: "ui-test".to_string(),
                 side: 16,
             }));
+            // The first material is being read on the worker.
+            wait_opened(stage, handles);
             let _ = stage.ui().capture();
             script(stage, handles);
             r2.set(true);
@@ -68,6 +70,22 @@ pub(super) fn with_workspace(script: impl FnOnce(&Stage<'_, Msg>, &Handles) + 's
     )
     .expect("render");
     assert!(ran.get(), "the script ran to the end");
+}
+
+/// Ticks until the worker has read the recipe being opened, if one is.
+fn wait_opened(stage: &Stage<'_, Msg>, h: &Handles) {
+    let end = Instant::now() + Duration::from_secs(60);
+    while h.studio.borrow().is_opening() {
+        stage.emit(Msg::Step);
+        assert!(Instant::now() < end, "never opened");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// Opens a material of the table and waits for its recipe.
+pub(super) fn open(stage: &Stage<'_, Msg>, h: &Handles, name: &str) {
+    stage.emit(Msg::Tex(TexMsg::Open(name.to_string())));
+    wait_opened(stage, h);
 }
 
 pub(super) fn mouse_event(kind: u8, x: i32, y: i32, button: MouseButton) -> Event {

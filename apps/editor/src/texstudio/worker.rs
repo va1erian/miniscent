@@ -17,6 +17,7 @@ use mscent_texgen::graph::{Cache, Graph};
 
 use super::eval::{self, Failure, Output, Picture, Request, Thumbs};
 use super::lit::LitTile;
+use super::open;
 use crate::build::panic_text;
 
 /// Results kept between runs, so that a change re-runs only what depends on it.
@@ -27,6 +28,9 @@ const ANIMATION: Duration = Duration::from_millis(40);
 /// A material to make, for Apply and Save. It carries its page: edits made while
 /// it runs are not part of what was asked for.
 pub struct BakeJob {
+    /// For Save: made as the game will make it from the file, not from the previews'
+    /// cache.
+    pub save: bool,
     pub name: String,
     pub recipe: Recipe,
     pub graph: Graph,
@@ -39,10 +43,25 @@ pub struct Baked {
     pub texture: Result<Texture, String>,
 }
 
+/// A recipe file to read, for opening a material.
+pub struct OpenJob {
+    pub name: String,
+    pub path: std::path::PathBuf,
+    pub gloss: u8,
+}
+
+/// A finished [`OpenJob`].
+pub struct Opened {
+    pub name: String,
+    pub gloss: u8,
+    pub recipe: Result<Recipe, String>,
+}
+
 #[derive(Default)]
 struct Inbox {
     request: Option<Request>,
     bake: Option<BakeJob>,
+    open: Option<OpenJob>,
     /// Stop animating: the workspace is not on screen.
     idle: bool,
     stop: bool,
@@ -55,6 +74,7 @@ pub struct Outbox {
     pub thumbs: Option<Thumbs>,
     pub failure: Option<Failure>,
     pub baked: Option<Baked>,
+    pub opened: Option<Opened>,
 }
 
 impl Outbox {
@@ -74,6 +94,9 @@ struct Shared {
     outbox: Mutex<Outbox>,
     /// Set whenever the inbox gets something newer than the run in progress.
     cancel: AtomicBool,
+    /// Set when the worker is dropped. A bake ignores `cancel`, which edits set, but
+    /// not this: closing the editor must not wait for a slow material.
+    quit: AtomicBool,
     /// Holds every evaluation up while a test has it.
     #[cfg(test)]
     gate: Mutex<()>,
@@ -97,6 +120,7 @@ enum Work {
     Idle,
     Evaluate(Box<Request>),
     Bake(Box<BakeJob>),
+    Open(Box<OpenJob>),
     Animate,
 }
 
@@ -109,6 +133,9 @@ fn next_work(shared: &Shared, animating: bool) -> Work {
         }
         if let Some(job) = inbox.bake.take() {
             return Work::Bake(Box::new(job));
+        }
+        if let Some(job) = inbox.open.take() {
+            return Work::Open(Box::new(job));
         }
         // Reset under the lock that set it: what is taken here is the newest, and
         // anything newer sets the flag again after this.
@@ -158,9 +185,15 @@ fn guarded_evaluate(shared: &Shared, request: &Request, cache: &mut Cache) -> Op
     })
 }
 
-fn guarded_bake(job: &BakeJob, cache: &mut Cache) -> Result<Texture, String> {
+fn guarded_bake(shared: &Shared, job: &BakeJob, cache: &mut Cache) -> Result<Texture, String> {
+    #[cfg(test)]
+    let _gate = lock(&shared.gate);
     catch_unwind(AssertUnwindSafe(|| {
-        eval::bake(&job.recipe, &job.graph, cache)
+        if job.save {
+            eval::bake_saved(&job.recipe, &shared.quit)
+        } else {
+            eval::bake(&job.recipe, &job.graph, cache, &shared.quit)
+        }
     }))
     .unwrap_or_else(|panic| {
         *cache = Cache::new(CACHE_BYTES);
@@ -181,12 +214,22 @@ fn thread_main(shared: &Shared) {
                 tile = guarded_evaluate(shared, &request, &mut cache);
             }
             Work::Bake(job) => {
-                let texture = guarded_bake(&job, &mut cache);
+                let texture = guarded_bake(shared, &job, &mut cache);
                 let job = *job;
                 lock(&shared.outbox).baked = Some(Baked {
                     name: job.name,
                     recipe: job.recipe,
                     texture,
+                });
+            }
+            Work::Open(job) => {
+                #[cfg(test)]
+                let _gate = lock(&shared.gate);
+                let recipe = open::read_recipe_file(&job.path);
+                lock(&shared.outbox).opened = Some(Opened {
+                    name: job.name,
+                    gloss: job.gloss,
+                    recipe,
                 });
             }
             Work::Animate => {
@@ -241,6 +284,17 @@ impl Worker {
         Ok(())
     }
 
+    /// Asks for a recipe file to be read; gives it back when the mailbox is busy
+    /// this moment.
+    pub fn post_open(&self, job: OpenJob) -> Result<(), Box<OpenJob>> {
+        let Some(mut inbox) = try_lock(&self.shared.inbox) else {
+            return Err(Box::new(job));
+        };
+        inbox.open = Some(job);
+        self.shared.wake.notify_one();
+        Ok(())
+    }
+
     /// Stops whatever is running and any animation; false when busy this moment.
     pub fn post_idle(&self) -> bool {
         let Some(mut inbox) = try_lock(&self.shared.inbox) else {
@@ -276,6 +330,7 @@ impl Drop for Worker {
     fn drop(&mut self) {
         lock(&self.shared.inbox).stop = true;
         self.shared.cancel.store(true, Ordering::Relaxed);
+        self.shared.quit.store(true, Ordering::Relaxed);
         self.shared.wake.notify_all();
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();

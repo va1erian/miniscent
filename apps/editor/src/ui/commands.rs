@@ -199,9 +199,24 @@ impl Editor {
                     .borrow_mut()
                     .doc
                     .set_level_path(Some(path.clone()));
+                let unsaved = self
+                    .tex
+                    .studio
+                    .borrow()
+                    .unsaved_among(&doc.materials_used());
                 self.saved = doc;
                 self.path = Some(path);
-                lit.map_or(msg.clone(), |l| format!("{msg}; {l}"))
+                let said = lit.map_or(msg.clone(), |l| format!("{msg}; {l}"));
+                match unsaved.is_empty() {
+                    true => said,
+                    // The level is saved all the same: the file is right, the
+                    // material is what is missing, and Save material is the cure.
+                    false => format!(
+                        "{said}. WARNING: it uses {}, applied in the Texture Studio but not \
+                         saved: next session those faces draw grey, or another material",
+                        unsaved.join(", ")
+                    ),
+                }
             }
             Err(e) => e,
         };

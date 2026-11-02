@@ -4,13 +4,30 @@
 //! from loading any material at all. Save also installs, so the running table and
 //! the disk give a new material the same id.
 
-use mscent_render::{Material, Texture};
+use std::collections::BTreeSet;
+
+use mscent_render::{Material, MaterialId, Texture};
 use mscent_texgen::Recipe;
-use mscent_world::materials::NAMES;
 
 use super::TexStudio;
 use super::save;
 use super::worker::{BakeJob, Baked};
+
+/// The ten materials the game ships, in id order. Saving over one asks first.
+/// `mscent_world::materials::NAMES` names only the five the renderer checks, so
+/// this is the studio's own list, and a test holds it to the shipped manifest.
+pub(super) const STOCK: [&str; 10] = [
+    "brick",
+    "floor",
+    "lightpanel",
+    "metal",
+    "rock",
+    "bark",
+    "cap",
+    "coral",
+    "stem",
+    "wax",
+];
 
 /// What Save did with the request.
 #[derive(Debug, PartialEq, Eq)]
@@ -69,6 +86,7 @@ impl TexStudio {
             }
         };
         let job = BakeJob {
+            save,
             name: doc.name().to_string(),
             recipe: doc.recipe().clone(),
             graph,
@@ -78,6 +96,19 @@ impl TexStudio {
             unposted: Some(job),
         });
         true
+    }
+
+    /// The materials among the table's `ids` that were applied under a new id and
+    /// never saved: a level using them names an id the disk does not have.
+    pub fn unsaved_among(&self, ids: &BTreeSet<u16>) -> Vec<String> {
+        let Some(table) = self.table() else {
+            return Vec::new();
+        };
+        ids.iter()
+            .filter_map(|&id| table.get(MaterialId(id)))
+            .filter(|m| self.unsaved.contains(&m.name))
+            .map(|m| m.name.clone())
+            .collect()
     }
 
     /// Makes the material and installs it in the running editor.
@@ -92,7 +123,7 @@ impl TexStudio {
             self.message = Some("no material is open".to_string());
             return SaveStart::Refused;
         };
-        if NAMES.contains(&name.as_str()) && !self.overwrite_ok.contains(&name) {
+        if STOCK.contains(&name.as_str()) && !self.overwrite_ok.contains(&name) {
             return SaveStart::NeedsConsent(name);
         }
         if self.store.dir().is_none() {
@@ -131,22 +162,27 @@ impl TexStudio {
     /// the recipe stays as it is, still dirty, and the table is not touched.
     fn finish_with(&mut self, save: bool, name: &str, recipe: &Recipe, texture: Texture) -> String {
         let mut said = format!("Applied {name}");
+        let table = self.table();
         if save {
             let Some(dir) = self.store.dir() else {
                 return "no texture directory to save to".to_string();
             };
-            let known = self.table().and_then(|t| t.find(name)).map(|id| id.0);
-            match save::save_material(&dir, name, recipe, known) {
+            let Some(table) = &table else {
+                return "not saved: there is no material table to agree ids with".to_string();
+            };
+            match save::save_material(&dir, name, recipe, table) {
                 Ok(id) => said = format!("Saved {name} (id {id}) in {}", dir.display()),
                 Err(why) => return format!("not saved: {why}"),
             }
+            self.unsaved.remove(name);
             if let Some(doc) = self.docs.get_mut(name) {
                 doc.mark_saved(recipe.clone());
             }
         }
-        let Some(mut table) = self.table() else {
+        let Some(mut table) = table else {
             return format!("{said}, but there is no table to show it in");
         };
+        let is_new = table.find(name).is_none();
         let material = Material {
             name: name.to_string(),
             gloss: recipe.gloss,
@@ -156,6 +192,10 @@ impl TexStudio {
             return format!("{said}, but the material table is full");
         }
         self.store.replace(table);
+        // A new id exists only here until the material is saved.
+        if is_new && !save {
+            self.unsaved.insert(name.to_string());
+        }
         said
     }
 }
