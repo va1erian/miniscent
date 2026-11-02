@@ -80,6 +80,7 @@ fn time_frame(r: &LevelRenderer, view: &View, lights: &[DynLight]) -> (f64, u32,
         particles: None,
         lights,
         poses: &[],
+        ..Effects::default()
     };
     let (mut spans, mut best) = (0, f64::MAX);
     for _ in 0..batches {

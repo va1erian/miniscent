@@ -5,7 +5,7 @@
 
 use super::atlas::{Atlas, AtlasError};
 use super::uv::{FaceProjection, project_face};
-use super::{BakeConfig, LightFace, LightmapError};
+use super::{BakeConfig, LightFace, LightmapError, LuxelDensity};
 
 /// Growth of the luxel size per attempt. Each step drops about a third of the
 /// luxels, so a level loses little more detail than it has to.
@@ -18,6 +18,22 @@ pub(super) struct Layout {
     pub proj: Vec<FaceProjection>,
 }
 
+/// The frame and grid of one face at the bake's current luxel `size`, as its
+/// density asks. A face with no luxels keeps its frame, so the output stays
+/// aligned with the input, and has an empty grid.
+fn project(face: &LightFace, index: usize, size: f32) -> Result<FaceProjection, LightmapError> {
+    let scale = face.density.scale().unwrap_or(1.0);
+    let proj = project_face(face, index, size * scale)?;
+    Ok(match face.density {
+        LuxelDensity::None => FaceProjection {
+            width: 0,
+            height: 0,
+            ..proj
+        },
+        _ => proj,
+    })
+}
+
 /// Lays `faces` out at `cfg.luxel_size`, coarsening until they fit. Fails only
 /// when one luxel per face is still too much for the atlas.
 pub(super) fn lay_out(faces: &[LightFace], cfg: &BakeConfig) -> Result<Layout, LightmapError> {
@@ -26,14 +42,14 @@ pub(super) fn lay_out(faces: &[LightFace], cfg: &BakeConfig) -> Result<Layout, L
         let proj = faces
             .iter()
             .enumerate()
-            .map(|(i, f)| project_face(f, i, size))
+            .map(|(i, f)| project(f, i, size))
             .collect::<Result<Vec<_>, _>>()?;
         let sizes: Vec<(u32, u32)> = proj.iter().map(|p| (p.width, p.height)).collect();
-        match Atlas::pack(&sizes, cfg.atlas_width, cfg.atlas_max_height) {
+        match Atlas::pack_sparse(&sizes, cfg.atlas_width, cfg.atlas_max_height) {
             Ok(atlas) => return Ok(Layout { atlas, proj }),
             // Faces shrink to one luxel as `size` grows, so this ends.
             Err(AtlasError::TooTall | AtlasError::TooWide(_))
-                if sizes.iter().any(|&s| s != (1, 1)) =>
+                if sizes.iter().any(|&(w, h)| w > 1 || h > 1) =>
             {
                 size *= COARSEN;
             }
@@ -81,6 +97,7 @@ mod tests {
         LightFace {
             vertices: vec![p(0.0, 0.0), p(side, 0.0), p(side, side), p(0.0, side)],
             normal: Vec3::new(0.0, 0.0, 1.0),
+            density: LuxelDensity::Full,
         }
     }
 

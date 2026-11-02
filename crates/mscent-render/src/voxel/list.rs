@@ -67,6 +67,9 @@ pub(crate) struct VoxelList {
     lods: Vec<u8>,
     /// The governor's scale on the distances; zero until first used.
     scale: f32,
+    /// Triangles this list may submit before it drops to the lowest detail;
+    /// `None` is the frame's own [`MAX_VOXEL_TRIS`].
+    pub budget: Option<u32>,
     flood: Flood,
     flooded: Option<u32>,
     pub triangles: u32,
@@ -113,6 +116,10 @@ impl VoxelList {
         near.clear();
         self.near = near;
         self.govern();
+    }
+
+    fn cap(&self) -> u32 {
+        self.budget.unwrap_or(MAX_VOXEL_TRIS)
     }
 
     /// Notes chunk `c` for this frame if it can be seen at all.
@@ -182,7 +189,7 @@ impl VoxelList {
         let Some(chunk) = scene.world.chunks.get(i) else {
             return 2;
         };
-        if self.triangles >= MAX_VOXEL_TRIS {
+        if self.triangles >= self.cap() {
             self.lods[i] = 2;
             return 2;
         }
@@ -219,7 +226,7 @@ impl VoxelList {
     /// slowly, with a gap between the two so they do not oscillate.
     fn govern(&mut self) {
         let t = self.triangles as f32;
-        let budget = MAX_VOXEL_TRIS as f32;
+        let budget = self.cap() as f32;
         if t > budget {
             self.scale = (self.scale * GOVERNOR_DOWN).max(GOVERNOR_MIN);
         } else if t < budget * GOVERNOR_ROOM {

@@ -15,3 +15,7 @@
 7 coral 30
 8 stem 20
 9 wax 90
+10 sky-stars 0
+11 sky-clouds 0
+12 sky-ridge 0
+13 sky-planet 0

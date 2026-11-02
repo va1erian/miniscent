@@ -11,6 +11,7 @@
 
 mod cache;
 mod compiled;
+mod config;
 mod effects;
 mod fill;
 mod movers;
@@ -18,11 +19,11 @@ mod overlay;
 mod setup;
 mod shader;
 pub mod view;
+mod vista;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use mscent_math::Vec3;
 use mscent_world::lightmap::{CellSites, Lightmap, LightmapError, PointLight};
 use mscent_world::materials;
 use mscent_world::voxel::{RemeshedChunk, VoxelWorld};
@@ -46,6 +47,7 @@ use crate::voxel::list::VoxelList;
 
 pub use cache::{BakeCache, BakeReport, BakedLight, Source};
 pub use compiled::Compiled;
+pub use config::BuildConfig;
 pub use effects::Effects;
 pub use movers::MoverPose;
 pub use overlay::{Actor, ActorKind, Overlay};
@@ -54,10 +56,15 @@ pub use view::View;
 
 /// Light scale of emissive surfaces (256 is the plain texture colour).
 pub const EMISSIVE: u32 = 330;
+/// Light scale of a self-lit sky: the texture as it is.
+const SELF_LIT: u32 = 256;
 /// Light scale of a face that has no lightmap data.
 const UNLIT: u32 = 200;
 const NEAR: f32 = 0.1;
 const FAR: f32 = 400.0;
+/// Far plane of a vista layer. `1/z` keeps its precision here, and each layer
+/// has the depth buffer to itself.
+const FAR_VISTA: f32 = 100_000.0;
 /// Rows per band of a frame.
 const TILE_ROWS: u32 = 24;
 /// Fewest workers a renderer starts with, whatever the CPU reports.
@@ -72,46 +79,6 @@ pub enum Quality {
     Medium,
     /// Lightmap, bump mapping and specular highlights.
     High,
-}
-
-/// Bake and look settings.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BuildConfig {
-    /// World units per luxel.
-    pub luxel_size: f32,
-    pub ambient: Vec3,
-    /// Multiplier on every point light's colour (the baked light then
-    /// saturates the texture, which is what makes bright pools).
-    pub light_gain: f32,
-    /// Radius of the lamp disc for soft shadows, in world units (0: hard).
-    pub light_radius: f32,
-    /// Shadow rays per luxel and light for soft shadows.
-    pub shadow_samples: u32,
-    /// Colours of the sky gradient; the bottom one is also the fog colour.
-    pub sky_top: u32,
-    pub sky_bottom: u32,
-    /// View depths where fog starts and where it is total.
-    pub fog_start: f32,
-    pub fog_end: f32,
-    /// Vertical field of view in radians.
-    pub fov_y: f32,
-}
-
-impl Default for BuildConfig {
-    fn default() -> Self {
-        Self {
-            luxel_size: 0.125,
-            ambient: Vec3::new(0.006, 0.006, 0.009),
-            light_gain: 4.6,
-            light_radius: 0.3,
-            shadow_samples: 64,
-            sky_top: 0xff10_2048,
-            sky_bottom: 0xff3a_4a78,
-            fog_start: 4.0,
-            fog_end: 26.0,
-            fov_y: 1.3,
-        }
-    }
 }
 
 /// Why a level could not be prepared for rendering.
@@ -143,13 +110,16 @@ pub struct LevelRenderer {
     uv_maps: Vec<Option<UvToLuxel>>,
     spec: Vec<SpecTable>,
     lighting: MeshLighting,
-    /// The level's lamps, for voxel surfaces made after the build.
+    /// Every lamp, and those of the play space, for voxel surfaces made after
+    /// the build: a layer's room is lit by its own lamps and the play space not.
     voxel_lights: Vec<PointLight>,
+    play_lights: Vec<PointLight>,
     /// The cells the lightmap holds records for.
     voxel_sites: CellSites,
     actors: Vec<Actor>,
     meshes: overlay::ActorMeshes,
     mover_faces: Vec<movers::MoverFaces>,
+    vistas: vista::Vistas,
     cfg: BuildConfig,
     /// Band height and worker count of [`Self::render`].
     tiling: (u32, usize),
@@ -161,6 +131,9 @@ pub struct LevelRenderer {
 struct FrameState {
     tiles: TileRenderer,
     faces: PolyList,
+    /// The viewport faces in view, and the layers of the vistas they show.
+    holes: PolyList,
+    layers: Vec<vista::LayerList>,
     actors: PolyList,
     /// The level's mesh lighting plus this frame's dynamic lights, made on
     /// the first frame that has one and reused after it.
@@ -218,9 +191,12 @@ impl LevelRenderer {
         let compiled::Parts {
             bsp,
             faces,
+            holes,
+            vistas,
             mover_ranges,
             portals,
-            lights,
+            lights: all_lights,
+            play_lights: lights,
             actors,
             cfg,
             voxels,
@@ -230,7 +206,8 @@ impl LevelRenderer {
         // The game path pays for smooth texture sampling; the raw
         // rasterizer benchmark does not.
         let voxels = compiled::lit_voxels(voxels, bsp.leaves().len(), &sites, &lightmap);
-        let scene = Scene::with_voxels(bsp, faces, portals, materials.filtered(), voxels);
+        let scene = Scene::with_voxels(bsp, faces, portals, materials.filtered(), voxels)
+            .with_holes(&holes);
         let uv_maps = (0..scene.faces().len())
             .map(|i| {
                 let proj = lightmap.projections().get(i)?;
@@ -253,8 +230,10 @@ impl LevelRenderer {
             .collect();
         Self {
             mover_faces,
+            vistas,
             lighting: mesh_lighting(&lights, cfg.ambient),
-            voxel_lights: lights,
+            voxel_lights: all_lights,
+            play_lights: lights,
             voxel_sites: sites,
             actors,
             meshes: overlay::ActorMeshes::new(),
@@ -275,20 +254,24 @@ impl LevelRenderer {
 
     /// Changes voxel surfaces under the same brushes, between two frames.
     pub fn apply_voxels(&mut self, change: VoxelChange) {
-        let (lights, ambient) = (&self.voxel_lights, self.cfg.ambient);
+        let ambient = self.cfg.ambient;
         let leaves = self.scene.bsp().leaves().len();
         let (sites, lightmap) = (&self.voxel_sites, &self.lightmap);
-        self.scene.update_voxels(|voxels| match change {
-            VoxelChange::Chunks(list) => {
-                voxels.apply(list, |mesh| compiled::lamp_light(mesh, lights, ambient));
-            }
-            VoxelChange::All(world) => {
-                *voxels = voxels.remade(*world, leaves, |mesh| {
-                    compiled::lamp_light(mesh, lights, ambient)
-                });
-            }
-            VoxelChange::Restore(world) => {
-                *voxels = compiled::lit_voxels(*world, leaves, sites, lightmap);
+        let (all, play, vistas) = (&self.voxel_lights, &self.play_lights, &self.vistas);
+        self.scene.update_voxels(|voxels, bsp| {
+            let lamps = |pos| vistas.lamps_at(bsp, pos, all, play);
+            match change {
+                VoxelChange::Chunks(list) => {
+                    voxels.apply(list, |mesh| compiled::lamp_light(mesh, lamps, ambient));
+                }
+                VoxelChange::All(world) => {
+                    *voxels = voxels.remade(*world, leaves, |mesh| {
+                        compiled::lamp_light(mesh, lamps, ambient)
+                    });
+                }
+                VoxelChange::Restore(world) => {
+                    *voxels = compiled::lit_voxels(*world, leaves, sites, lightmap);
+                }
             }
         });
     }
@@ -392,10 +375,13 @@ impl LevelRenderer {
         let frame = self.frame_for(&mut slot, fb.width(), fb.height())?;
         let mut stats = self.scene.list_frame_voxels(
             &cam,
-            None,
             &mut frame.faces,
             &mut frame.voxels.candidates,
+            &mut frame.holes,
         );
+        let size = (fb.width(), fb.height());
+        let time = effects.vista_time;
+        stats.vista_faces = self.list_vistas(view, size, &frame.holes, time, &mut frame.layers);
         frame
             .voxels
             .prepare(self.scene.voxels(), &cam, eye_of(&cam), |leaf| {
@@ -409,11 +395,14 @@ impl LevelRenderer {
                 })
             });
         stats.voxel_triangles = frame.voxels.triangles;
+        stats.vista_triangles = frame.layers.iter().map(|l| l.voxel_triangles()).sum();
         self.list_movers(&cam, effects.poses, &mut frame.movers);
         self.list_actors(&cam, actors, lights, frame);
         let (faces, meshes, movers) = (&frame.faces, &frame.actors, &frame.movers);
         let voxels = &frame.voxels;
+        let (holes, layers) = (&frame.holes, &frame.layers);
         let (pixels, spans) = (AtomicU32::new(0), AtomicU32::new(0));
+        let vista_pixels = AtomicU32::new(0);
         let eye = eye_of(&cam);
         let texture_of = |id: u16| self.scene.texture_of(id);
         let voxel_fill = FillContext {
@@ -435,11 +424,18 @@ impl LevelRenderer {
             let vox = fill_voxels(band, voxels, &voxel_fill);
             let st = self.fill_level(band, faces, quality, eye, lights);
             self.meshes.fill(band, meshes, self.fog());
+            // Last of the solid things, so it shades only what they left showing.
+            let sky = self.fill_vistas(band, holes, layers, quality);
             if let Some((draws, bank)) = effects.particles {
                 draw_particles(band, draws, bank);
             }
-            pixels.fetch_add(moved.pixels + vox.pixels + st.pixels, Ordering::Relaxed);
-            spans.fetch_add(moved.spans + vox.spans + st.spans, Ordering::Relaxed);
+            vista_pixels.fetch_add(sky.pixels, Ordering::Relaxed);
+            let drawn = moved.pixels + vox.pixels + st.pixels + sky.pixels;
+            pixels.fetch_add(drawn, Ordering::Relaxed);
+            spans.fetch_add(
+                moved.spans + vox.spans + st.spans + sky.spans,
+                Ordering::Relaxed,
+            );
         });
         frame.tiles.composite(fb).ok()?;
         drop(slot);
@@ -448,6 +444,7 @@ impl LevelRenderer {
         }
         stats.pixels = pixels.into_inner();
         stats.spans = spans.into_inner();
+        stats.vista_pixels = vista_pixels.into_inner();
         Some(stats)
     }
 
@@ -463,6 +460,8 @@ impl LevelRenderer {
             *slot = Some(FrameState {
                 tiles: TileRenderer::new(width, height, self.tiling.0, self.tiling.1)?,
                 faces: PolyList::default(),
+                holes: PolyList::default(),
+                layers: Vec::new(),
                 actors: PolyList::default(),
                 lit: None,
                 movers: movers::MoverList::default(),

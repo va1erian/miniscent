@@ -24,6 +24,7 @@
 //! * [`apply_dab`], [`fill`] (`dab.rs`): edits, returning the chunks to remesh.
 //! * [`capture`], [`stamp`] (`clip.rs`): Copy and Stamp.
 //! * [`noise3`] (`noise.rs`): seeded noise for roughening and generated fields.
+//! * [`mountains`] (`mountains.rs`): a ridged-noise range as an add volume, for views.
 //! * [`Mesher`] (`surface.rs`): surface nets, one [`ChunkMesh`] per chunk.
 //! * [`ChunkMesh::clustered`] (`lod.rs`): level of detail without cracks.
 //! * [`AirMask`] (`connectivity.rs`): which chunk faces air joins.
@@ -41,6 +42,7 @@ mod dab;
 mod edit;
 mod index;
 mod lod;
+mod mountains;
 mod noise;
 mod parts;
 mod prim;
@@ -78,6 +80,7 @@ pub use dab::{DabOp, apply_dab, fill};
 pub use edit::{first_solid, solid_material_near};
 pub use index::{CellIndex, INDEX_EDGE};
 pub use lod::Lod;
+pub use mountains::{MountainError, Range as MountainRange, mountains};
 pub use noise::noise3;
 pub use parts::{MIN_ISLAND_SAMPLES, remove_islands, solid_parts};
 pub use prim::Prim;

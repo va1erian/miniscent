@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use super::draw::reaching;
 use super::test_util::{close, flat, make, red, rgba, run, square, white_area};
 use super::{MAX_POINTS, MAX_STROKES, Stroke, Value};
 use crate::error::TexError;
@@ -114,6 +115,27 @@ fn dots_sit_in_the_middle_of_their_cells() {
     }
     let want = 16.0 * core::f32::consts::PI * 4.0 * 4.0;
     assert!(close(white_area(&img), want, want * 0.05));
+}
+
+#[test]
+fn a_neighbour_is_left_out_of_a_dots_search_only_when_it_cannot_reach() {
+    // For every way a stamp can sit and every place in the cell, a cell that is
+    // left out has its nearest possible stamp at least `reach` away.
+    for slack in [0.0, 0.1, 0.3, 0.45] {
+        for reach in [0.02, 0.1, 0.3, 0.6, 2.0] {
+            for step in 0..100 {
+                let f = step as f32 / 100.0;
+                let (low, high) = reaching(f, slack, reach);
+                assert!(low <= 0 && high >= 0, "the own cell is always searched");
+                if low == 0 {
+                    assert!(f + 0.5 - slack >= reach, "{f} {slack} {reach}");
+                }
+                if high == 0 {
+                    assert!(1.5 - slack - f >= reach, "{f} {slack} {reach}");
+                }
+            }
+        }
+    }
 }
 
 #[test]

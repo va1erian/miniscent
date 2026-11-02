@@ -2,6 +2,7 @@
 //! browser and Hammer's Face Edit fields for the faces being edited.
 
 use mscent_render::{MaterialTable, Texture};
+use mscent_world::materials::view_slot;
 use mscent_world::texinfo::Justify;
 use xui::Image;
 use xui::backend::WidgetId;
@@ -10,6 +11,7 @@ use xui::widget::{CheckBox, GroupBox, HasText};
 
 use super::Msg;
 use super::app::cmd;
+use super::material_list::view_rows;
 use super::props::Mount;
 use super::toolbar::IconButton;
 use crate::model::EditorState;
@@ -73,6 +75,24 @@ fn preview_of(t: &Texture) -> Option<Image> {
             rgba.extend_from_slice(&[(p >> 16) as u8, (p >> 8) as u8, p as u8, 255]);
         }
     }
+    Image::from_rgba(PREVIEW as u32, PREVIEW as u32, rgba).ok()
+}
+
+/// A flat square for a viewport material, which has no texture to show. Each
+/// slot has its own colour so the eight can be told apart at a glance.
+fn swatch(slot: usize) -> Option<Image> {
+    const COLOURS: [[u8; 3]; 8] = [
+        [60, 90, 170],
+        [60, 150, 150],
+        [70, 150, 80],
+        [170, 160, 60],
+        [180, 110, 50],
+        [170, 70, 70],
+        [150, 70, 150],
+        [110, 110, 120],
+    ];
+    let [r, g, b] = *COLOURS.get(slot)?;
+    let rgba = [r, g, b, 255].repeat((PREVIEW * PREVIEW) as usize);
     Image::from_rgba(PREVIEW as u32, PREVIEW as u32, rgba).ok()
 }
 
@@ -140,6 +160,15 @@ impl FacePanel {
             if let Some(image) = preview_of(&m.texture) {
                 let (id, name) = (id.0, m.name.clone());
                 previews.push(Preview { id, name, image });
+            }
+        }
+        // Viewport materials come after the textures and are not in the table, so
+        // no index into `sizes` is made with one.
+        if table.is_some() {
+            for (slot, (id, name)) in view_rows().enumerate() {
+                if let Some(image) = swatch(slot) {
+                    previews.push(Preview { id, name, image });
+                }
             }
         }
         let thumbs: Vec<_> = previews.iter().map(|_| Handle::new()).collect();
@@ -301,9 +330,13 @@ impl FacePanel {
         for (h, p) in self.thumbs.iter().zip(&self.previews) {
             h.get().set_checked(p.id == t.material);
         }
-        self.info.get().set_text(&format!(
-            "{} x {} texels, tile {:.2} x {:.2} units",
-            v.texture.0, v.texture.1, v.tile.0, v.tile.1
-        ));
+        let info = match view_slot(t.material) {
+            Some(slot) => format!("A window onto vista {slot}: it shows the layers of slot {slot}"),
+            None => format!(
+                "{} x {} texels, tile {:.2} x {:.2} units",
+                v.texture.0, v.texture.1, v.tile.0, v.tile.1
+            ),
+        };
+        self.info.get().set_text(&info);
     }
 }

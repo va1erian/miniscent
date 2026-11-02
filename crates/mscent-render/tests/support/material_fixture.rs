@@ -9,12 +9,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use mscent_render::png_encode::encode_png;
+use mscent_render::png_encode::{encode_png, encode_png_rgba};
 use mscent_render::{MaterialTable, TextureError};
 use mscent_texgen::{bake, recipe};
 
 pub const STOCK: &str = "0 brick 25\n1 floor 90\n2 lightpanel 120\n3 metal 200\n4 rock 10\n\
-    5 bark 8\n6 cap 70\n7 coral 30\n8 stem 20\n9 wax 90\n";
+    5 bark 8\n6 cap 70\n7 coral 30\n8 stem 20\n9 wax 90\n10 sky-stars 0\n11 sky-clouds 0\n\
+    12 sky-ridge 0\n13 sky-planet 0\n";
 
 pub fn stock_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures")
@@ -29,8 +30,8 @@ fn gray(bytes: &[u8]) -> Vec<u32> {
 }
 
 /// The stock recipes baked and encoded as `(file name, PNG bytes)`: `name.png`
-/// always, and `name_n.png`, `name_h.png`, `name_s.png` for the maps a recipe
-/// makes.
+/// always (RGBA when the recipe has `out-alpha`), and `name_n.png`, `name_h.png`,
+/// `name_s.png` for the maps a recipe makes.
 fn stock_pngs() -> &'static [(String, Vec<u8>)] {
     static PNGS: OnceLock<Vec<(String, Vec<u8>)>> = OnceLock::new();
     PNGS.get_or_init(|| {
@@ -49,7 +50,20 @@ fn stock_pngs() -> &'static [(String, Vec<u8>)] {
             let maps = bake(&recipe, recipe.size).expect("bakes");
             let png =
                 |pixels: &[u32]| encode_png(maps.width, maps.height, pixels).expect("encodes");
-            files.push((format!("{name}.png"), png(&maps.albedo)));
+            // The sky materials are cutouts, whose alpha rides in the base PNG.
+            let base = match &maps.alpha {
+                Some(alpha) => {
+                    let texels: Vec<u32> = maps
+                        .albedo
+                        .iter()
+                        .zip(alpha)
+                        .map(|(&c, &a)| u32::from(a) << 24 | c & 0xff_ffff)
+                        .collect();
+                    encode_png_rgba(maps.width, maps.height, &texels).expect("encodes")
+                }
+                None => png(&maps.albedo),
+            };
+            files.push((format!("{name}.png"), base));
             if let Some(n) = &maps.normals {
                 files.push((format!("{name}_n.png"), png(n)));
             }

@@ -90,6 +90,7 @@ fn floor() -> LightFace {
             v3(0.0, 16.0, 0.0),
         ],
         normal: v3(0.0, 0.0, 1.0),
+        density: Default::default(),
     }
 }
 

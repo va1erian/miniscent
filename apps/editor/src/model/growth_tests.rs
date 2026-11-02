@@ -267,3 +267,27 @@ fn working_on_in_a_view_keeps_what_was_grown() {
     assert!(!st.pending());
     assert_eq!(st.history.depth(), depth + 1);
 }
+
+#[test]
+fn the_mountains_generator_raises_a_range_that_rolls_by_seed_and_undoes() {
+    let mut st = room_state();
+    st.voxel.generator = Some(Kind::Mountains);
+    st.voxel.seed = 5;
+    let steps = st.history.depth();
+    assert!(st.begin_stroke(on_floor(0.0, 0.0), StrokeKeys::default()));
+    st.finish_stroke();
+    assert!(st.pending(), "{}", st.message);
+    let first = volumes(&st);
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].op(), mscent_world::Op::Add);
+    assert!(st.reroll_to(6));
+    st.finish_stroke();
+    assert_ne!(first, volumes(&st), "another seed, another range");
+    assert!(st.reroll_to(5));
+    st.finish_stroke();
+    assert_eq!(volumes(&st), first, "the same seed, the same range");
+    assert!(st.commit_pending());
+    assert_eq!(st.history.depth(), steps + 1);
+    assert!(st.undo());
+    assert!(st.doc.volumes().next().is_none());
+}

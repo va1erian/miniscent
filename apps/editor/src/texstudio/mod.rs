@@ -398,6 +398,8 @@ impl TexStudio {
 }
 
 #[cfg(test)]
+mod alpha_tests;
+#[cfg(test)]
 mod hostile_tests;
 #[cfg(test)]
 mod paint_tests;

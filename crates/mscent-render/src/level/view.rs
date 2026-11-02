@@ -94,6 +94,17 @@ mod tests {
     }
 
     #[test]
+    fn the_eye_is_recovered_far_from_the_origin() {
+        // A vista's room sits far out. Below the floor here, the floor's faces
+        // were culled as back faces and the stars showed through the ground.
+        let eye = Vec3::new(16384.0, 12.0, 0.75);
+        let v = View::from_angles(eye, -0.8, 0.1, 0.3);
+        let cam = v.camera(1.2, 0.1, 100.0, 64, 48).expect("camera");
+        let got = eye_of(&cam);
+        assert!((got - eye).length() < 0.02, "{got:?}");
+    }
+
+    #[test]
     fn roll_tilts_the_world_horizon() {
         let eye = Vec3::ZERO;
         let level = View::from_angles(eye, 0.0, 0.0, 0.0)

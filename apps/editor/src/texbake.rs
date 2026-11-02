@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use mscent_render::manifest;
-use mscent_render::png_encode::encode_png;
+use mscent_render::png_encode::{encode_png, encode_png_rgba};
 use mscent_render::recipe_texture::EXTENSION;
 use mscent_texgen::{Maps, bake};
 
@@ -20,13 +20,17 @@ fn grey(values: &[u8]) -> Vec<u32> {
 }
 
 fn write_png(path: &Path, maps: &Maps, pixels: &[u32]) -> Result<(), String> {
-    let bytes = encode_png(maps.width, maps.height, pixels)
-        .ok_or_else(|| format!("{}: cannot encode", path.display()))?;
+    write_bytes(path, encode_png(maps.width, maps.height, pixels))
+}
+
+fn write_bytes(path: &Path, bytes: Option<Vec<u8>>) -> Result<(), String> {
+    let bytes = bytes.ok_or_else(|| format!("{}: cannot encode", path.display()))?;
     std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Writes `name.png` and whichever of `name_n.png`, `name_h.png` and
-/// `name_s.png` the recipe has, where `name` is the recipe file's stem.
+/// Writes `name.png` (with alpha, if the recipe has `out-alpha`) and whichever of
+/// `name_n.png`, `name_h.png` and `name_s.png` the recipe has, where `name` is the
+/// recipe file's stem.
 pub fn run(recipe_path: &Path, dir: &Path) -> Result<(), String> {
     let recipe = read_recipe_file(recipe_path)?;
     let name = recipe_path
@@ -43,7 +47,7 @@ pub fn run(recipe_path: &Path, dir: &Path) -> Result<(), String> {
     refuse_shadowing(recipe_path, dir, &name)?;
     let maps = bake(&recipe, recipe.size).map_err(|e| format!("{}: {e}", recipe_path.display()))?;
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    write_png(&dir.join(format!("{name}.png")), &maps, &maps.albedo)?;
+    write_base_png(&dir.join(format!("{name}.png")), &maps)?;
     if let Some(normals) = &maps.normals {
         write_png(&dir.join(format!("{name}_n.png")), &maps, normals)?;
     }
@@ -54,6 +58,21 @@ pub fn run(recipe_path: &Path, dir: &Path) -> Result<(), String> {
         write_png(&dir.join(format!("{name}_s.png")), &maps, &grey(specular))?;
     }
     list_in_manifest(dir, &name, recipe.gloss)
+}
+
+/// The base picture, with the alpha in the PNG's own channel when the recipe has
+/// one, which is where the loader reads it from.
+fn write_base_png(path: &Path, maps: &Maps) -> Result<(), String> {
+    let Some(alpha) = &maps.alpha else {
+        return write_png(path, maps, &maps.albedo);
+    };
+    let texels: Vec<u32> = maps
+        .albedo
+        .iter()
+        .zip(alpha)
+        .map(|(&c, &a)| u32::from(a) << 24 | c & 0xff_ffff)
+        .collect();
+    write_bytes(path, encode_png_rgba(maps.width, maps.height, &texels))
 }
 
 /// A recipe of the same name in `dir` wins over the PNGs about to be written, so
@@ -150,6 +169,26 @@ op 2 1 1 out-specular
             .expect("wall");
         assert_eq!(wall.gloss, 33);
         assert_eq!(wall.texture.texel(0, 0), 0xff00_ff00);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_masked_recipe_writes_a_png_whose_alpha_the_loader_reads() {
+        let dir = scratch("alpha");
+        let source = dir.join("cut.mst");
+        let text = "miniscent-recipe 1
+size 16 16
+op 0 0 1 flat color=0,1,0
+op 0 1 1 out-albedo
+op 1 0 1 rect x=0.5 y=0.5 w=0.5 h=1
+op 1 1 1 out-alpha
+";
+        std::fs::write(&source, text).expect("write");
+        let out = dir.join("out");
+        run(&source, &out).expect("bakes");
+        let t = load_texture(&out, "cut").expect("loads");
+        assert!(t.is_masked());
+        assert_eq!((t.alpha_at(8, 8), t.alpha_at(0, 8)), (255, 0));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

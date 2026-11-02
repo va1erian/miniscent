@@ -34,6 +34,7 @@ fn scene(workers: usize, samples: u32, radius: f32) -> Lightmap {
             v3(0.0, 20.0, 0.0),
         ],
         normal: v3(0.0, 0.0, 1.0),
+        density: Default::default(),
     };
     let lamps = [
         PointLight {

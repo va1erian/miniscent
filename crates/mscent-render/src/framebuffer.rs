@@ -7,6 +7,18 @@
 use crate::camera::MAX_SIDE;
 use crate::shade::lerp_rgb;
 
+/// The colour a viewport face of `slot` paints. Alpha 0 can come from nothing
+/// else, and no such pixel outlasts the pass that made it.
+pub(crate) const fn hole_mark(slot: u32) -> u32 {
+    slot
+}
+
+/// The gradient's colour at a screen row of a target `full_height` tall.
+fn sky_at(row: u32, full_height: u32, top: u32, bottom: u32) -> u32 {
+    let last = (full_height - 1).max(1);
+    lerp_rgb(top, bottom, (row * 256 / last).min(256))
+}
+
 /// Colour and depth buffers of one render target.
 #[derive(Clone, Debug)]
 pub struct Framebuffer {
@@ -14,6 +26,8 @@ pub struct Framebuffer {
     height: u32,
     color: Vec<u32>,
     depth: Vec<f32>,
+    /// Depth of a vista while one draws; empty until the first does.
+    view_depth: Vec<f32>,
     /// First screen row held (non-zero only for a tile of a larger target).
     y0: u32,
     /// Height of the whole target this buffer is a part of.
@@ -33,6 +47,7 @@ impl Framebuffer {
             height,
             color: vec![0xff00_0000; n],
             depth: vec![0.0; n],
+            view_depth: Vec::new(),
             y0: 0,
             full_height: height,
         })
@@ -128,13 +143,52 @@ impl Framebuffer {
     /// Fill the colour with a vertical gradient (the sky) and reset depth.
     pub fn clear_sky(&mut self, top: u32, bottom: u32) {
         let w = self.width as usize;
-        let last = (self.full_height - 1).max(1);
+        let (y0, full) = (self.y0, self.full_height);
         for (y, row) in self.color.chunks_exact_mut(w).enumerate() {
             // Screen row, so tiles of one target share a single gradient.
-            let t = ((self.y0 + y as u32) * 256 / last).min(256);
-            row.fill(lerp_rgb(top, bottom, t));
+            row.fill(sky_at(y0 + y as u32, full, top, bottom));
         }
         self.depth.fill(0.0);
+    }
+
+    /// Starts drawing a vista through the marks of `slot`: those pixels take the
+    /// gradient, so what no layer covers fails visibly, and every other pixel
+    /// refuses all depth tests until [`Self::close_view`]. The scene's depth is
+    /// kept for what draws after the vista. The second plane is made on first
+    /// use, so a level without viewports never pays for it.
+    pub(crate) fn open_view(&mut self, slot: u32, top: u32, bottom: u32) {
+        let mark = hole_mark(slot);
+        self.view_depth.resize(self.depth.len(), 0.0);
+        let w = self.width as usize;
+        let rows = self.height;
+        for y in 0..rows {
+            let sky = sky_at(self.y0 + y, self.full_height, top, bottom);
+            let start = y as usize * w;
+            let color = &mut self.color[start..start + w];
+            let depth = &mut self.view_depth[start..start + w];
+            for (c, d) in color.iter_mut().zip(depth) {
+                if *c == mark {
+                    *c = sky;
+                    *d = 0.0;
+                } else {
+                    *d = f32::INFINITY;
+                }
+            }
+        }
+        core::mem::swap(&mut self.depth, &mut self.view_depth);
+    }
+
+    /// Between two layers of a vista: the mask stays and the depth is forgotten,
+    /// so the next layer draws over the last wherever it covers.
+    pub(crate) fn next_view_layer(&mut self) {
+        for d in self.depth.iter_mut().filter(|d| d.is_finite()) {
+            *d = 0.0;
+        }
+    }
+
+    /// Puts the scene's depth back after [`Self::open_view`].
+    pub(crate) fn close_view(&mut self) {
+        core::mem::swap(&mut self.depth, &mut self.view_depth);
     }
 
     fn index(&self, x: i32, y: i32) -> Option<usize> {

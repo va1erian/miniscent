@@ -144,6 +144,8 @@ pub enum Channel {
     Albedo,
     Height,
     Specular,
+    /// Coverage: how much of the texel is there. Red, like height and specular.
+    Alpha,
 }
 
 /// Inputs a kernel may take, read from the blocks above it.

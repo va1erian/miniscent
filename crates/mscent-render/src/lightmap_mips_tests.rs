@@ -17,6 +17,7 @@ fn baked() -> Lightmap {
     let quad = |pts: [[f32; 3]; 4], n: [f32; 3]| LightFace {
         vertices: pts.iter().map(|p| Vec3::new(p[0], p[1], p[2])).collect(),
         normal: Vec3::new(n[0], n[1], n[2]),
+        density: Default::default(),
     };
     let floor = quad(
         [

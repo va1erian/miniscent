@@ -228,7 +228,13 @@ impl<'a> Sculptor<'a> {
         self.adopt(def, volume.clone(), Some(volume), (lo + hi) * 0.5)
     }
 
-    fn adopt(&mut self, def: BrushDef, volume: Volume, before: Option<Volume>, p: Vec3d) -> bool {
+    pub(super) fn adopt(
+        &mut self,
+        def: BrushDef,
+        volume: Volume,
+        before: Option<Volume>,
+        p: Vec3d,
+    ) -> bool {
         self.others.retain(|(id, _)| *id != def.id);
         self.ctx = Some(Context::new(&volume, self.brushes));
         self.target = Some(Target {

@@ -13,7 +13,7 @@
 use super::atlas::{Atlas, Rect};
 use super::cells::{CellRecord, RECORD_BYTES};
 use super::uv::FaceProjection;
-use super::{BakeConfig, LightFace, Lightmap, Luxel, PointLight};
+use super::{BakeConfig, LightFace, Lightmap, Luxel, LuxelDensity, PointLight};
 use mscent_math::Vec3;
 
 pub const MAGIC: [u8; 4] = *b"MSLT";
@@ -109,9 +109,26 @@ pub fn input_key(
             h.vec3(v);
         }
         h.vec3(f.normal);
+        density_key(&mut h, f.density);
     }
     h.bytes(&voxel_shape.to_le_bytes());
     h.0
+}
+
+/// Marks a face that is not baked at full density. A full face adds nothing, so
+/// every key made before densities existed is still the key of the same bake.
+/// The marker is no vertex count a face could have.
+fn density_key(h: &mut Fnv, density: LuxelDensity) {
+    const MARK: u32 = 0xD375_17E5;
+    match density {
+        LuxelDensity::Full => {}
+        LuxelDensity::Coarse(_) => {
+            h.u32(MARK);
+            // The factor the baker uses, so equal bakes have equal keys.
+            h.f32(density.scale().unwrap_or(1.0));
+        }
+        LuxelDensity::None => h.u32(MARK + 1),
+    }
 }
 
 /// Checks the start of a stored lightmap, [`HEADER_BYTES`] of it or more,

@@ -17,6 +17,7 @@ use mscent_math::{Vec2, Vec3};
 use crate::camera::Camera;
 use crate::clip::{ClipVertex, MAX_POLYGON_VERTICES, clip_polygon};
 use crate::framebuffer::Framebuffer;
+use crate::raster_masked::masked_span_pixels;
 use crate::shade::{FlatShader, Fog, SpanEnd, SpanShader};
 use crate::texture::Texture;
 
@@ -211,6 +212,18 @@ impl PolyList {
         }
     }
 
+    /// Screen bounds `[x0, y0, x1, y1]` of the polygons tagged `tag`.
+    pub(crate) fn bounds_of(&self, tag: u32) -> Option<[f32; 4]> {
+        let mut bounds = None;
+        for poly in self.polys.iter().filter(|p| p.tag == tag) {
+            for p in self.pts.get(poly.start..poly.end).unwrap_or(&[]) {
+                let [x0, y0, x1, y1] = bounds.unwrap_or([p.x, p.y, p.x, p.y]);
+                bounds = Some([x0.min(p.x), y0.min(p.y), x1.max(p.x), y1.max(p.y)]);
+            }
+        }
+        bounds
+    }
+
     /// The polygons touching rows `lo..hi`, in the order they were pushed.
     pub(crate) fn in_rows(&self, (lo, hi): (i32, i32)) -> impl Iterator<Item = ListedPoly> + '_ {
         self.polys
@@ -339,7 +352,7 @@ fn row_extent(pts: &[ScreenVert], yc: f32) -> Option<(ScreenVert, ScreenVert)> {
 
 /// 16.16 fixed point; the wrap to 32 bits is intended because texture sides
 /// are powers of two no larger than 4096, which divide 2^16 * 2^16.
-fn fix(f: f32) -> i32 {
+pub(crate) fn fix(f: f32) -> i32 {
     (f64::from(f) * 65536.0) as i64 as i32
 }
 
@@ -393,7 +406,12 @@ fn draw_row<S: SpanShader>(
             level,
             smooth: tex.is_filtered(),
         };
-        stats.pixels += span_pixels(color, depth, &span, tex, shader);
+        // One branch per span picks the cutout loop; opaque textures never see it.
+        stats.pixels += if tex.is_masked() {
+            masked_span_pixels(color, depth, &span, tex, shader)
+        } else {
+            span_pixels(color, depth, &span, tex, shader)
+        };
         a = b;
         x += n;
     }

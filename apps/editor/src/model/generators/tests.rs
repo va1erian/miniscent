@@ -22,13 +22,18 @@ fn site(size: f64) -> Site {
 }
 
 fn plans(site: &Site, seed: u32) -> Vec<Plan> {
-    Kind::ALL.iter().map(|&k| generate(k, site, seed)).collect()
+    planned().map(|k| generate(k, site, seed)).collect()
+}
+
+/// The kinds that make pieces.
+fn planned() -> impl Iterator<Item = Kind> {
+    Kind::ALL.into_iter().filter(|k| k.planned())
 }
 
 #[test]
 fn the_same_seed_gives_the_same_pieces_and_another_seed_gives_others() {
     let s = site(1.0);
-    for kind in Kind::ALL {
+    for kind in planned() {
         let a = generate(kind, &s, 7);
         assert!(!a.pieces().is_empty(), "{} made nothing", kind.name());
         assert_eq!(
@@ -50,7 +55,7 @@ fn the_same_seed_gives_the_same_pieces_and_another_seed_gives_others() {
 fn a_plan_is_bounded_and_grows_from_its_site_along_the_normal() {
     for size in [0.25, 1.0, 3.0, 8.0] {
         let s = site(size);
-        for (kind, plan) in Kind::ALL.iter().zip(plans(&s, 3)) {
+        for (kind, plan) in planned().zip(plans(&s, 3)) {
             assert!(plan.pieces().len() <= MAX_PIECES, "{}", kind.name());
             let (lo, hi) = plan.bounds().expect("not empty");
             let reach = 12.0 * size.max(0.25) + 4.0;
@@ -70,7 +75,7 @@ fn a_plan_is_bounded_and_grows_from_its_site_along_the_normal() {
 fn nothing_added_is_thinner_than_a_cell() {
     let s = site(0.25);
     let cell = s.cell;
-    for (kind, plan) in Kind::ALL.iter().zip(plans(&s, 9)) {
+    for (kind, plan) in planned().zip(plans(&s, 9)) {
         let added = plan.pieces().iter().filter(|p| p.op != DabOp::Carve);
         for piece in added {
             let (lo, hi) = piece.prim.bounds();

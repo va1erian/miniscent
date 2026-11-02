@@ -13,7 +13,7 @@ use mscent_render::texel_light::{TexelLight, TexelSurface, dither_of, shade_texe
 use mscent_render::{EMISSIVE, SpecTable, Texture, TextureError};
 use mscent_texgen::Maps;
 
-use super::eval::{Picture, Tab};
+use super::eval::{Picture, Tab, over_backdrop};
 
 /// Longest side drawn.
 const MAX_SIDE: u32 = 512;
@@ -104,7 +104,16 @@ impl LitTile {
                     shade_texel(texel, light, self.surface_at(tx, ty), dither_of(x, y))
                 };
                 let [_, r, g, b] = out.to_be_bytes();
-                rgba.extend_from_slice(&[r, g, b, 255]);
+                // A cutout is drawn over a backdrop, or its clear part would be
+                // black and look like paint.
+                let coverage = self.texture.alpha_at(tx, ty);
+                rgba.extend_from_slice(&over_backdrop(
+                    [r, g, b],
+                    coverage,
+                    x as u32,
+                    y as u32,
+                    (w, h),
+                ));
             }
         }
         Picture {
@@ -135,6 +144,7 @@ mod tests {
             normals,
             heights: None,
             specular,
+            alpha: None,
         }
     }
 
@@ -186,6 +196,19 @@ mod tests {
     }
 
     #[test]
+    fn a_cutout_is_drawn_over_a_backdrop_where_it_is_clear() {
+        let mut m = maps(None, None);
+        let mut alpha = vec![255u8; 16];
+        alpha[0] = 0;
+        m.alpha = Some(alpha);
+        let picture = LitTile::new(m, 0, false, 1, true).expect("tile").render(0);
+        // The clear texel is the backdrop's grey, the solid one is the colour.
+        let (clear, solid) = (&picture.rgba[0..4], &picture.rgba[4..8]);
+        assert_eq!(clear, [96, 96, 96, 255], "{clear:?}");
+        assert!(solid[0] > solid[2] && solid != clear, "{solid:?}");
+    }
+
+    #[test]
     fn a_large_map_is_drawn_at_the_cap() {
         let big = Maps {
             width: 1024,
@@ -194,6 +217,7 @@ mod tests {
             normals: None,
             heights: None,
             specular: None,
+            alpha: None,
         };
         let picture = LitTile::new(big, 0, false, 1, true)
             .expect("tile")

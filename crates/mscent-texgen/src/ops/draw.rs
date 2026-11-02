@@ -1,7 +1,7 @@
 //! Shapes drawn over the input (or a background colour). Positions are
 //! normalized and distances wrapped, so a shape near an edge shows on both sides.
 
-use mscent_math::epsilon::TEXTURE_MIN_ELLIPSE_AXIS;
+use mscent_math::epsilon::{TEXTURE_MIN_EDGE_RAMP, TEXTURE_MIN_ELLIPSE_AXIS};
 
 use super::cost::Cost;
 use super::util::{BLACK, WHITE, coverage, draw, texel, unit_hash};
@@ -77,9 +77,21 @@ fn line(ctx: &Ctx) -> Result<Image, TexError> {
     }))
 }
 
+/// Which neighbours of a texel's cell (`-1`, `0`, `1` along one axis) can still
+/// reach it, for a texel `f` of the way across its cell. A stamp lies within `slack`
+/// of its cell's middle and covers nothing beyond `reach` from its own, so a
+/// neighbour whose nearest possible stamp is farther than that adds nothing, and
+/// leaving it out changes no byte. Most texels see only their own cell.
+pub(super) fn reaching(f: f32, slack: f32, reach: f32) -> (i32, i32) {
+    // A little more than the bare sums, so rounding can never drop a stamp.
+    let margin = reach + 1e-4;
+    let low = if f >= margin + slack - 0.5 { 0 } else { -1 };
+    let high = if f <= 1.5 - slack - margin { 0 } else { 1 };
+    (low, high)
+}
+
 /// A grid of round stamps, each moved within its cell by a seeded jitter. A texel
-/// looks at its own cell and the eight around it, which is all a stamp that
-/// stays near its cell can reach.
+/// looks at its own cell and those around it that a stamp of the cell can reach.
 fn dots(ctx: &Ctx) -> Result<Image, TexError> {
     let (nx, ny) = (ctx.int("count_x"), ctx.int("count_y"));
     let (radius, soft) = (ctx.float("radius"), ctx.float("softness"));
@@ -88,12 +100,18 @@ fn dots(ctx: &Ctx) -> Result<Image, TexError> {
     let size = ctx.frame.size;
     // Distances below are in cells, so the edge needs its texel in cells too.
     let px = (nx as f32 / size.width() as f32).max(ny as f32 / size.height() as f32);
+    // Past this far from its middle a stamp's coverage is exactly zero.
+    let reach = radius + (soft + px).max(TEXTURE_MIN_EDGE_RAMP) / 2.0;
     Ok(draw(ctx, |u, v| {
         let (cu, cv) = (u * nx as f32, v * ny as f32);
         let (ci, cj) = (cu.floor() as i32, cv.floor() as i32);
+        let ((i_low, i_high), (j_low, j_high)) = (
+            reaching(cu - ci as f32, slack, reach),
+            reaching(cv - cj as f32, slack, reach),
+        );
         let mut best: f32 = 0.0;
-        for gj in cj - 1..=cj + 1 {
-            for gi in ci - 1..=ci + 1 {
+        for gj in cj + j_low..=cj + j_high {
+            for gi in ci + i_low..=ci + i_high {
                 let (wi, wj) = (gi.rem_euclid(nx), gj.rem_euclid(ny));
                 let jx = (unit_hash(wi, wj, seed) - 0.5) * 2.0 * slack;
                 let jy = (unit_hash(wi, wj, seed ^ 0x5bd1_e995) - 0.5) * 2.0 * slack;

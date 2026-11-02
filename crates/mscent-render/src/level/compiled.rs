@@ -15,11 +15,12 @@ use mscent_world::lightmap::{
     BakeConfig, CellRecord, CellSites, LightFace, Lightmap, LightmapError, Occluders, PointLight,
     bake_in, shape_key,
 };
-use mscent_world::materials::NO_DRAW;
+use mscent_world::materials::{NO_DRAW, view_slot};
 use mscent_world::voxel::{ChunkMesh, VoxelWorld};
 use mscent_world::{Bsp, Face, Level, Portals, brush_faces, compile, extract_faces};
 
 use super::setup::{actors_of, lights_of, with_level_fog};
+use super::vista::Vistas;
 use super::{
     Actor, BakeCache, BakedLight, BuildConfig, BuildError, LevelRenderer, check_materials,
 };
@@ -44,15 +45,33 @@ fn append_mover_faces(level: &Level, faces: &mut Vec<Face>) -> Vec<Range<usize>>
     ranges
 }
 
+/// Moves the viewport faces out of `faces`, before any light is laid out for them.
+fn take_viewport_faces(faces: &mut Vec<Face>) -> Vec<(Face, u8)> {
+    let (holes, rest): (Vec<Face>, Vec<Face>) = core::mem::take(faces)
+        .into_iter()
+        .partition(|f| view_slot(f.material).is_some());
+    *faces = rest;
+    holes
+        .into_iter()
+        .filter_map(|f| view_slot(f.material).map(|slot| (f, slot)))
+        .collect()
+}
+
 /// What the renderer keeps of a compiled level.
 pub(super) struct Parts {
     pub bsp: Bsp,
     /// The world's faces, then each mover's.
     pub faces: Vec<Face>,
+    /// Viewport faces with their slots, kept apart: no luxels, no texture.
+    pub holes: Vec<(Face, u8)>,
+    pub vistas: Vistas,
     /// For each mover, which of `faces` are its own.
     pub mover_ranges: Vec<Range<usize>>,
     pub portals: Portals,
+    /// Every lamp, which the bake takes, since solid stops the rays of a far one.
     pub lights: Vec<PointLight>,
+    /// The lamps of the play space: meshes and voxels light without shadows.
+    pub play_lights: Vec<PointLight>,
     pub actors: Vec<Actor>,
     pub cfg: BuildConfig,
     pub voxels: VoxelWorld,
@@ -89,9 +108,11 @@ fn vertex_light(
 
 /// Lamps and ambient with no shadows: for a surface no bake has seen, until the
 /// next one has. Nothing is traced, so it is fit for a stroke and for play.
-pub(super) fn lamp_light(
+/// `lamps` says which lamps light a point: the play space's, or every one in a
+/// layer's room, whose own lamps are what its surfaces are baked with.
+pub(super) fn lamp_light<'a>(
     mesh: &ChunkMesh,
-    lights: &[PointLight],
+    lamps: impl Fn(Vec3) -> &'a [PointLight],
     ambient: Vec3,
 ) -> Vec<VertexLight> {
     mesh.vertices
@@ -99,7 +120,7 @@ pub(super) fn lamp_light(
         .map(|v| {
             let mut color = ambient;
             let mut dir = Vec3::ZERO;
-            for l in lights {
+            for l in lamps(v.pos) {
                 let to = l.position - v.pos;
                 let d = to.length();
                 if d <= 0.0 || d >= l.radius {
@@ -148,10 +169,15 @@ impl Compiled {
         let mut faces = extract_faces(&bsp, &brushes);
         // The voxel surface closes in front of a shell, before any light is laid out for it.
         faces.retain(|f| f.material != NO_DRAW);
+        let holes = take_viewport_faces(&mut faces);
         let voxels = VoxelWorld::build(level, &level.static_brushes(), &bsp);
         let mover_ranges = append_mover_faces(level, &mut faces);
         let portals = Portals::build(&bsp);
-        let light_faces = faces.iter().map(LightFace::from).collect();
+        let vistas = Vistas::new(level, &bsp, &portals);
+        let mut light_faces: Vec<LightFace> = faces.iter().map(LightFace::from).collect();
+        vistas.set_densities(&faces, &mut light_faces);
+        let lights = lights_of(level, cfg.light_gain);
+        let play_lights = vistas.play_lights(&bsp, &lights);
         let bake_cfg = BakeConfig {
             luxel_size: cfg.luxel_size,
             ambient: cfg.ambient,
@@ -165,9 +191,12 @@ impl Compiled {
         let parts = Parts {
             bsp,
             faces,
+            holes,
+            vistas,
             mover_ranges,
             portals,
-            lights: lights_of(level, cfg.light_gain),
+            lights,
+            play_lights,
             actors: actors_of(level),
             cfg: with_level_fog(cfg, level),
             voxels,
@@ -290,6 +319,16 @@ mod tests {
         r.render(&mut fb, &view, Quality::Low, r.actors(), None)
             .expect("renders");
         fb.pixels().to_vec()
+    }
+
+    #[test]
+    fn a_level_without_vistas_or_skies_keeps_its_key_and_its_lamps() {
+        let c = compiled();
+        let full: Vec<LightFace> = c.parts.faces.iter().map(LightFace::from).collect();
+        let key = input_key(&full, &c.parts.lights, &c.bake_cfg, c.voxel_shape);
+        assert_eq!(c.light_key(), key, "no density reaches the key");
+        assert!(!c.parts.lights.is_empty());
+        assert_eq!(c.parts.play_lights, c.parts.lights);
     }
 
     #[test]

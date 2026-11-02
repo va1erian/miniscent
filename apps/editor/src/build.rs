@@ -16,7 +16,7 @@ use miniscent_game::{GameSession, SessionConfig};
 use mscent_game::{Arena, LoadError};
 use mscent_render::{BakeCache, BakeReport, BuildError, Compiled, LevelRenderer, Source};
 use mscent_world::lightmap::LightmapError;
-use mscent_world::{Entity, Level};
+use mscent_world::{Entity, Level, vista_warnings};
 
 use crate::materials::SharedMaterials;
 use crate::model::Document;
@@ -48,6 +48,8 @@ pub struct Built {
     pub report: Option<BakeReport>,
     /// Reloads the level's script while it is played, for a saved level.
     pub watch: Option<ScriptWatcher>,
+    /// What the level's vistas do wrong, one line each; shown in the log.
+    pub warnings: Vec<String>,
 }
 
 pub enum Product {
@@ -261,6 +263,10 @@ fn preview(
         .map_err(|e| format!("cannot prepare the level: {e:?}"))?;
     // Before the script is read, so an edit made meanwhile is seen as a change.
     let watch = doc.level_path().map(ScriptWatcher::new);
+    let warnings = vista_warnings(&level)
+        .iter()
+        .map(ToString::to_string)
+        .collect();
     Ok(Built {
         product: product(&level, renderer, cfg, doc.level_path()),
         light,
@@ -268,6 +274,7 @@ fn preview(
         materials: generation,
         report,
         watch,
+        warnings,
     })
 }
 

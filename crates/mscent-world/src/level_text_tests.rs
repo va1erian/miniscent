@@ -2,6 +2,7 @@ use crate::brush::{Brush, Op};
 use crate::entity::{Entity, Level};
 use crate::labels::{EntityLabel, MoverGroup};
 use crate::level_text::{from_text, to_text};
+use crate::texinfo::TexInfo;
 use crate::{format, showcase_level};
 use mscent_math::rng::Rng;
 use mscent_math::{Vec3, Vec3d};
@@ -198,4 +199,79 @@ fn seeded_mutations_never_panic_and_anything_accepted_is_consistent() {
         }
     }
     assert!(accepted > 0, "the fuzz never produced a level");
+}
+
+#[test]
+fn vista_lines_round_trip_in_decimal_and_hex() {
+    let text = "miniscent-level 1
+box subtract 0 65520  -20 -20 -20  20 20 20
+vista 1 2 3  4 5 6  2 1 0.0625  0 0 0.5  1.5 -2  0 100000  0x8090a0  name sky
+vista 0 0 0  0 0 0  0 0 0  0 0 0  0 0  1 2  12648430
+";
+    let level = from_text(text).unwrap();
+    assert_eq!(level.brushes[0].material(), 65520);
+    assert_eq!(level.vista_layers().len(), 2);
+    let Entity::VistaLayer {
+        fog_color, slot, ..
+    } = level.entities[1]
+    else {
+        panic!("not a vista layer");
+    };
+    assert_eq!((slot, fog_color), (0, 0x00C0_FFEE));
+    let again = to_text(&level);
+    assert!(again.contains("0x8090a0"));
+    assert_eq!(from_text(&again).unwrap(), level);
+    assert_eq!(to_text(&from_text(&again).unwrap()), again);
+}
+
+#[test]
+fn bad_vista_lines_are_refused() {
+    let head = "miniscent-level 1\n";
+    for line in [
+        "vista 0 0 0  0 0 0  8 0 0.5  0 0 0  0 0  0 10  0",
+        "vista 0 0 0  0 0 0  0 4 0.5  0 0 0  0 0  0 10  0",
+        "vista 0 0 0  0 0 0  0 0 1.5  0 0 0  0 0  0 10  0",
+        "vista 0 0 0  0 0 0  0 0 0.5  0 0 0  0 0  5 5  0",
+        "vista 0 0 0  0 0 0  0 0 0.5  0 0 0  0 0  0 10  0xzz",
+        "vista 0 0 0  0 0 0  0 0 0.5  0 0 0  0 0  0 10  4294967296",
+        "vista 0 0 0  0 0 0  0 0 0.5  0 0 0  0 0  0 10",
+    ] {
+        assert!(from_text(&format!("{head}{line}\n")).is_err(), "{line}");
+    }
+}
+
+#[test]
+fn viewport_materials_survive_in_box_and_brush_lines() {
+    let one = |slot: u16| {
+        let (lo, hi) = (Vec3d::new(0.0, 0.0, 0.0), Vec3d::new(1.0, 1.0, 1.0));
+        let b = Brush::cuboid(lo, hi, Op::Add, u32::from(slot)).unwrap();
+        b.with_material(0xFFF0 + slot)
+    };
+    let level = Level {
+        brushes: (0..8).map(one).collect(),
+        ..Default::default()
+    };
+    let text = to_text(&level);
+    assert!(text.contains(" 65527 "));
+    assert_eq!(from_text(&text).unwrap(), level);
+
+    // A face of a brush that is not a box carries its own number.
+    let base = &from_text("miniscent-level 1\nbox add 0 0  0 0 0  1 1 1\n")
+        .unwrap()
+        .brushes[0];
+    let mut planes = base.planes().to_vec();
+    planes.push(mscent_math::DPlane::new(Vec3d::new(0.6, 0.0, 0.8), 1.2));
+    let mut infos = base.texinfos().to_vec();
+    infos.push(TexInfo {
+        material: 65520,
+        ..TexInfo::default_for_normal(Vec3d::new(0.6, 0.0, 0.8))
+    });
+    let cut = Brush::new_textured(&planes, &infos, Op::Add, 0).unwrap();
+    let level = Level {
+        brushes: vec![cut],
+        ..Default::default()
+    };
+    let text = to_text(&level);
+    assert!(text.starts_with("miniscent-level 1\nbrush"));
+    assert_eq!(from_text(&text).unwrap(), level);
 }

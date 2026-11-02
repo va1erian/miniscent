@@ -1,6 +1,8 @@
 use crate::brush::{Brush, Op};
 use crate::entity::{Entity, Level};
+use crate::entity::{MAX_VISTA_FOG, MAX_VISTA_LAYERS};
 use crate::format::{self, FormatError, MAX_BRUSHES};
+use crate::materials::VIEW_SLOTS;
 use mscent_math::rng::Rng;
 use mscent_math::{Vec3, Vec3d};
 
@@ -211,5 +213,130 @@ fn hostile_world_entities_are_rejected() {
         level.entities.push(world(start, end));
         let r = format::read(&format::write(&level));
         assert_eq!(r, Err(FormatError::BadEntity), "{start} {end}");
+    }
+}
+
+fn vista(slot: u8, layer: u8, parallax: f32) -> Entity {
+    Entity::VistaLayer {
+        pos: Vec3::new(1.0, 2.0, 3.0),
+        centre: Vec3::new(-4.0, 5.0, 6.0),
+        slot,
+        layer,
+        parallax,
+        spin: Vec3::new(0.0, 0.0, 0.5),
+        pan: [1.5, -2.0],
+        fog_start: 0.0,
+        fog_end: MAX_VISTA_FOG,
+        fog_color: 0x8090a0,
+    }
+}
+
+fn with(e: Entity) -> Level {
+    let mut level = sample();
+    level.entities.push(e);
+    level
+}
+
+#[test]
+fn vista_layers_round_trip() {
+    let mut level = with(vista(0, 0, 0.0625));
+    level.entities.push(vista(7, MAX_VISTA_LAYERS - 1, 1.0));
+    let bytes = format::write(&level);
+    assert_eq!(format::read(&bytes).unwrap(), level);
+    assert_eq!(&bytes[4..6], &5u16.to_le_bytes());
+}
+
+/// A good layer with one field changed by `f`.
+fn tweaked(f: impl FnOnce(&mut Entity)) -> Entity {
+    let mut e = vista(1, 1, 0.5);
+    f(&mut e);
+    e
+}
+
+#[test]
+fn hostile_vista_layers_are_rejected() {
+    let cases = [
+        vista(VIEW_SLOTS, 0, 0.5),
+        vista(0, MAX_VISTA_LAYERS, 0.5),
+        vista(0, 0, f32::NAN),
+        vista(0, 0, 1.5),
+        vista(0, 0, -0.1),
+        tweaked(|e| {
+            if let Entity::VistaLayer {
+                fog_start, fog_end, ..
+            } = e
+            {
+                (*fog_start, *fog_end) = (5.0, 5.0);
+            }
+        }),
+        tweaked(|e| {
+            if let Entity::VistaLayer { fog_end, .. } = e {
+                *fog_end = MAX_VISTA_FOG * 2.0;
+            }
+        }),
+        tweaked(|e| {
+            if let Entity::VistaLayer { spin, .. } = e {
+                spin.x = f32::INFINITY;
+            }
+        }),
+        tweaked(|e| {
+            if let Entity::VistaLayer { pan, .. } = e {
+                pan[1] = 1.0e9;
+            }
+        }),
+        tweaked(|e| {
+            if let Entity::VistaLayer { centre, .. } = e {
+                centre.y = f32::NAN;
+            }
+        }),
+    ];
+    for (i, e) in cases.into_iter().enumerate() {
+        let r = format::read(&format::write(&with(e)));
+        assert_eq!(r, Err(FormatError::BadEntity), "case {i}");
+    }
+}
+
+/// Rewrites a file's version field.
+fn as_version(mut bytes: Vec<u8>, version: u16) -> Vec<u8> {
+    bytes[4..6].copy_from_slice(&version.to_le_bytes());
+    bytes
+}
+
+#[test]
+fn tag_seven_is_refused_before_version_five() {
+    let bytes = format::write(&with(vista(0, 0, 0.5)));
+    for version in 3..=4 {
+        let r = format::read(&as_version(bytes.clone(), version));
+        assert_eq!(r, Err(FormatError::BadEntityTag(7)), "version {version}");
+    }
+}
+
+#[test]
+fn a_version_four_file_without_vista_layers_still_loads() {
+    // Older writers made these same bytes under a smaller number; versions 1 and
+    // 2 are covered by the texinfo and labels tests.
+    let level = sample();
+    let bytes = format::write(&level);
+    assert_eq!(format::read(&as_version(bytes, 4)).unwrap(), level);
+}
+
+#[test]
+fn the_first_vista_layer_of_a_slot_and_layer_counts() {
+    let mut level = with(vista(2, 1, 0.25));
+    level.entities.push(vista(2, 1, 0.5));
+    level.entities.push(vista(2, 2, 0.75));
+    let back = format::read(&format::write(&level)).unwrap();
+    let layers = back.vista_layers();
+    assert_eq!(layers.len(), 2);
+    assert_eq!(*layers[0], vista(2, 1, 0.25));
+    assert_eq!(*layers[1], vista(2, 2, 0.75));
+}
+
+#[test]
+fn bit_flips_in_a_level_with_vista_layers_never_panic() {
+    let bytes = format::write(&with(vista(3, 1, 0.0625)));
+    let mut rng = Rng::new(0x0051_57a5);
+    for _ in 0..20_000 {
+        fuzz_once(&mut rng, &bytes);
     }
 }

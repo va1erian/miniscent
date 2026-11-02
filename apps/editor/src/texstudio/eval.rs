@@ -106,6 +106,46 @@ fn colours_of(image: &Image) -> Vec<u8> {
     )
 }
 
+/// The two greys of the backdrop behind a cutout.
+const CHECKER: [u8; 2] = [96, 160];
+
+/// The backdrop's grey under texel `(x, y)` of a `width` by `height` picture: sixteen
+/// squares across the longer side, so a draft and a full size look alike.
+pub(super) fn backdrop(x: u32, y: u32, width: u32, height: u32) -> u8 {
+    let cell = (width.max(height) / 16).max(1);
+    CHECKER[((x / cell + y / cell) & 1) as usize]
+}
+
+/// A colour picture laid over the backdrop by `coverage` (0 clear, 255 solid), so
+/// that a masked material shows its shape and what is clear shows as clear.
+pub(super) fn over_backdrop(
+    rgb: [u8; 3],
+    coverage: u8,
+    x: u32,
+    y: u32,
+    size: (u32, u32),
+) -> [u8; 4] {
+    let behind = u32::from(backdrop(x, y, size.0, size.1));
+    let a = u32::from(coverage);
+    let mix = |c: u8| ((u32::from(c) * a + behind * (255 - a) + 127) / 255) as u8;
+    [mix(rgb[0]), mix(rgb[1]), mix(rgb[2]), 255]
+}
+
+/// The albedo over the backdrop, where the page says how much of it is there.
+fn masked_colours_of(image: &Image, alpha: &Image) -> Vec<u8> {
+    let size = image.size();
+    let (w, h) = (size.width(), size.height());
+    let texels = image.pixels().iter().zip(alpha.pixels()).enumerate();
+    rgba(
+        texels.map(|(i, (p, a))| {
+            let (x, y) = (i as u32 % w, i as u32 / w);
+            let rgb = [byte(p[0]), byte(p[1]), byte(p[2])];
+            over_backdrop(rgb, byte(a[0]), x, y, (w, h))
+        }),
+        size.texels(),
+    )
+}
+
 /// Height and specular are data in channel R.
 fn greys_of(image: &Image) -> Vec<u8> {
     let px = image.pixels().iter().map(|p| byte(p[0]));
@@ -195,7 +235,10 @@ impl Pass<'_> {
                 None => self.nothing("Select a block to see it here"),
             },
             Tab::Albedo => match self.output(Channel::Albedo) {
-                Some((_, image)) => self.picture(image, colours_of),
+                Some((_, image)) => match self.output(Channel::Alpha) {
+                    Some((_, alpha)) => self.picture(image, |i| masked_colours_of(i, alpha)),
+                    None => self.picture(image, colours_of),
+                },
                 None => self.nothing("The page has no out-albedo"),
             },
             Tab::Height => match self.output(Channel::Height) {

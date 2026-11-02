@@ -14,8 +14,16 @@
 //! world 0 0 0  4 26                               # x y z, fog start, fog end
 //! marker 3 0 0  0  name trap_hinge                # x y z yaw
 //! zone 0 10 0  2 2 2  name hall  tag alarm        # x y z, half sizes
+//! vista 0 0 0  0 0 0  0 0 0.0625  0 0 0.1  0 0  0 1e5  0x8090a0  # see below
 //! mover vault_door  tag doors  brushes 1 2        # brush lines, counted from 0
 //! ```
+//!
+//! A `vista` line is a vista layer: position, centre, slot, layer, parallax, spin
+//! (axis times radians per second), pan, fog start, fog end, fog colour as decimal
+//! or `0x` hex. Parallax may be written `x16` for 1/16, the scale of a room that
+//! is authored 16 times smaller than it looks (a number of at least 1; it is
+//! stored, and dumped, as the parallax). A `mountains` line builds a ridged-noise
+//! range as a voxel volume (see `level_text/mountains.rs`), and is not dumped. A face's `material` of 65520 to 65527 is viewport slot 0 to 7.
 //!
 //! A plane in a `brush` line is `nx ny nz dist` then its texture mapping:
 //! `material ux uy uz vx vy vz ushift vshift uscale vscale rotation lock`.
@@ -33,6 +41,11 @@ use crate::labels::{EntityLabel, MoverGroup};
 use crate::texinfo::TexInfo;
 use mscent_math::{DPlane, Vec3, Vec3d};
 use std::fmt::Write as _;
+
+mod mountains;
+mod words;
+
+use words::{Res, Words, clip};
 
 const HEADER: &str = "miniscent-level 1";
 
@@ -179,63 +192,26 @@ fn entity_text(e: &Entity) -> String {
         } => format!("world {} {fog_start} {fog_end}", v32(pos)),
         Entity::Marker { pos, yaw } => format!("marker {} {yaw}", v32(pos)),
         Entity::Zone { pos, half } => format!("zone {} {}", v32(pos), v32(half)),
+        Entity::VistaLayer {
+            pos,
+            centre,
+            slot,
+            layer,
+            parallax,
+            spin,
+            pan,
+            fog_start,
+            fog_end,
+            fog_color,
+        } => format!(
+            "vista {} {} {slot} {layer} {parallax} {} {} {} {fog_start} {fog_end} {fog_color:#08x}",
+            v32(pos),
+            v32(centre),
+            v32(spin),
+            pan[0],
+            pan[1]
+        ),
     }
-}
-
-/// The words of one line, read in order.
-struct Words<'a> {
-    rest: std::str::SplitWhitespace<'a>,
-}
-
-type Res<T> = Result<T, String>;
-
-impl<'a> Words<'a> {
-    fn word(&mut self, what: &str) -> Res<&'a str> {
-        self.rest
-            .next()
-            .ok_or_else(|| format!("expected {what} at the end of the line"))
-    }
-
-    fn parse<T: std::str::FromStr>(&mut self, what: &str) -> Res<T> {
-        let w = self.word(what)?;
-        w.parse()
-            .map_err(|_| format!("expected {what}, not '{}'", clip(w)))
-    }
-
-    fn f32(&mut self, what: &str) -> Res<f32> {
-        let v: f32 = self.parse(what)?;
-        if v.is_finite() {
-            Ok(v)
-        } else {
-            Err(format!("{what} must be finite"))
-        }
-    }
-
-    fn f64(&mut self, what: &str) -> Res<f64> {
-        let v: f64 = self.parse(what)?;
-        if v.is_finite() {
-            Ok(v)
-        } else {
-            Err(format!("{what} must be finite"))
-        }
-    }
-
-    fn v3(&mut self, what: &str) -> Res<Vec3> {
-        Ok(Vec3::new(self.f32(what)?, self.f32(what)?, self.f32(what)?))
-    }
-
-    fn v3d(&mut self, what: &str) -> Res<Vec3d> {
-        Ok(Vec3d::new(
-            self.f64(what)?,
-            self.f64(what)?,
-            self.f64(what)?,
-        ))
-    }
-}
-
-/// Hostile lines can be megabytes long; messages quote only the start.
-fn clip(w: &str) -> String {
-    w.chars().take(32).collect()
 }
 
 fn read_op(w: &mut Words) -> Res<Op> {
@@ -325,6 +301,18 @@ fn read_entity(kind: &str, w: &mut Words) -> Res<Option<Entity>> {
             pos: pos(w)?,
             half: w.v3("the half sizes")?,
         },
+        "vista" => Entity::VistaLayer {
+            pos: pos(w)?,
+            centre: w.v3("the centre")?,
+            slot: w.parse("the slot")?,
+            layer: w.parse("the layer")?,
+            parallax: w.parallax("the parallax")?,
+            spin: w.v3("the spin")?,
+            pan: [w.f32("the pan")?, w.f32("the pan")?],
+            fog_start: w.f32("the fog start")?,
+            fog_end: w.f32("the fog end")?,
+            fog_color: w.colour("the fog colour")?,
+        },
         _ => return Ok(None),
     }))
 }
@@ -394,6 +382,10 @@ fn read_line(level: &mut Level, line: &str) -> Res<()> {
             level.brushes.push(brush);
         }
         "mover" => level.mover_groups.push(read_mover(&mut w)?),
+        "mountains" => {
+            let volume = mountains::read(&mut w, level)?;
+            level.volumes.push(volume);
+        }
         _ => {
             if level.entities.len() >= MAX_ENTITIES {
                 return Err("too many entities".to_string());
@@ -410,7 +402,7 @@ fn read_line(level: &mut Level, line: &str) -> Res<()> {
             level.entities.push(entity);
         }
     }
-    if kind != "mover" && kind != "box" && kind != "brush" {
+    if !matches!(kind, "mover" | "box" | "brush" | "mountains") {
         return Ok(());
     }
     match w.rest.next() {

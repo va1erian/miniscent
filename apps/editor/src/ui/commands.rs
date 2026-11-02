@@ -48,6 +48,8 @@ pub mod cmd {
     pub const SCRIPT_PANE: MenuId = MenuId::new(27);
     pub const GUIDE: MenuId = MenuId::new(28);
     pub const SCRIPT_WINDOW: MenuId = MenuId::new(29);
+    pub const NEW_VISTA: MenuId = MenuId::new(30);
+    pub const NEW_MOUNTAINS: MenuId = MenuId::new(31);
 }
 
 /// Fog the dialog starts from for a level without a world entity.
@@ -78,6 +80,8 @@ pub(super) fn menus(m: &mut xui::widget::MenuScope<'_>) {
         e.item(cmd::EXTRUDE, "Extrude face &out   Ctrl+E");
         e.item(cmd::EXTRUDE_IN, "Extrude face &in   Ctrl+Shift+E");
         e.separator();
+        e.item(cmd::NEW_VISTA, "New &vista");
+        e.item(cmd::NEW_MOUNTAINS, "New &mountains");
         e.item(cmd::LEVEL_SETTINGS, "Level &settings...");
     });
     m.submenu(MenuId::new(102), "&View", |v| {
@@ -213,6 +217,14 @@ impl Editor {
             }
             cmd::EXTRUDE_IN => {
                 st.extrude_faces(-1.0);
+            }
+            cmd::NEW_VISTA => {
+                st.commit_pending();
+                st.new_vista();
+            }
+            cmd::NEW_MOUNTAINS => {
+                st.commit_pending();
+                st.new_mountains();
             }
             _ => {}
         }

@@ -139,7 +139,7 @@ Each of these is asserted by a test (see [Glitches](#glitches-designed-out)):
 
 | Thing | Choice |
 |---|---|
-| Cell size | Per volume: 0.125, 0.25, 0.5 or 1 world units (powers of two on `SNAP_GRID`). Default 0.5 for caves, 0.25 for growths; a 0.5 cell has a quarter of the triangles for the same surface |
+| Cell size | Per volume: 0.125, 0.25, 0.5, 1, 2 or 4 world units (powers of two on `SNAP_GRID`; 2 and 4 are for ranges seen far off). Default 0.5 for caves, 0.25 for growths; a 0.5 cell has a quarter of the triangles for the same surface |
 | Sample | 1 LSB = 1/32 cell. `base` and `resolved` are `-63..=63` (±2 cells); `delta` is `i8`, `-126..=126`, enough to override any base |
 | Material | A material id per sample, as `u8`: 256 is far more than the game's 5, and no remapping means no out-of-range index to check |
 | Chunk | 16³ samples: `Uniform { delta, material }` or `Detail(Arc<[…; 8 KB]>)` |

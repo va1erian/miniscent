@@ -28,6 +28,7 @@ fn floor() -> LightFace {
             v3(0.0, 40.0, 0.0),
         ],
         normal: v3(0.0, 0.0, 1.0),
+        density: Default::default(),
     }
 }
 
@@ -203,6 +204,7 @@ fn penumbra_luxels(radius: f32, samples: u32) -> usize {
             v3(0.0, 100.0, 0.0),
         ],
         normal: v3(0.0, 0.0, 1.0),
+        density: Default::default(),
     };
     let lamp = PointLight {
         position: v3(20.0, 45.0, 30.0),

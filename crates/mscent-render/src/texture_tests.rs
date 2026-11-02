@@ -120,3 +120,42 @@ fn a_mask_with_no_normal_map_is_an_error() {
         Err(TextureError::SpecularWithoutNormals)
     ));
 }
+
+#[test]
+fn coverage_needs_one_byte_per_texel_and_all_solid_is_opaque() {
+    let t = Texture::new(2, 2, vec![0xff00_0000; 4]).unwrap();
+    assert!(t.clone().with_alpha(vec![0; 3]).is_err());
+    let opaque = t.clone().with_alpha(vec![255; 4]).unwrap();
+    assert!(!opaque.is_masked());
+    assert!(opaque.alpha_sampler(0).is_none());
+    assert_eq!(opaque.alpha_at(1, 1), 255);
+    let cut = t.with_alpha(vec![0, 255, 255, 255]).unwrap();
+    assert!(cut.is_masked());
+    assert_eq!(cut.alpha_at(0, 0), 0);
+    assert_eq!(cut.alpha_at(2, 2), 0, "wraps");
+    assert_eq!(cut.alpha_at(1, 0), 255);
+}
+
+#[test]
+fn filtering_carries_the_coverage_down_the_chain_in_either_order() {
+    let alpha = vec![0, 255, 255, 0];
+    let t = Texture::new(2, 2, vec![0xff00_0000; 4]).unwrap();
+    let late = t.clone().with_alpha(alpha.clone()).unwrap().filtered();
+    let early = t.filtered().with_alpha(alpha).unwrap();
+    for tex in [&late, &early] {
+        assert_eq!(tex.mip_count(), 1);
+        assert_eq!(tex.alpha_sampler(1).unwrap().nearest(0, 0), 127);
+        assert_eq!(tex.alpha_sampler(0).unwrap().nearest(0, 0), 0);
+    }
+}
+
+#[test]
+fn the_colour_path_stays_opaque_whatever_the_coverage() {
+    let t = Texture::new(2, 2, vec![0x40ff_0000; 4])
+        .unwrap()
+        .with_alpha(vec![0; 4])
+        .unwrap()
+        .filtered();
+    assert_eq!(t.sample_bilinear(0x8000, 0x8000) >> 24, 255);
+    assert_eq!(t.sample_bilinear_lod(0x8000, 0x8000, 1) >> 24, 255);
+}

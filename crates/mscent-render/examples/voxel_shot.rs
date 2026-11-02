@@ -87,9 +87,10 @@ fn shoot(r: &LevelRenderer, eye: Vec3, target: Vec3, out: &Path) -> Result<(), F
     let png = encode_png(w, h, fb.pixels()).ok_or("cannot encode")?;
     std::fs::write(out, png)?;
     println!(
-        "{}: {} voxel triangles, {holes} hole pixels, {ms:.1} ms",
+        "{}: {} voxel triangles, {} vista pixels, {holes} hole pixels, {ms:.1} ms",
         out.display(),
         stats.voxel_triangles,
+        stats.vista_pixels,
     );
     Ok(())
 }
