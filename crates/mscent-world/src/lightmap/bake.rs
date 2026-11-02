@@ -2,10 +2,14 @@
 
 use super::atlas::{Atlas, PADDING, Rect, ppm};
 use super::bounce;
+use super::cell_sites::CellSites;
+use super::cells::{CellLighting, CellRecord, direct_pass, settle};
+use super::cells_bounce;
 use super::filter;
 use super::layout::{Layout, lay_out};
+use super::occluders::Occluders;
 use super::parallel::par_map;
-use super::soft;
+use super::soft::{self, Footprint, light_at};
 use super::uv::FaceProjection;
 use super::{BakeConfig, LightFace, LightmapError, Luxel, PointLight};
 use crate::bsp::Bsp;
@@ -18,7 +22,7 @@ pub const MAX_SHADOW_SAMPLES: u32 = 256;
 
 /// Everything a worker needs, shared read-only across threads.
 pub(super) struct Scene<'a> {
-    pub bsp: &'a Bsp,
+    pub occ: &'a Occluders<'a>,
     pub faces: &'a [LightFace],
     pub proj: &'a [FaceProjection],
     pub lights: &'a [PointLight],
@@ -40,15 +44,29 @@ pub struct Lightmap {
     atlas: Atlas,
     proj: Vec<FaceProjection>,
     texels: Vec<Luxel>,
+    /// Light of the surface cells of voxel volumes, in the order of the
+    /// [`CellSites`] the bake was given.
+    cells: Vec<CellRecord>,
 }
 
 impl Lightmap {
-    pub(super) fn from_parts(atlas: Atlas, proj: Vec<FaceProjection>, texels: Vec<Luxel>) -> Self {
+    pub(super) fn from_parts(
+        atlas: Atlas,
+        proj: Vec<FaceProjection>,
+        texels: Vec<Luxel>,
+        cells: Vec<CellRecord>,
+    ) -> Self {
         Self {
             atlas,
             proj,
             texels,
+            cells,
         }
+    }
+
+    /// The light of each voxel surface cell, in site order.
+    pub fn cells(&self) -> &[CellRecord] {
+        &self.cells
     }
 
     /// All luxels, atlas row by row (gutter included).
@@ -177,10 +195,24 @@ pub fn bake_cancellable(
     cfg: &BakeConfig,
     cancel: &AtomicBool,
 ) -> Result<Lightmap, LightmapError> {
+    let occ = Occluders::brushes(bsp);
+    bake_in(&occ, &CellSites::default(), faces, lights, cfg, cancel)
+}
+
+/// Like [`bake_cancellable`], with shadows from `occ`, which may include voxel
+/// volumes, and a record of light for each of `sites`.
+pub fn bake_in(
+    occ: &Occluders<'_>,
+    sites: &CellSites,
+    faces: &[LightFace],
+    lights: &[PointLight],
+    cfg: &BakeConfig,
+    cancel: &AtomicBool,
+) -> Result<Lightmap, LightmapError> {
     validate(lights, cfg)?;
     let Layout { atlas, proj } = lay_out(faces, cfg)?;
     let scene = Scene {
-        bsp,
+        occ,
         faces,
         proj: &proj,
         lights,
@@ -204,7 +236,15 @@ pub fn bake_cancellable(
             filter::smooth(grid, p.width as usize, p.height as usize);
         }
     }
-    bounce::add_bounce(&scene, &rows, &mut grids);
+    let patches = bounce::face_patches(&scene, &grids);
+    let env = CellLighting { occ, lights, cfg };
+    let which: Vec<usize> = (0..sites.len()).collect();
+    let mut direct = direct_pass(&env, sites, &which, cancel);
+    if scene.cancelled() {
+        return Err(LightmapError::Cancelled);
+    }
+    bounce::add_bounce(&scene, &rows, &patches, &mut grids);
+    cells_bounce::add_bounce(&scene, sites, &patches, &mut direct);
     if scene.cancelled() {
         return Err(LightmapError::Cancelled);
     }
@@ -214,11 +254,8 @@ pub fn bake_cancellable(
         }
     }
     let texels = compose(&atlas, &grids);
-    Ok(Lightmap {
-        atlas,
-        proj,
-        texels,
-    })
+    let cells = settle(&env, sites, &which, &direct);
+    Ok(Lightmap::from_parts(atlas, proj, texels, cells))
 }
 
 fn validate(lights: &[PointLight], cfg: &BakeConfig) -> Result<(), LightmapError> {
@@ -282,56 +319,35 @@ fn direct_row(s: &Scene, face: usize, row: u32) -> Vec<Luxel> {
             let verts = &s.faces[face].vertices;
             let centre = p.luxel_sample(verts, x, row);
             let rx = soft::Receiver {
-                bsp: s.bsp,
-                proj: p,
-                verts,
-                x,
-                y: row,
+                occ: s.occ,
+                foot: Footprint::Luxel {
+                    proj: p,
+                    verts,
+                    x,
+                    y: row,
+                },
                 bias: s.cfg.normal_bias,
                 centre,
             };
-            direct_at(s, &rx)
+            direct_at(s, &rx, p)
         })
         .collect()
 }
 
-/// Accumulates colour and a luminance-weighted (not yet unit) direction.
-fn direct_at(s: &Scene, rx: &soft::Receiver) -> Luxel {
+/// Accumulates colour and a luminance-weighted (not yet unit) direction, in the
+/// tangent frame of `proj`.
+fn direct_at(s: &Scene, rx: &soft::Receiver, proj: &FaceProjection) -> Luxel {
     let mut acc = Luxel {
         color: Vec3::ZERO,
         dir: Vec3::ZERO,
     };
     for light in s.lights {
-        if let Some((c, to_light)) = light_at(s, rx, light) {
+        if let Some((c, to_light)) = light_at(rx, light, s.cfg) {
             acc.color = acc.color + c;
-            acc.dir = acc.dir + rx.proj.to_tangent(to_light) * luminance(c);
+            acc.dir = acc.dir + proj.to_tangent(to_light) * luminance(c);
         }
     }
     acc
-}
-
-/// Light arriving at the luxel from one lamp and the unit direction towards
-/// it, or `None` when out of range, facing away or shadowed.
-fn light_at(s: &Scene, rx: &soft::Receiver, light: &PointLight) -> Option<(Vec3, Vec3)> {
-    let to = light.position - rx.centre;
-    let dist = to.length();
-    if dist >= light.radius {
-        return None;
-    }
-    let dir = to.normalized()?;
-    let facing = dir.dot(rx.proj.normal);
-    if facing <= 0.0 {
-        return None;
-    }
-    let seen = soft::visibility(rx, light.position, s.cfg.light_radius, s.cfg.shadow_samples);
-    if seen <= 0.0 {
-        return None;
-    }
-    let falloff = 1.0 - dist / light.radius;
-    Some((
-        light.color * (falloff * falloff * falloff * facing * seen),
-        dir,
-    ))
 }
 
 /// Adds ambient and turns the accumulated direction into a unit vector, with

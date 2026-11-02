@@ -27,11 +27,11 @@ pub use crate::uv_luxel::UvToLuxel;
 
 /// Highlight strength: the table peaks at gloss/255 of the light colour,
 /// which on dim baked light would be invisible.
-const SPEC_GAIN: f32 = 1.1;
+pub(crate) const SPEC_GAIN: f32 = 1.1;
 
 /// Table response below which a highlight adds nothing visible (the light
 /// level tops out near 300 of 256, so 1/300 is under one level).
-const MIN_SPEC: f32 = 1.0 / 300.0;
+pub(crate) const MIN_SPEC: f32 = 1.0 / 300.0;
 
 /// Pixels of the longest span (a power of two, for the masked index).
 const MAX_PX: usize = SPAN_LEN as usize;
@@ -51,8 +51,8 @@ const MAX_KNOT_LUXELS: f32 = 8.0;
 
 /// Texels per pixel up to which bump mapping keeps full strength, and the
 /// rate at which it has faded out (the normal map aliases beyond that).
-const BUMP_FULL: f32 = 1.0;
-const BUMP_GONE: f32 = 3.0;
+pub(crate) const BUMP_FULL: f32 = 1.0;
+pub(crate) const BUMP_GONE: f32 = 3.0;
 
 /// Everything the shader needs about the face being drawn.
 #[derive(Clone, Copy)]
@@ -315,20 +315,20 @@ impl<'a, const SPEC: bool> LightingShader<'a, SPEC> {
 /// Negative or NaN products saturate to zero in the float-to-int cast.
 /// `dither` in `[0, 1)` is added before truncation so smooth gradients do not
 /// quantise into visible rings.
-fn mul_rgb3(c: u32, k: Vec3, dither: f32) -> u32 {
+pub(crate) fn mul_rgb3(c: u32, k: Vec3, dither: f32) -> u32 {
     let ch =
         |shift: u32, k: f32| (((c >> shift) & 0xff) as f32 * k * (1.0 / 256.0) + dither) as u32;
     0xff00_0000 | ch(16, k.x).min(255) << 16 | ch(8, k.y).min(255) << 8 | ch(0, k.z).min(255)
 }
 
 /// Light level (256 = full) above which [`soft_limit`] starts rolling off.
-const KNEE: f32 = 190.0;
+pub(crate) const KNEE: f32 = 190.0;
 /// Distance past the knee at which the roll-off reaches its ceiling.
 const ROLL: f32 = 110.0;
 
 /// Smoothly compresses light above the knee towards `KNEE + ROLL`, so bright
 /// pools keep texture detail instead of clipping to flat white.
-fn soft_limit(x: f32) -> f32 {
+pub(crate) fn soft_limit(x: f32) -> f32 {
     // KNEE + d / (1 + d / ROLL) with d = x - KNEE, rearranged to x - d^2 /
     // (ROLL + d) so there is no branch: d is zero below the knee.
     let d = (x - KNEE).max(0.0);
@@ -344,7 +344,7 @@ fn fast_log2(x: f32) -> f32 {
 /// Cheap noise in `[0, 1)` from the screen position. It is fixed on the
 /// screen, so it cannot crawl across surfaces as the camera moves (noise
 /// keyed by span index or texel does, since both shift every frame).
-fn dither_of(x: i32, y: i32) -> f32 {
+pub(crate) fn dither_of(x: i32, y: i32) -> f32 {
     let h = (x as u32).wrapping_mul(0x9E37_79B1) ^ (y as u32).wrapping_mul(0x85EB_CA6B);
     let h = (h ^ (h >> 15)).wrapping_mul(0x2C1B_3C6D);
     ((h >> 8) & 0xffff) as f32 * (1.0 / 65536.0)
@@ -352,7 +352,7 @@ fn dither_of(x: i32, y: i32) -> f32 {
 
 /// Add a white highlight of strength `s` scaled by the light colour `k`,
 /// saturating per channel.
-fn add_spec(c: u32, k: Vec3, s: f32) -> u32 {
+pub(crate) fn add_spec(c: u32, k: Vec3, s: f32) -> u32 {
     // The float cast saturates at u32::MAX, so the add must saturate too.
     let ch = |shift: u32, k: f32| (((c >> shift) & 0xff).saturating_add((k * s) as u32)).min(255);
     0xff00_0000 | ch(16, k.x) << 16 | ch(8, k.y) << 8 | ch(0, k.z)

@@ -158,6 +158,8 @@ impl EditorState {
 
     /// Button down. Returns whether anything visible changed.
     pub fn pointer_down(&mut self, p: Pointer) -> bool {
+        // Working on in a 2D view keeps what was grown, which it may be about to move.
+        self.commit_pending();
         self.drag = None;
         let snapped = [self.snap(p.pos[0]), self.snap(p.pos[1])];
         match self.tool {
@@ -176,7 +178,7 @@ impl EditorState {
             }
             Tool::Slice => self.slice_down(p, snapped),
             Tool::Vertex => self.vertex_down(p),
-            Tool::Select | Tool::Face => {
+            Tool::Select | Tool::Face | Tool::Voxel => {
                 if let Some(handle) = self.handle_at(p)
                     && let Some(before) = self.selected_brush().cloned()
                 {
@@ -252,7 +254,10 @@ impl EditorState {
                     Original::Brush(orig) => {
                         let mut moved = orig;
                         moved.translate(d);
-                        self.doc.replace_brush(&moved);
+                        // Volumes may touch but not overlap: it stays where it fits.
+                        if !self.volume_overlaps(&moved) {
+                            self.doc.replace_brush(&moved);
+                        }
                     }
                     Original::Entity(orig) => {
                         let q = orig.entity.pos();
@@ -358,8 +363,15 @@ impl EditorState {
         }
     }
 
+    fn volume_overlaps(&self, def: &BrushDef) -> bool {
+        def.volume().is_some_and(|v| {
+            (self.doc.volumes()).any(|(other, o)| other.id != def.id && o.overlaps(v))
+        })
+    }
+
     /// Abandons a drag, restoring the item as it was.
     pub fn cancel_drag(&mut self) {
+        self.cancel_stroke();
         match self.drag.take() {
             Some(Drag::Move { before, .. }) => match before {
                 Original::Brush(b) => self.doc.replace_brush(&b),

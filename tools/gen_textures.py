@@ -156,8 +156,96 @@ def lightpanel():
     return alb, h, 3.0
 
 
+def worley(points, seed):
+    """Periodic distance (in texels) to the nearest of `points` jittered sites."""
+    r = np.random.default_rng(seed)
+    sites = r.random((points, 2)) * N
+    y, x = np.mgrid[0:N, 0:N]
+    near = np.full((N, N), 1e9)
+    second = np.full((N, N), 1e9)
+    for sx, sy in sites:
+        dx = np.minimum(np.abs(x - sx), N - np.abs(x - sx))
+        dy = np.minimum(np.abs(y - sy), N - np.abs(y - sy))
+        d = np.hypot(dx, dy)
+        second = np.where(d < near, near, np.minimum(second, d))
+        near = np.minimum(near, d)
+    return near, second
+
+
+def streaks(noise, cut):
+    """Noise low-passed up the image, so it runs along V as fibres and runs do."""
+    keep = (np.abs(np.fft.fftfreq(N)) < cut)[:, None]
+    s = np.fft.ifft(np.fft.fft(noise, axis=0) * keep, axis=0).real
+    return (s - s.min()) / (np.ptp(s) + 1e-9)
+
+
+def smooth_step(lo, hi, x):
+    t = np.clip((x - lo) / (hi - lo), 0, 1)
+    return t * t * (3 - 2 * t)
+
+
+def ramp(t, a, b):
+    t = t[..., None]
+    return np.array(a) * (1 - t) + np.array(b) * t
+
+
+def cap():
+    """A toadstool's skin. Its spots are not here: a projected image stretches and
+    cuts them on a curved cap, so the renderer draws them from the volume."""
+    # Broad mottling only: fine grain under a bump map reads as noise on a cap.
+    mottle = tile_noise(2, 4)
+    return ramp(mottle, (0.50, 0.08, 0.05), (0.80, 0.20, 0.09)), 0.35 + 0.05 * mottle, 2.0
+
+
+def stem():
+    """Pale flesh with fine fibres running up it (V is up on a wall)."""
+    fibres = tile_noise(4, 8, 0.5)
+    streak = streaks(fibres, 0.03)
+    blotch = tile_noise(3, 4)
+    a = ramp(streak, (0.62, 0.55, 0.42), (0.90, 0.84, 0.70)) * (0.88 + 0.12 * blotch[..., None])
+    return a, 0.3 + 0.6 * streak, 2.0
+
+
+def bark():
+    """Dark furrows running up the trunk, with ridges broken into plates."""
+    grain = tile_noise(5, 8, 0.6)
+    ridge = streaks(grain, 0.05)
+    furrow = smooth_step(0.38, 0.62, ridge)
+    near, second = worley(30, 13)
+    plate = smooth_step(0.0, 3.0, second - near)
+    h = furrow * (0.6 + 0.4 * plate)
+    a = ramp(h, (0.16, 0.10, 0.06), (0.66, 0.47, 0.29)) * (0.8 + 0.3 * tile_noise(4, 8)[..., None])
+    return a, h, 5.0
+
+
+def coral():
+    """Rose stone pitted with polyp cups in a close, even field."""
+    near, second = worley(220, 17)
+    cup = 1 - smooth_step(0.6, 2.2, near)
+    rim = smooth_step(0.0, 2.0, second - near)
+    mottle = tile_noise(4, 4)
+    body = ramp(mottle, (0.76, 0.34, 0.30), (0.96, 0.62, 0.50))
+    a = body * (1 - 0.5 * cup[..., None]) * (0.85 + 0.15 * rim[..., None])
+    return a, 0.75 - 0.6 * cup + 0.1 * mottle, 4.0
+
+
+def wax():
+    """Honey-coloured wax: warm, smooth, with soft pooled runs."""
+    flow = tile_noise(4, 4, 0.45)
+    run = streaks(tile_noise(3, 8), 0.04)
+    t = 0.6 * flow + 0.4 * run
+    # Little range: on a curved comb two projections meet, and a wide one shows
+    # where they do as patches of another brightness.
+    a = ramp(t, (0.80, 0.54, 0.14), (0.92, 0.66, 0.20))
+    return a, 0.4 + 0.1 * t, 0.8
+
+
 if __name__ == "__main__":
     for name, fn in [("brick", brick), ("metal", metal), ("rock", rock),
                      ("floor", floor_tile), ("lightpanel", lightpanel)]:
+        a, h, s = fn()
+        save(name, a, h, s)
+    for name, fn in [("bark", bark), ("cap", cap), ("coral", coral),
+                     ("stem", stem), ("wax", wax)]:
         a, h, s = fn()
         save(name, a, h, s)

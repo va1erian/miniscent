@@ -9,6 +9,7 @@
 
 use mscent_math::{Polygon, Vec3d};
 use mscent_render::View;
+use mscent_world::voxel::{Context, first_solid};
 use mscent_world::{Brush, Op};
 
 use super::document::{Document, Id};
@@ -100,7 +101,10 @@ pub fn pick_face(doc: &Document, ray: &Ray) -> Option<FaceHit> {
     let brushes = build_all(doc);
     let mut best: Option<FaceHit> = None;
     for (def, brush) in doc.brushes().iter().zip(&brushes) {
-        let Some(brush) = brush else { continue };
+        // A volume's shell is never a surface.
+        let Some(brush) = brush.as_ref().filter(|_| !def.is_volume()) else {
+            continue;
+        };
         for (plane, pl) in brush.planes().iter().enumerate() {
             let Some(nv) = visible_normal(brush, plane) else {
                 continue;
@@ -134,6 +138,29 @@ pub fn pick_face(doc: &Document, ray: &Ray) -> Option<FaceHit> {
         }
     }
     best
+}
+
+/// [`pick_face`], unless a voxel surface stands in front of the face.
+pub fn pick_visible_face(doc: &Document, ray: &Ray) -> Option<FaceHit> {
+    let hit = pick_face(doc, ray)?;
+    if doc.volumes().next().is_none() {
+        return Some(hit);
+    }
+    let unit = ray.dir.normalized()?;
+    // An invalid brush elsewhere must not stop picking, and no volume can be
+    // judged against a level that will not export.
+    let Ok(level) = doc.to_level() else {
+        return Some(hit);
+    };
+    let brushes = level.static_brushes();
+    let length = ray.dir.length();
+    for (_, volume) in doc.volumes() {
+        let mut ctx = Context::new(volume, &brushes);
+        if first_solid(volume, &mut ctx, ray.origin, unit, hit.t * length).is_some() {
+            return None;
+        }
+    }
+    Some(hit)
 }
 
 /// The polygon of a face as the brush builds it, and its visible normal.

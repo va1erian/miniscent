@@ -24,6 +24,16 @@ impl Lod {
             Lod::Quarter => 4,
         }
     }
+
+    /// The cells at this level that merge into one vertex share this key. A cell
+    /// on a chunk's border merges with nothing.
+    pub fn key(self, cell: [i8; 3]) -> [i32; 3] {
+        if on_border(cell) {
+            cell.map(i32::from)
+        } else {
+            cell.map(|c| i32::from(c) / self.block() * self.block())
+        }
+    }
 }
 
 /// True for a cell a neighbouring chunk's mesh also uses.
@@ -70,17 +80,11 @@ impl ChunkMesh {
 
 /// The merged vertices, and the new index of each old vertex.
 fn merge_vertices(vertices: &[VoxelVertex], lod: Lod) -> (Vec<Merged>, Vec<u16>) {
-    let size = lod.block();
     let mut slots = vec![u16::MAX; CELLS];
     let mut merged: Vec<Merged> = Vec::new();
     let mut remap = Vec::with_capacity(vertices.len());
     for v in vertices {
-        let key = if on_border(v.cell) {
-            v.cell.map(i32::from)
-        } else {
-            v.cell.map(|c| i32::from(c) / size * size)
-        };
-        let slot = &mut slots[cell_index(key)];
+        let slot = &mut slots[cell_index(lod.key(v.cell))];
         if *slot == u16::MAX {
             *slot = merged.len() as u16;
             merged.push(Merged {

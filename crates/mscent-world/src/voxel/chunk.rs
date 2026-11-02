@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use super::{CHUNK_EDGE, CHUNK_SAMPLES};
+use super::{CHUNK_EDGE, CHUNK_SAMPLES, INHERIT_MATERIAL};
 
 /// Index of a sample inside a chunk. Coordinates must be below [`CHUNK_EDGE`].
 pub(super) const fn sample_index(x: usize, y: usize, z: usize) -> usize {
@@ -28,7 +28,7 @@ impl Chunk {
     /// The untouched chunk.
     pub const EMPTY: Chunk = Chunk::Uniform {
         delta: 0,
-        material: 0,
+        material: INHERIT_MATERIAL,
     };
 
     /// `(delta, material)` of sample `i`, which must be in range.
@@ -51,6 +51,18 @@ impl Chunk {
         match self {
             Chunk::Detail(d) => Arc::make_mut(d),
             Chunk::Uniform { .. } => unreachable!("promoted above"),
+        }
+    }
+
+    /// Whether the two hold the same changes, materials aside.
+    pub(super) fn same_deltas(&self, other: &Chunk) -> bool {
+        match (self, other) {
+            (Chunk::Uniform { delta: a, .. }, Chunk::Uniform { delta: b, .. }) => a == b,
+            (Chunk::Detail(a), Chunk::Detail(b)) => Arc::ptr_eq(a, b) || a.delta == b.delta,
+            (Chunk::Uniform { delta, .. }, Chunk::Detail(d))
+            | (Chunk::Detail(d), Chunk::Uniform { delta, .. }) => {
+                d.delta.iter().all(|v| v == delta)
+            }
         }
     }
 

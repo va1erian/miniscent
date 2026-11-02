@@ -1,6 +1,6 @@
 # Voxel volumes: design
 
-Status: M11.1 and M11.2 are done (field, dabs, meshing, level of detail, connectivity, level file); the game and editor load and keep volumes but do not draw or edit them yet. Work items are [M11](work-items.md#m11-voxel-volumes).
+Status: M11.1 to M11.9 are done; [what differs from this design](#where-the-build-differs) is listed below. Work items are [M11](work-items.md#m11-voxel-volumes).
 
 Brushes are good at architecture and bad at anything that grows. This design adds a second kind of
 geometry for hives, coral, mushrooms, trees, cave systems, stalactites and alien interiors, painted
@@ -73,23 +73,22 @@ This gives the behaviour a level designer expects, with no special cases:
 - Move a `Subtract` volume: its sculpting moves with it and its walls re-form from what lies there.
 
 Volumes may touch but not overlap. A move or growth that would overlap is refused, like a Vertex
-move that loses a corner. Touching volumes must read each other's resolved samples across the border.
-**Not yet:** today a volume's ring sees only brushes, so a tunnel across a shared face is sealed by a
-wall on each side. M11.3 does this before volumes can be seen in a level.
+move that loses a corner. Touching volumes read each other's resolved samples across the border
+(`Context::in_level`), so a tunnel across a shared face has no wall in it. With different cell sizes the
+two surfaces overlap rather than meet exactly.
 
-A mover brush stays out of the CSG, so M11.3 builds a `Context` from `Level::static_brushes`.
+A mover brush stays out of the CSG, so a `Context` is built from `Level::static_brushes`.
 
 `--dump-level` refuses a level with volumes, because the text form has none and packing it again
 would lose them. A text form can follow if an agent needs to write volumes.
 
 A volume may not share an order with a brush, because it would then be neither before nor after it.
-The loader refuses that. Until a volume is a `BrushDef` (M11.7), the editor keeps each one right after
-the last surviving brush that preceded it when loaded, and renumbers brushes and volumes as one
-sequence on save.
+The loader refuses that. In the editor a volume is an entry in the brush list, so its order is its
+position, like any brush's.
 
-**Materials of untouched rock.** `base` gives a sample's density only, so a chunk nobody painted says
-material 0. Carving into a `Subtract` volume therefore shows material 0 instead of the brush's, until
-M11.3 takes the material of the brush that decided the sample.
+**Materials of untouched rock.** A stored material of 255 means "whatever brush this sample came from":
+the face that decided it, or the nearest brush for rock too deep for any to reach. A carved wall so shows the
+material of the wall it was carved from. A brush material a sample cannot name (254 and up) draws grey.
 
 ### Where a Subtract volume meets the BSP
 
@@ -121,7 +120,9 @@ This seam is where a hybrid would show holes. The rules:
    BSP's portal from the room into the box's leaf is already correct.
 
 An `Add` volume has none of this: its ring is forced to air, and it intersects brush geometry in the
-z-buffer. Triangles wholly inside BSP solid are dropped at meshing, which also saves their light.
+z-buffer. Its triangles wholly inside BSP solid are dropped at meshing, which also saves their light. A
+`Subtract` volume keeps its triangles in the ring: a cave's surface can close just past its box, in what
+the BSP calls solid, with its air side in the box. Dropping those showed the sky.
 
 ### Invariants
 
@@ -149,7 +150,7 @@ Each of these is asserted by a test (see [Glitches](#glitches-designed-out)):
 tick from the UI thread, so `PartialEq` on a volume compares `Arc` pointers first and only reads the
 bytes of chunks whose pointers differ. An undo step shares every untouched chunk with its neighbours.
 
-Limits: `MAX_VOLUMES` 256, 4096 chunks per volume, `MAX_DETAIL_CHUNKS` 16 384 per level (128 MiB). Tolerances go in `mscent_math::epsilon`.
+Limits: `MAX_VOLUMES` 256, 4096 chunks per volume, `MAX_TOTAL_CHUNKS` 65 536 per level (every chunk is meshed at load, about 20 µs each even when empty), `MAX_DETAIL_CHUNKS` 16 384 per level (128 MiB). Tolerances go in `mscent_math::epsilon`.
 
 ### File format
 
@@ -176,8 +177,8 @@ A hostile file is the main threat, and RLE is a decompression bomb by design, so
 - A material id not in the table draws with the existing grey fallback.
 
 `voxel/wire_tests.rs` covers bit flips and truncation (whatever loads is also meshed), forged runs and
-each limit. **The writer has no limit of its own:** a level can be sculpted past `MAX_DETAIL_CHUNKS` or
-`format::MAX_FILE_BYTES` and then not load, so M11.7 must refuse such edits or fail the save.
+each limit. A stroke stops at `MAX_DETAIL_CHUNKS`, and saving reads the bytes back first and refuses a
+level the loader would refuse, leaving the old file in place.
 
 Only deltas are stored. As with brushes, the loader recompiles: `resolved` and meshes are rebuilt at
 load (about 40 µs a chunk measured for meshing, so a large cave adds tens of milliseconds).
@@ -194,8 +195,8 @@ agrees too. A brush's value must also not depend on which chunk asks for it, so 
 sample and not only per chunk.
 
 Each mesh stores positions, normals, the cell of each vertex, material per triangle and a **15-bit air
-connectivity mask** between chunk faces. M11.3 adds dropping of buried triangles, and M11.6 the per-cell
-collision index.
+connectivity mask** between chunk faces. `VoxelWorld` adds the dropping of buried triangles and the
+per-cell collision index.
 
 ### Level of detail, without cracks
 
@@ -247,15 +248,30 @@ overloaded view therefore loses distant detail first, and frame time stays bound
 - **Projection:** each triangle picks its dominant axis and maps world coordinates through it, with
   the material's scale. UVs depend only on world position, so **textures do not swim when the surface
   is edited**. Triplanar blending would cost three texture fetches a pixel, which the budget cannot pay.
-- **Seams and material borders:** a triangle whose vertices disagree on axis or material takes a
-  blending shader variant that picks either side per pixel through a 4x4 ordered dither. It is stable
-  on screen, cheap, and only those triangles pay. It is the one mechanism for both cases.
+- **Seams and material borders:** a triangle whose vertices disagree on axis chooses the axis per pixel
+  from the interpolated normal, so two projections meet along the line where the surface really turns.
+  In a narrow band around that line the two fade together, with relief fading to flat, which costs a
+  second fetch there and no hard cut on anything with contrast.
+  Two materials meet at the middle of the triangle, with a narrow 4x4 ordered dither to take off the stair-step.
+  Only those triangles pay. A dither across the whole triangle was tried first: it turned spots on a cap to
+  noise, and drew squares around anything round, because it followed the voxel grid.
 - **Light:** colour and dominant direction interpolate perspective-correctly from the vertices. The
   values are attached to world points, so this cannot return the screen-space span crawl that the
   per-pixel lightmap work removed. `examples/crawl.rs` is extended to prove it.
-- **Bump and specular:** the tangent axes are the two world axes of the projection, so moving the
-  world direction into tangent space is a swizzle, and the existing bump and specular code applies.
-  Beyond LOD0, shading is Gouraud plus albedo only.
+- **Bump:** the tangent axes are the two world axes of the projection, so moving the world direction into
+  tangent space is a swizzle, and the existing bump code applies, at every level of detail: bump fades with
+  distance by itself, and cutting it off at a chunk border drew a hard line between textured and flat rock.
+- **Specular:** at High, the highlight is worked out per pixel in world space from the interpolated normal
+  (Phong). The projection's frame is skewed wherever the surface tilts from its axis, so a highlight measured
+  in it changed with a triangle's axis, and drew the triangles as hard-edged patches on anything glossy. Low and
+  Medium draw no highlight, and were never affected. Against the skewed sum it costs nothing that can be measured.
+- **Normals:** a vertex's normal is read over its cell and its neighbours, as one cell's gradient turns sharply
+  wherever the grid crosses a crease. That costs meshing about 13% (0.33 to 0.37 ms a chunk). A sheet too thin for
+  that reach, and a surface with no crease, keep the cell's own: a flat wall must not tilt near a brush it meets.
+- **Spots:** a large bright mark on a curved surface cannot be a projected image, which stretches it and cuts it
+  where projections meet. A cap's spots come from balls in a repeating table of distance (`voxel/solid.rs`), so
+  a surface of any shape cuts each in a round patch. It reads eight samples for each pixel of that material alone,
+  at every quality.
 
 ## Lighting
 
@@ -263,19 +279,38 @@ Faces keep the atlas. Voxels add a **light record per surface cell**, keyed by t
 (colour and direction, 9 bytes), about the density of the lightmap at the same size. A vertex in a
 border cell reads the record of the chunk that owns the cell, so neighbouring chunks shade identically.
 
-Changes to the baker (`mscent-world/src/lightmap/`):
+As built (M11.5), in `mscent-world/src/lightmap/`:
 
-- **Occluders:** `segment_clear(bsp, a, b)` has two callers (`soft.rs`, `bounce.rs`). Both move to an
-  `Occluders` type: the BSP, then a grid walk through the volumes that skips uniform chunks. **Voxels
-  shadow brushes and brushes shadow voxels.**
-- **Receivers:** a cell is lit like a luxel from a point lifted 1.5 cells along its normal, with the
-  same soft shadow sampling. A cell whose point is in solid takes its value from lit neighbours, so
-  a stalagmite's root does not get a black rim where it meets the floor.
-- **Bounce:** a mixed chunk becomes one patch. Cells gather in 4³ blocks and interpolate, because
-  today's bounce is luxels x faces rays and voxels would make that explode.
-- **Cache:** `input_key` adds a hash of the resolved field's shape, not its materials, so painting
-  never re-bakes. `.msl.lit` gains the records and `store::VERSION` is bumped; the reader's checks
-  (counts, finiteness, checksum, ignore and rebake) apply as they do today.
+- **Occluders** (`occluders.rs`, `voxel_rays.rs`): both callers of `segment_clear` (`soft.rs`,
+  `bounce.rs`) ask `Occluders`: the BSP, then each volume's full-detail triangles in a grid of
+  blocks four cells wide, walked with a 3D DDA that visits only the blocks a ray crosses, so a
+  chunk with no surface costs nothing. **Voxels shadow brushes and brushes shadow voxels.** With
+  no volumes it is the BSP query alone, and the luxels are bit for bit what they were.
+- **Records** (`cell_sites.rs`, `cells.rs`): 9 bytes a cell as designed, a `u16` per colour channel
+  in 1/2048 steps (the most it holds is 32, far past the shader's soft limit) and an `i8` per
+  direction component. They are keyed by the global cell, ordered by volume, owning chunk and cell,
+  so a vertex in a border cell reads the one record every chunk that draws it reads. Which cells
+  exist follows from the world, so a cache file holds records and no keys. A level of detail reads
+  the record at its merged vertex's `cell`.
+- **Receivers:** a cell is lit like a luxel from a point lifted 1.5 cells along its normal
+  (`VOXEL_LIGHT_LIFT_CELLS`), with the same soft shadow sampling over a square of its size. A cell
+  whose lifted point is inside solid brush takes the mean of the lit cells within two cells, nearer
+  ones counting more, so a stalagmite's root does not get a black rim. Only brush solid is tested:
+  a lifted point inside voxel rock (a normal that curves into the surface within 1.5 cells) is not
+  found and is dark.
+- **Bounce:** a chunk with a surface becomes one omnidirectional patch. Cells gather in 4x4x4
+  blocks, one ray from the block's middle per patch, and the result is blurred over the 26
+  neighbours. Brush luxels still gather from face patches only: voxels do not bounce onto brushes.
+- **Cache:** `input_key` takes `cell_sites::shape_key`, a hash of every chunk's vertices (position,
+  normal, cell) and triangles, and no materials, so painting never re-bakes and carving does.
+  `.msl.lit` holds a count and the records after the luxels and `store::VERSION` is 5. The reader
+  refuses a count that does not use the bytes left, and `BakeCache` refuses a file whose count is
+  not this level's number of cells. Any 9 bytes are a record, so nothing in them can be out of range.
+- **Draft:** `Compiled::draft` bakes with hard shadows and no bounce and lights the cells the same
+  way, so a voxel floor shows its shadows at once.
+- **Per chunk:** `light_cells(&CellLighting, &CellSites, &[usize])` lights any set of sites with the
+  direct light the full bake gives them (a test holds it to that), and `CellSites::of_chunk` names a
+  chunk's sites. The stroke-time refinement below is built on these in the editor work.
 
 ### Light must never flash during a stroke
 
@@ -301,8 +336,43 @@ with the primitives in `prim.rs`. This is the same contact model as `cell.rs`, s
 from a brush floor onto voxel rock meets no invisible lip**. Prototype cost, on a plain scan with no
 index: 5.5 µs a sweep at radius 0.5.
 
-The fuzz test in `tests/fuzz.rs` is extended to random levels with volumes, asserting the same two
-properties: the sphere never ends within its radius of solid, and never crosses a surface.
+As built (M11.6):
+
+- `Solids::with_voxels(&VoxelWorld)` adds the volumes; a plain `&Bsp` still converts, with none.
+  `Arena` builds and holds the `VoxelWorld` and hands out `Arena::solids(movers)` and
+  `Arena::is_solid(p)`, which every sweep, the spawn checks and the script's placement checks use.
+  The particle system (`fx`) asks `Arena::fx_world()` (`fx/world.rs`): the BSP, then the volumes if the
+  point is in one's box. A voxel test costs `VOXEL_TEST_COST` (16) of the tick's 512 BSP-test units and a
+  bounce whose step touches a volume `VOXEL_SWEEP_COST` (128) more, with 8 bisections instead of 20; a level
+  with no volumes costs what it did. A bounce's normal is the nearest voxel triangle's
+  (`VoxelWorld::surface_normal`) when within 0.2 of the contact, else the six axis probes. The camera shake
+  of a blast is tested against the volumes too. Measured with `fx_sim_bench`: in the cave a voxel test costs
+  about 10 µs, a tick of 1365 Die particles all inside the box 420 µs (BSP alone 17 µs), so the budget lets
+  about 32 tests through a tick and the rest of a crowd passes through (Die) or dies (Bounce).
+- The triangles are the full-detail mesh with buried ones already dropped, so what is drawn is what is hit.
+  `crates/mscent-collide/src/voxel.rs` does the sweep. Triangles are **one-sided**, like the faces of a
+  cell: only the side the winding points to stops a sphere, and only while it moves against the normal.
+  A sphere embedded in a surface can therefore always leave it, and a centre wholly behind a face (in
+  the rock) is ignored by it. Edges and vertices are tested for every triangle that has them, so an open
+  boundary left by a dropped triangle costs no contact.
+- `VoxelChunk::index` is a `CellIndex` (`voxel/index.rs`): 8x8x8 cells over the mesh's own bounds, at
+  most 2 KiB and 16 four-byte entries per triangle, and none (a scan of every triangle) if a mesh would
+  need more. `VoxelWorld::for_each_chunk_in` finds the chunks a box touches, then `triangles_in` the
+  triangles of the cells it touches, each once.
+- **Solid is the sign of the nearest surface**, not a ray count: a ray parity test breaks where buried
+  triangles were dropped. `VoxelWorld::is_solid` finds the nearest drawn triangle within two chunks and
+  says solid if the point is behind it (against the blended vertex normals at that point, so a ridge
+  agrees with both its faces). Where nothing is that near, a per-chunk verdict recorded at build time
+  (`VolumeGeometry::rock`, the field's sign at the first of 27 samples the BSP leaves open) answers.
+  A point is solid if the BSP says so or this does; both are pure functions of the level's bytes.
+  Known limit: a chunk whose air the BSP splits into pieces of different sign, with nothing drawn in it,
+  gets one verdict.
+
+The fuzz test in `tests/fuzz.rs` is extended to random levels with volumes (a carved `Subtract` volume
+in a wall and an `Add` volume of growths in a room), asserting the same two properties: the sphere never
+ends within its radius of solid, and never crosses a surface. The voxel part is judged by the distance to
+the drawn triangles, by brute force over a plain hash grid in `tests/fuzz/volumes.rs`, which shares no
+code with the index or the contact maths. With the voxels left out of `Solids`, both new tests fail.
 
 The editor's `pick_face` is also blocked by voxels in front of a face, so face picking stays honest.
 
@@ -350,13 +420,13 @@ The tool is **Voxel (X)**. There is no need to place a box: dabbing is enough.
 |---|---|
 | Add / Carve | Sphere, box or capsule dab with a falloff; hold Ctrl while painting to swap |
 | Smooth | Blur toward the local average: the CE2 tool that makes everything look natural |
-| Flatten | Toward the plane set by the stroke's first hit |
-| Roughen | Displace by seeded 3D noise, for weathering |
+| Flatten | Toward the plane set by the stroke's first hit (that point and the surface normal there), fully at the dab's core. New solid takes the tool's material |
+| Roughen | Displace by seeded value noise (`voxel::noise3`), bumps three cells apart. A dab moves the surface a fraction of a cell and dabs overlap, so scrubbing deepens the same bumps rather than adding new ones |
 | Paint | Material only; no shape change, no re-bake |
-| Tunnel | Click a path; carves round cones with radius per point |
+| Tunnel | Click a path: the first click carves the mouth, each next click carves a round cone from the last point, with the radius the tool has at that click (set with the wheel). Esc ends the path. One undo step per click |
 | Growth | Generators, below |
-| Fill | Fills the box from a warped gyroid or noise field, for alien interiors |
-| Copy / Stamp | Captures a region and pastes it as a dab |
+| Fill | "Fill selected volume" in the panel replaces every sample of the selected volume from a warped gyroid or ridged noise field (`generators/field.rs`), as one undo step. It replaces the whole volume, sculpting included |
+| Copy / Stamp | Copy captures a ball (the tool's radius, up to 48 cells) of the volume under the click as samples (`voxel::capture`). Stamp replaces the same ball at the click (`voxel::stamp`), creating an add volume where there is none. The cell size must match |
 
 Radius with the wheel, strength with Ctrl+wheel; hold Shift to lock the stroke to one plane.
 Right button remains fly-look, and only the 3D view paints. The 2D views show the box, an outline of
@@ -370,15 +440,29 @@ through the same dab code, so undo, light and limits need no generator logic.
 
 | Generator | Method |
 |---|---|
-| Stalactites | Rays up and down from the brushed area find rock; tapered round cones with drip noise |
-| Mushrooms | Stem round cone, ellipsoid cap, radial carves for gills, clustered placement |
-| Coral | Branching growth with a random bias, then smooth union and Roughen |
-| Trees | Space colonization: attractors in a crown, branches grown toward them, thickness from the pipe model, flare into the ground |
-| Hive | Hexagonal comb on a surface: carved prisms that leave wax walls, on a curved base |
+| Stalactites | Tapered round cones with a flared root, scattered over a disc and growing along the surface normal, so the one generator hangs from a ceiling and rises from a floor. Drips shorten toward the edge |
+| Mushrooms | A cluster of leaning stems (round cones) with spheroid caps hollowed beneath and twelve radial gill carves |
+| Coral | Branching growth with a random bias: each branch forks twice, four levels deep, thinning as it goes, from three or four colonies |
+| Trees | Space colonization: 140 attractors in a crown, nodes grown toward the nearest ones until reached, thickness from the pipe model (exponent 3), buttress roots flaring into the ground |
+| Hive | A wax lens bulging out of the surface (so the comb is curved) with hexagonal prisms carved into it in a packed grid at random depths. The walls are what the carving leaves, never under two cells thick |
 
-**Ghost preview:** a generator runs on a background thread and shows the primitives in wireframe in
-the 3D view. Wheel re-rolls the seed; click commits one undo step. Radii are clamped to at least one
-cell, because thinner than that aliases into broken beads.
+A plan holds at most 4096 primitives (`generators::MAX_PIECES`): sphere, round cone, spheroid (an
+ellipsoid of revolution) or hexagonal prism, each added or carved. `Prim` gained the spheroid and the
+prism for this; the prism is there because a comb of round holes reads as a sponge. `Plan` widens every
+radius to at least one cell, because thinner than that aliases into broken beads. A site is a point, a
+normal, a size (the tool's radius) and a cell. The normal comes from three parallel rays through the pick
+code a stroke uses (`generators::surface_normal`), so it works on brushes and on voxel surfaces alike.
+Not done: a generator does not snap each drip or stem to the surface with a ray of its own, so on a
+strongly curved surface a root can float or sink. Roots are sunk a little and flared to hide that.
+
+**Held result instead of a ghost.** The design asked for a wireframe of the primitives in the 3D view.
+The highlight overlay (`studio/highlight.rs`) fills and outlines polygons with the frame's depth test
+and has no wire primitive, so a wireframe of a few hundred spheres and cones would have needed a second
+overlay path. What is built instead is the real result: with a generator chosen in the panel, a click
+runs it on the stroke thread, puts the result in the document without recording it, and holds it. The
+wheel, or the Seed field, re-rolls: the document goes back to before and the generator runs again with
+another seed. Commit records one undo step. Esc, a new click, undo or a tool change drops it. The volume
+grows the way a stroke's does, so the limits (detail chunks, neighbours, box size) apply unchanged.
 
 ### Stroke semantics
 
@@ -459,7 +543,46 @@ noisy: repeat runs moved these by up to about 25%.
 | Carve dab, with copy on write | r=1: about 20 µs, r=2: about 90 µs, r=4: about 500 µs, r=8: about 3 ms |
 | Smooth dab, with copy on write | r=1: about 37 µs, r=2: about 230 µs, r=4: about 1.6 ms, r=8: about 12 ms |
 
-Drawing, from a throwaway prototype that M11.4 replaces with a real benchmark, on frames of 640x360
+Collision (M11.6), same scene, enclosed so every sweep starts in the cave's air, 2000 seeded positions
+and directions, best of 20 passes, from the same example:
+
+| What | Result |
+|---|---|
+| `VoxelWorld::build` (meshing, level of detail, index) | about 70 ms for 256 chunks |
+| Cell index | about 82 µs a chunk, 2.5 MiB for 220k triangles (12 bytes a triangle) |
+| Sweep at radius 0.5, one step of 0.1 | about 24 µs, most of it the start-in-rock test |
+| Sweep at radius 0.5, a move of 4 units | about 46 µs |
+| Sweep as a ray (radius 0), 0.1 and 4 units | about 17 µs and 31 µs |
+| `slide_move`, 10 units/s for one step, radius 0.5 | about 33 µs (up to four sweeps) |
+| `is_solid`, BSP and voxels | about 17 µs, doubled when the nearest-surface search was corrected: it had been stopping a ring early and sometimes giving the wrong answer |
+| The same step with the BSP alone | 0.17 µs |
+
+The cave is far denser than a level: a chunk here holds about 860 triangles. At 120 steps a second one
+walking body costs about 4 ms a second, 0.4% of a core. The start test is the costliest part of a short
+sweep; it searches rings of index cells for the nearest triangle. Not measured on the i3-7100U.
+
+Drawing through the real path, from `cargo run --release -p mscent-render --example voxel_bench_frame`:
+one worker, 640x360, the same cave from 40 air positions, against a brush room all of whose pixels are lit
+faces. The first frame of a view can run far over budget until the governor acts.
+
+| What | Low | High |
+|---|---|---|
+| Cave, mean frame (worst 19 to 22 ms at High) | 9.3 to 11.0 ms | 11.7 to 13.2 ms |
+| Cave, cost per screen pixel | 41 to 48 ns | 51 to 57 ns |
+| Brush room, cost per screen pixel | 18 to 27 ns | 30 to 50 ns |
+
+Each row moves between its ends from run to run on an idle machine, the brush row most, and the cause is not
+known, so compare ratios with care. Anything compiling in the background inflates all of these.
+
+On this dense scene a voxel pixel at High costs about 1.1 to 1.3 times a brush pixel on the latest runs, which **misses** the aim of no
+more. Overdraw is 1.00, as chunks draw near first and covered spans are skipped, so it is not that. About 40 000
+triangles, past the 25 000 budget because level of detail cannot reduce this scene further, and spans of
+about 5 pixels against 16 for a wall, set the floor at Low. Keeping bump at every level of detail and fading
+projections together raised High from 9.6 ms: both were bought for the look, as a hard line at a chunk
+border and a hard cut between projections were the alternatives. A level at or under the budget pays less; the
+generator showcases draw 5 000 to 24 000 triangles.
+
+The prototype this replaced, on the same frames, for the record:
 from 40 air positions:
 
 | What | Result |
@@ -493,10 +616,31 @@ What it does not say:
   That would put 25k triangles near 2.8 ms, but it also puts today's 8.86 ms frame near 44 ms, so
   M1.4 and M8.5 remain open for the whole game, not just this.
 - **Prototype fill has no bump or specular,** and fills at about 10 ns per pixel against about 38 ns
-  for the whole showcase frame. A voxel pixel at High must cost no more than a brush pixel; the prototype
-  does not show that. M11.4 measures it.
+  for the whole showcase frame.
 - **It has no near-plane clipping** and no shader variants.
-- **Baking with voxel occluders was not measured.**
+- **Baking with voxel occluders** is measured below.
+
+Baking, from `cargo run --release -p mscent-render --example voxel_bake`: a room around the same
+kind of warped gyroid, 8x8x4 chunks of 0.25 cells (256 chunks, 295k triangles, 147 554 surface
+cells, 1.27 MiB of records), four lamps, the game's bake settings, 24 threads. The machine is
+noisy; these are the range of three runs.
+
+| What | Result |
+|---|---|
+| Sites (which cells exist) | about 18 ms |
+| Occluders built (grids of 295k triangles) | about 35 ms |
+| Whole bake, brush faces only (6 faces) | 12 to 13 ms |
+| Same, rays also tested against the voxels | 93 to 116 ms |
+| Faces and cells, shadows from brushes only | 70 to 81 ms |
+| Faces and cells, shadows from brushes and voxels | 410 to 450 ms |
+| Cells' direct light alone, 1 thread, brushes only | about 60 ms, 0.4 us a cell |
+| Same, with voxel occluders | 2.3 to 2.7 s, 15 to 18 us a cell |
+
+So voxel occluders cost about 6 times the bake of the cells, and a ray against the voxels costs
+about 2 us where one against the BSP of a room costs a tenth of that. The scene's brush part is
+tiny; in a level whose brush bake takes seconds this adds well under one. The bake runs once per
+distinct level and not on a stroke, but the editor's draft and the per-chunk refinement call the
+same rays, so they pay these costs for the cells they touch. Not measured on the i3-7100U.
 
 ### Budgets
 
@@ -520,16 +664,41 @@ Crate edges do not change: field and meshing live in `mscent-world`, so render a
 ```text
 crates/mscent-world/src/voxel/   volume, chunk, context and block (fold, base, ring), prim, dab,
                                  surface (nets), lod, connectivity, wire (section 5), query (grid walk)
-crates/mscent-world/src/lightmap/occluders.rs, cells.rs
+crates/mscent-world/src/lightmap/occluders.rs, voxel_rays.rs, cell_sites.rs, cells.rs, cells_bounce.rs
 crates/mscent-collide/src/voxel.rs, solids.rs
 crates/mscent-render/src/voxel/  prepare, fill, flood, shader, governor
 crates/mscent-game/src/combat.rs (carve), destruct.rs (queue)
-apps/editor/src/model/voxel/     tool, stroke, grow, generators/*
+apps/editor/src/model/           stroke (thread), sculptor (what a stroke does), growth (generator and
+                                 Fill jobs), voxel (state), generators/* (one file per generator)
 apps/editor/src/studio/live.rs   mesher thread, batches
-apps/editor/src/ui/voxelpanel.rs
+apps/editor/src/ui/voxelpanel.rs dab, generator, seed, Commit, Fill
 apps/editor/src/selftest/voxel.rs
 ```
 
+
+## Where the build differs
+
+| Design | Built | Why |
+|---|---|---|
+| Chunks beyond the fog's total depth are skipped | Drawn at the lowest detail | Fog colour is not the sky's: a far wall would turn into sky at the fog line |
+| Dabs up to radius 2 on the UI thread, larger ones as a job | Every dab on the stroke's thread | A UI tick is an `Arc` clone at any radius |
+| `Cmd::VoxelBatch` with per-chunk generations | One live job at a time, taking the newest document | Stale work cannot be queued, so nothing needs a generation |
+| Undo budget of 256 MiB in `History` | Not built | History still has no budget of any kind; a chunk is shared until changed |
+| Stroke light: hard shadows at 150 ms, then a per-chunk bake | Cells inherit during the stroke; the whole-level bake runs when it ends | `light_cells` exists for per-chunk work if a large level needs it |
+| Wireframe ghost for generators | The real result, held until Commit | `highlight.rs` only fills polygons; a second overlay path was not worth it |
+| Ctrl+wheel strength, Shift locks a plane | Not built | Roughen's strength is fixed |
+| Add, Carve as sphere, box or capsule | Capsule between pointer samples | A sphere is the zero-length case |
+| Generators in the tool's material | Living things in their own: bark, cap, stem, coral, wax | It is most of what makes them read; the tool's material applies to drips |
+| Destructible flag on the material, in level data | `materials::is_destructible`: rock | No format change for a game with five materials |
+
+Known limits:
+
+- Brush luxels gather no bounce from voxel patches; only cells gather from faces and chunks.
+- A chunk new in a stroke or a shot, with no old cell to inherit from, is lit by lamps with no shadows until the next bake.
+- Light does not newly pour through a shot hole, and brush shadows do not change, as designed.
+- `check_frame_cost.py` has no voxel scene.
+- Particles in a volume's box are limited to about 32 point tests and 4 bounces a tick, so a crowd of sparks in
+  a cave is thinned: Die particles over the limit pass through rock for that tick, Bounce particles die.- The reference machine (i3-7100U) is unmeasured for all of this.
 
 ## Alternatives rejected
 

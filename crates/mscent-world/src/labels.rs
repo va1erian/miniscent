@@ -163,6 +163,26 @@ impl Level {
     }
 }
 
+impl Level {
+    /// The brushes the BSP is compiled from: the static ones, and the shell of
+    /// each subtract volume. Faces are extracted from the same list. A shell
+    /// that is not a valid brush cannot come from a volume the loader accepted.
+    pub fn csg_brushes(&self) -> Cow<'_, [Brush]> {
+        let brushes = self.static_brushes();
+        let mut shells = self
+            .volumes
+            .iter()
+            .filter_map(|v| v.shell()?.ok())
+            .peekable();
+        if shells.peek().is_none() {
+            return brushes;
+        }
+        let mut all = brushes.into_owned();
+        all.extend(shells);
+        Cow::Owned(all)
+    }
+}
+
 fn check_name<'a>(name: &'a str, names: &mut BTreeSet<&'a str>) -> Result<(), LabelError> {
     if !valid_name(name) {
         return Err(LabelError::BadName);

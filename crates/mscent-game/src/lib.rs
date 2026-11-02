@@ -31,6 +31,7 @@
 
 pub mod arena;
 pub mod combat;
+pub mod destruct;
 pub mod enemy;
 pub mod fx;
 pub mod game;
@@ -72,6 +73,8 @@ pub use weapon::{Shot, Weapon};
 #[cfg(test)]
 mod adv_tests;
 #[cfg(test)]
+mod destruct_tests;
+#[cfg(test)]
 mod enemy_tests;
 #[cfg(test)]
 mod game_tests;
@@ -89,3 +92,5 @@ mod script_prop_tests;
 mod script_tests;
 #[cfg(test)]
 mod test_util;
+#[cfg(test)]
+mod voxel_tests;

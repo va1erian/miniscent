@@ -73,7 +73,7 @@ fn a_failed_remount_keeps_the_old_lists_and_the_next_try_succeeds() {
         let fail = |_: &Host, _: Layout<Msg>| Err(BackendError::CreateFailed("forced"));
         assert!(panel.show_materials_with(1, Some(&bigger), &fail).is_err());
         assert_eq!(panel.materials_shown(), 0, "still to be done");
-        assert_eq!(panel.face.thumb_count(), 5);
+        assert_eq!(panel.face.thumb_count(), 10);
         panel.sync(&mut state.borrow_mut());
 
         // The thumbnails mount and the second one, the list's, fails.
@@ -88,22 +88,26 @@ fn a_failed_remount_keeps_the_old_lists_and_the_next_try_succeeds() {
         let got = panel.show_materials_with(1, Some(&bigger), &second_fails);
         assert!(got.is_err());
         assert_eq!(panel.materials_shown(), 0, "still to be done");
-        assert_eq!(panel.face.thumb_count(), 6, "the thumbnails are consistent");
+        assert_eq!(
+            panel.face.thumb_count(),
+            11,
+            "the thumbnails are consistent"
+        );
         assert!(
             Rc::ptr_eq(&old, &panel.material.get()),
             "the old list stays"
         );
-        assert_eq!(panel.materials.labels().len(), 6, "with its own rows");
+        assert_eq!(panel.materials.labels().len(), 11, "with its own rows");
         panel.sync(&mut state.borrow_mut());
         assert!(panel.note_failure(1), "reported once");
         assert!(!panel.note_failure(1), "not on every tick");
 
         // The next tick's try works.
         let sizes = panel.show_materials(1, Some(&bigger)).expect("mounts");
-        assert_eq!(sizes.len(), 6);
+        assert_eq!(sizes.len(), 11);
         assert_eq!(panel.materials_shown(), 1);
         assert!(!Rc::ptr_eq(&old, &panel.material.get()), "a new list");
-        assert_eq!(panel.materials.labels().len(), 7);
+        assert_eq!(panel.materials.labels().len(), 12);
         panel.sync(&mut state.borrow_mut());
     });
 }

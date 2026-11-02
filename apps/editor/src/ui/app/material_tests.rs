@@ -10,7 +10,7 @@ use xui::{Dip, Theme};
 use super::*;
 use crate::model::Selection;
 
-/// The stock materials, a new one at 5, a retired id at 6 and another at 7.
+/// The stock materials, a new one at 10, a retired id at 11 and another at 12.
 fn extended(stock: &MaterialTable) -> MaterialTable {
     let brick = stock.get(MaterialId(0)).expect("brick");
     let mut table = stock.clone();
@@ -46,8 +46,8 @@ fn script(ui: &mut Ui<Msg>) -> xui::backend::Result<Editor> {
     app.state.borrow_mut().selection = Some(Selection::Brush(first));
     app.refresh();
     assert_eq!(shown(&mut app, 3), "metal");
-    assert_eq!(shown(&mut app, 7), "(other id)", "not in this generation");
-    assert_eq!(app.state.borrow().texture_sizes.len(), 5);
+    assert_eq!(shown(&mut app, 12), "(other id)", "not in this generation");
+    assert_eq!(app.state.borrow().texture_sizes.len(), 10);
     let before = icon_buttons(&ui.layout_report());
 
     // What is being typed in a field stays through the replacement.
@@ -69,12 +69,16 @@ fn script(ui: &mut Ui<Msg>) -> xui::backend::Result<Editor> {
     assert_eq!(app.panel.material_text(), "glass", "the list did follow");
 
     assert_eq!(shown(&mut app, 3), "metal", "stock ids keep their rows");
-    assert_eq!(shown(&mut app, 5), "concrete");
-    assert_eq!(shown(&mut app, 6), "(other id)", "a retired id has no name");
-    assert_eq!(shown(&mut app, 7), "glass");
+    assert_eq!(shown(&mut app, 10), "concrete");
+    assert_eq!(
+        shown(&mut app, 11),
+        "(other id)",
+        "a retired id has no name"
+    );
+    assert_eq!(shown(&mut app, 12), "glass");
     assert_eq!(
         app.state.borrow().texture_sizes.len(),
-        8,
+        13,
         "the sizes followed"
     );
     let report = ui.layout_report();

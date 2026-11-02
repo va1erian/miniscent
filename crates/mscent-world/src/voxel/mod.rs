@@ -22,24 +22,41 @@
 //! * [`Volume`] (`volume.rs`): sparse copy-on-write chunks. Cloning is O(1).
 //! * [`Context`] (`context.rs`): what the brushes contribute to one volume.
 //! * [`apply_dab`], [`fill`] (`dab.rs`): edits, returning the chunks to remesh.
+//! * [`capture`], [`stamp`] (`clip.rs`): Copy and Stamp.
+//! * [`noise3`] (`noise.rs`): seeded noise for roughening and generated fields.
 //! * [`Mesher`] (`surface.rs`): surface nets, one [`ChunkMesh`] per chunk.
 //! * [`ChunkMesh::clustered`] (`lod.rs`): level of detail without cracks.
 //! * [`AirMask`] (`connectivity.rs`): which chunk faces air joins.
+//! * [`VoxelWorld`] (`world.rs`): every volume of a level meshed against its BSP.
+//! * [`CellIndex`] (`index.rs`) and the queries in `query.rs`: the triangles of a
+//!   box, and whether a point is solid, for collision.
 //! * `wire.rs`: the level file's section for volumes.
 
 mod block;
 mod chunk;
+mod clip;
 mod connectivity;
 mod context;
 mod dab;
+mod edit;
+mod index;
 mod lod;
+mod noise;
+mod parts;
 mod prim;
+mod query;
+mod span;
 mod surface;
 mod volume;
 pub(crate) mod wire;
+mod world;
 
 #[cfg(test)]
 mod dab_tests;
+#[cfg(test)]
+mod edit_tests;
+#[cfg(test)]
+mod query_tests;
 #[cfg(test)]
 mod resolve_tests;
 #[cfg(test)]
@@ -47,17 +64,27 @@ mod surface_tests;
 #[cfg(test)]
 mod test_util;
 #[cfg(test)]
+mod tools_tests;
+#[cfg(test)]
 mod wire_tests;
+#[cfg(test)]
+mod world_tests;
 
 pub use chunk::{Chunk, ChunkData};
+pub use clip::{Clip, MAX_CLIP_HALF, capture, stamp};
 pub use connectivity::{AirMask, Face};
 pub use context::Context;
 pub use dab::{DabOp, apply_dab, fill};
+pub use edit::{first_solid, solid_material_near};
+pub use index::{CellIndex, INDEX_EDGE};
 pub use lod::Lod;
+pub use noise::noise3;
+pub use parts::{MIN_ISLAND_SAMPLES, remove_islands, solid_parts};
 pub use prim::Prim;
 pub use surface::{ChunkMesh, Mesher, VoxelVertex};
 pub use volume::{CellSize, Volume, VolumeError};
-pub use wire::{MAX_DETAIL_CHUNKS, MAX_VOLUMES};
+pub use wire::{MAX_DETAIL_CHUNKS, MAX_TOTAL_CHUNKS, MAX_VOLUMES};
+pub use world::{NO_CHUNK, RemeshedChunk, VolumeGeometry, VoxelChunk, VoxelWorld};
 
 /// Samples along one edge of a chunk.
 pub const CHUNK_EDGE: usize = 16;
@@ -71,6 +98,13 @@ pub const UNITS_PER_CELL: f64 = 32.0;
 pub const MAX_SAMPLE: i8 = 63;
 /// Largest magnitude of a `delta`: enough to override any base.
 pub const MAX_DELTA: i8 = 2 * MAX_SAMPLE;
+
+/// A stored material meaning "whatever brush this sample came from". Rock nobody
+/// painted looks like the wall it was carved out of.
+pub const INHERIT_MATERIAL: u8 = u8::MAX;
+/// What a sample shows for a brush material samples cannot name: not in any
+/// table, so it draws with the grey fallback.
+pub const FALLBACK_MATERIAL: u8 = u8::MAX - 1;
 
 /// World distance `d` as a sample, for a lattice of `cell` world units. The
 /// sign always survives, so a surface never moves to the wrong side of a

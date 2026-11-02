@@ -2,31 +2,41 @@
 //! average direct light it received, and each luxel gathers from the patches
 //! it can see. One shadow ray per luxel and patch keeps rooms that are lit
 //! only through a door from going black, at a cost of luxels x faces rays.
+//! Voxel cells gather from the same patches and from patches of their own
+//! (see `cells_bounce.rs`).
 
 use super::bake::{Scene, luminance, rows_to_grids};
 use super::parallel::par_map;
-use super::ray::segment_clear;
 use super::uv::FaceProjection;
 use super::{LightFace, Luxel};
 use mscent_math::Vec3;
 use std::f32::consts::PI;
 
-/// A whole face treated as one diffuse emitter.
-struct Patch {
-    centre: Vec3,
-    normal: Vec3,
-    area: f32,
+/// A face, or the surface of a voxel chunk, treated as one diffuse emitter.
+pub(super) struct Patch {
+    /// Where its rays end: on the surface of a face, or in the air in front of
+    /// a chunk's surface.
+    pub centre: Vec3,
+    pub normal: Vec3,
+    pub area: f32,
     /// Light the patch sends back out: average direct colour times albedo.
-    radiosity: Vec3,
+    pub radiosity: Vec3,
+    /// Shines in every direction, as a chunk's crumpled surface does, instead
+    /// of only out of its front.
+    pub omni: bool,
 }
 
-/// Adds the bounce contribution to the direct-light `grids` (one per face).
-/// Does nothing when albedo or gain is zero.
-pub(super) fn add_bounce(s: &Scene, rows: &[(usize, u32)], grids: &mut [Vec<Luxel>]) {
+/// Adds the bounce contribution of `patches` to the direct-light `grids` (one
+/// per face). Does nothing when albedo or gain is zero.
+pub(super) fn add_bounce(
+    s: &Scene,
+    rows: &[(usize, u32)],
+    patches: &[Patch],
+    grids: &mut [Vec<Luxel>],
+) {
     if s.cfg.albedo <= 0.0 || s.cfg.bounce_gain <= 0.0 {
         return;
     }
-    let patches = build_patches(s, grids);
     if patches.iter().all(|p| luminance(p.radiosity) <= 1e-6) {
         return;
     }
@@ -34,7 +44,7 @@ pub(super) fn add_bounce(s: &Scene, rows: &[(usize, u32)], grids: &mut [Vec<Luxe
         if s.cancelled() {
             return Vec::new();
         }
-        gather_row(s, &patches, rows[i].0, rows[i].1)
+        gather_row(s, patches, rows[i].0, rows[i].1)
     });
     let extra = rows_to_grids(s.proj, extra);
     for (grid, add) in grids.iter_mut().zip(extra) {
@@ -45,7 +55,8 @@ pub(super) fn add_bounce(s: &Scene, rows: &[(usize, u32)], grids: &mut [Vec<Luxe
     }
 }
 
-fn build_patches(s: &Scene, grids: &[Vec<Luxel>]) -> Vec<Patch> {
+/// One patch per face, from the direct light of its luxels.
+pub(super) fn face_patches(s: &Scene, grids: &[Vec<Luxel>]) -> Vec<Patch> {
     let faces = s.faces.iter().zip(s.proj).zip(grids);
     faces
         .map(|((face, proj), grid)| {
@@ -56,6 +67,7 @@ fn build_patches(s: &Scene, grids: &[Vec<Luxel>]) -> Vec<Patch> {
                 normal: proj.normal,
                 area: polygon_area(face, proj),
                 radiosity: avg * s.cfg.albedo,
+                omni: false,
             }
         })
         .collect()
@@ -105,24 +117,37 @@ fn gather_row(s: &Scene, patches: &[Patch], face: usize, row: u32) -> Vec<Luxel>
         .collect()
 }
 
-/// Light reaching `point` from one patch (disc form factor, so nearby patches
-/// do not blow up) and the unit direction towards it.
+/// Light reaching `point` from one patch and the unit direction towards it.
 fn gather_from(s: &Scene, p: &FaceProjection, point: Vec3, patch: &Patch) -> Option<(Vec3, Vec3)> {
+    let (colour, dir) = transfer(s, patch, point, p.normal)?;
+    let bias = s.cfg.normal_bias;
+    let from = (point + p.normal * bias).to_f64();
+    let target = (patch.centre + patch.normal * bias).to_f64();
+    s.occ.segment_clear(from, target).then_some((colour, dir))
+}
+
+/// What the patch sends to a surface point facing `normal`, before shadows
+/// (disc form factor, so nearby patches do not blow up), and the unit
+/// direction towards the patch.
+pub(super) fn transfer(
+    s: &Scene,
+    patch: &Patch,
+    point: Vec3,
+    normal: Vec3,
+) -> Option<(Vec3, Vec3)> {
     if luminance(patch.radiosity) <= 1e-6 {
         return None;
     }
     let to = patch.centre - point;
     let dist2 = to.length_squared();
     let dir = to.normalized()?;
-    let cos_here = dir.dot(p.normal);
-    let cos_there = -dir.dot(patch.normal);
+    let cos_here = dir.dot(normal);
+    let cos_there = if patch.omni {
+        0.5
+    } else {
+        -dir.dot(patch.normal)
+    };
     if cos_here <= 0.0 || cos_there <= 0.0 {
-        return None;
-    }
-    let bias = s.cfg.normal_bias;
-    let from = (point + p.normal * bias).to_f64();
-    let target = (patch.centre + patch.normal * bias).to_f64();
-    if !segment_clear(s.bsp, from, target) {
         return None;
     }
     let form = patch.area * cos_here * cos_there / (PI * dist2 + patch.area);

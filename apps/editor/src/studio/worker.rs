@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use miniscent_game::FrameStats;
 use mscent_platform::Event;
-use mscent_render::{Framebuffer, View};
+use mscent_render::{Framebuffer, View, VoxelChange};
 
 use super::Mode;
 use super::highlight::Highlights;
@@ -57,6 +57,8 @@ pub trait Scene: Send + 'static {
     /// Draws the same level with the light of `lit` from now on, leaving a
     /// running game as it is.
     fn relight(&mut self, _lit: Built) {}
+    /// Changes voxel surfaces under the same brushes.
+    fn apply_voxels(&mut self, _change: VoxelChange) {}
 }
 
 /// A picture the thread is asked to draw.
@@ -103,6 +105,10 @@ impl Scene for Slow {
     fn relight(&mut self, lit: Built) {
         self.inner.relight(lit);
     }
+
+    fn apply_voxels(&mut self, change: VoxelChange) {
+        self.inner.apply_voxels(change);
+    }
 }
 
 enum Cmd {
@@ -114,6 +120,8 @@ enum Cmd {
     Highlights(Highlights),
     Scene(Box<dyn Scene>),
     Relight(Box<Built>),
+    /// One whole batch, so a frame never shows half a dab.
+    Voxels(VoxelChange),
 }
 
 #[derive(Default)]
@@ -224,6 +232,12 @@ impl Worker {
     /// Hands the current scene new light for the same level.
     pub fn relight(&mut self, lit: Built) {
         self.held.push_back(Cmd::Relight(Box::new(lit)));
+        self.flush();
+    }
+
+    /// Changes voxel surfaces under the current scene. Never lost, like a scene.
+    pub fn voxels(&mut self, change: VoxelChange) {
+        self.held.push_back(Cmd::Voxels(change));
         self.flush();
     }
 
@@ -338,6 +352,10 @@ impl Loop {
             }
             Cmd::Relight(lit) => {
                 scene.relight(*lit);
+                self.dirty = true;
+            }
+            Cmd::Voxels(change) => {
+                scene.apply_voxels(change);
                 self.dirty = true;
             }
             Cmd::Highlights(h) => {

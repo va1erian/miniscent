@@ -14,6 +14,7 @@ pub mod props;
 mod toolbar;
 mod view3d;
 mod viewport;
+mod voxelpanel;
 mod wrap;
 
 mod probe;
@@ -21,4 +22,5 @@ mod probe;
 pub use app::{Editor, Msg, cmd};
 pub use probe::Probe;
 pub use props::Prop;
-pub use view3d::Click;
+pub use view3d::{Click, PaneDrag};
+pub use voxelpanel::VoxelProp;

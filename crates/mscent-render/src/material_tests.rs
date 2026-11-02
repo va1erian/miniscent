@@ -23,7 +23,21 @@ fn solid(name: &str) -> Material {
 fn assets_load_and_texels_read_back() {
     let table = MaterialTable::load_dir(&textures_dir()).unwrap();
     let names: Vec<&str> = table.iter().map(|(_, m)| m.name.as_str()).collect();
-    assert_eq!(names, ["brick", "floor", "lightpanel", "metal", "rock"]);
+    assert_eq!(
+        names,
+        [
+            "brick",
+            "floor",
+            "lightpanel",
+            "metal",
+            "rock",
+            "bark",
+            "cap",
+            "coral",
+            "stem",
+            "wax"
+        ]
+    );
 
     // Expected values were read with an independent decoder (PIL).
     let brick = &table.get(table.find("brick").unwrap()).unwrap().texture;
@@ -139,4 +153,22 @@ fn a_retired_id_holds_its_place_and_finds_nothing() {
     let ids: Vec<u16> = table.iter().map(|(id, _)| id.0).collect();
     assert_eq!(ids, [0, 2]);
     assert!(table.filtered().get(gone).is_none());
+}
+
+/// Saved levels and the voxel generators store these ids, and only the first five
+/// are checked when a level is built.
+#[test]
+fn the_living_materials_keep_their_ids_in_the_real_manifest() {
+    use mscent_world::materials::{BARK, CAP, CORAL, STEM, WAX};
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures");
+    let table = MaterialTable::load_dir(&dir).expect("loads");
+    for (id, name) in [
+        (BARK, "bark"),
+        (CAP, "cap"),
+        (CORAL, "coral"),
+        (STEM, "stem"),
+        (WAX, "wax"),
+    ] {
+        assert_eq!(table.find(name), Some(MaterialId(id)), "{name}");
+    }
 }

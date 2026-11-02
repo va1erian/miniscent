@@ -245,7 +245,13 @@ impl Game {
             let mut bodies: Vec<&mut Body> = vec![&mut self.player.body];
             let alive = self.enemies.iter_mut().filter(|e| e.alive());
             bodies.extend(alive.map(|e| &mut e.body));
-            match push_mover(&self.arena.bsp, &mut self.solids, i, &pose, &mut bodies) {
+            match push_mover(
+                self.arena.solids(&[]),
+                &mut self.solids,
+                i,
+                &pose,
+                &mut bodies,
+            ) {
                 Push::Moved => {
                     if self.movers[i].advance(pose) {
                         self.events.push(Event::MoverArrived(i));

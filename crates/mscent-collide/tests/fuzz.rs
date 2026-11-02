@@ -7,15 +7,24 @@
 //!   clear, and a sweep reported as unobstructed reaches its target;
 //! * a slide never moves farther than its velocity allows, and a slide that
 //!   touched nothing followed a clear straight path.
+//!
+//! The same properties are checked on levels with voxel volumes (M11.6): a
+//! carved `Subtract` volume in a wall and an `Add` volume of growths in a
+//! room. There the voxel part is judged by the distance to the drawn
+//! triangles, by brute force (`fuzz/volumes.rs`).
 
 #[path = "fuzz/oracle.rs"]
 mod oracle;
+#[path = "fuzz/volumes.rs"]
+mod volumes;
 
-use mscent_collide::{MAX_BUMPS, slide_move, sweep_sphere};
+use mscent_collide::{MAX_BUMPS, Solids, slide_move, sweep_sphere};
 use mscent_math::rng::Rng;
 use mscent_math::{Vec3, Vec3d};
+use mscent_world::voxel::VoxelWorld;
 use mscent_world::{Brush, Bsp, GenParams, compile, generate, room_centers};
 use oracle::Oracle;
+use volumes::{VoxelOracle, add_volumes};
 
 const DEFAULT_ITERS: usize = 6000;
 const LEVELS: usize = 12;
@@ -23,10 +32,51 @@ const RADII: [f32; 6] = [0.05, 0.25, 0.5, 0.75, 1.0, 1.5];
 /// Spacing of the reference sub-stepped path scan.
 const PATH_STEP: f64 = 0.1;
 
+/// A sphere may sit this much inside a triangle's surface, as for brushes.
+const VOXEL_TOLERANCE: f64 = 5.0e-3;
+
 struct Level {
+    /// What the BSP compiled from: brushes, plus a shell for each volume.
     brushes: Vec<Brush>,
     bsp: Bsp,
     centers: Vec<Vec3d>,
+    voxels: Option<(VoxelWorld, VoxelOracle)>,
+}
+
+impl Level {
+    fn solids(&self) -> Solids<'_> {
+        let solids = Solids::from(&self.bsp);
+        self.voxels
+            .as_ref()
+            .map_or(solids, |(world, _)| solids.with_voxels(world))
+    }
+
+    /// True if a sphere of radius `r` at `p` overlaps brush or voxel solid.
+    fn overlaps(&self, probe: &Oracle, p: Vec3d, r: f64) -> bool {
+        probe.overlaps(&self.brushes, p, r)
+            || self
+                .voxels
+                .as_ref()
+                .is_some_and(|(_, oracle)| oracle.overlaps(p, r, VOXEL_TOLERANCE))
+    }
+
+    /// The first fraction of `a -> b`, sampled every `step`, where it overlaps.
+    fn first_overlap(&self, probe: &Oracle, a: Vec3d, b: Vec3d, r: f64, step: f64) -> Option<f64> {
+        if self.voxels.is_none() {
+            return probe.first_overlap(&self.brushes, a, b, r, step);
+        }
+        let len = (b - a).length();
+        let n = (len / step).ceil().max(1.0) as u32;
+        (0..=n)
+            .map(|i| f64::from(i) / f64::from(n))
+            .find(|&t| self.overlaps(probe, a.lerp(b, t), r))
+    }
+
+    /// Whether `p` is inside the voxel rock, by the library's own verdict. Only
+    /// used to pick starts, never to judge a result.
+    fn in_rock(&self, p: Vec3d) -> bool {
+        self.voxels.as_ref().is_some_and(|(w, _)| w.is_solid(p))
+    }
 }
 
 fn iters() -> usize {
@@ -36,7 +86,7 @@ fn iters() -> usize {
         .unwrap_or(DEFAULT_ITERS)
 }
 
-fn make_level(seed: u64) -> Level {
+fn make_level(seed: u64, volumes: bool) -> Level {
     let params = GenParams {
         cols: 1 + (seed % 3) as u32,
         rows: 1 + ((seed / 3) % 3) as u32,
@@ -44,11 +94,23 @@ fn make_level(seed: u64) -> Level {
         pillar_percent: 40 + (seed % 5) as u32 * 15,
     };
     let brushes = generate(seed, &params);
+    let centers = room_centers(seed, &params);
+    if volumes {
+        let v = add_volumes(&brushes).expect("a generated level has a first room");
+        let oracle = VoxelOracle::new(&v.world);
+        return Level {
+            brushes: v.csg,
+            bsp: v.bsp,
+            centers,
+            voxels: Some((v.world, oracle)),
+        };
+    }
     let bsp = compile(&brushes).expect("generated level compiles");
     Level {
         brushes,
         bsp,
-        centers: room_centers(seed, &params),
+        centers,
+        voxels: None,
     }
 }
 
@@ -83,7 +145,7 @@ fn random_start(lv: &Level, probe: &Oracle, rng: &mut Rng, r: f64) -> Option<Vec
             c.y + rng.range_f64(-18.0, 18.0),
             rng.range_f64(0.0, 12.0),
         );
-        if !probe.overlaps(&lv.brushes, p, r + 0.01) {
+        if !lv.overlaps(probe, p, r + 0.01) && !lv.in_rock(p) {
             return Some(p);
         }
     }
@@ -94,10 +156,10 @@ fn fail(what: &str, seed: u64, detail: &str) -> ! {
     panic!("{what} (level seed {seed}): {detail}");
 }
 
-fn fuzz_sweeps(n: usize) {
+fn fuzz_sweeps(n: usize, volumes: bool) {
     for k in 0..LEVELS {
-        let seed = 1000 + k as u64;
-        let lv = make_level(seed);
+        let seed = if volumes { 3000 } else { 1000 } + k as u64;
+        let lv = make_level(seed, volumes);
         let probe = Oracle::new(&lv.brushes);
         let mut rng = Rng::new(seed ^ 0xABCD);
         for i in 0..n / LEVELS {
@@ -109,13 +171,13 @@ fn fuzz_sweeps(n: usize) {
             // Chain sweeps so later ones start in contact with a surface.
             for _ in 0..4 {
                 let to = from + random_dir(&mut rng) * rng.range_f64(0.0, 14.0);
-                let tr = sweep_sphere(&lv.bsp, from.to_f32(), to.to_f32(), radius);
+                let tr = sweep_sphere(lv.solids(), from.to_f32(), to.to_f32(), radius);
                 let end = tr.end.to_f64();
                 let ctx = format!("iter {i} r {radius} from {from:?} to {to:?} trace {tr:?}");
-                if probe.overlaps(&lv.brushes, end, r) {
+                if lv.overlaps(&probe, end, r) {
                     fail("sweep ended inside solid", seed, &ctx);
                 }
-                if let Some(t) = probe.first_overlap(&lv.brushes, from, end, r, PATH_STEP) {
+                if let Some(t) = lv.first_overlap(&probe, from, end, r, PATH_STEP) {
                     fail("sweep passed through solid", seed, &format!("t {t} {ctx}"));
                 }
                 if !tr.hit && (end - to).length() > 1e-4 {
@@ -127,10 +189,10 @@ fn fuzz_sweeps(n: usize) {
     }
 }
 
-fn fuzz_slides(n: usize) {
+fn fuzz_slides(n: usize, volumes: bool) {
     for k in 0..LEVELS {
-        let seed = 2000 + k as u64;
-        let lv = make_level(seed);
+        let seed = if volumes { 4000 } else { 2000 } + k as u64;
+        let lv = make_level(seed, volumes);
         let probe = Oracle::new(&lv.brushes);
         let mut rng = Rng::new(seed ^ 0x1234);
         for i in 0..n / LEVELS {
@@ -145,11 +207,11 @@ fn fuzz_slides(n: usize) {
                     vel = (random_dir(&mut rng) * rng.range_f64(0.0, 60.0)).to_f32();
                 }
                 let dt = rng.range_f32(0.002, 0.2);
-                let res = slide_move(&lv.bsp, pos, vel, dt, radius);
+                let res = slide_move(lv.solids(), pos, vel, dt, radius);
                 let ctx = format!(
                     "iter {i} frame {frame} r {radius} pos {pos:?} vel {vel:?} dt {dt} -> {res:?}"
                 );
-                if probe.overlaps(&lv.brushes, res.pos.to_f64(), r) {
+                if lv.overlaps(&probe, res.pos.to_f64(), r) {
                     fail("slide ended inside solid", seed, &ctx);
                 }
                 let budget = vel.length() * dt + 1e-3 * (MAX_BUMPS as f32 + 1.0);
@@ -158,10 +220,7 @@ fn fuzz_slides(n: usize) {
                 }
                 if res.contacts == 0 {
                     let (a, b) = (pos.to_f64(), res.pos.to_f64());
-                    if probe
-                        .first_overlap(&lv.brushes, a, b, r, PATH_STEP)
-                        .is_some()
-                    {
+                    if lv.first_overlap(&probe, a, b, r, PATH_STEP).is_some() {
                         fail("free slide passed through solid", seed, &ctx);
                     }
                 }
@@ -174,12 +233,22 @@ fn fuzz_slides(n: usize) {
 
 #[test]
 fn sweeps_never_enter_or_cross_solid() {
-    fuzz_sweeps(iters());
+    fuzz_sweeps(iters(), false);
 }
 
 #[test]
 fn slides_never_end_inside_solid() {
-    fuzz_slides(iters());
+    fuzz_slides(iters(), false);
+}
+
+#[test]
+fn sweeps_never_enter_or_cross_solid_with_volumes() {
+    fuzz_sweeps(iters(), true);
+}
+
+#[test]
+fn slides_never_end_inside_solid_with_volumes() {
+    fuzz_slides(iters(), true);
 }
 
 /// Regression (found by this fuzzer): the vertical jamb edge of a corridor
@@ -187,7 +256,7 @@ fn slides_never_end_inside_solid() {
 /// the clip box, so a sphere wider than the corridor slipped past it.
 #[test]
 fn regression_unbounded_cell_edge_is_swept() {
-    let lv = make_level(1000);
+    let lv = make_level(1000, false);
     let tr = sweep_sphere(
         &lv.bsp,
         Vec3::new(30.0, 17.6, 3.0),

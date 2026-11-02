@@ -3,13 +3,15 @@
 //! repeated.
 //!
 //! The key is a hash of exactly what the baker reads: face polygons and
-//! normals, lights, and the config values that change the output. The byte
-//! format is little endian: magic, version, key, atlas, projections, luxels.
+//! normals, lights, the shape of voxel surfaces and the config values that
+//! change the output. The byte format is little endian: magic, version, key,
+//! atlas, projections, luxels, then a count and the light records of voxel cells.
 //! The reader checks every count against the bytes that remain and every
 //! number for finiteness, so a damaged or hostile file yields an error and
 //! the caller bakes again.
 
 use super::atlas::{Atlas, Rect};
+use super::cells::{CellRecord, RECORD_BYTES};
 use super::uv::FaceProjection;
 use super::{BakeConfig, LightFace, Lightmap, Luxel, PointLight};
 use mscent_math::Vec3;
@@ -17,7 +19,7 @@ use mscent_math::Vec3;
 pub const MAGIC: [u8; 4] = *b"MSLT";
 /// Bumped whenever the baker's output for the same input changes, which
 /// also invalidates old files.
-pub const VERSION: u16 = 4;
+pub const VERSION: u16 = 5;
 /// Largest accepted file.
 pub const MAX_BYTES: usize = 256 << 20;
 const MAX_ATLAS_SIDE: u32 = 1 << 16;
@@ -39,29 +41,29 @@ pub enum StoreError {
     Corrupt,
 }
 
-const FNV_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+pub(super) const FNV_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 
 /// FNV-1a, 64 bit: stable across runs, platforms and Rust versions (unlike
 /// `DefaultHasher`).
-struct Fnv(u64);
+pub(super) struct Fnv(pub u64);
 
 impl Fnv {
-    fn bytes(&mut self, b: &[u8]) {
+    pub(super) fn bytes(&mut self, b: &[u8]) {
         for &x in b {
             self.0 = (self.0 ^ u64::from(x)).wrapping_mul(0x0000_0100_0000_01b3);
         }
     }
 
-    fn u32(&mut self, v: u32) {
+    pub(super) fn u32(&mut self, v: u32) {
         self.bytes(&v.to_le_bytes());
     }
 
-    fn f32(&mut self, v: f32) {
+    pub(super) fn f32(&mut self, v: f32) {
         // Adding zero turns -0.0 into 0.0 so equal values hash equally.
         self.u32((v + 0.0).to_bits());
     }
 
-    fn vec3(&mut self, v: Vec3) {
+    pub(super) fn vec3(&mut self, v: Vec3) {
         self.f32(v.x);
         self.f32(v.y);
         self.f32(v.z);
@@ -69,8 +71,15 @@ impl Fnv {
 }
 
 /// Hash of everything [`super::bake`] reads. The worker count is left out:
-/// it does not change the result.
-pub fn input_key(faces: &[LightFace], lights: &[PointLight], cfg: &BakeConfig) -> u64 {
+/// it does not change the result. `voxel_shape` is
+/// [`super::cell_sites::shape_key`] of the level's volumes (0 for none): the
+/// shape of their surfaces shadows and is lit, their materials do neither.
+pub fn input_key(
+    faces: &[LightFace],
+    lights: &[PointLight],
+    cfg: &BakeConfig,
+    voxel_shape: u64,
+) -> u64 {
     let mut h = Fnv(FNV_BASIS);
     h.bytes(&MAGIC);
     h.u32(u32::from(VERSION));
@@ -101,6 +110,7 @@ pub fn input_key(faces: &[LightFace], lights: &[PointLight], cfg: &BakeConfig) -
         }
         h.vec3(f.normal);
     }
+    h.bytes(&voxel_shape.to_le_bytes());
     h.0
 }
 
@@ -175,6 +185,17 @@ fn put_vec3(out: &mut Vec<u8>, v: Vec3) {
     }
 }
 
+/// A count, then that many records, using every byte that is left.
+fn read_cells(r: &mut Reader<'_>) -> Result<Vec<CellRecord>, StoreError> {
+    let n = r.u32()? as usize;
+    if n.checked_mul(RECORD_BYTES) != Some(r.remaining()) {
+        return Err(StoreError::Corrupt);
+    }
+    (0..n)
+        .map(|_| Ok(CellRecord::from_bytes(&r.array()?)))
+        .collect()
+}
+
 /// One face record: rectangle, four vectors, three floats.
 const FACE_BYTES: usize = 16 + 4 * 12 + 3 * 4;
 const LUXEL_BYTES: usize = 24;
@@ -185,7 +206,9 @@ impl Lightmap {
     pub fn to_bytes(&self, key: u64) -> Vec<u8> {
         let atlas = self.atlas();
         let mut out = Vec::with_capacity(
-            32 + atlas.rects().len() * FACE_BYTES + self.texel_slice().len() * LUXEL_BYTES,
+            36 + atlas.rects().len() * FACE_BYTES
+                + self.texel_slice().len() * LUXEL_BYTES
+                + self.cells().len() * RECORD_BYTES,
         );
         out.extend_from_slice(&MAGIC);
         out.extend_from_slice(&VERSION.to_le_bytes());
@@ -207,6 +230,10 @@ impl Lightmap {
         for l in self.texel_slice() {
             put_vec3(&mut out, l.color);
             put_vec3(&mut out, l.dir);
+        }
+        out.extend_from_slice(&(self.cells().len() as u32).to_le_bytes());
+        for c in self.cells() {
+            out.extend_from_slice(&c.to_bytes());
         }
         let mut sum = Fnv(FNV_BASIS);
         sum.bytes(&out);
@@ -268,7 +295,13 @@ impl Lightmap {
         let count = (aw as usize)
             .checked_mul(ah as usize)
             .ok_or(StoreError::Corrupt)?;
-        if count.checked_mul(LUXEL_BYTES) != Some(r.remaining()) {
+        // The luxels, then a count and the records, fill the rest exactly.
+        let luxel_bytes = count.checked_mul(LUXEL_BYTES).ok_or(StoreError::Corrupt)?;
+        let tail = r
+            .remaining()
+            .checked_sub(luxel_bytes)
+            .ok_or(StoreError::Corrupt)?;
+        if tail < 4 {
             return Err(StoreError::Corrupt);
         }
         let mut texels = Vec::with_capacity(count);
@@ -278,6 +311,7 @@ impl Lightmap {
                 dir: r.vec3()?,
             });
         }
-        Ok(Self::from_parts(atlas, proj, texels))
+        let cells = read_cells(&mut r)?;
+        Ok(Self::from_parts(atlas, proj, texels, cells))
     }
 }

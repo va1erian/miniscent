@@ -5,7 +5,7 @@
 use crate::combat::line_of_sight;
 use crate::game::{Game, Phase};
 use crate::script_api::{ENEMY, MARKER, MOVER, PROP, Res, ZONE, nil, number, one, point, string};
-use mscent_collide::{STEP_HZ, Solids};
+use mscent_collide::STEP_HZ;
 use mscent_math::{Quat, Vec3};
 use mscent_script::{Flow, Heap, Native, Value};
 
@@ -129,11 +129,11 @@ fn teleport(g: &mut Game, h: &mut Heap, _: Value, args: &[Value]) -> Res {
         return Err("teleport:distance: wants a thing and a distance".into());
     };
     let (at, distance) = (g.place_of(h, target)?, number(h, distance, "distance:")?);
-    let solids = Solids::new(&g.arena.bsp, &g.solids);
+    let solids = g.arena.solids(&g.solids);
     let clear = AROUND.iter().find_map(|d| {
         let dir = Vec3::new(d[0], d[1], d[2]).normalized()?;
         let pos = at + dir * distance;
-        let open = !g.arena.bsp.is_solid(pos.to_f64());
+        let open = !g.arena.is_solid(pos.to_f64());
         (open && line_of_sight(solids, pos, at)).then_some(pos)
     });
     let pos = clear.ok_or_else(|| format!("no clear place {distance} from there"))?;
@@ -143,7 +143,7 @@ fn teleport(g: &mut Game, h: &mut Heap, _: Value, args: &[Value]) -> Res {
 
 fn fly_to(g: &mut Game, h: &mut Heap, _: Value, args: &[Value]) -> Res {
     let pos = g.place_of(h, one(args)?)?;
-    if g.arena.bsp.is_solid(pos.to_f64()) {
+    if g.arena.is_solid(pos.to_f64()) {
         return Err("flyTo: that place is inside solid rock".into());
     }
     put_player(g, pos);

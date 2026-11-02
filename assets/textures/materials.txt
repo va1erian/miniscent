@@ -10,3 +10,8 @@
 2 lightpanel 120
 3 metal 200
 4 rock 10
+5 bark 8
+6 cap 70
+7 coral 30
+8 stem 20
+9 wax 90

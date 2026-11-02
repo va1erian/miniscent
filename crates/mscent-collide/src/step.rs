@@ -8,7 +8,6 @@
 use crate::slide::slide_move;
 use crate::sweep::Solids;
 use mscent_math::Vec3;
-use mscent_world::Bsp;
 
 /// Physics rate.
 pub const STEP_HZ: u64 = 120;
@@ -99,10 +98,16 @@ impl Simulation {
 
     /// Advances by a frame of `elapsed_ns`, applying `accel` on every step;
     /// returns the number of steps run.
-    pub fn update(&mut self, bsp: &Bsp, elapsed_ns: u64, accel: Vec3) -> u32 {
+    pub fn update<'a>(
+        &mut self,
+        solids: impl Into<Solids<'a>>,
+        elapsed_ns: u64,
+        accel: Vec3,
+    ) -> u32 {
+        let solids = solids.into();
         let steps = self.stepper.advance(elapsed_ns);
         for _ in 0..steps {
-            self.body.step(bsp, accel);
+            self.body.step(solids, accel);
         }
         steps
     }

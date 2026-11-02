@@ -18,7 +18,6 @@ use crate::step::Body;
 use crate::sweep::Solids;
 use crate::tuning::{SKIN, SQUEEZE_SLACK};
 use mscent_math::{Vec3, Vec3d};
-use mscent_world::Bsp;
 
 /// Rounds of pushing a wedged body out. Between a wall and a mover at an angle,
 /// each round slides it part of the way; at 45 degrees it halves the overlap.
@@ -36,13 +35,14 @@ pub enum Push {
 
 /// Moves `movers[index]` to `pose`, pushing `bodies`. Never leaves a body
 /// inside a mover or through a wall that it was clear of.
-pub fn push_mover(
-    bsp: &Bsp,
+pub fn push_mover<'a>(
+    world: impl Into<Solids<'a>>,
     movers: &mut [MoverSolid],
     index: usize,
     pose: &Pose,
     bodies: &mut [&mut Body],
 ) -> Push {
+    let world: Solids = world.into();
     let Some(mover) = movers.get(index) else {
         return Push::Moved;
     };
@@ -59,7 +59,7 @@ pub fn push_mover(
             continue;
         }
         let before = bodies[i].pos;
-        let solids = Solids::new(bsp, movers).without(index);
+        let solids = world.over(movers).without(index);
         if !push_body(solids, &old, &new, &shape, bodies[i]) {
             for &(j, pos) in &moved {
                 bodies[j].pos = pos;
