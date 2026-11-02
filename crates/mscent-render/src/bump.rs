@@ -44,24 +44,66 @@ pub fn texel_normal(tex: &Texture, fu: i32, fv: i32) -> Vec3 {
 /// [`texel_normal`] on a map already looked up, for the per-pixel loop.
 #[inline]
 pub fn view_normal(map: &NormalView, fu: i32, fv: i32) -> Vec3 {
-    let (u, v) = (fu.wrapping_sub(0x8000), fv.wrapping_sub(0x8000));
-    let (x0, y0) = (u >> 16, v >> 16);
-    let (tx, ty) = (((u >> 8) & 0xff) as u32, ((v >> 8) & 0xff) as u32);
-    let (a, b) = (map.texel(x0, y0), map.texel(x0.wrapping_add(1), y0));
-    let (c, d) = (
-        map.texel(x0, y0.wrapping_add(1)),
-        map.texel(x0.wrapping_add(1), y0.wrapping_add(1)),
-    );
-    // Blend the bytes with exact integer weights (summing to 1 << 16) and
-    // convert once per channel, instead of decoding four texels to floats.
-    let (wa, wb) = ((256 - tx) * (256 - ty), tx * (256 - ty));
-    let (wc, wd) = ((256 - tx) * ty, tx * ty);
-    let ch = |shift: u32| {
-        let byte = |p: u32| (p >> shift) & 0xff;
-        let sum = byte(a) * wa + byte(b) * wb + byte(c) * wc + byte(d) * wd;
-        sum as f32 * (1.0 / (65536.0 * 127.5)) - 1.0
-    };
-    Vec3::new(ch(16), ch(8), ch(0))
+    NormalSample::fetch(map, fu, fv).normal()
+}
+
+/// The four normal texels around a sample and their weights: fetched once for
+/// the normal, and the specular mask in their alpha is there for no extra fetch,
+/// to be blended only for the pixels inside a highlight.
+#[derive(Clone, Copy)]
+pub struct NormalSample {
+    texels: [u32; 4],
+    weights: [u32; 4],
+}
+
+impl NormalSample {
+    #[inline]
+    pub fn fetch(map: &NormalView, fu: i32, fv: i32) -> Self {
+        let (u, v) = (fu.wrapping_sub(0x8000), fv.wrapping_sub(0x8000));
+        let (x0, y0) = (u >> 16, v >> 16);
+        let (tx, ty) = (((u >> 8) & 0xff) as u32, ((v >> 8) & 0xff) as u32);
+        let (x1, y1) = (x0.wrapping_add(1), y0.wrapping_add(1));
+        Self {
+            texels: [
+                map.texel(x0, y0),
+                map.texel(x1, y0),
+                map.texel(x0, y1),
+                map.texel(x1, y1),
+            ],
+            // Exact integer weights, summing to 1 << 16.
+            weights: [
+                (256 - tx) * (256 - ty),
+                tx * (256 - ty),
+                (256 - tx) * ty,
+                tx * ty,
+            ],
+        }
+    }
+
+    /// One byte channel of the texels, blended: 0 to `255 << 16`.
+    #[inline]
+    fn blend(&self, shift: u32) -> u32 {
+        let byte = |i: usize| (self.texels[i] >> shift) & 0xff;
+        byte(0) * self.weights[0]
+            + byte(1) * self.weights[1]
+            + byte(2) * self.weights[2]
+            + byte(3) * self.weights[3]
+    }
+
+    /// The normal, bilinearly filtered: blends the bytes and converts once per
+    /// channel, instead of decoding four texels to floats.
+    #[inline]
+    pub fn normal(&self) -> Vec3 {
+        let ch = |shift: u32| self.blend(shift) as f32 * (1.0 / (65536.0 * 127.5)) - 1.0;
+        Vec3::new(ch(16), ch(8), ch(0))
+    }
+
+    /// The specular mask, bilinearly filtered, 0.0 to 1.0. A division, not a
+    /// reciprocal: four full texels must give exactly 1.0.
+    #[inline]
+    pub fn mask(&self) -> f32 {
+        self.blend(24) as f32 / (65536.0 * 255.0)
+    }
 }
 
 /// The normal of an unperturbed surface in tangent space.

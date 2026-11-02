@@ -267,7 +267,7 @@ GUI itself was not driven by hand, only the model through the pointer API and th
 
 | ID | Status | Evidence |
 |---|---|---|
-| M3.1 | Partial | `texture.rs` (`load_texture`, `MaterialTable`, gloss) with `png.rs` and `inflate.rs`; decoding happens at load time, not build time. `assets/textures` has albedo, `_n` and `_h` |
+| M3.1 | Partial | `texture.rs` (`load_texture`) and `material.rs` (`MaterialTable`, gloss, ids from `materials.txt`) with `png.rs` and `inflate.rs`; decoding happens at load time, not build time. `assets/textures` has albedo, `_n` and `_h` |
 | M3.2 | Done | `camera.rs`, `clip.rs` and their tests |
 | M3.3 | Done | `raster.rs`; `tests/snapshot.rs::brick_quad_facing_the_camera` against `tests/ref/brick_quad.ppm` |
 | M3.4 | Done | `scene.rs` and `scene/walk.rs`; `scene_tests::flythrough_matches_brute_force_with_no_doubled_faces` |
@@ -298,8 +298,8 @@ GUI itself was not driven by hand, only the model through the pointer API and th
 | M5.3 | Done | `directions_are_unit_and_point_at_the_light`, `lightless_luxels_use_the_fallback_direction` |
 | M5.4 | Done | `scene.rs` now draws baked lightmaps through `lighting_shader.rs` and `level/`; `level_render.rs` tests and the flythrough PNGs show light pools and shadows on metal, brick and floor. Frame cost: about 13.5 ms/frame in the game bench on the dev machine, not compared against the bump bench or measured on the i3-7100U |
 | M5.5 | Done | `bump.rs` wired into the scene shader (`lighting_shader_tests`, `level_render.rs`); bump is visible on bolts and mortar in the flythrough PNGs |
-| M5.6 | Partial | `specular.rs` is wired as the High quality option (default quality is high; `--quality low|medium` turn it off). Gloss still comes from `default_gloss`, not `_s` textures (M5.7). Variant D cost is still not recorded in `docs/perf/` |
-| M5.7 | Not done | `tools/gen_textures.py` emits albedo, `_n` and `_h` only, no `_s.png`; gloss comes from `default_gloss` in `texture.rs` instead |
+| M5.6 | Partial | `specular.rs` is wired as the High quality option (default quality is high; `--quality low|medium` turn it off). Gloss comes from `assets/textures/materials.txt`, and a `name_s.png` masks the highlight per texel (M12.5). Variant D cost is still not recorded in `docs/perf/` |
+| M5.7 | Partial | The engine side is done (M12.5): `load_texture` puts `name_s.png` into the alpha of the normal texels and the specular shader multiplies the highlight by it. The generator is not: `tools/gen_textures.py` emits albedo, `_n` and `_h` only, no `_s.png`, so no stock material has a mask; gloss per material comes from `assets/textures/materials.txt` |
 | M5.8 | Done | `lightmap/bounce.rs`; `bounce_lights_a_room_seen_only_through_a_door`, `ambient_fills_unlit_luxels` |
 
 ## M6 Gameplay (`mscent-game`)
@@ -383,4 +383,4 @@ Design in [voxels.md](voxels.md). The game builds the volumes' surfaces and coll
 - Core crates are not declared `no_std`; they use `std` only. `mscent-platform` (winit, softbuffer, optional) and the editor (xui) are the only crates with external dependencies.
 - Textures are decoded at load time by an in-repo PNG decoder, not at build time.
 - The "fuzz target" for the level format is a seeded in-process test.
-- Still open: `_s` gloss textures (M5.7), perf numbers on the i3-7100U, all LazyOS work (M1.3, M1.4, M8.x).
+- Still open: `_s` gloss textures from the generator (M5.7; the engine reads them since M12.5), perf numbers on the i3-7100U, all LazyOS work (M1.3, M1.4, M8.x).

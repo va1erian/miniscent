@@ -1,9 +1,10 @@
-//! Material ids shared by the level builders and the renderer.
+//! The stock material ids shared by the level builders and the renderer.
 //!
-//! The ids are the positions of the names in [`NAMES`], which is the order
-//! `MaterialTable::load_dir` assigns. Levels store these ids, so a new material
-//! goes on the end of the list. The renderer checks the names when it builds a
-//! level, so a mismatch is reported there.
+//! `assets/textures/materials.txt` decides every id, and may list more materials
+//! after these. It must keep the five in [`NAMES`] where they are: the renderer
+//! checks those names when it builds a level, so a mismatch is reported there.
+//! The living materials the voxel generators grow come after them, and their ids
+//! are held to the manifest by a test.
 
 /// Red brick walls.
 pub const BRICK: u16 = 0;
@@ -18,7 +19,7 @@ pub const ROCK: u16 = 4;
 
 /// Furrowed tree bark.
 pub const BARK: u16 = 5;
-/// A toadstool's red, warted cap.
+/// A toadstool's red cap; its spots come from the renderer, not the texture.
 pub const CAP: u16 = 6;
 /// Rose coral pitted with polyp cups.
 pub const CORAL: u16 = 7;
@@ -37,16 +38,5 @@ pub const fn is_destructible(material: u8) -> bool {
     material as u16 == ROCK
 }
 
-/// Texture names in id order.
-pub const NAMES: [&str; 10] = [
-    "brick",
-    "floor",
-    "lightpanel",
-    "metal",
-    "rock",
-    "bark",
-    "cap",
-    "coral",
-    "stem",
-    "wax",
-];
+/// Stock texture names in id order.
+pub const NAMES: [&str; 5] = ["brick", "floor", "lightpanel", "metal", "rock"];

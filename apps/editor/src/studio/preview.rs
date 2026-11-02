@@ -91,7 +91,9 @@ impl Studio {
             Preview::Empty
         } else if self.error.is_some() {
             Preview::Failed
-        } else if self.built_doc.as_ref() != Some(doc) {
+        } else if self.built_doc.as_ref() != Some(doc)
+            || self.built_materials != self.materials_seen
+        {
             Preview::Updating
         } else if self.light == Light::Full {
             Preview::Full
@@ -127,6 +129,7 @@ impl Studio {
         self.empty = false;
         self.poll_live(out);
         self.watch_script();
+        self.watch_materials();
         let changed = self.wanted.as_ref() != Some(doc);
         if changed {
             self.changed_at = Instant::now();
@@ -152,6 +155,18 @@ impl Studio {
         self.refresh |= files.is_some_and(ScriptWatcher::changed);
     }
 
+    /// A new generation of the material table builds the picture again, as a
+    /// finished bake does: same document, so the same lightmap comes back.
+    fn watch_materials(&mut self) {
+        let generation = self.materials.generation();
+        if generation != self.materials_seen {
+            self.materials_seen = generation;
+            self.refresh = true;
+            // The table that failed is gone; this one has not been tried.
+            self.error = None;
+        }
+    }
+
     /// An empty level draws nothing, so the last picture must go; whatever is
     /// still being prepared is for a level that no longer exists.
     fn show_empty(&mut self, doc: &Document, out: &mut Tick) {
@@ -174,7 +189,7 @@ impl Studio {
         self.refresh = false;
         self.flush_cache_path();
         self.wanted = Some(doc.clone());
-        match build::start_preview(doc, &self.cache, &self.settings) {
+        match build::start_preview(doc, &self.cache, &self.materials, &self.settings) {
             Ok(job) => self.preview_job = Some(job),
             Err(e) => self.preview_failed(e, doc, doc, out),
         }
@@ -185,6 +200,9 @@ impl Studio {
             || self.preview_job.is_some()
             || self.refresh
             || self.stroking
+            // The bake's end would ask for the preview that just failed, and
+            // that would bake again. A new document or table clears this.
+            || self.error.is_some()
             || self.worker.is_none()
             || self.light == Light::Full
             || self.failed_bake == Some(self.light_key)
@@ -234,6 +252,7 @@ impl Studio {
         self.light_key = built.light_key;
         self.live_dirty = false;
         self.live_bsp = Some(std::sync::Arc::new(built.renderer().scene().bsp().clone()));
+        self.built_materials = built.materials;
         let why = built.unplayable().map(str::to_string);
         self.script_watch.files = built.watch.clone();
         self.attach(Box::new(LevelScene::new(built)), made_for, why);
@@ -253,6 +272,7 @@ impl Studio {
         match &mut self.worker {
             Some(w) if same_level && built.light == Light::Full => {
                 self.light = Light::Full;
+                self.built_materials = built.materials;
                 w.relight(built);
             }
             _ => self.wanted = None,
@@ -286,8 +306,9 @@ impl Studio {
         match result {
             Ok(Some(report)) => {
                 out.log.push(build::log_line(&report));
-                // The next preview finds the lightmap in the cache.
-                self.refresh = true;
+                // The next preview finds the lightmap in the cache. While the
+                // level cannot be shown, whatever clears that makes one anyway.
+                self.refresh |= self.error.is_none();
             }
             Ok(None) => {}
             Err(e) => self.bake_failed(e, out),

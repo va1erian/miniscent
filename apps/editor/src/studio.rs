@@ -16,6 +16,7 @@ use miniscent_game::{SessionConfig, lightcache};
 use mscent_platform::Event;
 
 use crate::build::{BakeJob, Built, Job, Light, SharedCache};
+use crate::materials::SharedMaterials;
 use crate::model::{Document, FlyCam};
 
 mod highlight;
@@ -61,7 +62,7 @@ pub struct Studio {
     wanted: Option<Document>,
     /// When the document was last seen to change.
     changed_at: Instant,
-    /// A bake finished: the next preview picks up its lightmap.
+    /// A bake finished or the materials changed: the next preview picks that up.
     refresh: bool,
     script_watch: preview::ScriptWatch,
     /// The document the picture was made from.
@@ -93,6 +94,12 @@ pub struct Studio {
     /// A cache file path set while a job held the cache (`Some(None)`: no
     /// file), applied by the next tick.
     pending_path: Option<Option<PathBuf>>,
+    /// The material table every build draws with.
+    materials: SharedMaterials,
+    /// The newest generation of it that a preview was asked for.
+    materials_seen: u64,
+    /// The generation of it in the picture.
+    built_materials: u64,
     highlights: Highlights,
     /// How previews and bakes light the level.
     settings: SessionConfig,
@@ -147,6 +154,9 @@ impl Studio {
             camera: FlyCam::for_document(doc),
             cache: SharedCache::default(),
             pending_path: None,
+            materials: SharedMaterials::default(),
+            materials_seen: 0,
+            built_materials: 0,
             highlights: Highlights::default(),
             settings: SessionConfig::default(),
         }
@@ -218,6 +228,11 @@ impl Studio {
         if let Some(w) = &self.worker {
             w.highlights(&self.highlights);
         }
+    }
+
+    /// The material table: replacing it updates the picture, keeping the light.
+    pub fn materials(&self) -> &SharedMaterials {
+        &self.materials
     }
 
     /// The lightmap cache shared by every build.
@@ -450,6 +465,8 @@ mod cache_lock_tests;
 mod large_level_tests;
 #[cfg(test)]
 mod live_tests;
+#[cfg(test)]
+mod material_tests;
 #[cfg(test)]
 mod preview_tests;
 #[cfg(test)]

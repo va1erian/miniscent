@@ -3,22 +3,40 @@
 // Several parallel per-axis arrays are indexed by the same axis number.
 #![allow(clippy::needless_range_loop)]
 
-use mscent_world::{Entity, Op, materials::NAMES};
-use xui::backend::WidgetId;
+use mscent_render::MaterialTable;
+use mscent_world::{Entity, Op};
+use xui::backend::{Result as XuiResult, WidgetId};
 use xui::prelude::*;
 use xui::widget::{Edit, GroupBox, HasText};
 
 use super::Msg;
 use super::facepanel::FacePanel;
+use super::material_list::MaterialChoices;
 use super::voxelpanel::{VoxelPanel, VoxelProp, apply as apply_voxel};
 use crate::model::entity::{entity_name, params, pos, set_param, with_pos};
 use crate::model::{EditorState, Shape, Tool};
+
+/// The container a list is remade in.
+type Host = xui::widget::Panel<Msg>;
+
+/// Puts a list's new layout in its container, replacing the old one on success.
+pub(super) type Mount<'a> = dyn Fn(&Host, Layout<Msg>) -> XuiResult<()> + 'a;
+
+/// The material list, in a layout of its own to mount in a container.
+fn material_list(choices: &MaterialChoices, handle: &Handle<ComboBox<Msg>>) -> Layout<Msg> {
+    let picks = choices.clone();
+    let list = combo_box(&choices.labels())
+        .on_select(move |row| Msg::Prop(Prop::Material(picks.id_of(row))))
+        .bind(handle);
+    column().child(list)
+}
 
 /// A field edit made in the panel.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Prop {
     Op(usize),
-    Material(usize),
+    /// A material picked in the list; `None` is the row that picks nothing.
+    Material(Option<u16>),
     Min(usize, f64),
     Max(usize, f64),
     Pos(usize, f64),
@@ -46,6 +64,13 @@ pub struct Panel {
     what: Handle<Label<Msg>>,
     op: Handle<ComboBox<Msg>>,
     material: Handle<ComboBox<Msg>>,
+    /// Holds `material`: a combo box's items are fixed, so a new list is a new one.
+    material_host: Handle<Host>,
+    materials: MaterialChoices,
+    /// The generation of the material table the lists were made from.
+    materials_shown: u64,
+    /// The generation whose lists were last reported as not made.
+    materials_failed: Option<u64>,
     min: [Handle<NumberField<Msg>>; 3],
     max: [Handle<NumberField<Msg>>; 3],
     pos: [Handle<NumberField<Msg>>; 3],
@@ -93,6 +118,69 @@ impl Panel {
             || self.material.get().id() == id
     }
 
+    /// What the material list shows, for tests.
+    #[cfg(test)]
+    pub fn material_text(&self) -> String {
+        self.material.get().text()
+    }
+
+    pub fn materials_shown(&self) -> u64 {
+        self.materials_shown
+    }
+
+    /// Whether the failure to make the lists of `generation` is news.
+    pub fn note_failure(&mut self, generation: u64) -> bool {
+        self.materials_failed.replace(generation) != Some(generation)
+    }
+
+    /// Fills the material lists from `table` of `generation`, remaking the
+    /// widgets if they exist, and returns the texel sizes by material id. No
+    /// table leaves the stock names and no thumbnails. After an error the lists
+    /// work as they did and the generation is still to be shown, to try again.
+    pub fn show_materials(
+        &mut self,
+        generation: u64,
+        table: Option<&MaterialTable>,
+    ) -> XuiResult<Vec<(u32, u32)>> {
+        self.show_materials_with(generation, table, &|host, layout| host.set_layout(layout))
+    }
+
+    fn show_materials_with(
+        &mut self,
+        generation: u64,
+        table: Option<&MaterialTable>,
+        mount: &Mount<'_>,
+    ) -> XuiResult<Vec<(u32, u32)>> {
+        if let Some(ui) = &self.ui {
+            ui.invalidate_layout();
+        }
+        let sizes = self.face.show_materials(table, self.ui.as_ref(), mount)?;
+        let choices = table.map(MaterialChoices::from_table).unwrap_or_default();
+        let list = Handle::new();
+        if let Some(host) = self.material_host.try_get() {
+            mount(&host, material_list(&choices, &list))?;
+        }
+        self.materials = choices;
+        self.material = list;
+        self.materials_shown = generation;
+        Ok(sizes)
+    }
+
+    /// Shows the selection in the material lists alone, leaving every field
+    /// alone: they may hold text being typed.
+    pub fn sync_material_lists(&self, st: &EditorState) {
+        let brush = st.selected_brush();
+        self.material.get().set_enabled(brush.is_some());
+        if let Some(b) = brush {
+            self.material
+                .get()
+                .select(self.materials.row_of(b.material));
+        }
+        if let Some(view) = st.face_view() {
+            self.face.sync_lists(&view);
+        }
+    }
+
     /// Gives the panel the UI it needs to show and hide its sections.
     pub fn attach(&mut self, ui: &Ui<Msg>) {
         self.ui = Some(ui.clone());
@@ -115,9 +203,9 @@ impl Panel {
             )
             .child(label("Material"))
             .child(
-                combo_box(&NAMES)
-                    .on_select(|i| Msg::Prop(Prop::Material(i)))
-                    .bind(&self.material),
+                panel(material_list(&self.materials, &self.material))
+                    .plain()
+                    .bind(&self.material_host),
             );
         // Min and Max take one row each (X, Y, Z side by side) so the
         // Face section below stays on screen.
@@ -231,7 +319,7 @@ impl Panel {
             self.op.get().select(usize::from(b.op == Op::Subtract));
             self.material
                 .get()
-                .select((b.material as usize).min(NAMES.len() - 1));
+                .select(self.materials.row_of(b.material));
         }
         for a in 0..3 {
             self.min[a].get().set_value(lo[a]);
@@ -266,7 +354,8 @@ pub fn apply(st: &mut EditorState, prop: Prop) -> bool {
         Prop::Op(i) => st.edit_selected_brush(|b| {
             b.op = if i == 0 { Op::Add } else { Op::Subtract };
         }),
-        Prop::Material(i) => st.edit_selected_brush(|b| b.set_material(i as u16)),
+        Prop::Material(Some(id)) => st.edit_selected_brush(|b| b.set_material(id)),
+        Prop::Material(None) => false,
         Prop::Min(a, v) => st.edit_selected_brush(|b| {
             if let Shape::Box { min, .. } = &mut b.shape {
                 min[a] = v;
@@ -297,3 +386,7 @@ pub fn apply(st: &mut EditorState, prop: Prop) -> bool {
         Prop::Voxel(prop) => apply_voxel(st, prop),
     }
 }
+
+#[cfg(test)]
+#[path = "props_tests.rs"]
+mod props_tests;

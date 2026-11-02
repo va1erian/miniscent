@@ -36,7 +36,9 @@ fn finish<T>(job: &Job<T>) -> T {
 }
 
 fn preview_of(doc: &Document, cache: &SharedCache) -> Built {
-    finish(&start_preview(doc, cache, &SessionConfig::default()).expect("starts"))
+    finish(
+        &start_preview(doc, cache, &Default::default(), &SessionConfig::default()).expect("starts"),
+    )
 }
 
 fn uvs(built: &Built) -> Vec<mscent_world::TexInfo> {

@@ -5,9 +5,10 @@ use mscent_world::lightmap::PointLight;
 use mscent_world::{Entity, Level};
 
 use super::{Actor, ActorKind, BuildConfig};
+use crate::manifest::DEFAULT_GLOSS;
+use crate::material::{MaterialId, MaterialTable};
 use crate::mesh::{MeshLighting, PointLight as MeshLight};
 use crate::specular::SpecTable;
-use crate::texture::{MaterialId, MaterialTable};
 
 pub(super) fn lights_of(level: &Level, gain: f32) -> Vec<PointLight> {
     level
@@ -83,8 +84,11 @@ pub(super) fn mesh_lighting(lights: &[PointLight], ambient: Vec3) -> MeshLightin
 pub(super) fn spec_tables(table: &MaterialTable) -> Vec<SpecTable> {
     let mut tables: Vec<SpecTable> = (0u16..)
         .take(table.len())
-        .map(|i| SpecTable::new(table.get(MaterialId(i)).map_or(40, |m| m.gloss)))
+        .map(|i| {
+            let gloss = table.get(MaterialId(i)).map_or(DEFAULT_GLOSS, |m| m.gloss);
+            SpecTable::new(gloss)
+        })
         .collect();
-    tables.push(SpecTable::new(40));
+    tables.push(SpecTable::new(DEFAULT_GLOSS));
     tables
 }

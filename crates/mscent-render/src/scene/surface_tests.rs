@@ -1,5 +1,5 @@
 use super::*;
-use crate::texture::{Material, MaterialTable};
+use crate::material::{Material, MaterialTable};
 use mscent_world::{Brush, GenParams, Op, compile, extract_faces, generate};
 
 const COLOURS: [u32; 5] = [

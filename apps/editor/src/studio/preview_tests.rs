@@ -237,7 +237,13 @@ fn an_edit_during_a_bake_drops_it_and_the_newest_level_gets_the_light() {
     // The picture's lightmap is the second level's, not the dropped one's.
     let key = studio.light_key;
     let cache = studio.cache();
-    let job = build::start_preview(&second, &cache, &SessionConfig::default()).expect("starts");
+    let job = build::start_preview(
+        &second,
+        &cache,
+        &Default::default(),
+        &SessionConfig::default(),
+    )
+    .expect("starts");
     let built = loop {
         if let Some(r) = job.poll() {
             break r.expect("builds");
@@ -394,8 +400,10 @@ fn new_light_replaces_the_renderer_under_a_running_game() {
         }
         std::thread::sleep(Duration::from_millis(5));
     };
-    let draft =
-        wait(build::start_preview(&doc, &cache, &SessionConfig::default()).expect("starts"));
+    let draft = wait(
+        build::start_preview(&doc, &cache, &Default::default(), &SessionConfig::default())
+            .expect("starts"),
+    );
     let key = draft.light_key;
     let area = |b: &build::Built| b.renderer().lightmap().atlas().height();
     let draft_height = area(&draft);
@@ -403,7 +411,10 @@ fn new_light_replaces_the_renderer_under_a_running_game() {
     while bake.job.poll().is_none() {
         std::thread::sleep(Duration::from_millis(5));
     }
-    let full = wait(build::start_preview(&doc, &cache, &SessionConfig::default()).expect("starts"));
+    let full = wait(
+        build::start_preview(&doc, &cache, &Default::default(), &SessionConfig::default())
+            .expect("starts"),
+    );
     assert!(area(&full) > draft_height);
 
     let mut scene = LevelScene::new(draft);

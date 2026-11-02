@@ -33,13 +33,13 @@ use crate::dynlight::MAX_DYN_LIGHTS;
 use crate::framebuffer::Framebuffer;
 use crate::lighting_shader::UvToLuxel;
 use crate::lightmap_mips::LightMips;
+use crate::material::{MaterialId, MaterialTable};
 use crate::mesh::MeshLighting;
 use crate::particles::{ParticleDraws, SpriteBank, draw_particles};
 use crate::raster::PolyList;
 use crate::scene::{Scene, SceneStats, eye_of};
 use crate::shade::Fog;
 use crate::specular::SpecTable;
-use crate::texture::{MaterialId, MaterialTable};
 use crate::tiles::TileRenderer;
 use crate::voxel::fill::{FillContext, fill_voxels};
 use crate::voxel::list::VoxelList;
@@ -119,8 +119,8 @@ impl Default for BuildConfig {
 pub enum BuildError {
     Csg(CsgError),
     Bake(LightmapError),
-    /// The material table does not hold the standard textures in id order;
-    /// the value is the first id that is wrong.
+    /// The material table does not hold the stock materials at their ids; the
+    /// value is the first id that is wrong.
     Materials(u16),
 }
 

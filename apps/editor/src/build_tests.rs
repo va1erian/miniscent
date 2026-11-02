@@ -48,8 +48,13 @@ fn a_level_without_start_or_goal_previews_view_only() {
         entities: vec![],
         ..Default::default()
     });
-    let job =
-        start_preview(&doc, &SharedCache::default(), &SessionConfig::default()).expect("starts");
+    let job = start_preview(
+        &doc,
+        &SharedCache::default(),
+        &SharedMaterials::default(),
+        &SessionConfig::default(),
+    )
+    .expect("starts");
     let built = wait(&job).expect("builds");
     assert!(built.unplayable().is_some());
 }
@@ -66,7 +71,9 @@ player 0 0 0 0
     let mut doc = Document::from_level(&level);
     let cache = SharedCache::default();
     let cfg = SessionConfig::default();
-    let build = |doc: &Document| wait(&start_preview(doc, &cache, &cfg).expect("starts"));
+    let materials = SharedMaterials::default();
+    let build =
+        |doc: &Document| wait(&start_preview(doc, &cache, &materials, &cfg).expect("starts"));
 
     let without = build(&doc).expect("builds");
     assert!(without.unplayable().is_some(), "no script, no goal");
@@ -95,8 +102,16 @@ player 0 0 0 0
 fn the_showcase_previews_playable_on_a_draft_and_a_bake_makes_it_full() {
     let doc = Document::from_level(&mscent_world::showcase_level());
     let cache = SharedCache::default();
-    let first = wait(&start_preview(&doc, &cache, &SessionConfig::default()).expect("starts"))
-        .expect("builds");
+    let first = wait(
+        &start_preview(
+            &doc,
+            &cache,
+            &SharedMaterials::default(),
+            &SessionConfig::default(),
+        )
+        .expect("starts"),
+    )
+    .expect("builds");
     assert!(first.unplayable().is_none());
     assert_eq!(first.light, Light::Draft);
     assert_eq!(
@@ -109,8 +124,16 @@ fn the_showcase_previews_playable_on_a_draft_and_a_bake_makes_it_full() {
     let report = wait(&job.job).expect("bakes").expect("not cancelled");
     assert_eq!(report.source, Source::Baked);
 
-    let second = wait(&start_preview(&doc, &cache, &SessionConfig::default()).expect("starts"))
-        .expect("builds");
+    let second = wait(
+        &start_preview(
+            &doc,
+            &cache,
+            &SharedMaterials::default(),
+            &SessionConfig::default(),
+        )
+        .expect("starts"),
+    )
+    .expect("builds");
     assert_eq!(second.light, Light::Full);
     assert_eq!(second.light_key, first.light_key);
     assert_eq!(cache.lock().expect("cache").bakes(), 1);

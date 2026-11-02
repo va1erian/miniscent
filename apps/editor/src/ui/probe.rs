@@ -4,8 +4,9 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use super::app::Msg;
+use super::app::{Editor, Msg};
 use super::view3d::View3d;
+use crate::materials::SharedMaterials;
 use crate::model::EditorState;
 use crate::studio::Preview;
 
@@ -15,12 +16,31 @@ pub struct Probe {
     pub(super) view3d: Rc<View3d<Msg>>,
     pub(super) play: Rc<View3d<Msg>>,
     pub(super) preview: Rc<Cell<Preview>>,
+    pub(super) materials: SharedMaterials,
+}
+
+impl Editor {
+    /// Handles for scripted runs and tests.
+    pub fn probe(&self) -> Probe {
+        Probe {
+            state: self.state.clone(),
+            view3d: self.pane3d(),
+            play: self.play.get(),
+            preview: self.preview.clone(),
+            materials: self.studio.materials().clone(),
+        }
+    }
 }
 
 impl Probe {
     /// The model, shared with the views.
     pub fn state(&self) -> Rc<RefCell<EditorState>> {
         self.state.clone()
+    }
+
+    /// The material table, which a run can replace.
+    pub fn materials(&self) -> &SharedMaterials {
+        &self.materials
     }
 
     /// How far the picture had caught up with the document at the last tick.

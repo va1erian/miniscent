@@ -25,6 +25,7 @@ impl Editor {
         let sculpted = state.borrow_mut().poll_stroke();
         self.studio.set_stroking(state.borrow().stroking());
         let tick = self.studio.tick(&events, size, &state.borrow().doc);
+        self.follow_materials();
         self.push_log(&tick.log);
         if let Some(s) = &tick.status {
             self.state.borrow_mut().message = s.clone();

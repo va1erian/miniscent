@@ -14,7 +14,6 @@ use xui::widget::{FileDialog, HasText, MenuId};
 use super::commands::menus;
 use super::keys::{OPS, TOOLS, key_name, shortcut};
 use super::layouts::{self, Arrangement, Disposition};
-use super::probe::Probe;
 use super::props::{Panel, apply};
 use super::toolbar::IconButton;
 use super::view3d::View3d;
@@ -107,7 +106,7 @@ pub struct Editor {
     pub(super) open_dialog: FileDialog<Msg>,
     pub(super) save_dialog: FileDialog<Msg>,
     /// Shared with scripted runs through [`Probe`].
-    preview: Rc<Cell<Preview>>,
+    pub(super) preview: Rc<Cell<Preview>>,
 }
 
 impl Editor {
@@ -162,7 +161,11 @@ impl Editor {
             preview: Rc::new(Cell::new(Preview::Updating)),
         };
         app.panel.attach(ui);
-        state.borrow_mut().texture_sizes = app.panel.face.load_previews();
+        let (generation, table) = app.studio.materials().current();
+        state.borrow_mut().texture_sizes = app
+            .panel
+            .show_materials(generation, table.ok().as_ref())
+            .unwrap_or_default();
         let emit: Rc<dyn Fn(ViewEvent) -> Msg> = Rc::new(Msg::View);
         let views = stack().children((
             layouts::classic(&app.classic, &state, &emit).fill(1),
@@ -373,16 +376,6 @@ F5 plays it.
             v.get().refit();
         }
     }
-
-    /// Handles for scripted runs and tests.
-    pub fn probe(&self) -> Probe {
-        Probe {
-            state: self.state.clone(),
-            view3d: self.pane3d(),
-            play: self.play.get(),
-            preview: self.preview.clone(),
-        }
-    }
 }
 
 mod tick;
@@ -393,6 +386,8 @@ mod keys_tests;
 mod layout_tests;
 #[cfg(test)]
 mod lock_tests;
+#[cfg(test)]
+mod material_tests;
 #[cfg(test)]
 mod tests;
 

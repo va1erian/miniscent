@@ -23,7 +23,7 @@ use super::setup::{actors_of, lights_of, with_level_fog};
 use super::{
     Actor, BakeCache, BakedLight, BuildConfig, BuildError, LevelRenderer, check_materials,
 };
-use crate::texture::MaterialTable;
+use crate::material::MaterialTable;
 use crate::voxel::{VertexLight, VoxelScene};
 
 /// Draft luxel size; the baker coarsens it further if the atlas asks for that.
