@@ -1,8 +1,138 @@
 # Texture Studio: plan
 
-Status: draft, nothing here is implemented. Time and size figures are targets
-to measure, not results. The work items below move to
-[work-items.md](work-items.md) as M12 once this is accepted.
+Status: built. M12.1 to M12.11 are done, and the workspace is on the Texture menu.
+The sections after "As built" are the plan as written, kept for its reasoning;
+"As built" overrides them. Work items are in [work-items.md](work-items.md). To learn
+the tool, follow the [tutorial](texture-studio-tutorial.md).
+
+## As built
+
+- **All stock materials ship as recipes.** The ten stock materials are
+  `assets/textures/*.mst`, 11.4 KB against 902 KB of PNGs, and the game makes them
+  at load. `tools/gen_textures.py` is gone. So `mscent-render` depends on
+  `mscent-texgen`, unlike the plan below, and every caller of `load_dir` gets
+  recipes without knowing. PNG materials still load, and a recipe wins over a PNG
+  of the same name.
+- **Measured (`texgen_bench`, size-optimized release, dev machine).** All ten stock
+  recipes take 42.8 ms at 128 px, and one parameter change on brick at 256 px takes
+  19 ms. The game binary grows by about 140 KB to 2.02 MB, 92% of its 2.2 MB budget.
+- **Directory limits.** Beyond each recipe's own limit, a directory's recipes may
+  together take about 30 s of estimated work and make 64 tiles of 1024 px, since a
+  texture stays in memory while the game runs. Save checks the directory as it will
+  be, because the game refuses a directory past these as a whole.
+- **Lookalikes.** Recipes reproduce the old pictures closely, not exactly, since
+  numpy's FFT noise is not reproducible in Rust. Metal and floor gained specular
+  masks, which closes M5.7. Detail finer than a texel raised shimmer past its limit
+  until recipes stopped their octaves where the old generator did: at 128 px, a
+  frequency doubled past 64 adds only aliasing.
+- **Save** writes the recipe and `materials.txt`, never PNGs, and
+  `--bake-texture` writes PNGs to look at and adds a row when the directory it
+  writes to has a manifest.
+- **`--bake-texture` checks first.** It reads the recipe up to `MAX_FILE`, and
+  refuses an invalid name or a `name.mst` already in the output directory (which
+  the game would load in place of the PNGs) before it writes anything.
+- **The workspace and Play.** Opening the workspace cancels an F5 still waiting for
+  the level, and Play started by any route closes the workspace first. Esc during a
+  drag of a block cancels the drag, and a second Esc goes back to the level; an
+  undo, a deletion or another material during a drag also ends it with no move.
+  "Working..." in the preview ends when the work does, including a page that does
+  not compile or whose first draft fails.
+- **Stacked blocks, no wires.** A block reads the row directly above it, under its
+  columns, left to right. A generator below a block starts a new chain.
+- **Preview.** Six tabs. Block shows the selected block; the others show one map
+  of the finished material, whichever block is selected. The tab stays chosen
+  when the selection moves, so one map can be watched while any block is edited.
+- **Evaluation.** Every request runs a draft of at most 128 px that keeps all
+  blocks, for the thumbnails, then the full size keeping only the selected block
+  and the outputs, unless a drag is going on. A page of 256 blocks kept at 1024 px
+  would not fit the evaluator's memory limit.
+- **Save also applies.** The running table and the disk must give a material
+  the same id, because levels store ids. Before writing, Save works out the id
+  the material has in the running table and reads the manifest again from the
+  disk; if the disk's id differs it refuses and names the materials to save
+  first, so applying A and then saving B is refused until A is saved. It also
+  refuses a new name whose `.mst` file is already there unlisted, and so does
+  New. Saving over any of the ten stock materials asks first (the list is the
+  studio's own, held to the shipped `materials.txt` by a test). A read error on
+  the old recipe stops the save, since only a missing file means there was none to
+  put back, and files are synced before they are renamed into place.
+- **Save proves the page the way the game runs it.** Before any file is touched,
+  the worker reads back the text it will write, then compiles, runs (no cache) and
+  packs that, which is what `mscent_texgen::bake` does, with a cancel flag so
+  closing the editor does not wait for a slow bake. The texture it installs is that
+  one. A row whose recipe fails would stop the game loading any material.
+- **Applied, not saved.** A material applied under a new id is in the running table
+  only. Saving a level that uses one still saves, and the status bar names it in a
+  warning, since next session those faces would draw grey or another material.
+  Only brush faces are checked, not the materials of voxel volumes.
+- **Opening reads on the worker.** A recipe file is read and parsed on the worker
+  and the material opens on a later tick, so a large file never holds the UI
+  thread; the material on show stays until then, and one open at a time.
+- **Lit view.** `mscent_render::texel_light` holds the steps the lighting shader
+  takes for a pixel once it knows the light, inlined into the shader, and
+  `shade_texel` is those steps in one call. The tile is drawn at most 512 px wide.
+- **The page shows what a block reads.** Each input a block actually reads, from
+  the compiled graph, is a small mark on its top edge, and the parameter panel
+  says it in words ("reads 1 input: noise", or the name a `load` reads). The marks
+  are the compiled graph's, so a page with an error shows none and the error text
+  says why. The page scrolls by the wheel, a middle-button drag or by selecting a
+  block, which brings it into view; a bar along the edge shows where the window
+  is on a longer page.
+- **Paint.** With a `paint` block selected and the Block tab showing, a drag on the
+  preview draws a stroke. Positions are in tiles, the 2x tiled view included, and
+  a stroke is kept as one continuous run of coordinates, so one that crosses an edge
+  continues on the other side. A stroke is one undo step, and its points are thinned
+  to a quarter of the brush radius apart (at least 1/1024 tile) so a long one stays
+  small, and every point is rounded to 1/4096 of a tile as it is added. It stops
+  growing at `MAX_POINTS` (4096) with a message, and a block past `MAX_STROKES`
+  refuses a new one. The recipe's undo
+  history is kept to 256 steps and an estimated 64 MB, the oldest going first, since
+  a stroke list is copied whole into each step. While the pointer is down the worker runs the
+  draft path, as for a slider, and the full picture comes on release. The brush
+  (radius, hardness, colour) belongs to the workspace, so it is no undo step. The
+  recipe reader holds `stroke` lines to `mscent_texgen::ops::charge_stroke`, the rule
+  the kernel applies, so a file that reads also runs, at any size.
+- **Limits on work.** The game makes recipes at startup on one thread with no way to
+  cancel, so a small file must not be able to stall it. Each operator has a cost
+  (`OpSpec::cost`, nanoseconds per texel on its worst parameters, or worked out from
+  octaves, inputs or strokes), measured by the `texgen_costs` example and rounded up.
+  `graph::run`, and so `bake` and `load_recipe`, refuse with `TooLarge` before any
+  pixel when a page's kernels at that size add up to more than `MAX_RECIPE_NS` (5 s).
+  `MaterialTable::load_dir` adds up its recipes, with their packing and reading, and
+  refuses past `MAX_DIRECTORY_NS` (30 s), also before any pixel; the stock directory
+  declares 47 ms. PNGs are not counted. Costs depend only on the recipe and the size,
+  never a clock, so a page gets the same answer on every machine; thirty `dots`, the
+  dearest ordinary block, still fit at 1024 px.
+- **Limit on strokes.** `paint`'s rule is one function, `ops::charge_stroke`: for each
+  segment `(length + 2r) * 2r` in tile units, with `r` the radius plus two texels of a
+  1024 px tile, plus 1/65536 per point, up to `MAX_STROKE_WORK` (360). It does not
+  know the tile's size, so strokes that work at 1024 px work at 128 px. At a brush of
+  radius 0.2 thinned as the editor thins it, 360 is 100 tiles of drawing. The
+  rasterizer walks each segment's rows and spans, not its bounding box, so a long
+  thin diagonal costs what the rule says; the pictures are the same to the bit.
+- **Limit on memory.** `graph::peak_images` plans the peak from the graph before any
+  kernel runs: the run's order and readers, with each kernel block counted as its own
+  image whatever a cache would share. Over `MAX_LIVE_BYTES` (512 MiB) is `TooLarge`, so
+  the answer is the same in the editor, with a cache, and in a bake, with none.
+- **Measured worst cases** (`texgen_costs` and `recipe_limits`, release profile, best
+  of three, 1024 px, dev machine with other work running). Before, 254 `paint` blocks
+  took 233.9 s, 254 full `scratches` 87.3 s and `dots` 33.7 s. Those pages are now
+  refused in under 0.3 ms, and the most of each that passes takes: 4 such `paint`s 2.9 s;
+  26 `scratches` 3.9 s; 31 `dots` 4.1 s; 39 `blur` 4.5 s; 34 `sharpen` 3.3 s; 39 `noise`
+  of 8 octaves 4.7 s; 33 `cavity` 3.8 s. No page of any operator passed at over about
+  5 s. One `paint` at the most the rule takes, on the costliest shape, takes 3 s.
+  Reading is linear, at most 5 ns a byte: a 4 MiB file takes 14 ms, not 12.6 s. A
+  directory at its limit, 6 rows of 33 `cavity` blocks, takes 28.1 s, and 7 rows are
+  refused in 5 ms. Running slower than this on another machine, or under load, is
+  possible: the limits are in estimated work, not seconds.
+- **A material with no recipe** (PNG files) opens on a new page of its size, and
+  nothing replaces the files until it is saved, which asks first for a stock one.
+- **Bump fade at 512 px.** A tile's world size is `texture_size * scale`, so at the
+  default scale a 512 px map has the texel density of a 128 px one and fades at
+  the same distance. Only a 512 px map scaled to a 128 px map's tile has 4 times
+  the texels per pixel, and it reaches `BUMP_GONE` at a quarter of the distance.
+  The lit view draws one texel per pixel and does not show this. This is worked
+  out from the shader's constants; no picture of it was taken.
 
 ## Goal
 
@@ -19,7 +149,7 @@ node graphs, animated textures, and custom emissive materials (see "Lit view").
 
 | Fact | Where | What it means here |
 |---|---|---|
-| Five textures come from Python: fractal noise through FFT upsampling, plus masks built by hand per material | [gen_textures.py](../tools/gen_textures.py) | The operators below must be able to rebuild all five; that is the test of the op set |
+| Five textures come from Python: fractal noise through FFT upsampling, plus masks built by hand per material | `tools/gen_textures.py` (since removed) | The operators below must be able to rebuild all five; that is the test of the op set |
 | Normals: wrapped central differences per texel, `(-dx, dy, 1)` | `to_normal` in the same file | Keep this sign convention, or every bump flips. Per-texel differences also mean relief changes with resolution; see "Resolution" |
 | Height is 8-bit on disk, and normals are computed before quantizing | same | The generator keeps more bits so gentle slopes do not stair-step |
 | Material ids are positions in the sorted file list, and levels store the id | [materials.rs](../crates/mscent-world/src/materials.rs), `check_materials` in [level/mod.rs](../crates/mscent-render/src/level/mod.rs) | Adding `concrete.png` shifts `floor` and later ids, and the level no longer builds. **This blocks custom materials** |
@@ -34,7 +164,7 @@ node graphs, animated textures, and custom emissive materials (see "Lit view").
 | xui at the pinned rev has `Tabs`, `Slider`, `ColorPicker`, `ComboBox`, `TreeView`, `Split` and context menus; the editor already has custom-painted nodes and hideable `stack`s | [app.rs](../apps/editor/src/ui/app.rs), [view3d.rs](../apps/editor/src/ui/view3d.rs) | No xui changes or new dependencies expected |
 | Normal texels are `0xAARRGGBB`, and decoding ignores alpha | `Texture::normal`, `NormalView` in texture.rs, [bump.rs](../crates/mscent-render/src/bump.rs) | The specular mask can live there; see "Engine changes" |
 | `encode_png` writes 8-bit RGB with stored (uncompressed) deflate | [png_encode.rs](../crates/mscent-render/src/png_encode.rs) | It loads correctly, but a 128 px map becomes about 49 KB (today 305 bytes to 29 KB) and a 1024 px map about 3 MB |
-| The game binary has a 2.2 MB budget | [check_size.py](../tools/check_size.py) | The game links the generator only if that is measured and worth it |
+| The game binary has a size budget (2.2 MB) | [check_size.py](../tools/check_size.py) | The game links the generator only if that is measured and worth it |
 
 ## What to take from kkrieger
 
@@ -168,6 +298,13 @@ op 1 3 1 out-height normal_strength=5
 | Height tools | | `bump` (bake light into albedo), `cavity`, `slope` (specular from height) |
 | Flow | `store`, `load`, `out-albedo`, `out-height`, `out-specular` | |
 
+A block reads the blocks above it, so a position is a connection and there are no
+wires to show it. An operator whose input is optional (`rect`, `dots`, `paint` and
+the other shapes) therefore draws over the block above it if there is one, and on
+its own background only if there is none. The page marks every input a block reads
+on its top edge, and the parameter panel says how many and from which blocks, so a
+shape placed under another block is seen to read it.
+
 A recipe needs `out-albedo`. Without `out-height` the normal map is flat, and
 without `out-specular` the mask is full. Height and specular read channel R.
 All five stock recipes need only the first set.
@@ -262,7 +399,7 @@ Each leaves the game and the editor working. Sizes as in work-items.md.
 | M12.8 | Paint operator and tool | M12.6 | M | Replay at 128 and 512 px, downsampled, is within 2 levels mean; a stroke across the edge passes the seam test; undo restores identical pixels |
 | M12.9 | Later operator set, starter templates | M12.3, M12.4 | L | Same tests as M12.2; each template bakes into a contact sheet |
 | M12.10 | Stock recipes for all five materials with `out-specular` for `metal` and `floor` (closes M5.7), retire `gen_textures.py`; a compressing PNG encoder if file size needs it | M12.7 | M | Side-by-side contact sheet reviewed by the owner; full test suite passes, with snapshot changes explained; CI checks that committed PNGs equal the recipe output; assets size recorded |
-| M12.11 | Optional: game builds materials from recipes at load | M12.10 | M | Decided on measured numbers: binary size against the budget, load time against the 67 ms PNG decode noted in `build.rs` |
+| M12.11 | Game builds materials from recipes at load | M12.10 | M | Decided on measured numbers: binary size against the budget, load time against the 67 ms PNG decode noted in `build.rs` |
 
 M12.5 is independent of the rest and can start at any time, so it can run in
 parallel with M12.1 to M12.4. A first usable release is M12.1 to M12.7.

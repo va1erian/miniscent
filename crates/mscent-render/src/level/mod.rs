@@ -55,7 +55,7 @@ use setup::{mesh_lighting, spec_tables};
 pub use view::View;
 
 /// Light scale of emissive surfaces (256 is the plain texture colour).
-const EMISSIVE: u32 = 330;
+pub const EMISSIVE: u32 = 330;
 /// Light scale of a self-lit sky: the texture as it is.
 const SELF_LIT: u32 = 256;
 /// Light scale of a face that has no lightmap data.

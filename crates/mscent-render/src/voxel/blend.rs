@@ -24,12 +24,11 @@ use super::tri::{Corner, Gradient, each_row};
 use super::{SEAM_BAND, TEXELS_PER_UNIT, axis_map, seam_of};
 use crate::bump::{FLAT_NORMAL, bump_gain, view_normal};
 use crate::framebuffer::Framebuffer;
-use crate::lighting_shader::{
-    BUMP_FULL, BUMP_GONE, KNEE, MIN_SPEC, SPEC_GAIN, add_spec, dither_of, mul_rgb3, soft_limit,
-};
+use crate::lighting_shader::{BUMP_FULL, BUMP_GONE};
 use crate::raster::{DrawStats, SPAN_LEN};
 use crate::shade::lerp_rgb;
 use crate::specular::SpecTable;
+use crate::texel_light::{KNEE, MIN_SPEC, SPEC_GAIN, add_spec, dither_of, mul_rgb3, soft_limit};
 use crate::texture::{LodSampler, NormalView, Texture};
 
 /// Thresholds of the ordered dither, as fractions of 16.

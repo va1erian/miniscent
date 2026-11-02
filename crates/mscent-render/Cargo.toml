@@ -7,6 +7,7 @@ publish.workspace = true
 [dependencies]
 mscent-math.workspace = true
 mscent-world.workspace = true
+mscent-texgen.workspace = true
 
 # Not `workspace = true`: this crate alone needs unsafe (std::arch SIMD in
 # simd.rs and particles/kernels.rs, and lending a borrowed closure to parked

@@ -254,8 +254,9 @@ fn preview(
             (Arc::new(draft), Light::Draft, None)
         }
     };
-    // One decode for the whole session: at 67 ms it would be most of the cost
-    // of a preview. The table's clone shares its pixels and mips.
+    // One load for the whole session: the stock materials are generated, about 4 ms
+    // each on a size-optimized build, which a preview should not pay again. The
+    // table's clone shares its pixels and mips.
     let (generation, table) = materials.current();
     let renderer = compiled
         .into_renderer(map, table?)

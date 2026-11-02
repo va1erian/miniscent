@@ -118,6 +118,11 @@ impl Studio {
         Ok(())
     }
 
+    /// Forgets a Play that was waiting for the preview: the user went elsewhere.
+    pub fn cancel_play_when_ready(&mut self) {
+        self.play_pending = false;
+    }
+
     /// One tick's worth of keeping up with `doc`. Never blocks.
     pub(super) fn sync_preview(&mut self, doc: &Document, out: &mut Tick) {
         self.poll_preview(doc, out);
@@ -261,7 +266,8 @@ impl Studio {
         let why = built.unplayable().map(str::to_string);
         self.script_watch.files = built.watch.clone();
         self.attach(Box::new(LevelScene::new(built)), made_for, why);
-        if self.play_pending && self.built_doc.as_ref() == Some(doc) {
+        // Not while another build is wanted: this one may have read an older script.
+        if self.play_pending && !self.refresh && self.built_doc.as_ref() == Some(doc) {
             self.play_pending = false;
             match &self.unplayable {
                 None => out.play_now = true,

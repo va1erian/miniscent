@@ -1,0 +1,47 @@
+miniscent-recipe 1
+size 128 128
+gloss 120
+# Shared parts: the frame's inside, the lit area, and the diffuser's grid. Shapes
+# draw over a block above them, so each starts in a clear column.
+op 0 0 1 rect x=0.5 y=0.5 w=0.8125 h=0.8125
+op 0 1 1 store name=inside
+op 1 0 1 rect x=0.5 y=0.5 w=0.71875 h=0.71875
+op 1 1 1 store name=lit
+op 2 0 1 bricks rows=8 cols=8 offset=0 mortar=0.09 mode=mask
+op 2 1 1 store name=cells
+# The light: warm, brightest in the middle, never below 55%, grid darkened.
+op 0 2 1 glow x=0.5 y=0.5 radius=0.703
+op 1 2 1 flat color=0.55,0.55,0.55
+op 0 3 2 merge mode=max
+op 0 4 1 color gain=1,0.95,0.75
+op 0 5 1 store name=warm
+op 1 5 1 load name=cells
+op 1 6 1 range out_low=0.82
+op 0 6 1 load name=warm
+op 0 7 2 merge mode=multiply
+op 0 8 1 store name=glow
+# The dark gap around the light, then the frame.
+op 0 9 1 flat color=0.2,0.2,0.2
+op 1 9 1 load name=glow
+op 2 9 1 load name=lit
+op 0 10 3 mask
+op 0 11 1 store name=panel
+op 0 12 1 noise freq_x=8 freq_y=8 octaves=4 persistence=0.55 seed=41 color0=0.176,0.192,0.224 color1=0.264,0.288,0.336
+op 1 12 1 load name=panel
+op 2 12 1 load name=inside
+op 0 13 3 mask
+op 0 14 1 out-albedo
+# Height: frame high, gap low, the diffuser between with its grid sunk in.
+op 0 15 1 load name=cells
+op 0 16 1 range out_low=0.35 out_high=0.45
+op 0 17 1 store name=diffuser
+op 0 18 1 flat color=0.2,0.2,0.2
+op 1 18 1 load name=diffuser
+op 2 18 1 load name=lit
+op 0 19 3 mask
+op 0 20 1 store name=recess
+op 0 21 1 flat color=0.8,0.8,0.8
+op 1 21 1 load name=recess
+op 2 21 1 load name=inside
+op 0 22 3 mask
+op 0 23 1 out-height normal_strength=3

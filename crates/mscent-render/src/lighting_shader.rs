@@ -21,17 +21,10 @@ use crate::lightmap_mips::{LightMips, Rgbx};
 use crate::raster::SPAN_LEN;
 use crate::shade::{Fog, SpanEnd, SpanShader, lerp_rgb};
 use crate::specular::{SpecTable, half_vector};
+use crate::texel_light::{add_highlight, dither_of, limit_light, mul_rgb3, spec_response};
 use crate::texture::{NormalView, Texture};
 
 pub use crate::uv_luxel::UvToLuxel;
-
-/// Highlight strength: the table peaks at gloss/255 of the light colour,
-/// which on dim baked light would be invisible.
-pub(crate) const SPEC_GAIN: f32 = 1.1;
-
-/// Table response below which a highlight adds nothing visible (the light
-/// level tops out near 300 of 256, so 1/300 is under one level).
-pub(crate) const MIN_SPEC: f32 = 1.0 / 300.0;
 
 /// Pixels of the longest span (a power of two, for the masked index).
 const MAX_PX: usize = SPAN_LEN as usize;
@@ -311,51 +304,10 @@ impl<'a, const SPEC: bool> LightingShader<'a, SPEC> {
     }
 }
 
-/// Multiply the colour channels by per-channel light `k` (256 = unchanged).
-/// Negative or NaN products saturate to zero in the float-to-int cast.
-/// `dither` in `[0, 1)` is added before truncation so smooth gradients do not
-/// quantise into visible rings.
-pub(crate) fn mul_rgb3(c: u32, k: Vec3, dither: f32) -> u32 {
-    let ch =
-        |shift: u32, k: f32| (((c >> shift) & 0xff) as f32 * k * (1.0 / 256.0) + dither) as u32;
-    0xff00_0000 | ch(16, k.x).min(255) << 16 | ch(8, k.y).min(255) << 8 | ch(0, k.z).min(255)
-}
-
-/// Light level (256 = full) above which [`soft_limit`] starts rolling off.
-pub(crate) const KNEE: f32 = 190.0;
-/// Distance past the knee at which the roll-off reaches its ceiling.
-const ROLL: f32 = 110.0;
-
-/// Smoothly compresses light above the knee towards `KNEE + ROLL`, so bright
-/// pools keep texture detail instead of clipping to flat white.
-pub(crate) fn soft_limit(x: f32) -> f32 {
-    // KNEE + d / (1 + d / ROLL) with d = x - KNEE, rearranged to x - d^2 /
-    // (ROLL + d) so there is no branch: d is zero below the knee.
-    let d = (x - KNEE).max(0.0);
-    x - d * d / (ROLL + d)
-}
-
 /// `log2(x)` for positive finite `x`, linear between powers of two (off by
 /// under 0.09, which only shifts where the level blend happens).
 fn fast_log2(x: f32) -> f32 {
     x.to_bits() as f32 * (1.0 / (1 << 23) as f32) - 127.0
-}
-
-/// Cheap noise in `[0, 1)` from the screen position. It is fixed on the
-/// screen, so it cannot crawl across surfaces as the camera moves (noise
-/// keyed by span index or texel does, since both shift every frame).
-pub(crate) fn dither_of(x: i32, y: i32) -> f32 {
-    let h = (x as u32).wrapping_mul(0x9E37_79B1) ^ (y as u32).wrapping_mul(0x85EB_CA6B);
-    let h = (h ^ (h >> 15)).wrapping_mul(0x2C1B_3C6D);
-    ((h >> 8) & 0xffff) as f32 * (1.0 / 65536.0)
-}
-
-/// Add a white highlight of strength `s` scaled by the light colour `k`,
-/// saturating per channel.
-pub(crate) fn add_spec(c: u32, k: Vec3, s: f32) -> u32 {
-    // The float cast saturates at u32::MAX, so the add must saturate too.
-    let ch = |shift: u32, k: f32| (((c >> shift) & 0xff).saturating_add((k * s) as u32)).min(255);
-    0xff00_0000 | ch(16, k.x) << 16 | ch(8, k.y) << 8 | ch(0, k.z)
 }
 
 impl<const SPEC: bool> SpanShader for LightingShader<'_, SPEC> {
@@ -407,25 +359,13 @@ impl<const SPEC: bool> SpanShader for LightingShader<'_, SPEC> {
             }
             k = k * bump_gain(n, seg.dir0 + seg.ddir * f);
         }
-        // Below the knee the roll-off is the identity: skip its divisions.
-        if k.x.max(k.y).max(k.z) > KNEE {
-            k = Vec3::new(soft_limit(k.x), soft_limit(k.y), soft_limit(k.z));
-        }
+        let k = limit_light(k);
         let dither = dither_of(self.x0 + i as i32, self.y0);
         let mut out = mul_rgb3(texel, k, dither);
         if let Some(spec) = self.spec.filter(|_| SPEC) {
             let h = seg.half0 + seg.dhalf * f;
-            // Stepping unit vectors linearly shortens them mid-interval,
-            // which would flatten the peak; one Newton step of 1/|h|
-            // restores it.
-            let s = spec.table.response(n.dot(h) * (1.5 - 0.5 * h.dot(h)));
-            // Most pixels are outside the lobe; below this the add is under
-            // one level for any light the shader can produce. The mask only
-            // lowers the response, so those pixels need not blend it.
-            if s > MIN_SPEC {
-                let mask = self.spec_mask(&spec, sample.as_ref());
-                out = add_spec(out, k, s * mask * SPEC_GAIN);
-            }
+            let s = spec_response(spec.table, n, h);
+            out = add_highlight(out, k, s, || self.spec_mask(&spec, sample.as_ref()));
         }
         match self.face.fog {
             Some(fog) => {
@@ -448,3 +388,6 @@ mod lighting_shader_tests;
 #[cfg(test)]
 #[path = "specular_mask_tests.rs"]
 mod specular_mask_tests;
+#[cfg(test)]
+#[path = "texel_light_tests.rs"]
+mod texel_light_tests;

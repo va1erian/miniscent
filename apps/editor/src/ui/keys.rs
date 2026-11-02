@@ -114,6 +114,8 @@ pub(super) fn shortcut(key: Key, mods: Modifiers) -> Option<Msg> {
     }
     match key {
         Key::F5 => Some(Msg::Menu(cmd::PLAY)),
+        Key::F6 => Some(Msg::Menu(cmd::SCRIPT_PANE)),
+        Key::F7 => Some(Msg::Menu(cmd::GUIDE)),
         Key::ESCAPE => Some(Msg::Escape),
         Key::DELETE => guarded(Msg::Menu(cmd::DELETE)),
         Key::RETURN => guarded(Msg::Menu(cmd::SLICE)),

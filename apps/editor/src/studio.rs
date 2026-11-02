@@ -171,6 +171,12 @@ impl Studio {
         self.built_doc.as_ref() == Some(doc)
     }
 
+    /// The script file was just written: the picture and whether it plays are out
+    /// of date, whatever a job on its way says, so it must build again.
+    pub fn script_changed(&mut self) {
+        self.refresh = true;
+    }
+
     /// Whether Play can start on what is up right now. After a live edit it needs
     /// one more preview, as a game collides with what that compiles.
     pub fn playable_now(&self, doc: &Document) -> bool {
@@ -233,6 +239,11 @@ impl Studio {
         if let Some(w) = &self.worker {
             w.highlights(&self.highlights);
         }
+    }
+
+    /// What identifies the full lightmap of the picture.
+    pub fn light_key(&self) -> u64 {
+        self.light_key
     }
 
     /// The material table: replacing it updates the picture, keeping the light.
@@ -481,6 +492,6 @@ mod tests;
 #[cfg(test)]
 mod texture_tests;
 #[cfg(test)]
-mod tick_costs;
+pub(crate) mod tick_costs;
 #[cfg(test)]
 mod vista_tests;

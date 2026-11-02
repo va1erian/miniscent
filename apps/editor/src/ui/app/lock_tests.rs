@@ -248,3 +248,47 @@ fn play_locks_the_pointer_and_releases_it_on_esc_and_when_the_backend_ends_it() 
         assert_eq!(s.editor.borrow().studio.mode, Mode::Edit);
     });
 }
+
+#[test]
+fn a_play_queued_before_the_workspace_opens_never_starts_under_it() {
+    run(|s| {
+        // The level is not built yet, so F5 waits for it.
+        s.ui.emit(Msg::Menu(cmd::PLAY));
+        s.ui.emit(Msg::Menu(cmd::TEX_OPEN));
+        s.backend.pump(s.window);
+        assert!(s.editor.borrow().tex.is_open());
+        s.wait_preview();
+        // The picture is up: the Play that was waiting for it would start now.
+        for _ in 0..20 {
+            s.ui.emit(Msg::Step);
+            s.backend.pump(s.window);
+        }
+        let editor = s.editor.borrow();
+        assert_eq!(editor.studio.mode, Mode::Edit);
+        assert!(editor.tex.is_open(), "the workspace is still up");
+    });
+}
+
+#[test]
+fn play_from_any_route_closes_the_workspace_and_its_shortcuts_stay_the_levels() {
+    run(|s| {
+        s.wait_preview();
+        s.ui.emit(Msg::Menu(cmd::TEX_OPEN));
+        s.backend.pump(s.window);
+        assert!(s.editor.borrow().tex.is_open());
+        // Not through F5, which the workspace ignores: Play begun some other way.
+        s.editor.borrow_mut().begin_play();
+        {
+            let editor = s.editor.borrow();
+            assert_eq!(editor.studio.mode, Mode::Play);
+            assert!(!editor.tex.is_open(), "the workspace went first");
+        }
+        // Ctrl+S in the game is not a Save of a material.
+        s.ui.emit(Msg::Menu(cmd::TEX_SAVE));
+        s.ui.emit(Msg::Menu(cmd::SAVE));
+        s.backend.pump(s.window);
+        let editor = s.editor.borrow();
+        assert!(!editor.tex.studio.borrow().is_baking());
+        assert_eq!(editor.studio.mode, Mode::Play, "and still playing");
+    });
+}

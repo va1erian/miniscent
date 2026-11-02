@@ -2,6 +2,7 @@ use super::*;
 use crate::camera::Camera;
 use crate::framebuffer::Framebuffer;
 use crate::raster::{Vertex, draw_polygon};
+use crate::texel_light::{KNEE, ROLL, add_spec, soft_limit};
 use crate::texture::load_texture;
 use mscent_world::lightmap::{BakeConfig, LightFace, PointLight, bake};
 use mscent_world::{Brush, Op, compile};

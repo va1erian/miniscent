@@ -22,9 +22,17 @@ use crate::studio::Preview;
 use crate::ui::{Editor, Msg, Probe, cmd};
 
 mod faces;
+mod guide;
 mod keys;
+mod level_settings;
 mod materials;
+mod script_pane;
 mod scripting;
+mod texture;
+mod texture_paint;
+mod texture_stock;
+mod texture_tutorial;
+mod timing;
 mod vista;
 mod voxel;
 
@@ -68,6 +76,11 @@ struct Holder {
     editor: Probe,
 }
 
+/// `--ui-timing`: prints what the UI thread's everyday work costs.
+pub fn ui_timing(dir: &Path) -> i32 {
+    run_theme(dir, Theme::light(), (1280.0, 800.0), timing::script)
+}
+
 /// Runs the script; returns the process exit code.
 pub fn run(dir: &Path) -> i32 {
     let scripted = run_theme(
@@ -75,6 +88,18 @@ pub fn run(dir: &Path) -> i32 {
         Theme::light(),
         (1280.0, 800.0),
         scripting::script,
+    );
+    let pane = run_theme(
+        &dir.join("script-pane"),
+        Theme::light(),
+        (1280.0, 800.0),
+        script_pane::script,
+    );
+    let pane_dark = run_theme(
+        &dir.join("script-pane-dark"),
+        Theme::dark(),
+        (1280.0, 800.0),
+        script_pane::script,
     );
     let light = run_theme(dir, Theme::light(), (1280.0, 800.0), script);
     let dark = run_theme(&dir.join("dark"), Theme::dark(), (1280.0, 800.0), script);
@@ -84,6 +109,18 @@ pub fn run(dir: &Path) -> i32 {
         Theme::light(),
         (2000.0, 1124.0),
         wide_script,
+    );
+    let textures = run_theme(
+        &dir.join("texture"),
+        Theme::light(),
+        (1280.0, 800.0),
+        texture::script,
+    );
+    let tutorial = run_theme(
+        &dir.join("tutorial"),
+        Theme::light(),
+        (1280.0, 800.0),
+        texture_tutorial::script,
     );
     let voxels = run_theme(
         &dir.join("voxel"),
@@ -97,18 +134,42 @@ pub fn run(dir: &Path) -> i32 {
         (1280.0, 800.0),
         vista::script,
     );
+    // Text is measured apart from how it is painted, which only shows when scaled.
+    let scaled = run_at(
+        &dir.join("guide-scaled"),
+        Theme::light(),
+        (1280.0, 800.0),
+        144,
+        guide::scaled,
+    );
     light
+        .max(scaled)
         .max(dark)
         .max(wide)
         .max(scripted)
+        .max(pane)
+        .max(pane_dark)
         .max(voxels)
+        .max(textures)
+        .max(tutorial)
         .max(vistas)
 }
 
 fn run_theme(
     dir: &Path,
     theme: Theme,
+    size: (f32, f32),
+    script: fn(&mut Run, &Stage<'_, Msg>, &Probe),
+) -> i32 {
+    run_at(dir, theme, size, 96, script)
+}
+
+/// A run at a display's scale: 96 dpi is 100%.
+fn run_at(
+    dir: &Path,
+    theme: Theme,
     (width, height): (f32, f32),
+    dpi: u32,
     script: fn(&mut Run, &Stage<'_, Msg>, &Probe),
 ) -> i32 {
     if let Err(e) = std::fs::create_dir_all(dir) {
@@ -122,7 +183,7 @@ fn run_theme(
     let probe: Rc<RefCell<Option<Holder>>> = Rc::new(RefCell::new(None));
     let (p2, r2) = (probe.clone(), run.clone());
     let result = render_with(
-        Snapshot::new(Dip(width), Dip(height)).theme(theme),
+        Snapshot::new(Dip(width), Dip(height)).theme(theme).dpi(dpi),
         move |ui| {
             let app = Editor::build(ui, Document::from_level(&mscent_world::showcase_level()))?;
             *p2.borrow_mut() = Some(Holder {

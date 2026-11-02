@@ -225,6 +225,17 @@ impl Document {
         &self.brushes
     }
 
+    /// The materials the faces of the brushes use, which is what a saved level
+    /// stores. A volume's voxels carry their own, which this leaves out.
+    pub fn materials_used(&self) -> std::collections::BTreeSet<u16> {
+        self.brushes
+            .iter()
+            .filter(|b| b.volume().is_none())
+            .flat_map(|b| b.full_texinfos())
+            .map(|t| t.material)
+            .collect()
+    }
+
     pub fn entities(&self) -> &[EntityDef] {
         &self.entities
     }
@@ -253,7 +264,7 @@ impl Document {
         self.groups.iter().find(|g| g.brushes.contains(&brush))
     }
 
-    pub(super) fn name_taken(&self, name: &str) -> bool {
+    pub(crate) fn name_taken(&self, name: &str) -> bool {
         self.groups.iter().any(|g| g.name == name)
             || self
                 .labels

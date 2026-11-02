@@ -14,6 +14,7 @@ import subprocess
 import sys
 
 # 1.6 MB until voxel volumes, which took the game from 1,576,960 to 1,885,184 bytes.
+# The texture generator adds about 140 KB, and replaced 902 KB of PNGs in the assets.
 BUDGET_BYTES = 2_200_000
 WARN_FRACTION = 0.8
 

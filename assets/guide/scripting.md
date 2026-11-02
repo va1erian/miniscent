@@ -1,0 +1,169 @@
+# Start here
+
+A level's logic is one script, a text file beside the level: `foo.st` beside `foo.msl`. It reads top to bottom. Nothing in the level says what a door does or when enemies appear. The level holds places and things with names, and the script says what happens to them.
+
+## The loop
+
+1. Pick something from Add entity on the Script tab, and click in a 2D view. It places a named door, zone or marker, and adds its lines to the script.
+2. Read those lines and change them. Completion and the Problems list keep you honest as you type.
+3. Press F5 to play. Your script is saved first, if the level has a file. Esc comes back.
+
+A level with no file yet has nowhere to keep its script, so F5 asks you to save it first.
+
+## Try a sample
+
+Open one from the Samples list on the Script tab. Each is a small level you can play at once and take apart. Your copy is yours to change, and opening the sample again starts it over. Use File, Save as to keep it.
+
+## Keys
+
+- **F6** shows or hides this pane. **F7** opens this guide.
+- The Own window button moves the pane to a window of its own, and Dock brings it back. Script, Script in its own window does the same. Moving it starts the script's undo over.
+- To use an example from this guide, click Insert in script under it.
+- Ctrl+Space offers completions. Enter or Tab accepts one.
+- Ctrl+S saves the level and its script. F5 plays.
+
+# Names and things
+
+The script finds things in the level by name. Select something, type in Script names on the right, and press Apply names. Names are lower case letters, digits and _.
+
+- A brush becomes a mover: Edit, Make mover, or give it a name. Brushes with the same name move together. A mover is taken out of the world and can have any shape made of add brushes.
+- A marker (M) is a named point. A marker can also have tags, and markers: finds them all.
+- A zone (Z) is a box that notices the player. Set its size in the Entity section.
+- An enemy (E) can have a name or a tag.
+
+The panel lists the script lines that name the selected thing. To rename something, rename it in both places: the Problems list will show every line you missed.
+
+These lines find each kind of thing:
+
+    door := mover: 'gate'.
+    hall := zone: 'hall'.
+    spot := marker: 'spot'.
+    spots := markers: 'wave_spawn'.
+    guards := tagged: 'guards'.
+
+# The language
+
+A statement ends with a period. A comment is in double quotes, and a string in single ones.
+
+    x := 3.
+    say: 'hello'.
+    player hp.
+    'n = ' , 3.
+
+## Messages
+
+A word with a colon takes a value. Several of them make one message. The thing on the left, if there is one, receives it.
+
+    door := mover: 'gate'.
+    door moveTo: 'open' in: 1.5.
+
+Arithmetic runs strictly from left to right: `2 + 3 * 4` is 20. Use brackets when you mean otherwise.
+
+    y := 2 + (3 * 4).
+
+## Blocks
+
+A block is code to run later. This is how everything that waits for something is written. A block can change the variables around it.
+
+    count := 0.
+    twice := [:n | n * 2].
+    count := twice value: 4.
+
+## Choices and loops
+
+    n := 3.
+    n > 2 ifTrue: [say: 'many'] ifFalse: [say: 'few'].
+    [n > 0] whileTrue: [n := n - 1].
+    3 timesRepeat: [say: 'again'].
+    {1. 2. 3} do: [:each | say: each].
+
+## Functions
+
+A function is how a repeated pattern gets a name. It sees the top-level variables.
+
+    define shout: what twice: n [
+        n timesRepeat: [say: what].
+    ]
+    shout: 'hey' twice: 2.
+
+# Doors and movers
+
+A mover is a group of brushes with named poses. It starts in the pose 'closed', which is where you drew it. You define the others by how far they are from there.
+
+    gate := mover: 'gate'.
+    gate pose: 'open' move: (x: 0 y: 0 z: 4).
+    (zone: 'gate_area') onEnter: [gate moveTo: 'open' in: 0.6].
+    (zone: 'gate_area') onExit: [gate moveTo: 'closed' in: 0.8].
+
+That pattern has a name in the library, and a key of `nil` means anyone can use the door. It listens to the zone named after the door and _area, here gate_area. A door from Add entity brings that zone along when you move or resize it. Move the zone yourself to open the door from elsewhere, and the Problems list tells you if a zone does not reach its door.
+
+    autoDoor: 'gate' travel: (x: 0 y: 0 z: 4) key: nil.
+
+A hinged door turns about a marker instead:
+
+    trap := mover: 'trap'.
+    trap pose: 'open' turn: (x: 1 y: 0 z: 0) degrees: 90 about: (marker: 'hinge').
+
+Decide what happens when something is in the way. 'reverse' is the default:
+
+    gate := mover: 'gate'.
+    gate whenBlocked: 'hold'.
+    gate whenBlocked: 'crush' damage: 40.
+
+Movers do not cast baked shadows, so light passes through a closed door. Place lights with that in mind.
+
+# Enemies and props
+
+Spawn on markers, by kind. Enemy kinds are drone and hunter. Prop kinds are switch, keycard, terminal and crate. A tag groups what you spawn.
+
+    card := spawn: 'keycard' at: (marker: 'spot') tag: 'key'.
+    card onPickup: [player give: 'red'. say: 'Red keycard'].
+    spawnAll: 'drone' at: (markers: 'wave_spawn') tag: 'wave'.
+
+Wait for a whole group without counting anything:
+
+    (tagged: 'wave') onAllDestroyed: [say: 'Clear'].
+    (tagged: 'wave') onEachDestroyed: [say: (tagged: 'wave') alive , ' left'].
+
+Tune a kind of your own:
+
+    sentry := defineEnemy: 'sentry' base: 0.
+    sentry hp: 80.
+    sentry speed: 0.
+
+A prop does only what you ask of it: it can be picked up if it has onPickup:, used if it has onUse:hold:, and shot if it has onHit:.
+
+# Time and sequences
+
+A handler can pause, and nothing else stops while it does. So a sequence is just lines of code.
+
+    (zone: 'hall') onceEnter: [
+        say: 'Here they come'.
+        wait: 1.
+        spawnAll: 'drone' at: (markers: 'wave_spawn') tag: 'wave'.
+        waitDestroyed: (tagged: 'wave').
+        wait: 2.
+        say: 'Clear'.
+    ].
+
+Run things later, or again and again:
+
+    after: 10 do: [say: 'Ten seconds in'].
+    every: 30 do: [player heal: 5].
+    fork: [wait: 1. say: 'Alongside'].
+
+End the level yourself:
+
+    (zone: 'hall') onceEnter: [player hp < 10 ifTrue: [lose] ifFalse: [win]].
+
+# When it goes wrong
+
+The Problems list checks your script as you type, against the level as it is now. Click a problem to go to its line.
+
+- "unknown" with a closest match means a typo in a message. The script does not start until it is fixed, so a typo cannot wait inside a handler that hardly ever runs.
+- "the level has no mover named" means a name in the script is not in the level. Check the spelling, then the Script names panel.
+- A warning is a variable assigned and never read, which is usually a typo too.
+
+Some mistakes only show when the line runs, such as a message sent to the wrong kind of thing. They appear on the screen while playing, with their file and line, and stop only that handler. Saving a script while the game runs starts the level over on it.
+
+If the file changed in another program, the script follows it, unless you have edits of your own. Then the pane says so, and you choose: Save overwrites the file, Reload takes it.

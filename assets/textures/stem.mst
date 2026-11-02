@@ -1,0 +1,21 @@
+miniscent-recipe 1
+size 128 128
+gloss 20
+# Pale flesh with fine fibres running up it (V is up on a wall), so the noise
+# varies across much more than along.
+op 0 0 1 noise freq_x=8 freq_y=1 octaves=4 persistence=0.5 seed=61
+op 0 1 1 store name=fibres
+op 0 2 1 noise freq_x=4 freq_y=4 octaves=3 persistence=0.55 seed=62
+op 0 3 1 range out_low=0.88
+op 0 4 1 store name=blotch
+op 0 5 1 flat color=0.62,0.55,0.42
+op 1 5 1 flat color=0.9,0.84,0.7
+op 2 5 1 load name=fibres
+op 0 6 3 mask
+op 0 7 3 store name=flesh
+op 3 7 1 load name=blotch
+op 0 8 4 merge mode=multiply
+op 0 9 1 out-albedo
+op 0 10 1 load name=fibres
+op 0 11 1 range out_low=0.3 out_high=0.9
+op 0 12 1 out-height normal_strength=2

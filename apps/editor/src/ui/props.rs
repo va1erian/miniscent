@@ -294,6 +294,11 @@ impl Panel {
         self.uses.get().set_text(&st.script_uses());
     }
 
+    /// The lines of the script that name the selection, as it is typed.
+    pub fn show_script_uses(&self, st: &EditorState) {
+        self.uses.get().set_text(&st.script_uses());
+    }
+
     /// Shows the selection in the fields and enables only the relevant ones.
     pub fn sync(&self, st: &mut EditorState) {
         self.sync_names(st);

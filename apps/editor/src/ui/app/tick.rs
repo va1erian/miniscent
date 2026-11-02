@@ -20,12 +20,16 @@ impl Editor {
         let clicks = pane.take_clicks();
         let drags = pane.take_drags();
         let wheel = pane.take_wheel();
-        let size = pane.size();
+        // Under the workspace the 3D pane is not on screen, so it costs no frames.
+        let hidden = self.studio.mode == Mode::Edit && self.tex.is_open();
+        let size = if hidden { (0, 0) } else { pane.size() };
         let state = self.state.clone();
         let sculpted = state.borrow_mut().poll_stroke();
         self.studio.set_stroking(state.borrow().stroking());
         let tick = self.studio.tick(&events, size, &state.borrow().doc);
         self.follow_materials();
+        self.light_key.set(self.studio.light_key());
+        self.tex_advance();
         self.push_log(&tick.log);
         if let Some(s) = &tick.status {
             self.state.borrow_mut().message = s.clone();
@@ -49,6 +53,7 @@ impl Editor {
             target.set_rgba(f.w, f.h, f.rgba);
         }
         if self.studio.mode == Mode::Edit {
+            self.sync_script();
             self.pane_wheel(wheel);
             let busy = sculpted || !clicks.is_empty() || !drags.is_empty() || wheel != 0;
             for click in clicks {

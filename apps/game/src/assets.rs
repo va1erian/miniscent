@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use mscent_render::MaterialTable;
+use mscent_render::{MaterialTable, recipe_texture};
 use mscent_world::Level;
 
 /// Directories that may hold `textures/`, most specific first: the explicit
@@ -25,13 +25,40 @@ fn candidates(explicit: Option<&Path>) -> Vec<PathBuf> {
     dirs
 }
 
+/// Whether a directory holds materials [`MaterialTable::load_dir`] can read: a
+/// manifest, any recipe, or the one PNG every stock level needs, which keeps an
+/// unrelated folder of pictures from being taken for textures.
+fn holds_materials(dir: &Path) -> bool {
+    let has_recipe = || {
+        std::fs::read_dir(dir).is_ok_and(|mut files| {
+            files.any(|file| {
+                file.is_ok_and(|f| {
+                    let name = f.file_name();
+                    name.to_string_lossy().ends_with(recipe_texture::EXTENSION)
+                        && f.path().is_file()
+                })
+            })
+        })
+    };
+    dir.join(mscent_render::manifest::FILE).is_file()
+        || dir.join("brick.png").is_file()
+        || has_recipe()
+}
+
 /// Loads the material table from the first candidate directory that has the
 /// textures. The error lists where it looked.
 pub fn load_materials(assets_root: Option<&Path>) -> Result<MaterialTable, String> {
+    load_materials_from(assets_root).map(|(table, _)| table)
+}
+
+/// As [`load_materials`], and the directory the table came from, which is where
+/// a material made in the editor is saved.
+pub fn load_materials_from(assets_root: Option<&Path>) -> Result<(MaterialTable, PathBuf), String> {
     let dirs = candidates(assets_root);
     for dir in &dirs {
-        if dir.join("brick.png").is_file() {
+        if holds_materials(dir) {
             return MaterialTable::load_dir(dir)
+                .map(|table| (table, dir.clone()))
                 .map_err(|e| format!("cannot load textures from {}: {e:?}", dir.display()));
         }
     }
@@ -62,10 +89,68 @@ mod tests {
     }
 
     #[test]
+    fn the_directory_reported_is_the_one_the_table_came_from() {
+        let (table, dir) = load_materials_from(None).expect("textures");
+        assert!(dir.join(mscent_render::manifest::FILE).is_file());
+        let again = MaterialTable::load_dir(&dir).expect("loads");
+        assert_eq!(again.len(), table.len());
+    }
+
+    #[test]
     fn missing_files_give_messages_not_panics() {
         let e = load_level(Path::new("no/such/level.msl")).unwrap_err();
         assert!(e.contains("cannot read"), "{e}");
         let e = load_materials(Some(Path::new("no/such/root")));
         assert!(e.is_ok(), "falls through to the source tree");
+    }
+
+    /// An `--assets` root holding `textures/` with the given files, whose table
+    /// is reported with the directory it came from.
+    fn root_with(tag: &str, files: &[(&str, &[u8])]) -> (PathBuf, MaterialTable, PathBuf) {
+        let root = std::env::temp_dir().join(format!("mscent-assets-{tag}-{}", std::process::id()));
+        let dir = root.join("textures");
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        for (name, bytes) in files {
+            std::fs::write(dir.join(name), bytes).expect("write");
+        }
+        let (table, from) = load_materials_from(Some(&root)).expect("loads");
+        (root, table, from)
+    }
+
+    const RECIPE: &[u8] = b"miniscent-recipe 1\nsize 4 4\nop 0 0 1 flat\nop 0 1 1 out-albedo\n";
+
+    #[test]
+    fn a_root_with_a_manifest_is_used() {
+        let files: [(&str, &[u8]); 2] = [("materials.txt", b"0 mine 7\n"), ("mine.mst", RECIPE)];
+        let (root, table, from) = root_with("manifest", &files);
+        assert_eq!(from, root.join("textures"));
+        assert_eq!(table.len(), 1);
+        assert!(table.find("mine").is_some());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_root_with_only_a_recipe_is_used_not_skipped_for_the_stock_folder() {
+        let (root, table, from) = root_with("recipe", &[("brick.mst", RECIPE)]);
+        assert_eq!(from, root.join("textures"));
+        assert_eq!(table.len(), 1, "only its own brick");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_root_with_only_a_brick_png_is_used_not_skipped_for_the_stock_folder() {
+        let png = mscent_render::png_encode::encode_png(2, 2, &[0xff00_0000; 4]).expect("encodes");
+        let (root, table, from) = root_with("png", &[("brick.png", &png)]);
+        assert_eq!(from, root.join("textures"));
+        assert_eq!(table.len(), 1, "only its own brick");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_root_with_neither_falls_through_to_the_stock_folder() {
+        let (root, table, from) = root_with("neither", &[("notes.txt", b"hi"), ("wall.png", b"x")]);
+        assert_ne!(from, root.join("textures"));
+        assert!(table.find("brick").is_some());
+        let _ = std::fs::remove_dir_all(root);
     }
 }
