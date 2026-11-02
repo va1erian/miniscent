@@ -112,6 +112,23 @@ Sizes: S is under a day, M a few days, L a week or more.
 | M8.5 | Frame-time results on the real Kaby Lake box, fix the worst offender | M8.1, M3.8 | M | 60 fps with every feature on, written up under `docs/perf/` |
 | M8.6 | Windows packaging and release notes | M8.5, M7.8 | S | A zip that runs on a clean machine |
 
+## M9 Voxel volumes
+
+Design in [voxels.md](voxels.md); status in [status.md](status.md#m9-voxel-volumes). Each item leaves the game and editor working, and levels
+without volumes draw exactly the same pixels.
+
+| ID | Item | Deps | Size | Done when |
+|---|---|---|---|---|
+| M9.1 | `mscent-world::voxel`: chunks, copy on write, resolve, dabs, surface nets, LOD, connectivity; `voxel_bench` example | M2.3 | L | Closed-mesh test over chunk borders; `fold` sign agrees with `Bsp::is_solid`; benchmark reports the field and meshing numbers in the design |
+| M9.2 | Level format version 3, section 4 | M9.1, M2.6 | M | Round trip; versions 1 and 2 load; bit flips and forged RLE never panic or exceed the allocation cap |
+| M9.3 | Volumes in compile: shell brush, no-draw faces, chunks on leaves, node bounds | M9.1 | M | Seeded `Subtract` volume leaves a room looking the same; a volume with only shell faces still renders |
+| M9.4 | Triangle path, flood, governor, projection and shading | M9.3, M5.5 | L | Pinhole test over 1000 poses; `frame_alloc` unchanged; frame budget met in `check_frame_cost.py`; voxel pixel cost at High compared with a brush pixel |
+| M9.5 | Light: occluders, cell records, cache, seam blending | M9.4, M5.8 | L | Voxels shadow brushes and the reverse (pixel tests); `crawl` on a voxel shadow edge; stale and forged caches ignored; painting does not re-bake |
+| M9.6 | Collision through `Solids`, contact model, fuzz | M9.3, M4.4 | M | Extended fuzz passes; no lip on a brush to voxel slide; replay stays bit-exact |
+| M9.7 | Editor: tool, stroke semantics, auto volumes, live path, undo budget, panel | M9.4, M7.6 | L | Selftest strokes, undoes (picture equal) and plays; worst UI tick under 1 ms during a stroke; a stroke starts no CSG job |
+| M9.8 | Destruction: queue, atomic swap, inherited light | M9.6, M9.5 | M | Replayed destruction is bit-exact; no frame shows a sky pixel; no ray traced in play |
+| M9.9 | Generators: stalactites, mushrooms, coral, trees, hive; Tunnel, Fill, Stamp | M9.7 | L | One showcase level per use case holds its budget; same seed gives the same bytes |
+
 ## Suggested order
 
 M0, then M1.1 through M1.4 in parallel with M2.1 through M2.3. The renderer

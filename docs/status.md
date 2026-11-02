@@ -273,6 +273,15 @@ GUI itself was not driven by hand, only the model through the pointer API and th
 | M8.5 | Not done | Needs the real Kaby Lake box |
 | M8.6 | Not done | Needs M8.5, M7.8 and a clean Windows machine |
 
+## M9 Voxel volumes
+
+Design in [voxels.md](voxels.md). Nothing in the game or editor uses volumes yet.
+
+| ID | Status | Evidence |
+|---|---|---|
+| M9.1 | Done | `mscent-world/src/voxel/`: `surface_tests` (closed across chunks and any mix of detail levels, border vertices keep their bits, only reported chunks change), `resolve_tests` (an untouched volume leaves the world as solid as it was, moving a brush keeps the sculpting, the surface runs past the box), `dab_tests`; `crates/mscent-bench/examples/voxel_bench.rs`; `crates/mscent-render/examples/voxel_shot.rs` draws five views with 0 hole pixels through `draw_polygon` with stand-in light. Dabs are Add, Carve, Smooth and Paint; Flatten and Roughen come with the tool in M9.7. Not measured on the i3-7100U |
+| M9.2 to M9.9 | Not done | |
+
 ## Deviations from the plan
 
 - Platform layer: the game does not use xui. `mscent-platform` is a small trait with a desktop (winit + softbuffer) and a headless backend; xui is used only by `apps/editor`. A LazyOS backend is not written.

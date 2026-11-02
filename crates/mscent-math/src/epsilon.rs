@@ -16,6 +16,10 @@ pub const PLANE_EPSILON_F32: f32 = 1.0e-3;
 /// floating point.
 pub const SNAP_GRID: f64 = 0.125;
 
+/// How far, in cells, a voxel surface sinks behind the brush faces it meets at
+/// the border of a volume, so the two never fight and never leave a gap.
+pub const VOXEL_SEAM_BIAS_CELLS: f64 = 1.0 / 16.0;
+
 /// Vectors shorter than this are treated as zero when normalizing, so a
 /// degenerate input yields `None` instead of NaN or infinity.
 pub const MIN_LENGTH_F64: f64 = 1.0e-9;
