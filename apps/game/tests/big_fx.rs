@@ -229,10 +229,11 @@ fn a_session_shows_a_blast_replays_it_exactly_and_returns_to_normal() {
     assert_eq!(blast, session_frame(true, 2), "a scripted run replays it");
     let (lit, plain) = (mean(&blast), mean(&session_frame(false, 2)));
     assert!(lit > plain + 40, "overlay and fire: {lit} against {plain}");
-    // Past the overlay and the shake, with the lights out.
-    let later = session_frame(true, 60);
-    let plain = session_frame(false, 60);
-    let n = later.len() as f32;
-    let same = later.iter().zip(&plain).filter(|(a, b)| a == b).count() as f32;
-    assert!(same > n * 0.3, "the room is back: {same} of {n}");
+    // Past the longest life in the table, so nothing of it is left, and effects
+    // never touch the game, so the frame is what it would have been.
+    const LONG_AFTER: u64 = 300;
+    assert!(
+        session_frame(true, LONG_AFTER) == session_frame(false, LONG_AFTER),
+        "the blast is gone and changed nothing"
+    );
 }
