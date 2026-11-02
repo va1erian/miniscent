@@ -197,7 +197,7 @@ impl GameSession {
     /// Sets off a blast. Nothing in the game does this yet; damage from one is
     /// a separate gameplay item, and the effect waits for it.
     pub fn blast(&mut self, pos: Vec3, radius: f32) {
-        self.fx.blast(pos, radius, &self.game.arena.bsp);
+        self.fx.blast(pos, radius, self.game.arena.fx_world());
     }
 
     /// The game and the renderer, taken apart again.
@@ -305,7 +305,7 @@ impl GameSession {
         // stops only on the pause menu.
         if self.menu.screen() != Screen::Paused {
             let ns = u64::try_from(dt.as_nanos()).unwrap_or(u64::MAX);
-            self.fx.advance(ns, &self.game.arena.bsp);
+            self.fx.advance(ns, self.game.arena.fx_world());
         }
         if self.playing() {
             self.look();

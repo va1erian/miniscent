@@ -10,9 +10,11 @@ use std::time::Instant;
 
 use mscent_game::Arena;
 use mscent_game::fx::{
-    Blend, ClassId, Collide, EffectArgs, Emitter, Fx, ParticleClass, Prim, Shape, Tier, TintSource,
+    Blend, ClassId, Collide, EffectArgs, Emitter, Fx, FxWorld, ParticleClass, Prim, Shape, Tier,
+    TintSource,
 };
-use mscent_world::showcase_level;
+use mscent_math::Vec3;
+use mscent_world::{Entity, showcase_level};
 
 const ROUNDS: usize = 3000;
 /// 60 Hz in whole nanoseconds is not exact; this gives one tick per call.
@@ -60,7 +62,13 @@ static NONE_ONLY: [Emitter; 1] = [burst(0, 6.0)];
 static DIE_ONLY: [Emitter; 1] = [burst(1, 6.0)];
 static BOUNCE_ONLY: [Emitter; 1] = [burst(2, 6.0)];
 
-fn run(name: &str, table: &'static [ParticleClass], effect: &'static [Emitter], arena: &Arena) {
+fn run(
+    name: &str,
+    table: &'static [ParticleClass],
+    effect: &'static [Emitter],
+    arena: &Arena,
+    world: FxWorld,
+) {
     let mut fx = Fx::new(table, 1);
     let args = EffectArgs {
         pos: arena.player_start,
@@ -74,7 +82,7 @@ fn run(name: &str, table: &'static [ParticleClass], effect: &'static [Emitter], 
     for _ in 0..ROUNDS {
         fx.spawn(effect, &args);
         let start = Instant::now();
-        fx.advance(ONE_TICK_NS, &arena.bsp);
+        fx.advance(ONE_TICK_NS, world);
         let ns = start.elapsed().as_nanos();
         let b = fx.last_tick_collision();
         total += ns;
@@ -94,11 +102,47 @@ fn run(name: &str, table: &'static [ParticleClass], effect: &'static [Emitter], 
     );
 }
 
+fn mixes(arena: &Arena, world: FxWorld) {
+    run("none, 4096", &NONE_4096, &NONE_ONLY, arena, world);
+    run("none only", &TABLE, &NONE_ONLY, arena, world);
+    run("die only", &TABLE, &DIE_ONLY, arena, world);
+    run("bounce only", &TABLE, &BOUNCE_ONLY, arena, world);
+    run("mixed", &TABLE, &ALL, arena, world);
+}
+
+/// The voxel cave, from the level the editor ships.
+fn cave() -> Arena {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../assets/levels/voxel-cave.msl"
+    );
+    let bytes = std::fs::read(path).expect("the cave level is in assets/levels");
+    let mut level = mscent_world::format::read(&bytes).expect("the cave level loads");
+    // The level has no start: take the first spot of a coarse grid that is
+    // open air, so the bursts begin in the cave.
+    level.entities.push(Entity::Goal {
+        pos: Vec3::ZERO,
+        radius: 1.0,
+    });
+    for i in 0..4096_u32 {
+        let at = |n: u32| (n as f32 - 8.0) * 4.0;
+        let pos = Vec3::new(at(i % 16), at(i / 16 % 16), at(i / 256));
+        level.entities.push(Entity::PlayerStart { pos, yaw: 0.0 });
+        if let Ok(arena) = Arena::from_level(&level) {
+            return arena;
+        }
+        level.entities.pop();
+    }
+    panic!("no open air in the cave level");
+}
+
 fn main() {
     let arena = Arena::from_level(&showcase_level()).expect("showcase loads");
-    run("none, 4096", &NONE_4096, &NONE_ONLY, &arena);
-    run("none only", &TABLE, &NONE_ONLY, &arena);
-    run("die only", &TABLE, &DIE_ONLY, &arena);
-    run("bounce only", &TABLE, &BOUNCE_ONLY, &arena);
-    run("mixed", &TABLE, &ALL, &arena);
+    println!("showcase (no volumes)");
+    mixes(&arena, FxWorld::from(&arena.bsp));
+    let cave = cave();
+    println!("voxel cave, BSP only (as before this change)");
+    mixes(&cave, FxWorld::from(&cave.bsp));
+    println!("voxel cave, BSP and voxels");
+    mixes(&cave, cave.fx_world());
 }

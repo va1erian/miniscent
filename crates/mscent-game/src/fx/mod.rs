@@ -27,6 +27,7 @@ pub mod lights;
 mod pool;
 pub mod recipes;
 pub mod recipes_big;
+pub mod world;
 
 pub use class::{
     Blend, ClassId, Collide, MAX_CLASSES, MAX_TOTAL_CAPACITY, ParticleClass, Prim, PuffShape, Tier,
@@ -34,10 +35,10 @@ pub use class::{
 };
 pub use collide::{Budget, MAX_SOLID_TESTS, MAX_SWEEPS};
 pub use emit::{Effect, EffectArgs, Emitter, QUEUE_CAPACITY, Shape, TintSource};
+pub use world::FxWorld;
 
 use mscent_math::Vec3;
 use mscent_math::rng::Rng;
-use mscent_world::Bsp;
 use pool::{Born, Pool};
 
 /// Particle ticks per second.
@@ -171,9 +172,10 @@ impl Fx {
     }
 
     /// Runs the particle clock forward by `elapsed_ns`.
-    pub fn advance(&mut self, elapsed_ns: u64, bsp: &Bsp) {
+    pub fn advance<'a>(&mut self, elapsed_ns: u64, world: impl Into<FxWorld<'a>>) {
+        let world = world.into();
         for _ in 0..self.clock.advance(elapsed_ns) {
-            self.tick(bsp);
+            self.tick(world);
         }
     }
 
@@ -243,7 +245,8 @@ impl Fx {
         }
     }
 
-    fn tick(&mut self, bsp: &Bsp) {
+    fn tick<'a>(&mut self, world: impl Into<FxWorld<'a>>) {
+        let world = world.into();
         self.budget = Budget::default();
         for slot in 0..emit::QUEUE_CAPACITY {
             if let Some(p) = self.queue.take_due(slot, TICK_DT) {
@@ -251,11 +254,11 @@ impl Fx {
             }
         }
         for k in 0..self.order.len() {
-            self.step_class(usize::from(self.order[k]), bsp);
+            self.step_class(usize::from(self.order[k]), world);
         }
     }
 
-    fn step_class(&mut self, ci: usize, bsp: &Bsp) {
+    fn step_class(&mut self, ci: usize, world: FxWorld) {
         let class = self.classes[ci];
         let motion = Motion::of(&class);
         let interval = class
@@ -268,7 +271,7 @@ impl Fx {
         let mut shed_n = 0;
         let mut i = 0;
         while i < pool.len() {
-            if !step_particle(pool, i, &motion, bsp, &mut self.budget) {
+            if !step_particle(pool, i, &motion, world, &mut self.budget) {
                 // The last particle now sits at `i` and has not stepped yet.
                 pool.swap_remove(i);
                 continue;
@@ -321,7 +324,13 @@ impl Motion {
 
 /// Semi-implicit Euler: velocity first, then position from the new velocity.
 /// Returns false when the particle died this tick.
-fn step_particle(pool: &mut Pool, i: usize, m: &Motion, bsp: &Bsp, budget: &mut Budget) -> bool {
+fn step_particle(
+    pool: &mut Pool,
+    i: usize,
+    m: &Motion,
+    world: FxWorld,
+    budget: &mut Budget,
+) -> bool {
     let t = pool.t(i) + TICK_DT * pool.inv_life(i);
     if t >= 1.0 {
         return false;
@@ -332,7 +341,7 @@ fn step_particle(pool: &mut Pool, i: usize, m: &Motion, bsp: &Bsp, budget: &mut 
     if !(pos.is_finite() && vel.is_finite() && emit::within_world(pos)) {
         return false;
     }
-    let (pos, vel) = match collide::resolve(m.mode, bsp, budget, prev, pos, vel) {
+    let (pos, vel) = match collide::resolve(m.mode, world, budget, prev, pos, vel) {
         collide::Outcome::Free => (pos, vel),
         collide::Outcome::Dead => return false,
         collide::Outcome::Bounced { pos, vel } => (pos, vel),
@@ -365,3 +374,6 @@ mod fx_collide_tests;
 #[cfg(test)]
 #[path = "../fx_tests.rs"]
 mod fx_tests;
+#[cfg(test)]
+#[path = "../fx_voxel_tests.rs"]
+mod fx_voxel_tests;

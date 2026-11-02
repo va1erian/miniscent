@@ -12,6 +12,8 @@ use mscent_render::scene::Scene;
 use mscent_render::{DynLight, MAX_DYN_LIGHTS};
 use mscent_world::Bsp;
 
+use super::world::FxWorld;
+
 use super::{MAX_CATCHUP_TICKS, NS_PER_SEC, TICK_HZ};
 
 /// Longest life a light is given, in seconds; flashes last a fraction of one.
@@ -147,11 +149,16 @@ impl Lights {
     /// or colour that is not positive, is dropped. With every slot taken the
     /// dimmest gives way, the new light included.
     pub fn add(&mut self, spec: LightSpec, bsp: Option<&Bsp>) {
+        self.add_in(spec, bsp.map(FxWorld::from));
+    }
+
+    /// [`Self::add`] with the voxel volumes counted as walls too.
+    pub fn add_in(&mut self, spec: LightSpec, world: Option<FxWorld>) {
         if self.limit == 0 || !usable(&spec) {
             return;
         }
         let spec = LightSpec {
-            pos: lifted(&spec, bsp),
+            pos: lifted(&spec, world),
             life: spec.life.min(MAX_LIFE),
             ..spec
         };
@@ -235,12 +242,12 @@ fn usable(s: &LightSpec) -> bool {
 
 /// `spec.pos` moved by its lift, or by less if that would meet solid: a light
 /// must stay on its own side of a wall, whatever is open beyond it.
-fn lifted(spec: &LightSpec, bsp: Option<&Bsp>) -> Vec3 {
-    let Some(bsp) = bsp else { return spec.pos };
+fn lifted(spec: &LightSpec, world: Option<FxWorld>) -> Vec3 {
+    let Some(world) = world else { return spec.pos };
     let mut k = 1.0;
     for _ in 0..LIFT_TRIES {
         let p = spec.pos + spec.lift * k;
-        if path_open(bsp, spec.pos, p) {
+        if path_open(world, spec.pos, p) {
             return p;
         }
         k *= 0.5;
@@ -249,9 +256,9 @@ fn lifted(spec: &LightSpec, bsp: Option<&Bsp>) -> Vec3 {
 }
 
 /// No test from `a` to `b` lands in solid, `b` included.
-fn path_open(bsp: &Bsp, a: Vec3, b: Vec3) -> bool {
+fn path_open(world: FxWorld, a: Vec3, b: Vec3) -> bool {
     let tests = (((b - a).length() / LIFT_STEP).ceil() as u32).clamp(1, MAX_LIFT_TESTS);
-    (1..=tests).all(|i| !bsp.is_solid(a.lerp(b, i as f32 / tests as f32).to_f64()))
+    (1..=tests).all(|i| !world.is_solid(a.lerp(b, i as f32 / tests as f32).to_f64()))
 }
 
 #[cfg(test)]
