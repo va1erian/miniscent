@@ -125,7 +125,7 @@ without volumes draw exactly the same pixels.
 | M9.4 | Triangle path, flood, governor, projection and shading | M9.3, M5.5 | L | Pinhole test over 1000 poses; `frame_alloc` unchanged; frame budget met in `check_frame_cost.py`; voxel pixel cost at High compared with a brush pixel |
 | M9.5 | Light: occluders, cell records, cache, seam blending | M9.4, M5.8 | L | Voxels shadow brushes and the reverse (pixel tests); `crawl` on a voxel shadow edge; stale and forged caches ignored; painting does not re-bake |
 | M9.6 | Collision through `Solids`, contact model, fuzz | M9.3, M4.4 | M | Extended fuzz passes; no lip on a brush to voxel slide; replay stays bit-exact |
-| M9.7 | Editor: tool, stroke semantics, auto volumes, live path, undo budget, panel | M9.4, M7.6 | L | Selftest strokes, undoes (picture equal) and plays; worst UI tick under 1 ms during a stroke; a stroke starts no CSG job |
+| M9.7 | Editor: tool, stroke semantics, auto volumes, live path, undo budget, panel | M9.4, M7.6 | L | Selftest strokes, undoes (picture equal) and plays; worst UI tick under 1 ms during a stroke; a stroke starts no CSG job; a level past the file limits cannot be saved as if it were fine |
 | M9.8 | Destruction: queue, atomic swap, inherited light | M9.6, M9.5 | M | Replayed destruction is bit-exact; no frame shows a sky pixel; no ray traced in play |
 | M9.9 | Generators: stalactites, mushrooms, coral, trees, hive; Tunnel, Fill, Stamp | M9.7 | L | One showcase level per use case holds its budget; same seed gives the same bytes |
 

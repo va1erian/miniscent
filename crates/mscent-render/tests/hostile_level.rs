@@ -26,6 +26,7 @@ fn room() -> Level {
             radius: 12.0,
             intensity: 1.0,
         }],
+        volumes: Vec::new(),
     }
 }
 

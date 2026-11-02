@@ -60,7 +60,7 @@ pub struct VoxelVertex {
 pub struct ChunkMesh {
     pub vertices: Vec<VoxelVertex>,
     pub triangles: Vec<[u16; 3]>,
-    /// Palette index of each triangle.
+    /// Material id of each triangle.
     pub materials: Vec<u8>,
     pub bounds: Aabb,
     pub air: AirMask,

@@ -1,6 +1,6 @@
 # Voxel volumes: design
 
-Status: M9.1 is done (field, dabs, meshing, level of detail, connectivity); the game and editor do not use volumes yet. Work items are [M9](work-items.md#m9-voxel-volumes).
+Status: M9.1 and M9.2 are done (field, dabs, meshing, level of detail, connectivity, level file); the game and editor load and keep volumes but do not draw or edit them yet. Work items are [M9](work-items.md#m9-voxel-volumes).
 
 Brushes are good at architecture and bad at anything that grows. This design adds a second kind of
 geometry for hives, coral, mushrooms, trees, cave systems, stalactites and alien interiors, painted
@@ -124,7 +124,7 @@ Each of these is asserted by a test (see [Glitches](#glitches-designed-out)):
 |---|---|
 | Cell size | Per volume: 0.125, 0.25, 0.5 or 1 world units (powers of two on `SNAP_GRID`). Default 0.5 for caves, 0.25 for growths; a 0.5 cell has a quarter of the triangles for the same surface |
 | Sample | 1 LSB = 1/32 cell. `base` and `resolved` are `-63..=63` (±2 cells); `delta` is `i8`, `-126..=126`, enough to override any base |
-| Material | `u8` per sample, indexing a per-volume palette of up to 256 material ids |
+| Material | A material id per sample, as `u8`: 256 is far more than the game's 5, and no remapping means no out-of-range index to check |
 | Chunk | 16³ samples: `Uniform { delta, material }` or `Detail(Arc<[…; 8 KB]>)` |
 | Table | `Arc` table of chunks, up to 16³ chunks per volume, so cloning a volume is O(1) |
 | World lattice | The box snaps to whole cells; samples are relative to its origin, so moves are by whole cells |
@@ -133,8 +133,7 @@ Each of these is asserted by a test (see [Glitches](#glitches-designed-out)):
 tick from the UI thread, so `PartialEq` on a volume compares `Arc` pointers first and only reads the
 bytes of chunks whose pointers differ. An undo step shares every untouched chunk with its neighbours.
 
-Limits, as constants in `voxel/mod.rs`: `MAX_VOLUMES` 256, 4096 chunks per volume,
-`MAX_DETAIL_CHUNKS` 16 384 per level (128 MiB). Tolerances go in `mscent_math::epsilon`.
+Limits: `MAX_VOLUMES` 256, 4096 chunks per volume, `MAX_DETAIL_CHUNKS` 16 384 per level (128 MiB). Tolerances go in `mscent_math::epsilon`.
 
 ### File format
 
@@ -142,21 +141,27 @@ Level format version 3 adds section `4`. Versions 1 and 2 still load, with no vo
 
 ```text
 count u32
-volume*: order u32, op u8, cell_log2 u8, origin i32*3, chunks u16*3,
-         palette count u16, material u16*,
-         chunk*: kind u8 (0 uniform: delta i8, material u8;
-                          1 detail: rle_len u32, RLE of delta, then material)
+volume*: order u32, op u8, cell u8, origin i32*3, chunks u16*3, chunk*
+chunk:   kind 0 (uniform): delta i8, material u8
+         kind 1 (detail):  plane of deltas, plane of materials
+plane:   len u32, then len bytes: exactly 4096 is the samples as they are,
+         any other multiple of 3 is runs of (count u16, value u8)
 ```
+
+Noise would triple in size as runs, hence the plain form. Sculpted rock mostly compresses well.
 
 A hostile file is the main threat, and RLE is a decompression bomb by design, so:
 
 - Every count is checked against the bytes left before allocating, as `read_count` does now.
-- Each chunk must decode to exactly 4096 samples per plane; a run past that is an error.
-- `MAX_DETAIL_CHUNKS` is charged before decoding. Uniform chunks allocate nothing.
-- Delta and palette ranges are checked, volume overlap is rejected, and `checked_mul` guards the box.
+- Each plane must decode to exactly 4096 samples; an empty run or a run past that is an error.
+- `MAX_DETAIL_CHUNKS` is charged before each is allocated. Uniform chunks allocate nothing.
+- A volume's table is built only once the bytes left could fill it.
+- Delta ranges are checked, and overlapping volumes are rejected.
 - A material id not in the table draws with the existing grey fallback.
 
-`format_tests::bit_flip_fuzzing_never_panics` is extended with volumes, plus forged-RLE cases.
+`voxel/wire_tests.rs` covers bit flips and truncation (whatever loads is also meshed), forged runs and
+each limit. **The writer has no limit of its own:** a level can be sculpted past `MAX_DETAIL_CHUNKS` or
+`format::MAX_FILE_BYTES` and then not load, so M9.7 must refuse such edits or fail the save.
 
 Only deltas are stored. As with brushes, the loader recompiles: `resolved` and meshes are rebuilt at
 load (about 40 µs a chunk measured for meshing, so a large cave adds tens of milliseconds).
@@ -434,6 +439,7 @@ noisy: repeat runs moved these by up to about 25%.
 | Same, over 8 brushes with a cold `base` | about 59 µs mean, 436 µs worst |
 | Cluster a chunk | about 13 µs |
 | Mesh memory | 4.1 MiB at 24 bytes a vertex and 6 a triangle, before LOD and light |
+| The same cave in a level file | 0.84 MiB, 1.2 ms to read back |
 | Carve dab, with copy on write | r=1: about 20 µs, r=2: about 90 µs, r=4: about 500 µs, r=8: about 3 ms |
 | Smooth dab, with copy on write | r=1: about 37 µs, r=2: about 230 µs, r=4: about 1.6 ms, r=8: about 12 ms |
 
@@ -496,9 +502,8 @@ reference machine when M8.5 runs.
 Crate edges do not change: field and meshing live in `mscent-world`, so render and collide see them.
 
 ```text
-crates/mscent-world/src/voxel/   mod (Volume, limits), chunk, resolve (fold, base),
-                                 prim (SDF, dab), surface (nets), lod, connectivity, query (grid walk)
-crates/mscent-world/src/format_voxel.rs      section 4
+crates/mscent-world/src/voxel/   volume, chunk, context and block (fold, base, ring), prim, dab,
+                                 surface (nets), lod, connectivity, wire (section 4), query (grid walk)
 crates/mscent-world/src/lightmap/occluders.rs, cells.rs
 crates/mscent-collide/src/voxel.rs, solids.rs
 crates/mscent-render/src/voxel/  prepare, fill, flood, shader, governor
@@ -509,7 +514,6 @@ apps/editor/src/ui/voxelpanel.rs
 apps/editor/src/selftest/voxel.rs
 ```
 
-`Level { .. }` appears at 46 sites, so `volumes` needs a constructor or `Default` to keep that change small.
 
 ## Alternatives rejected
 

@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! magic   "MSLV"           4 bytes
-//! version u16              currently 2 (1 is still read)
+//! version u16              currently 3 (1 and 2 are still read)
 //! flags   u16              reserved, must be 0
 //! count   u32              number of sections (<= MAX_SECTIONS)
 //! section*: id u32, len u32, payload[len]
@@ -12,7 +12,8 @@
 //!
 //! Sections: `1` brushes (required), `2` entities (required); `3` is
 //! reserved for compiled data, which the loader skips because it recompiles
-//! from brushes. Unknown section ids are skipped for forward compatibility.
+//! from brushes; `4` voxel volumes (optional, from version 3, `voxel/wire.rs`).
+//! Unknown section ids are skipped for forward compatibility.
 //! Brushes are stored as raw planes and rebuilt through [`Brush::new`], so a
 //! hostile file cannot smuggle in an invalid brush. Version 2 follows each
 //! brush's planes with one TexInfo record per plane (`texinfo.rs`, 47 bytes);
@@ -26,10 +27,11 @@ use crate::format_wire::{
     Cursor, TEXINFO_BYTES, len_u32, put_f32, put_f64, put_texinfo, put_u16, put_u32, put_vec3,
 };
 use crate::texinfo::TexInfo;
+use crate::voxel::wire::{read_volumes, write_volumes};
 use mscent_math::{DPlane, Vec3d};
 
 pub const MAGIC: [u8; 4] = *b"MSLV";
-pub const VERSION: u16 = 2;
+pub const VERSION: u16 = 3;
 /// Oldest version [`read`] still accepts.
 const MIN_VERSION: u16 = 1;
 pub const MAX_FILE_BYTES: usize = 64 << 20;
@@ -39,6 +41,7 @@ pub const MAX_SECTIONS: u32 = 16;
 
 const SEC_BRUSHES: u32 = 1;
 const SEC_ENTITIES: u32 = 2;
+const SEC_VOLUMES: u32 = 4;
 
 /// Smallest brush record: op, order, material, plane count.
 const BRUSH_HEAD: usize = 1 + 4 + 2 + 4;
@@ -70,18 +73,26 @@ pub enum FormatError {
     Brush(BrushError),
     /// A texture mapping field is non-finite or out of range.
     BadTexInfo,
+    /// A voxel volume has a bad field, a forged plane or overlaps another.
+    BadVolume,
 }
 
 /// Serialises a level (source data only).
 pub fn write(level: &Level) -> Vec<u8> {
-    let brushes = write_brushes(&level.brushes);
-    let entities = write_entities(&level.entities);
-    let mut out = Vec::with_capacity(32 + brushes.len() + entities.len());
+    let mut sections = vec![
+        (SEC_BRUSHES, write_brushes(&level.brushes)),
+        (SEC_ENTITIES, write_entities(&level.entities)),
+    ];
+    if !level.volumes.is_empty() {
+        sections.push((SEC_VOLUMES, write_volumes(&level.volumes)));
+    }
+    let total: usize = sections.iter().map(|(_, body)| body.len()).sum();
+    let mut out = Vec::with_capacity(32 + total);
     out.extend_from_slice(&MAGIC);
     put_u16(&mut out, VERSION);
     put_u16(&mut out, 0);
-    put_u32(&mut out, 2);
-    for (id, body) in [(SEC_BRUSHES, brushes), (SEC_ENTITIES, entities)] {
+    put_u32(&mut out, len_u32(sections.len()));
+    for (id, body) in sections {
         put_u32(&mut out, id);
         put_u32(&mut out, len_u32(body.len()));
         out.extend_from_slice(&body);
@@ -169,7 +180,7 @@ pub fn read(data: &[u8]) -> Result<Level, FormatError> {
     if count > MAX_SECTIONS {
         return Err(FormatError::TooMany);
     }
-    let (mut brushes, mut entities) = (None, None);
+    let (mut brushes, mut entities, mut volumes) = (None, None, None);
     for _ in 0..count {
         let id = c.u32()?;
         let len = usize::try_from(c.u32()?).map_err(|_| FormatError::TooLarge)?;
@@ -177,6 +188,7 @@ pub fn read(data: &[u8]) -> Result<Level, FormatError> {
         match id {
             SEC_BRUSHES => store(&mut brushes, id, read_brushes(body, version))?,
             SEC_ENTITIES => store(&mut entities, id, read_entities(body))?,
+            SEC_VOLUMES if version >= 3 => store(&mut volumes, id, read_volumes(body))?,
             _ => {}
         }
     }
@@ -186,6 +198,7 @@ pub fn read(data: &[u8]) -> Result<Level, FormatError> {
     Ok(Level {
         brushes: brushes.ok_or(FormatError::MissingSection(SEC_BRUSHES))?,
         entities: entities.ok_or(FormatError::MissingSection(SEC_ENTITIES))?,
+        volumes: volumes.unwrap_or_default(),
     })
 }
 

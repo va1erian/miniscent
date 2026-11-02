@@ -23,7 +23,7 @@ const CORE_SHARPNESS: f64 = 4.0;
 /// What a dab does inside its shape.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DabOp {
-    /// Fills with solid of a palette material.
+    /// Fills with solid of a material.
     Add { material: u8 },
     /// Removes solid.
     Carve,

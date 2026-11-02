@@ -275,12 +275,13 @@ GUI itself was not driven by hand, only the model through the pointer API and th
 
 ## M9 Voxel volumes
 
-Design in [voxels.md](voxels.md). Nothing in the game or editor uses volumes yet.
+Design in [voxels.md](voxels.md). The game and editor load and keep volumes, but do not compile, draw or edit them yet: a level with volumes plays as if they were not there.
 
 | ID | Status | Evidence |
 |---|---|---|
 | M9.1 | Done | `mscent-world/src/voxel/`: `surface_tests` (closed across chunks and any mix of detail levels, border vertices keep their bits, only reported chunks change), `resolve_tests` (an untouched volume leaves the world as solid as it was, moving a brush keeps the sculpting, the surface runs past the box), `dab_tests`; `crates/mscent-bench/examples/voxel_bench.rs`; `crates/mscent-render/examples/voxel_shot.rs` draws five views with 0 hole pixels through `draw_polygon` with stand-in light. Dabs are Add, Carve, Smooth and Paint; Flatten and Roughen come with the tool in M9.7. Not measured on the i3-7100U |
-| M9.2 to M9.9 | Not done | |
+| M9.2 | Done | `voxel/wire.rs`, section 4 of level format version 3; `voxel/wire_tests.rs`: round trip, versions 1 and 2 load, bit flips and truncation never panic and whatever loads can be meshed, forged runs refused, detail chunks charged before allocation. The editor document keeps volumes across load and save. `voxel_bench` reports 0.84 MiB and 1.2 ms to read for the 256-chunk cave. The writer does not enforce the read limits yet (M9.7) |
+| M9.3 to M9.9 | Not done | |
 
 ## Deviations from the plan
 

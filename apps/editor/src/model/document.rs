@@ -4,6 +4,7 @@
 //! a list move. Entities are the game's own [`Entity`] values plus an id.
 
 use mscent_math::{DPlane, Vec3d};
+use mscent_world::voxel::Volume;
 use mscent_world::{Brush, BrushError, Entity, Level, Op, TexInfo};
 
 /// A stable identity that survives reordering, deletion and undo.
@@ -192,6 +193,9 @@ fn shape_of(b: &Brush) -> Shape {
 pub struct Document {
     brushes: Vec<BrushDef>,
     entities: Vec<EntityDef>,
+    /// Kept so loading and saving a level does not lose them; nothing edits
+    /// them yet.
+    volumes: Vec<Volume>,
     next_id: Id,
 }
 
@@ -213,6 +217,7 @@ impl Document {
             let id = doc.alloc_id();
             doc.entities.push(EntityDef { id, entity: *e });
         }
+        doc.volumes = level.volumes.clone();
         doc
     }
 
@@ -227,6 +232,7 @@ impl Document {
         Ok(Level {
             brushes,
             entities: self.entities.iter().map(|e| e.entity).collect(),
+            volumes: self.volumes.clone(),
         })
     }
 
@@ -235,6 +241,7 @@ impl Document {
     /// lightmap depends on nothing else.
     pub fn same_geometry(&self, other: &Document) -> bool {
         self.entities == other.entities
+            && self.volumes == other.volumes
             && self.brushes.len() == other.brushes.len()
             && self
                 .brushes
@@ -254,6 +261,10 @@ impl Document {
 
     pub fn entities(&self) -> &[EntityDef] {
         &self.entities
+    }
+
+    pub fn volumes(&self) -> &[Volume] {
+        &self.volumes
     }
 
     pub fn brush(&self, id: Id) -> Option<&BrushDef> {

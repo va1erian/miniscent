@@ -23,7 +23,8 @@ use mscent_world::{Face, Portals, compile, extract_faces};
 const SIZE: (u32, u32) = (1280, 720);
 const HOLE: u32 = 0xffff_00ff;
 const FOG: u32 = 0xff14_1820;
-/// The material each palette index of these volumes stands for.
+/// The look of each material number these volumes use: samples hold material
+/// ids, and these scenes want other pictures than ids 0 to 3 give.
 const PALETTE: [u16; 4] = [ROCK, FLOOR, BRICK, METAL];
 /// World units one repeat of a texture covers on a voxel surface.
 const TILE: f32 = 4.0;

@@ -135,7 +135,11 @@ pub fn validate(doc: &Document) -> Result<Level, String> {
     if let Some(i) = entities.iter().position(|e| !e.is_valid()) {
         return Err(format!("entity {} has an out-of-range value", i + 1));
     }
-    Ok(Level { brushes, entities })
+    Ok(Level {
+        brushes,
+        entities,
+        volumes: doc.volumes().to_vec(),
+    })
 }
 
 /// Runs `work` on `doc` on a new thread; a panic becomes an error text.
@@ -341,6 +345,7 @@ mod tests {
         let doc = Document::from_level(&Level {
             brushes: vec![room],
             entities: vec![],
+            volumes: Vec::new(),
         });
         let job = start_preview(&doc, &SharedCache::default()).expect("starts");
         let built = wait(&job).expect("builds");

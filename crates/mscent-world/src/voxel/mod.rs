@@ -25,6 +25,7 @@
 //! * [`Mesher`] (`surface.rs`): surface nets, one [`ChunkMesh`] per chunk.
 //! * [`ChunkMesh::clustered`] (`lod.rs`): level of detail without cracks.
 //! * [`AirMask`] (`connectivity.rs`): which chunk faces air joins.
+//! * `wire.rs`: the level file's section for volumes.
 
 mod block;
 mod chunk;
@@ -35,6 +36,7 @@ mod lod;
 mod prim;
 mod surface;
 mod volume;
+pub(crate) mod wire;
 
 #[cfg(test)]
 mod dab_tests;
@@ -44,6 +46,8 @@ mod resolve_tests;
 mod surface_tests;
 #[cfg(test)]
 mod test_util;
+#[cfg(test)]
+mod wire_tests;
 
 pub use chunk::{Chunk, ChunkData};
 pub use connectivity::{AirMask, Face};
@@ -53,6 +57,7 @@ pub use lod::Lod;
 pub use prim::Prim;
 pub use surface::{ChunkMesh, Mesher, VoxelVertex};
 pub use volume::{CellSize, Volume, VolumeError};
+pub use wire::{MAX_DETAIL_CHUNKS, MAX_VOLUMES};
 
 /// Samples along one edge of a chunk.
 pub const CHUNK_EDGE: usize = 16;

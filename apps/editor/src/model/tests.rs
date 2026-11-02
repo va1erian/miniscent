@@ -420,3 +420,17 @@ fn world_entity_edits_fog_with_undo_and_there_is_only_one() {
     assert!(s.undo());
     assert_eq!(s.doc.to_level().unwrap().fog(), Some((4.0, 26.0)));
 }
+
+#[test]
+fn volumes_survive_loading_into_a_document_and_saving_again() {
+    use mscent_world::voxel::{CellSize, Volume};
+    let mut level = mscent_world::showcase_level();
+    let volume = Volume::new(Op::Add, 500, CellSize::Quarter, [0; 3], [1, 1, 1]).expect("valid");
+    level.volumes.push(volume);
+    let doc = Document::from_level(&level);
+    assert_eq!(doc.volumes(), &level.volumes[..]);
+    let saved = doc.to_level().expect("exports");
+    assert_eq!(saved.volumes, level.volumes);
+    let built = crate::build::validate(&doc).expect("valid");
+    assert_eq!(built.volumes, level.volumes);
+}

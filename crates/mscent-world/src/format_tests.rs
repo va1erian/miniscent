@@ -34,6 +34,7 @@ fn sample() -> Level {
                 radius: 1.5,
             },
         ],
+        volumes: Vec::new(),
     }
 }
 

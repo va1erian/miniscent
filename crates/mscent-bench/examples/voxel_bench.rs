@@ -8,7 +8,9 @@ use std::hint::black_box;
 use std::time::Instant;
 
 use mscent_math::Vec3d;
+use mscent_world::Level;
 use mscent_world::brush::{Brush, Op};
+use mscent_world::format;
 use mscent_world::voxel::{
     CellSize, ChunkMesh, Context, DabOp, Lod, Mesher, Prim, Volume, apply_dab, fill,
 };
@@ -156,6 +158,23 @@ fn report_brushes() {
     );
 }
 
+/// What the volume adds to a level file, and how long it takes to read back.
+fn report_file(volume: &Volume) {
+    let level = Level {
+        brushes: Vec::new(),
+        entities: Vec::new(),
+        volumes: vec![volume.clone()],
+    };
+    let bytes = format::write(&level);
+    let t = Instant::now();
+    let read = format::read(&bytes).is_ok();
+    println!(
+        "level file: {:.2} MiB, read back in {:.1} ms ({read})",
+        bytes.len() as f64 / f64::from(1 << 20),
+        t.elapsed().as_secs_f64() * 1e3
+    );
+}
+
 fn main() {
     // A subtract volume with no brushes: rock on all sides, so the only surface
     // is the cave's, not a hull around the box as well.
@@ -170,6 +189,7 @@ fn main() {
         "{CHUNKS:?} chunks of 16^3 at 0.25: filled in {:.1} ms",
         t.elapsed().as_secs_f64() * 1e3
     );
+    report_file(&volume);
     let meshes = report_meshing(&volume);
     report_lod(&meshes);
     report_dabs(&volume);

@@ -29,6 +29,26 @@ impl CellSize {
             CellSize::One => 1.0,
         }
     }
+
+    /// Its number in the level file.
+    pub(super) const fn code(self) -> u8 {
+        match self {
+            CellSize::Eighth => 0,
+            CellSize::Quarter => 1,
+            CellSize::Half => 2,
+            CellSize::One => 3,
+        }
+    }
+
+    pub(super) const fn from_code(code: u8) -> Option<Self> {
+        match code {
+            0 => Some(CellSize::Eighth),
+            1 => Some(CellSize::Quarter),
+            2 => Some(CellSize::Half),
+            3 => Some(CellSize::One),
+            _ => None,
+        }
+    }
 }
 
 /// Why a volume was refused.
@@ -152,6 +172,12 @@ impl Volume {
     pub fn chunk(&self, coord: [u16; 3]) -> Option<&Chunk> {
         let index = self.lattice.chunk_index(coord.map(i32::from))?;
         self.table.get(index)
+    }
+
+    /// Whether the two boxes share space. Touching does not count.
+    pub fn overlaps(&self, other: &Volume) -> bool {
+        let ((a0, a1), (b0, b1)) = (self.bounds(), other.bounds());
+        a0.x < b1.x && b0.x < a1.x && a0.y < b1.y && b0.y < a1.y && a0.z < b1.z && b0.z < a1.z
     }
 
     /// The brush that clears this volume's box from the BSP: a subtract brush

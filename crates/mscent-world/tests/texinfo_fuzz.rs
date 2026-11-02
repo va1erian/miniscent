@@ -73,6 +73,7 @@ fn operation_sequences_keep_texinfo_valid_and_round_trippable() {
         let level = Level {
             brushes: vec![brush],
             entities: vec![],
+            volumes: Vec::new(),
         };
         let back = format::read(&format::write(&level)).expect("round trip");
         assert_eq!(back, level);

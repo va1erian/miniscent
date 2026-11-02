@@ -5,6 +5,7 @@
 //! never carries NaN, infinite or non-positive-radius values.
 
 use crate::brush::Brush;
+use crate::voxel::Volume;
 use mscent_math::Vec3;
 
 /// Largest absolute coordinate, radius or intensity accepted for an entity.
@@ -118,4 +119,6 @@ impl Level {
 pub struct Level {
     pub brushes: Vec<Brush>,
     pub entities: Vec<Entity>,
+    /// Voxel volumes, none of which overlap. Their CSG order shares `Brush::order`.
+    pub volumes: Vec<Volume>,
 }

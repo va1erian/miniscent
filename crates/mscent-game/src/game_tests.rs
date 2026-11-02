@@ -67,6 +67,7 @@ fn unplayable_levels_are_errors_not_panics() {
     let solid = Level {
         brushes: Vec::new(),
         entities: vec![start(Vec3::ZERO, 0.0), far_goal()],
+        volumes: Vec::new(),
     };
     assert_eq!(Arena::from_level(&solid), Err(LoadError::SpawnInSolid(0)));
 }

@@ -29,6 +29,7 @@ fn seed_level() -> Level {
                 radius: 1.0,
             },
         ],
+        volumes: Vec::new(),
     }
 }
 

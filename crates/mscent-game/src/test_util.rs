@@ -34,6 +34,7 @@ pub fn open_level(entities: Vec<Entity>) -> Level {
     Level {
         brushes: vec![room()],
         entities,
+        volumes: Vec::new(),
     }
 }
 
@@ -41,6 +42,7 @@ pub fn split_level(entities: Vec<Entity>) -> Level {
     Level {
         brushes: vec![room(), divider()],
         entities,
+        volumes: Vec::new(),
     }
 }
 
