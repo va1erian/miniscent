@@ -67,6 +67,56 @@ impl Prim {
         (in_range(centre) && positive(radius)).then_some(Self(Shape::Sphere { centre, radius }))
     }
 
+    /// The radius at its thinnest: half its least width.
+    pub fn thinnest(&self) -> f64 {
+        match self.0 {
+            Shape::Sphere { radius, .. } => radius,
+            Shape::RoundCone {
+                radius_a, radius_b, ..
+            } => radius_a.min(radius_b),
+            Shape::Cuboid { min, max } => {
+                let d = (max - min) * 0.5;
+                d.x.min(d.y).min(d.z)
+            }
+            Shape::Spheroid { along, across, .. } => along.min(across),
+            Shape::HexPrism {
+                apothem,
+                half_depth,
+                ..
+            } => apothem.min(half_depth),
+        }
+    }
+
+    /// The same shape `by` larger on every side, or `None` past the legal range.
+    pub fn grown(&self, by: f64) -> Option<Self> {
+        match self.0 {
+            Shape::Sphere { centre, radius } => Self::sphere(centre, radius + by),
+            Shape::RoundCone {
+                a,
+                b,
+                radius_a,
+                radius_b,
+            } => Self::round_cone(a, b, radius_a + by, radius_b + by),
+            Shape::Cuboid { min, max } => {
+                let d = Vec3d::new(by, by, by);
+                Self::cuboid(min - d, max + d)
+            }
+            Shape::Spheroid {
+                centre,
+                axis,
+                along,
+                across,
+            } => Self::spheroid(centre, axis, along + by, across + by),
+            Shape::HexPrism {
+                centre,
+                axis,
+                side,
+                apothem,
+                half_depth,
+            } => Self::hex_prism(centre, axis, side, apothem + by, half_depth + by),
+        }
+    }
+
     /// A tapered capsule from `a` to `b`. With equal radii it is a capsule.
     pub fn round_cone(a: Vec3d, b: Vec3d, radius_a: f64, radius_b: f64) -> Option<Self> {
         let ok = in_range(a) && in_range(b) && positive(radius_a) && positive(radius_b);

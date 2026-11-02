@@ -33,6 +33,15 @@ const DIR_STEPS: f32 = 127.0;
 /// Cells a hole in the light is filled from: a lit cell this far away or less.
 const FILL_REACH: i32 = 2;
 
+/// A cell's light is read across this many cells around it. A record sits on a
+/// vertex and is stretched over whole triangles, so a shadow edge between two
+/// neighbours would draw as a hard facet; spread over a few cells it draws as a
+/// ramp, about what a luxel's bilinear fetch does for a wall.
+const FILTER_REACH: i32 = 1;
+/// How alike two normals must be for one cell to read another: the far side of a
+/// thin sheet or a sharp ridge is a different surface in different light.
+const FILTER_MIN_FACING: f32 = 0.25;
+
 /// Cells lit per unit of work handed to a thread.
 const BATCH: usize = 64;
 
@@ -126,7 +135,7 @@ pub(super) fn direct_cell(env: &CellLighting, sites: &CellSites, i: usize) -> Di
     let (pos, normal) = (sites.pos(i), sites.normal(i));
     let size = sites.cell_size(i);
     let lift = VOXEL_LIGHT_LIFT_CELLS * size;
-    if env.occ.in_brush_solid((pos + normal * lift).to_f64()) {
+    if env.occ.in_solid((pos + normal * lift).to_f64()) {
         return Direct::Solid;
     }
     let (tangent, bitangent) = tangent_frame(normal);
@@ -194,13 +203,45 @@ pub(super) fn settle(
         .iter()
         .zip(direct)
         .map(|(&i, &d)| {
-            let (color, dir) = match d {
-                Direct::Lit { color, dir } => (color, dir),
-                Direct::Solid => filled(sites, i, &known),
-            };
+            let (color, dir) = filtered(sites, i, d, &known);
             CellRecord::new(color + env.cfg.ambient, dir)
         })
         .collect()
+}
+
+/// What site `i` shows: its own light, read across its surface around it.
+pub(super) fn filtered(
+    sites: &CellSites,
+    i: usize,
+    own: Direct,
+    known: &impl Fn(usize) -> Direct,
+) -> (Vec3, Vec3) {
+    let (mut color, mut dir) = match own {
+        Direct::Lit { color, dir } => (color, dir),
+        Direct::Solid => filled(sites, i, known),
+    };
+    let mut weight = 1.0f32;
+    let normal = sites.normal(i);
+    for dz in -FILTER_REACH..=FILTER_REACH {
+        for dy in -FILTER_REACH..=FILTER_REACH {
+            for dx in -FILTER_REACH..=FILTER_REACH {
+                let Some(j) = sites.neighbour(i, [dx, dy, dz]).filter(|&j| j != i) else {
+                    continue;
+                };
+                let facing = normal.dot(sites.normal(j));
+                if facing < FILTER_MIN_FACING {
+                    continue;
+                }
+                if let Direct::Lit { color: c, dir: d } = known(j) {
+                    let w = facing / (1 + dx * dx + dy * dy + dz * dz) as f32;
+                    color = color + c * w;
+                    dir = dir + d * w;
+                    weight += w;
+                }
+            }
+        }
+    }
+    (color * (1.0 / weight), dir * (1.0 / weight))
 }
 
 /// The weighted mean of the lit cells within [`FILL_REACH`] of site `i`, nearer

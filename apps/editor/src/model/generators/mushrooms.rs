@@ -4,7 +4,7 @@
 use std::f64::consts::TAU;
 
 use mscent_math::rng::Rng;
-use mscent_world::materials::ROCK;
+use mscent_world::materials::{CAP, STEM};
 
 use super::Plan;
 use super::site::{Frame, Site};
@@ -29,18 +29,12 @@ pub(super) fn grow(plan: &mut Plan, f: &Frame, site: &Site, rng: &mut Rng) {
             } else {
                 rng.range_f64(0.5, 0.85)
             };
-        cap_and_stem(
-            plan,
-            f,
-            (r * a.cos(), r * a.sin()),
-            scale,
-            rng,
-            site.material,
-        );
+        cap_and_stem(plan, f, (r * a.cos(), r * a.sin()), scale, rng);
     }
 }
 
-fn cap_and_stem(plan: &mut Plan, f: &Frame, at: (f64, f64), s: f64, rng: &mut Rng, cap: u8) {
+fn cap_and_stem(plan: &mut Plan, f: &Frame, at: (f64, f64), s: f64, rng: &mut Rng) {
+    let (cap, stem) = (CAP as u8, STEM as u8);
     let lean = (
         rng.range_f64(-0.25, 0.25) * s,
         rng.range_f64(-0.25, 0.25) * s,
@@ -63,12 +57,6 @@ fn cap_and_stem(plan: &mut Plan, f: &Frame, at: (f64, f64), s: f64, rng: &mut Rn
             cap,
         );
     }
-    plan.cone(root, top, (0.4 * s, 0.26 * s), false, ROCK as u8);
-    plan.ellipsoid(
-        f.at(at.0, at.1, 0.0),
-        f.n,
-        (0.35 * s, 0.7 * s),
-        false,
-        ROCK as u8,
-    );
+    plan.cone(root, top, (0.4 * s, 0.26 * s), false, stem);
+    plan.ellipsoid(f.at(at.0, at.1, 0.0), f.n, (0.35 * s, 0.7 * s), false, stem);
 }

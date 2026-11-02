@@ -126,7 +126,7 @@ pub(super) fn lit_voxels(
     sites: &CellSites,
     lightmap: &Lightmap,
 ) -> VoxelScene {
-    VoxelScene::new(world, leaves, |chunk, _, mesh| {
+    VoxelScene::new(world, leaves, |chunk, mesh| {
         vertex_light(sites, lightmap.cells(), chunk, mesh)
     })
 }

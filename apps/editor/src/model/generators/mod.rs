@@ -2,7 +2,8 @@
 //! a surface into a bounded list of primitives, each added or carved, and
 //! nothing else. They are pure, so the same seed always gives the same list,
 //! and the list goes through the same dab code as a brush stroke, which is why
-//! undo, light and limits need nothing of their own.
+//! undo, light and limits need nothing of their own. Living things come in their
+//! own materials, which is most of what makes them read; drips take the site's.
 
 mod coral;
 mod field;
@@ -30,6 +31,15 @@ pub use site::{Site, surface_normal};
 /// unbounded amount of work.
 pub const MAX_PIECES: usize = 4096;
 
+/// Thinnest radius a piece may have, in cells.
+const MIN_RADIUS_CELLS: f64 = 1.5;
+/// Pieces thinner than this, in cells, are not smoothed. Each pass shrinks a thin
+/// limb, and overlapping passes would part a twig from its branch.
+const MIN_SMOOTHED_CELLS: f64 = 3.0;
+/// How far past a piece, in cells, its smoothing reaches. A smoothing dab does
+/// nothing at its own edge, and it is the piece's surface that needs it.
+const SMOOTH_REACH_CELLS: f64 = 2.0;
+
 /// One primitive of a plan and what it does.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Piece {
@@ -37,8 +47,9 @@ pub struct Piece {
     pub op: DabOp,
 }
 
-/// What a generator returns. Radii below one cell alias into broken beads, so
-/// every shape added here is widened to one.
+/// What a generator returns. Radii near one cell alias into broken beads, so
+/// every shape added here is widened to at least [`MIN_RADIUS_CELLS`]. Carves are
+/// left as asked: a wider hollow eats the small thing it was hollowing.
 #[derive(Clone, Debug)]
 pub struct Plan {
     pieces: Vec<Piece>,
@@ -61,9 +72,30 @@ impl Plan {
         self.pieces.len() >= MAX_PIECES
     }
 
-    /// The radius a shape may have: at least one cell.
+    /// The radius a shape may have.
     pub fn thick(&self, radius: f64) -> f64 {
-        radius.max(self.cell)
+        radius.max(self.cell * MIN_RADIUS_CELLS)
+    }
+
+    fn sized(&self, radius: f64, carve: bool) -> f64 {
+        if carve { radius } else { self.thick(radius) }
+    }
+
+    /// Smooths what the plan has added, which takes the hard creases out of
+    /// where its pieces join. This is what makes growth read as grown rather
+    /// than assembled. What does not fit is left as it is.
+    fn smooth_added(&mut self) {
+        let thick_enough = self.cell * MIN_SMOOTHED_CELLS;
+        let added: Vec<Prim> = self
+            .pieces
+            .iter()
+            .filter(|p| matches!(p.op, DabOp::Add { .. }) && p.prim.thinnest() >= thick_enough)
+            .map(|p| p.prim)
+            .collect();
+        let reach = self.cell * SMOOTH_REACH_CELLS;
+        for prim in added {
+            self.push(prim.grown(reach), DabOp::Smooth);
+        }
     }
 
     fn push(&mut self, prim: Option<Prim>, op: DabOp) {
@@ -81,12 +113,12 @@ impl Plan {
     }
 
     pub fn sphere(&mut self, centre: Vec3d, radius: f64, carve: bool, material: u8) {
-        let prim = Prim::sphere(centre, self.thick(radius));
+        let prim = Prim::sphere(centre, self.sized(radius, carve));
         self.push(prim, Self::op(carve, material));
     }
 
     pub fn cone(&mut self, a: Vec3d, b: Vec3d, radii: (f64, f64), carve: bool, material: u8) {
-        let (ra, rb) = (self.thick(radii.0), self.thick(radii.1));
+        let (ra, rb) = (self.sized(radii.0, carve), self.sized(radii.1, carve));
         self.push(Prim::round_cone(a, b, ra, rb), Self::op(carve, material));
     }
 
@@ -99,7 +131,7 @@ impl Plan {
         carve: bool,
         material: u8,
     ) {
-        let (along, across) = (self.thick(radii.0), self.thick(radii.1));
+        let (along, across) = (self.sized(radii.0, carve), self.sized(radii.1, carve));
         let prim = Prim::spheroid(centre, axis, along, across);
         self.push(prim, Self::op(carve, material));
     }
@@ -110,8 +142,10 @@ impl Plan {
     }
 
     /// The corners of a box around everything, or `None` for an empty plan.
+    /// Smoothing reaches past a piece but makes nothing there, so it does not count.
     pub fn bounds(&self) -> Option<(Vec3d, Vec3d)> {
-        let mut boxes = self.pieces.iter().map(|p| p.prim.bounds());
+        let shaped = self.pieces.iter().filter(|p| p.op != DabOp::Smooth);
+        let mut boxes = shaped.map(|p| p.prim.bounds());
         let first = boxes.next()?;
         Some(boxes.fold(first, |(lo, hi), (l, h)| (lo.min(l), hi.max(h))))
     }
@@ -156,6 +190,10 @@ pub fn generate(kind: Kind, site: &Site, seed: u32) -> Plan {
         Kind::Coral => coral::grow(&mut plan, &frame, site, &mut rng),
         Kind::Tree => trees::grow(&mut plan, &frame, site, &mut rng),
         Kind::Hive => hive::grow(&mut plan, &frame, site, &mut rng),
+    }
+    // A comb's walls are meant to have corners.
+    if kind != Kind::Hive {
+        plan.smooth_added();
     }
     plan
 }

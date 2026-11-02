@@ -196,9 +196,11 @@ fn cave(seed: u32) -> Scene {
         apply_dab(&mut volume, &mut ctx, &bumps, roughen);
     }
     // Drips from the ceiling and mounds from the floor, wherever a ray finds rock.
-    for (k, p) in path.iter().skip(1).enumerate() {
+    // Not at the mouth, where they would hang across the view in.
+    for (k, p) in path.iter().skip(3).enumerate() {
         for (dir, kind, size) in [
-            (v(0.0, 0.0, 1.0), Kind::Stalactites, 0.8),
+            // Spread out: at a quarter cell, drips packed closer merge into lumps.
+            (v(0.0, 0.0, 1.0), Kind::Stalactites, 1.3),
             (v(0.0, 0.0, -1.0), Kind::Mushrooms, 0.6),
         ] {
             let ray = Ray { origin: *p, dir };
@@ -221,7 +223,7 @@ fn cave(seed: u32) -> Scene {
     };
     Scene {
         level,
-        eye: Vec3::new(0.0, -3.0, 2.6),
+        eye: Vec3::new(0.0, -7.5, 2.6),
         target: Vec3::new(0.0, 8.0, 2.6),
     }
 }

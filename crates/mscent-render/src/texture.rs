@@ -5,6 +5,7 @@
 //! tangent-space normal map (`name_n.png`) and a height map (`name_h.png`).
 
 use core::fmt;
+use mscent_world::materials;
 use std::path::Path;
 
 use mscent_math::Vec3;
@@ -379,6 +380,11 @@ pub fn default_gloss(name: &str) -> u8 {
         "floor" => 90,
         "brick" => 25,
         "rock" => 10,
+        "wax" => 90,
+        "cap" => 70,
+        "coral" => 30,
+        "stem" => 20,
+        "bark" => 8,
         _ => 40,
     }
 }
@@ -443,7 +449,10 @@ impl MaterialTable {
                 }
             }
         }
-        names.sort();
+        // The ids levels store: known names keep their places whatever else is
+        // in the folder, and anything else follows, sorted.
+        let place = |name: &String| materials::NAMES.iter().position(|n| n == name);
+        names.sort_by_key(|name| (place(name).unwrap_or(usize::MAX), name.clone()));
         let mut table = Self::new();
         for name in names {
             let texture = load_texture(dir, &name)?;

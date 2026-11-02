@@ -367,3 +367,88 @@ fn records_round_trip_through_the_file_and_forged_ones_are_refused() {
         assert!(r.dir().length() < 1.75);
     }
 }
+
+#[test]
+fn a_cell_whose_lifted_point_is_in_its_own_rock_takes_light_from_around_it() {
+    let level = pillar_level(false, false);
+    let (bsp, world) = world_of(&level);
+    let occ = Occluders::new(&bsp, &world);
+    let inside = world
+        .chunks
+        .iter()
+        .flat_map(|c| c.lods[0].vertices.iter())
+        .map(|v| v.pos - v.normal * 0.2)
+        .find(|p| world.is_solid(p.to_f64()))
+        .expect("a point in rock");
+    assert!(occ.in_solid(inside.to_f64()));
+    assert!(!Occluders::brushes(&bsp).in_solid(inside.to_f64()));
+}
+
+/// A flat voxel slab `half` either side of z = 0, and its sites.
+fn slab_sites(half: f64) -> CellSites {
+    use crate::voxel::{CellSize, Context, DabOp, Prim, Volume, apply_dab};
+    let mut volume =
+        Volume::new(Op::Add, 0, CellSize::Quarter, [-16, -16, -16], [2, 2, 2]).expect("valid");
+    let shape = volume.clone();
+    let mut ctx = Context::new(&shape, &[]);
+    let slab = Prim::cuboid(v(-3.0, -3.0, -half), v(3.0, 3.0, half)).expect("valid");
+    let m = DabOp::Add { material: ROCK_ID };
+    apply_dab(&mut volume, &mut ctx, &slab, m);
+    // A room around it, or the BSP's solid would bury every triangle.
+    let level = Level {
+        brushes: vec![cuboid([-9.0; 3], [9.0; 3], Op::Subtract, 0)],
+        volumes: vec![volume.with_order(1)],
+        ..Default::default()
+    };
+    let (_, world) = world_of(&level);
+    CellSites::of(&world)
+}
+
+fn top_near_edge(sites: &CellSites) -> usize {
+    (0..sites.len())
+        .filter(|&i| sites.normal(i).z > 0.9 && sites.pos(i).y.abs() < 1.0)
+        .min_by(|&a, &b| sites.pos(a).x.abs().total_cmp(&sites.pos(b).x.abs()))
+        .expect("a cell on top")
+}
+
+#[test]
+fn a_hard_shadow_edge_is_read_as_a_ramp_across_cells() {
+    let sites = slab_sites(0.4);
+    let i = top_near_edge(&sites);
+    let at = sites.pos(i).x;
+    // Lit on one side of the cell, dark on the other.
+    let known = |j: usize| Direct::Lit {
+        color: if sites.pos(j).x <= at {
+            v3(1.0, 1.0, 1.0)
+        } else {
+            Vec3::ZERO
+        },
+        dir: v3(0.0, 0.0, 1.0),
+    };
+    let (color, _) = super::cells::filtered(&sites, i, known(i), &known);
+    assert!(
+        color.x > 0.3 && color.x < 0.9,
+        "the edge cell shows {}",
+        color.x
+    );
+}
+
+#[test]
+fn light_is_not_read_from_the_far_side_of_a_thin_shape() {
+    // Thinner than a cell, so the two sides are neighbouring cells.
+    let sites = slab_sites(0.1);
+    let i = (0..sites.len())
+        .find(|&i| sites.normal(i).z < -0.9 && sites.pos(i).x.abs() < 1.0)
+        .expect("a cell underneath");
+    // Only the top is lit, and the top is within reach of the bottom.
+    let known = |j: usize| Direct::Lit {
+        color: if sites.normal(j).z > 0.0 {
+            v3(1.0, 1.0, 1.0)
+        } else {
+            Vec3::ZERO
+        },
+        dir: v3(0.0, 0.0, 1.0),
+    };
+    let (color, _) = super::cells::filtered(&sites, i, known(i), &known);
+    assert_eq!(color.x, 0.0);
+}

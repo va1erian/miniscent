@@ -11,7 +11,7 @@ use crate::camera::{Camera, Frustum};
 /// Triangles a frame submits before the governor steps in.
 pub const MAX_VOXEL_TRIS: u32 = 25_000;
 /// Distances to half and to quarter detail, in chunk sizes.
-const LOD_DISTANCE: [f32; 2] = [2.0, 4.0];
+const LOD_DISTANCE: [f32; 2] = [3.0, 6.0];
 /// How much farther than its switching distance a chunk must come back from,
 /// so a chunk near the line does not flip every frame.
 const LOD_HYSTERESIS: f32 = 0.9;
@@ -56,8 +56,10 @@ pub(crate) struct ListedChunk {
 pub(crate) struct VoxelList {
     pub chunks: Vec<ListedChunk>,
     pub screen: Vec<ScreenV>,
-    /// Filled by the BSP walk: chunks of visible leaves, nearest first.
+    /// Filled by the BSP walk: chunks of visible leaves.
     pub candidates: Vec<u32>,
+    /// Those that can be seen, with how far off they are.
+    near: Vec<(f32, u32)>,
     /// By chunk: the frame it was last taken, so one in many leaves counts once.
     taken: Vec<u32>,
     frame: u32,
@@ -97,21 +99,24 @@ impl VoxelList {
         // and a change of volume repeats it, which costs only time.
         self.flooded = None;
         for &c in &candidates {
-            self.take(scene, cam, &frustum, eye, c, &lights);
+            self.consider(scene, cam, &frustum, eye, c);
         }
         self.candidates = candidates;
+        // A cave is one BSP leaf, so the walk's order says nothing within it. Near
+        // chunks first: the z-buffer then saves the shading of what they hide, and
+        // an overloaded frame loses detail from the far ones.
+        let mut near = std::mem::take(&mut self.near);
+        near.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+        for &(_, c) in &near {
+            self.take(scene, cam, eye, c, &lights);
+        }
+        near.clear();
+        self.near = near;
         self.govern();
     }
 
-    fn take(
-        &mut self,
-        scene: &VoxelScene,
-        cam: &Camera,
-        frustum: &Frustum,
-        eye: Vec3,
-        c: u32,
-        lights: &impl Fn(mscent_world::LeafId) -> u8,
-    ) {
+    /// Notes chunk `c` for this frame if it can be seen at all.
+    fn consider(&mut self, scene: &VoxelScene, cam: &Camera, frustum: &Frustum, eye: Vec3, c: u32) {
         let i = c as usize;
         let Some(chunk) = scene.world.chunks.get(i) else {
             return;
@@ -120,9 +125,24 @@ impl VoxelList {
             return;
         }
         self.taken[i] = self.frame;
-        if !self.flood_reaches(scene, eye, c) || !in_view(cam, frustum, &chunk.lods[0].bounds) {
-            return;
+        let bounds = &chunk.lods[0].bounds;
+        if self.flood_reaches(scene, eye, c) && in_view(cam, frustum, bounds) {
+            self.near.push((distance_to_box(bounds, eye), c));
         }
+    }
+
+    fn take(
+        &mut self,
+        scene: &VoxelScene,
+        cam: &Camera,
+        eye: Vec3,
+        c: u32,
+        lights: &impl Fn(mscent_world::LeafId) -> u8,
+    ) {
+        let i = c as usize;
+        let Some(chunk) = scene.world.chunks.get(i) else {
+            return;
+        };
         let lod = self.pick_lod(scene, eye, i);
         let mesh = &chunk.lods[usize::from(lod)];
         let start = self.screen.len();

@@ -2,8 +2,10 @@
 
 use mscent_math::Vec3d;
 
-use super::{FieldKind, Kind, MAX_PIECES, Plan, Site, field, generate, surface_normal};
+use super::{FieldKind, Kind, MAX_PIECES, Piece, Plan, Site, field, generate, surface_normal};
 use crate::model::pick::Ray;
+use mscent_world::Op;
+use mscent_world::voxel::{CellSize, Context, DabOp, Mesher, Volume, apply_dab};
 
 fn v(x: f64, y: f64, z: f64) -> Vec3d {
     Vec3d::new(x, y, z)
@@ -65,11 +67,12 @@ fn a_plan_is_bounded_and_grows_from_its_site_along_the_normal() {
 }
 
 #[test]
-fn nothing_is_thinner_than_a_cell() {
+fn nothing_added_is_thinner_than_a_cell() {
     let s = site(0.25);
     let cell = s.cell;
     for (kind, plan) in Kind::ALL.iter().zip(plans(&s, 9)) {
-        for piece in plan.pieces() {
+        let added = plan.pieces().iter().filter(|p| p.op != DabOp::Carve);
+        for piece in added {
             let (lo, hi) = piece.prim.bounds();
             let thin = (hi - lo).x.min((hi - lo).y).min((hi - lo).z);
             assert!(
@@ -194,4 +197,118 @@ fn fields_repeat_follow_the_seed_and_survive_hostile_wavelengths() {
             assert!(probe(kind, 3, wave).iter().all(|x| x.is_finite()), "{wave}");
         }
     }
+}
+
+/// How much a mesh's normals turn across its edges, on average, in radians.
+fn mean_turn(plan: &[Piece], cell: CellSize) -> f64 {
+    let mut volume =
+        Volume::new(Op::Add, 0, cell, [-64, -64, -32], [8, 8, 8]).expect("the box fits");
+    let shape = volume.clone();
+    let mut ctx = Context::new(&shape, &[]);
+    for piece in plan {
+        apply_dab(&mut volume, &mut ctx, &piece.prim, piece.op);
+    }
+    let mut mesher = Mesher::new();
+    let (mut sum, mut edges) = (0.0, 0.0f64);
+    for c in volume.all_chunks() {
+        let Some(m) = mesher.mesh(&volume, &mut ctx, c) else {
+            continue;
+        };
+        for t in &m.triangles {
+            for k in 0..3 {
+                let a = m.vertices[usize::from(t[k])].normal;
+                let b = m.vertices[usize::from(t[(k + 1) % 3])].normal;
+                sum += f64::from(a.dot(b).clamp(-1.0, 1.0).acos());
+                edges += 1.0;
+            }
+        }
+    }
+    assert!(edges > 0.0, "the plan made a surface");
+    sum / edges
+}
+
+#[test]
+fn growth_is_smoothed_where_its_pieces_join() {
+    for kind in [Kind::Mushrooms, Kind::Coral, Kind::Tree] {
+        let s = Site {
+            origin: Vec3d::new(0.0, 0.0, 0.0),
+            normal: Vec3d::new(0.0, 0.0, 1.0),
+            size: 1.5,
+            cell: CellSize::Eighth.units(),
+            material: 1,
+        };
+        let plan = generate(kind, &s, 3);
+        let raw: Vec<Piece> = (plan.pieces().iter())
+            .filter(|p| !matches!(p.op, DabOp::Smooth))
+            .copied()
+            .collect();
+        assert!(raw.len() < plan.pieces().len(), "{kind:?} has no smoothing");
+        let (before, after) = (
+            mean_turn(&raw, CellSize::Eighth),
+            mean_turn(plan.pieces(), CellSize::Eighth),
+        );
+        assert!(after < before, "{kind:?}: {before} became {after}");
+    }
+}
+
+#[test]
+fn a_comb_keeps_its_corners() {
+    let s = Site {
+        origin: Vec3d::new(0.0, 0.0, 0.0),
+        normal: Vec3d::new(0.0, 0.0, 1.0),
+        size: 1.5,
+        cell: CellSize::Quarter.units(),
+        material: 1,
+    };
+    let plan = generate(Kind::Hive, &s, 3);
+    assert!(plan.pieces().iter().all(|p| !matches!(p.op, DabOp::Smooth)));
+}
+
+#[test]
+fn a_small_mushroom_keeps_its_cap() {
+    let s = Site {
+        origin: Vec3d::new(0.0, 0.0, 0.0),
+        normal: Vec3d::new(0.0, 0.0, 1.0),
+        size: 0.4,
+        cell: CellSize::Quarter.units(),
+        material: 1,
+    };
+    let plan = generate(Kind::Mushrooms, &s, 3);
+    let mut volume = Volume::new(Op::Add, 0, CellSize::Quarter, [-64, -64, -32], [8, 8, 8])
+        .expect("the box fits");
+    let shape = volume.clone();
+    let mut ctx = Context::new(&shape, &[]);
+    for piece in plan.pieces() {
+        apply_dab(&mut volume, &mut ctx, &piece.prim, piece.op);
+    }
+    let mut mesher = Mesher::new();
+    let cap = mscent_world::materials::CAP as u8;
+    let on_cap: usize = volume
+        .all_chunks()
+        .into_iter()
+        .filter_map(|c| mesher.mesh(&volume, &mut ctx, c))
+        .map(|m| m.materials.iter().filter(|&&id| id == cap).count())
+        .sum();
+    assert!(on_cap > 20, "{on_cap} triangles of cap");
+}
+
+#[test]
+fn a_tree_grows_in_one_piece() {
+    let s = Site {
+        origin: Vec3d::new(0.0, 0.0, 0.0),
+        normal: Vec3d::new(0.0, 0.0, 1.0),
+        size: 1.8,
+        cell: CellSize::Eighth.units(),
+        material: 1,
+    };
+    let plan = generate(Kind::Tree, &s, 3);
+    let mut volume =
+        Volume::new(Op::Add, 0, CellSize::Eighth, [-128, -128, -32], [16, 16, 8]).expect("fits");
+    let shape = volume.clone();
+    let mut ctx = Context::new(&shape, &[]);
+    for piece in plan.pieces() {
+        apply_dab(&mut volume, &mut ctx, &piece.prim, piece.op);
+    }
+    let parts = mscent_world::voxel::solid_parts(&volume, &mut ctx);
+    assert_eq!(parts, 1, "the tree is in {parts} parts");
 }

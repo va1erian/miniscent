@@ -6,15 +6,12 @@
 //! `cargo run --release -p mscent-render --example voxel_shot -- target/shots/voxel`
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::Instant;
 
 use mscent_math::rng::Rng;
 use mscent_math::{Vec3, Vec3d};
 use mscent_render::png_encode::encode_png;
-use mscent_render::{
-    BuildConfig, Compiled, Framebuffer, LevelRenderer, MaterialTable, Quality, View,
-};
+use mscent_render::{BuildConfig, Framebuffer, LevelRenderer, MaterialTable, Quality, View};
 use mscent_world::brush::{Brush, Op};
 use mscent_world::materials::{BRICK, FLOOR, METAL, ROCK};
 use mscent_world::voxel::{CellSize, Context, DabOp, Prim, Volume, apply_dab, fill};
@@ -64,10 +61,8 @@ fn renderer(level: &Level) -> Result<LevelRenderer, Failure> {
         fog_end: 400.0,
         ..BuildConfig::default()
     };
-    let c = Compiled::new(level, &cfg).map_err(|e| format!("{e:?}"))?;
-    let map = Arc::new(c.draft().map_err(|e| format!("{e:?}"))?);
-    c.into_renderer(map, table)
-        .map_err(|e| format!("{e:?}").into())
+    // The light a player sees, not the draft an editor shows while it waits.
+    LevelRenderer::from_level(level, table, &cfg).map_err(|e| format!("{e:?}").into())
 }
 
 /// Writes the view from `eye` towards `target`.
@@ -369,7 +364,7 @@ const SHOWCASES: [(&str, [f32; 3], [f32; 3]); 5] = [
     ("coral", [0.0, -8.0, 3.5], [0.0, 3.0, 1.8]),
     ("mushrooms", [0.0, -8.0, 2.5], [0.0, 3.0, 1.5]),
     ("tree", [0.0, -11.0, 4.0], [0.0, 4.0, 6.0]),
-    ("cave", [0.0, -3.0, 2.6], [0.0, 8.0, 2.6]),
+    ("cave", [0.0, -7.5, 2.6], [0.0, 8.0, 2.6]),
 ];
 
 /// The levels the editor's generators built, drawn from their saved files.

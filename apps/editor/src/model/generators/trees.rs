@@ -3,6 +3,7 @@
 //! each branch's thickness from the twigs it carries. The trunk flares into the
 //! ground through buttress roots.
 
+use mscent_world::materials::BARK;
 use std::f64::consts::TAU;
 
 use mscent_math::Vec3d;
@@ -43,7 +44,7 @@ pub(super) fn grow(plan: &mut Plan, f: &Frame, site: &Site, rng: &mut Rng) {
     colonize(&mut nodes, &mut attractors, step, f);
     let tip = (0.05 * s).max(site.cell);
     thicken(&mut nodes, tip, step);
-    let wood = site.material;
+    let wood = BARK as u8;
     for node in &nodes {
         if let Some(p) = node.parent {
             let up = &nodes[p];

@@ -13,6 +13,7 @@ use crate::voxel::VoxelWorld;
 pub struct Occluders<'a> {
     bsp: &'a Bsp,
     volumes: Vec<VolumeRays>,
+    world: Option<&'a VoxelWorld>,
 }
 
 impl<'a> Occluders<'a> {
@@ -22,17 +23,22 @@ impl<'a> Occluders<'a> {
         Self {
             bsp,
             volumes: Vec::new(),
+            world: None,
         }
     }
 
     /// Brushes and the full-detail surfaces of `world`.
-    pub fn new(bsp: &'a Bsp, world: &VoxelWorld) -> Self {
+    pub fn new(bsp: &'a Bsp, world: &'a VoxelWorld) -> Self {
         let volumes = world
             .volumes
             .iter()
             .filter_map(|geometry| VolumeRays::new(geometry, &world.chunks))
             .collect();
-        Self { bsp, volumes }
+        Self {
+            bsp,
+            volumes,
+            world: Some(world),
+        }
     }
 
     pub fn has_volumes(&self) -> bool {
@@ -45,9 +51,9 @@ impl<'a> Occluders<'a> {
         segment_clear(self.bsp, a, b) && self.volumes.iter().all(|v| v.clear(a, b))
     }
 
-    /// Whether `p` is inside solid brush. A voxel surface does not count: a
-    /// point behind one only finds that out when a ray from it is blocked.
-    pub fn in_brush_solid(&self, p: Vec3d) -> bool {
-        !p.is_finite() || self.bsp.is_solid(p)
+    /// Whether `p` is inside rock of either kind: no light can be read there. On
+    /// a thin or sharply curved shape, a cell's lifted point can land inside.
+    pub fn in_solid(&self, p: Vec3d) -> bool {
+        !p.is_finite() || self.bsp.is_solid(p) || self.world.is_some_and(|w| w.is_solid(p))
     }
 }

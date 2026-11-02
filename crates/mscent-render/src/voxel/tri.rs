@@ -24,6 +24,10 @@ pub(super) struct Corner {
     pub pos: Vec3,
     pub light: Vec3,
     pub dir: Vec3,
+    /// The light direction in the world, and the surface's normal, for a triangle
+    /// whose corners have no one tangent frame.
+    pub world_dir: Vec3,
+    pub normal: Vec3,
     /// Weights of the triangle's three original vertices.
     pub weight: Vec3,
 }
@@ -36,7 +40,8 @@ pub(super) struct Gradient {
     y0: f64,
     /// `y1 - y0` and so on, in pixels.
     e: [f64; 4],
-    det: f64,
+    /// One over the determinant: the one division a triangle needs.
+    inv_det: f64,
 }
 
 impl Gradient {
@@ -51,15 +56,15 @@ impl Gradient {
                 px(c[2].x - c[0].x),
                 px(c[2].y - c[0].y),
             ],
-            det,
+            inv_det: 1.0 / det,
         }
     }
 
     /// `(value at the screen origin, per x, per y)`.
     pub(super) fn plane(&self, v: [f32; 3]) -> (f32, f32, f32) {
         let (d1, d2) = (f64::from(v[1] - v[0]), f64::from(v[2] - v[0]));
-        let ax = (d1 * self.e[3] - d2 * self.e[1]) / self.det;
-        let ay = (d2 * self.e[0] - d1 * self.e[2]) / self.det;
+        let ax = (d1 * self.e[3] - d2 * self.e[1]) * self.inv_det;
+        let ay = (d2 * self.e[0] - d1 * self.e[2]) * self.inv_det;
         let at = f64::from(v[0]) - ax * self.x0 - ay * self.y0;
         (at as f32, ax as f32, ay as f32)
     }
@@ -125,6 +130,17 @@ impl Rows {
         let col = |x: f64| ((x - 8.0) / 16.0).ceil();
         (col(l).max(0.0) as i32, col(r).min(f64::from(width)) as i32)
     }
+}
+
+/// Whether the triangle covers any pixel centre of the band. A far triangle is
+/// often smaller than a pixel and falls between them, and its setup can be spared.
+pub(super) fn covers_a_pixel(corners: &[Corner; 3], band: (i32, i32), width: i32) -> bool {
+    let rows = Rows::new(corners);
+    let (first, end) = rows.range(band);
+    (first..end).any(|y| {
+        let (xs, xe) = rows.extent(y, width);
+        xs < xe
+    })
 }
 
 /// Runs `row(y, xs, xe)` for each covered row of the band.
@@ -199,6 +215,8 @@ fn cut(cam: &Camera, inside: &Corner, outside: &Corner) -> Option<Corner> {
         pos,
         light: inside.light.lerp(outside.light, t),
         dir: inside.dir.lerp(outside.dir, t),
+        world_dir: inside.world_dir.lerp(outside.world_dir, t),
+        normal: inside.normal.lerp(outside.normal, t),
         weight: inside.weight.lerp(outside.weight, t),
     })
 }

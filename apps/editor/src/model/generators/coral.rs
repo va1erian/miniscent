@@ -1,6 +1,7 @@
 //! Coral: branches that fork as they climb, each thinner than the last, with a
 //! random lean and a pull away from the surface.
 
+use mscent_world::materials::CORAL;
 use std::f64::consts::TAU;
 
 use mscent_math::Vec3d;
@@ -45,9 +46,9 @@ fn colony(plan: &mut Plan, f: &Frame, site: &Site, from: Vec3d, rng: &mut Rng) {
     while let Some(t) = stack.pop() {
         let to = t.from + t.dir * (t.radius * rng.range_f64(2.6, 3.8));
         let end = t.radius * 0.78;
-        plan.cone(t.from, to, (t.radius, end), false, site.material);
+        plan.cone(t.from, to, (t.radius, end), false, CORAL as u8);
         if t.depth == 0 {
-            plan.sphere(to, end * 1.25, false, site.material);
+            plan.sphere(to, end * 1.25, false, CORAL as u8);
             continue;
         }
         for _ in 0..FORKS {

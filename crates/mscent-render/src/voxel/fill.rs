@@ -5,7 +5,7 @@ use mscent_math::Vec3;
 use super::blend::fill_blended;
 use super::list::{ListedChunk, SUBPIXEL, VoxelList};
 use super::shader::{Plane3, VoxelShader};
-use super::tri::{Corner, Gradient, area, clip_near, each_row};
+use super::tri::{Corner, Gradient, area, clip_near, covers_a_pixel, each_row};
 use super::{LodData, TEXELS_PER_UNIT, VoxelScene, axis_map};
 use crate::camera::Camera;
 use crate::dynlight::DynLight;
@@ -127,6 +127,8 @@ fn fill_tri(
             pos: v.pos,
             light: add_dynamic(light.color, v.pos, v.normal, tri.lights, ctx.lights),
             dir: tri.data.dir_t.get(i).copied().unwrap_or(Vec3::ZERO),
+            world_dir: light.dir,
+            normal: v.normal,
             weight: w,
         };
     }
@@ -182,7 +184,7 @@ fn draw_corners(
     stats: &mut DrawStats,
 ) {
     let det = area(c);
-    if det >= 0.0 {
+    if det >= 0.0 || !covers_a_pixel(c, fb.row_range(), fb.width() as i32) {
         return;
     }
     let grad = Gradient::new(c, det);
@@ -195,7 +197,7 @@ fn draw_corners(
                     tri.data.material.get(i).copied().unwrap_or(0),
                 )
             });
-            fill_blended(fb, c, &grad, corners, ctx, stats);
+            fill_blended(fb, c, &grad, corners, tri.full, ctx, stats);
         }
     }
 }
@@ -364,6 +366,15 @@ fn fill_rows<S: SpanShader>(
         while x < xe {
             let n = SPAN_LEN.min(xe - x);
             let b = a.advance(p.gx, n as f32);
+            // `1/z` is linear along a span, so its nearest pixel is at an end, and
+            // the z-buffer can spare a covered span all of its shading.
+            let slots = &depth[x as usize..(x + n) as usize];
+            let nearest = a.iz.max(a.iz + p.gx.iz * (n - 1) as f32);
+            if slots.iter().all(|&d| nearest <= d) {
+                a = b;
+                x += n;
+                continue;
+            }
             let (ea, eb) = (a.at(x, y), b.at(x + n, y));
             shader.begin_span(&ea, &eb, n as u32);
             stats.spans += 1;

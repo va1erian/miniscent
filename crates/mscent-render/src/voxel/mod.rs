@@ -24,7 +24,7 @@ use std::sync::Arc;
 use mscent_math::Vec3;
 use mscent_world::texinfo::DEFAULT_SCALE;
 use mscent_world::voxel::{
-    ChunkMesh, NO_CHUNK, RemeshedChunk, VoxelChunk, VoxelVertex, VoxelWorld,
+    ChunkMesh, Lod, NO_CHUNK, RemeshedChunk, VoxelChunk, VoxelVertex, VoxelWorld,
 };
 
 /// Light at one vertex.
@@ -125,6 +125,49 @@ impl LodData {
 /// A cell and the light it holds.
 type CellLight = ([i8; 3], VertexLight);
 
+/// A chunk's drawing data at every level, from the light of its full detail.
+fn lod_data(chunk: &VoxelChunk, full: Vec<VertexLight>) -> [LodData; 3] {
+    let half = merged_light(&chunk.lods[0], &full, &chunk.lods[1], Lod::Half);
+    let quarter = merged_light(&chunk.lods[0], &full, &chunk.lods[2], Lod::Quarter);
+    [
+        LodData::new(&chunk.lods[0], full),
+        LodData::new(&chunk.lods[1], half),
+        LodData::new(&chunk.lods[2], quarter),
+    ]
+}
+
+/// The light of a reduced mesh: each merged vertex the mean of the cells it stands
+/// for. One cell's record alone could be a dark one among lit, and a vertex this
+/// far apart from the next would show it as a black block. A border vertex stands
+/// for itself, so neighbouring chunks still agree at any level.
+fn merged_light(
+    full: &ChunkMesh,
+    light: &[VertexLight],
+    reduced: &ChunkMesh,
+    lod: Lod,
+) -> Vec<VertexLight> {
+    let mut sums: HashMap<[i32; 3], (Vec3, Vec3, f32)> = HashMap::new();
+    for (v, l) in full.vertices.iter().zip(light) {
+        let slot = sums
+            .entry(lod.key(v.cell))
+            .or_insert((Vec3::ZERO, Vec3::ZERO, 0.0));
+        slot.0 = slot.0 + l.color;
+        slot.1 = slot.1 + l.dir;
+        slot.2 += 1.0;
+    }
+    reduced
+        .vertices
+        .iter()
+        .map(|v| {
+            sums.get(&lod.key(v.cell))
+                .map_or_else(VertexLight::default, |&(color, dir, n)| VertexLight {
+                    color: color * (1.0 / n),
+                    dir: dir.normalized().unwrap_or(v.normal),
+                })
+        })
+        .collect()
+}
+
 /// Light for a remeshed chunk from what its cells held before.
 fn inherit(
     mesh: &ChunkMesh,
@@ -170,24 +213,21 @@ pub struct VoxelScene {
 }
 
 impl VoxelScene {
-    /// `light(chunk, level, mesh)` gives the light of a mesh's vertices. A list
-    /// of the wrong length is cut or filled with darkness, never trusted.
+    /// `light(chunk, mesh)` gives the light of a chunk's full-detail vertices. A
+    /// list of the wrong length is cut or filled with darkness, never trusted.
     pub fn new(
         world: VoxelWorld,
         leaf_count: usize,
-        mut light: impl FnMut(usize, usize, &ChunkMesh) -> Vec<VertexLight>,
+        mut light: impl FnMut(usize, &ChunkMesh) -> Vec<VertexLight>,
     ) -> Self {
         let lods = world
             .chunks
             .iter()
             .enumerate()
             .map(|(c, chunk): (usize, &Arc<VoxelChunk>)| {
-                [0, 1, 2].map(|level| {
-                    let mesh = &chunk.lods[level];
-                    let mut l = light(c, level, mesh);
-                    l.resize(mesh.vertices.len(), VertexLight::default());
-                    LodData::new(mesh, l)
-                })
+                let mut full = light(c, &chunk.lods[0]);
+                full.resize(chunk.lods[0].vertices.len(), VertexLight::default());
+                lod_data(chunk, full)
             })
             .collect();
         let mut scene = Self {
@@ -249,10 +289,8 @@ impl VoxelScene {
             let Some(chunk) = self.world.chunks.get(i) else {
                 continue;
             };
-            self.lods[i] = [0, 1, 2].map(|level| {
-                let mesh = &chunk.lods[level];
-                LodData::new(mesh, inherit(mesh, old.unwrap_or(&[]), &fresh))
-            });
+            let mesh = &chunk.lods[0];
+            self.lods[i] = lod_data(chunk, inherit(mesh, old.unwrap_or(&[]), &fresh));
         }
         self.index();
     }
@@ -273,25 +311,13 @@ impl VoxelScene {
                 old.insert(key(v.pos), *l);
             }
         }
-        let mut full: Vec<CellLight> = Vec::new();
-        Self::new(world, leaf_count, |_, level, mesh| {
-            if level > 0 {
-                return inherit(mesh, &full, &fresh);
-            }
+        Self::new(world, leaf_count, |_, mesh| {
             let lamps = fresh(mesh);
-            let lit: Vec<VertexLight> = mesh
-                .vertices
+            mesh.vertices
                 .iter()
                 .zip(lamps)
                 .map(|(v, lamp)| old.get(&key(v.pos)).copied().unwrap_or(lamp))
-                .collect();
-            full = mesh
-                .vertices
-                .iter()
-                .map(|v| v.cell)
-                .zip(lit.iter().copied())
-                .collect();
-            lit
+                .collect()
         })
     }
 
@@ -323,3 +349,5 @@ impl VoxelScene {
 mod fill_tests;
 #[cfg(test)]
 mod flood_tests;
+#[cfg(test)]
+mod shade_tests;

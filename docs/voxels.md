@@ -545,14 +545,19 @@ faces. The first frame of a view can run far over budget until the governor acts
 
 | What | Low | Medium | High |
 |---|---|---|---|
-| Cave, mean frame | 9.5 ms | 12.1 ms | 11.6 ms |
-| Cave, cost per screen pixel | 41 ns | 52 ns | 50 ns |
-| Brush room, cost per screen pixel | 26 ns | 45 ns | 46 ns |
+| Cave, mean frame (worst about 15 ms) | 8.4 ms | 9.5 ms | 9.6 ms |
+| Cave, cost per screen pixel | 37 ns | 41 ns | 42 ns |
+| Brush room, cost per screen pixel | 18 ns | 30 ns | 30 ns |
 
-So on this dense scene a voxel pixel at High costs about 10% more than a brush pixel, which **misses** the
-aim of no more. The rest is probably triangle setup: an estimate from these frame times, not a
-profile, puts it near 120 ns per triangle against the 22 ns the prototype
-suggested. The machine is noisy, and the Medium and High rows swap on some runs.
+Run with nothing else on the machine: anything compiling in the background inflates all of these, and an
+earlier version of this table, measured that way, understated the gap as 10%.
+
+So on this dense scene a voxel pixel at High costs about 40% more than a brush pixel, which **misses** the
+aim of no more. It is not shading or overdraw. Overdraw is 1.00 once chunks are drawn near first and covered
+spans are skipped, and bump mapping adds about 1 ms against about 2.7 ms for brushes. It is geometry: about
+40 000 triangles, past the 25 000 budget because level of detail cannot reduce this scene further, and spans
+of about 5 pixels against 16 for a wall. A level at or under the budget pays less; the generator showcases
+draw 4 000 to 24 000 triangles.
 
 The prototype this replaced, on the same frames, for the record:
 from 40 air positions:
@@ -664,8 +669,6 @@ apps/editor/src/selftest/voxel.rs
 
 Known limits:
 
-- Particles collide with the BSP only, so sparks and debris pass through voxel rock.
-- Triangles whose corners disagree on texture take Gouraud light and albedo only, with no bump or specular.
 - Brush luxels gather no bounce from voxel patches; only cells gather from faces and chunks.
 - A chunk new in a stroke or a shot, with no old cell to inherit from, is lit by lamps with no shadows until the next bake.
 - Light does not newly pour through a shot hole, and brush shadows do not change, as designed.

@@ -2,6 +2,7 @@
 //! it in a packed grid. The walls between cells are what the carving leaves.
 
 use mscent_math::rng::Rng;
+use mscent_world::materials::WAX;
 
 use super::Plan;
 use super::site::{Frame, Site};
@@ -10,6 +11,8 @@ use super::site::{Frame, Site};
 const COS30: f64 = 0.866_025_403_784_438_6;
 /// Cells carved this far below the lens' top surface, in cells, at least.
 const FLOOR_CELLS: f64 = 2.0;
+/// Smallest cell of the comb, across its flats, in voxel cells.
+const MIN_APOTHEM_CELLS: f64 = 3.0;
 /// Walls are at least this many cells thick, so they survive meshing.
 const WALL_CELLS: f64 = 2.0;
 
@@ -18,8 +21,9 @@ pub(super) fn grow(plan: &mut Plan, f: &Frame, site: &Site, rng: &mut Rng) {
     let reach = 3.4 * s;
     let lift = 1.5 * s;
     // The lens bulges out of the surface, thickest in the middle: a curved comb.
-    plan.ellipsoid(f.origin, f.n, (lift, reach), false, site.material);
-    let apothem = 0.42 * s;
+    plan.ellipsoid(f.origin, f.n, (lift, reach), false, WAX as u8);
+    // Few cells that read beat many that alias: a cell's flats need samples.
+    let apothem = (0.42 * s).max(MIN_APOTHEM_CELLS * site.cell);
     let wall = (0.14 * s).max(WALL_CELLS * site.cell);
     let pitch = 2.0 * apothem + wall;
     let span = (reach / pitch).ceil() as i32;
