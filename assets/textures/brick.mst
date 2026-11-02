@@ -6,7 +6,7 @@ op 0 0 1 bricks rows=8 cols=4 offset=0.5 mortar=0.125 seed=7 mode=mask
 op 0 1 1 store name=wall
 op 0 2 1 bricks rows=8 cols=4 offset=0.5 mortar=0.125 seed=7 mode=tint
 op 0 3 1 store name=tone
-op 0 4 1 noise freq_x=8 freq_y=8 octaves=5 persistence=0.55 seed=1
+op 0 4 1 noise freq_x=8 freq_y=8 octaves=4 persistence=0.55 seed=1
 op 0 5 1 store name=grain
 # Brick colour: dark to light by tone, then grain.
 op 0 6 1 flat color=0.47,0.19,0.13
@@ -21,7 +21,7 @@ op 0 11 2 merge mode=multiply
 op 0 12 1 color amount=1.25
 op 0 13 1 store name=bricks
 # Mortar, with its own mottling.
-op 0 14 1 noise freq_x=16 freq_y=16 octaves=4 persistence=0.55 seed=2 color0=0.36,0.344,0.32 color1=0.54,0.516,0.48
+op 0 14 1 noise freq_x=16 freq_y=16 octaves=3 persistence=0.55 seed=2 color0=0.36,0.344,0.32 color1=0.54,0.516,0.48
 op 0 15 1 store name=mortar
 # Laid together.
 op 0 16 1 load name=mortar
@@ -45,4 +45,4 @@ op 1 27 1 range out_high=0.5
 op 0 26 1 load name=edged
 op 0 27 1 range out_high=0.5
 op 0 28 2 merge mode=add
-op 0 29 1 out-height normal_strength=6
+op 0 29 1 out-height normal_strength=5
