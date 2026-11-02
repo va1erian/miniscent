@@ -181,17 +181,28 @@ pub(crate) fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
 }
 
 /// Starts the job that makes `doc` visible as fast as possible.
-pub fn start_preview(doc: &Document, cache: &SharedCache) -> Result<Job<Built>, String> {
-    let cache = Arc::clone(cache);
-    spawn("mscent-preview", doc, move |doc| preview(doc, &cache))
+pub fn start_preview(
+    doc: &Document,
+    cache: &SharedCache,
+    cfg: &SessionConfig,
+) -> Result<Job<Built>, String> {
+    let (cache, cfg) = (Arc::clone(cache), *cfg);
+    spawn("mscent-preview", doc, move |doc| preview(doc, &cache, &cfg))
 }
 
 /// Starts the full bake of `doc`, whose [`Built::light_key`] is `key`.
-pub fn start_bake(doc: &Document, key: u64, cache: &SharedCache) -> Result<BakeJob, String> {
-    let cache = Arc::clone(cache);
+pub fn start_bake(
+    doc: &Document,
+    key: u64,
+    cache: &SharedCache,
+    cfg: &SessionConfig,
+) -> Result<BakeJob, String> {
+    let (cache, cfg) = (Arc::clone(cache), *cfg);
     let cancel = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&cancel);
-    let job = spawn("mscent-bake", doc, move |doc| bake(doc, &cache, &flag))?;
+    let job = spawn("mscent-bake", doc, move |doc| {
+        bake(doc, &cache, &cfg, &flag)
+    })?;
     Ok(BakeJob { job, key, cancel })
 }
 
@@ -210,10 +221,9 @@ fn compile_level(level: &Level, cfg: &SessionConfig) -> Result<Compiled, String>
     Compiled::new(level, &cfg.build).map_err(|e| format!("CSG failed: {e:?}"))
 }
 
-fn preview(doc: &Document, cache: &SharedCache) -> Result<Built, String> {
+fn preview(doc: &Document, cache: &SharedCache, cfg: &SessionConfig) -> Result<Built, String> {
     let level = validate(doc)?;
-    let cfg = SessionConfig::default();
-    let compiled = compile_level(&level, &cfg)?;
+    let compiled = compile_level(&level, cfg)?;
     let light_key = compiled.light_key();
     let stored = {
         let mut cache = lock(cache);
@@ -235,7 +245,7 @@ fn preview(doc: &Document, cache: &SharedCache) -> Result<Built, String> {
     // Before the script is read, so an edit made meanwhile is seen as a change.
     let watch = doc.level_path().map(ScriptWatcher::new);
     Ok(Built {
-        product: product(&level, renderer, &cfg, doc.level_path()),
+        product: product(&level, renderer, cfg, doc.level_path()),
         light,
         light_key,
         report,
@@ -302,10 +312,11 @@ fn bake_workers() -> usize {
 fn bake(
     doc: &Document,
     cache: &SharedCache,
+    cfg: &SessionConfig,
     cancel: &AtomicBool,
 ) -> Result<Option<BakeReport>, String> {
     let level = validate(doc)?;
-    let compiled = compile_level(&level, &SessionConfig::default())?;
+    let compiled = compile_level(&level, cfg)?;
     // Looked up first so the report can say why a file was not good enough.
     if compiled.stored(&mut lock(cache)).is_some() {
         return Ok(lock(cache).last_report().cloned());
@@ -391,7 +402,8 @@ mod tests {
             entities: vec![],
             ..Default::default()
         });
-        let job = start_preview(&doc, &SharedCache::default()).expect("starts");
+        let job = start_preview(&doc, &SharedCache::default(), &SessionConfig::default())
+            .expect("starts");
         let built = wait(&job).expect("builds");
         assert!(built.unplayable().is_some());
     }
@@ -407,7 +419,8 @@ player 0 0 0 0
         std::fs::create_dir_all(&dir).expect("dir");
         let mut doc = Document::from_level(&level);
         let cache = SharedCache::default();
-        let build = |doc: &Document| wait(&start_preview(doc, &cache).expect("starts"));
+        let cfg = SessionConfig::default();
+        let build = |doc: &Document| wait(&start_preview(doc, &cache, &cfg).expect("starts"));
 
         let without = build(&doc).expect("builds");
         assert!(without.unplayable().is_some(), "no script, no goal");
@@ -436,7 +449,8 @@ player 0 0 0 0
     fn the_showcase_previews_playable_on_a_draft_and_a_bake_makes_it_full() {
         let doc = Document::from_level(&mscent_world::showcase_level());
         let cache = SharedCache::default();
-        let first = wait(&start_preview(&doc, &cache).expect("starts")).expect("builds");
+        let first = wait(&start_preview(&doc, &cache, &SessionConfig::default()).expect("starts"))
+            .expect("builds");
         assert!(first.unplayable().is_none());
         assert_eq!(first.light, Light::Draft);
         assert_eq!(
@@ -445,11 +459,13 @@ player 0 0 0 0
             "a draft is no bake"
         );
 
-        let job = start_bake(&doc, first.light_key, &cache).expect("starts");
+        let job =
+            start_bake(&doc, first.light_key, &cache, &SessionConfig::default()).expect("starts");
         let report = wait(&job.job).expect("bakes").expect("not cancelled");
         assert_eq!(report.source, Source::Baked);
 
-        let second = wait(&start_preview(&doc, &cache).expect("starts")).expect("builds");
+        let second = wait(&start_preview(&doc, &cache, &SessionConfig::default()).expect("starts"))
+            .expect("builds");
         assert_eq!(second.light, Light::Full);
         assert_eq!(second.light_key, first.light_key);
         assert_eq!(cache.lock().expect("cache").bakes(), 1);
@@ -462,11 +478,12 @@ player 0 0 0 0
         let cancel = Arc::new(AtomicBool::new(true));
         let flag = Arc::clone(&cancel);
         let copy = Arc::clone(&cache);
-        let job = spawn("test-bake", &doc, move |d| bake(d, &copy, &flag)).expect("starts");
+        let cfg = SessionConfig::default();
+        let job = spawn("test-bake", &doc, move |d| bake(d, &copy, &cfg, &flag)).expect("starts");
         assert!(wait(&job).expect("runs").is_none(), "reported as cancelled");
         assert_eq!(cache.lock().expect("cache").bakes(), 0, "nothing stored");
 
-        let job = start_bake(&doc, 0, &cache).expect("starts");
+        let job = start_bake(&doc, 0, &cache, &SessionConfig::default()).expect("starts");
         let flag = Arc::clone(&job.cancel);
         drop(job);
         assert!(flag.load(Ordering::Relaxed));
