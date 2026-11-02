@@ -200,7 +200,11 @@ fn mistakes(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         &format!("F5 tries the text being edited: {message}"),
     );
     let on_disk = std::fs::read_to_string(sample_script(probe)).unwrap_or_default();
-    run.check(on_disk == code.text(), "F5 saved the script first");
+    // A sample checked out on Windows is CRLF, and the file keeps what it had.
+    run.check(
+        on_disk.replace("\r\n", "\n") == code.text(),
+        "F5 saved the script first",
+    );
 
     // The same undo Ctrl+Z gets: the code editor's, not the level's.
     let depth = probe.state().borrow().history.depth();
