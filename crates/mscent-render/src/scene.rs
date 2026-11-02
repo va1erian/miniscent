@@ -64,6 +64,8 @@ pub struct SceneStats {
     pub vista_pixels: u32,
     /// Faces listed for the layers of the vistas in view.
     pub vista_faces: u32,
+    /// Voxel triangles submitted for the layers of the vistas in view.
+    pub vista_triangles: u32,
 }
 
 /// A compiled level ready to draw.
@@ -162,8 +164,8 @@ impl Scene {
     }
 
     /// Changes the voxel surfaces under a level whose brushes stay as they are.
-    pub(crate) fn update_voxels(&mut self, change: impl FnOnce(&mut VoxelScene)) {
-        change(&mut self.voxels);
+    pub(crate) fn update_voxels(&mut self, change: impl FnOnce(&mut VoxelScene, &Bsp)) {
+        change(&mut self.voxels, &self.bsp);
         self.refresh_bounds();
     }
 
@@ -278,16 +280,19 @@ impl Scene {
     /// whole-level answer a frame gives for an eye in solid would show other rooms.
     /// `pan` is how many texels the layer's self-lit faces have scrolled, with
     /// storage for the shifted vertices; `None` lists every face as authored.
+    /// `chunks` gets the voxel chunks of the visible leaves of the island, which
+    /// is why another room's voxels never show.
     pub(crate) fn list_layer(
         &self,
         cam: &Camera,
         islands: &Islands,
         island: u32,
         window: [f32; 4],
-        list: &mut PolyList,
+        (list, chunks): (&mut PolyList, &mut Vec<u32>),
         pan: Option<([f32; 2], &mut Vec<Vertex>)>,
     ) -> SceneStats {
         list.clear();
+        chunks.clear();
         let eye = eye_of(cam);
         let leaf = self.bsp.leaf_at_f32(eye);
         let mut visible = if islands.island_of(leaf) == Some(island) {
@@ -301,7 +306,7 @@ impl Scene {
         }
         let lists = walk::Lists {
             faces: list,
-            chunks: &mut Vec::new(),
+            chunks,
             holes: None,
             pan: pan.map(|(texels, scratch)| pan::Pan { texels, scratch }),
         };

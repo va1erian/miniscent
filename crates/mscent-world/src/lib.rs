@@ -60,6 +60,7 @@ pub mod portals;
 pub mod showcase;
 pub mod texinfo;
 pub mod vista_check;
+pub mod vista_scale;
 pub mod voxel;
 
 pub use brush::{Brush, BrushError, Op};
@@ -92,6 +93,8 @@ mod gen_tests;
 mod islands_tests;
 #[cfg(test)]
 mod labels_tests;
+#[cfg(test)]
+mod level_text_mountains_tests;
 #[cfg(test)]
 mod level_text_tests;
 #[cfg(test)]

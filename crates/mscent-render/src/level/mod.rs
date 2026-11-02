@@ -110,8 +110,10 @@ pub struct LevelRenderer {
     uv_maps: Vec<Option<UvToLuxel>>,
     spec: Vec<SpecTable>,
     lighting: MeshLighting,
-    /// The level's lamps, for voxel surfaces made after the build.
+    /// Every lamp, and those of the play space, for voxel surfaces made after
+    /// the build: a layer's room is lit by its own lamps and the play space not.
     voxel_lights: Vec<PointLight>,
+    play_lights: Vec<PointLight>,
     /// The cells the lightmap holds records for.
     voxel_sites: CellSites,
     actors: Vec<Actor>,
@@ -193,7 +195,7 @@ impl LevelRenderer {
             vistas,
             mover_ranges,
             portals,
-            lights: _,
+            lights: all_lights,
             play_lights: lights,
             actors,
             cfg,
@@ -230,7 +232,8 @@ impl LevelRenderer {
             mover_faces,
             vistas,
             lighting: mesh_lighting(&lights, cfg.ambient),
-            voxel_lights: lights,
+            voxel_lights: all_lights,
+            play_lights: lights,
             voxel_sites: sites,
             actors,
             meshes: overlay::ActorMeshes::new(),
@@ -251,20 +254,24 @@ impl LevelRenderer {
 
     /// Changes voxel surfaces under the same brushes, between two frames.
     pub fn apply_voxels(&mut self, change: VoxelChange) {
-        let (lights, ambient) = (&self.voxel_lights, self.cfg.ambient);
+        let ambient = self.cfg.ambient;
         let leaves = self.scene.bsp().leaves().len();
         let (sites, lightmap) = (&self.voxel_sites, &self.lightmap);
-        self.scene.update_voxels(|voxels| match change {
-            VoxelChange::Chunks(list) => {
-                voxels.apply(list, |mesh| compiled::lamp_light(mesh, lights, ambient));
-            }
-            VoxelChange::All(world) => {
-                *voxels = voxels.remade(*world, leaves, |mesh| {
-                    compiled::lamp_light(mesh, lights, ambient)
-                });
-            }
-            VoxelChange::Restore(world) => {
-                *voxels = compiled::lit_voxels(*world, leaves, sites, lightmap);
+        let (all, play, vistas) = (&self.voxel_lights, &self.play_lights, &self.vistas);
+        self.scene.update_voxels(|voxels, bsp| {
+            let lamps = |pos| vistas.lamps_at(bsp, pos, all, play);
+            match change {
+                VoxelChange::Chunks(list) => {
+                    voxels.apply(list, |mesh| compiled::lamp_light(mesh, lamps, ambient));
+                }
+                VoxelChange::All(world) => {
+                    *voxels = voxels.remade(*world, leaves, |mesh| {
+                        compiled::lamp_light(mesh, lamps, ambient)
+                    });
+                }
+                VoxelChange::Restore(world) => {
+                    *voxels = compiled::lit_voxels(*world, leaves, sites, lightmap);
+                }
             }
         });
     }
@@ -388,6 +395,7 @@ impl LevelRenderer {
                 })
             });
         stats.voxel_triangles = frame.voxels.triangles;
+        stats.vista_triangles = frame.layers.iter().map(|l| l.voxel_triangles()).sum();
         self.list_movers(&cam, effects.poses, &mut frame.movers);
         self.list_actors(&cam, actors, lights, frame);
         let (faces, meshes, movers) = (&frame.faces, &frame.actors, &frame.movers);
@@ -417,7 +425,7 @@ impl LevelRenderer {
             let st = self.fill_level(band, faces, quality, eye, lights);
             self.meshes.fill(band, meshes, self.fog());
             // Last of the solid things, so it shades only what they left showing.
-            let sky = self.fill_vistas(band, holes, layers);
+            let sky = self.fill_vistas(band, holes, layers, quality);
             if let Some((draws, bank)) = effects.particles {
                 draw_particles(band, draws, bank);
             }

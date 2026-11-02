@@ -2,8 +2,7 @@ use super::*;
 use crate::brush::{Brush, Op};
 use crate::labels::MoverGroup;
 use crate::materials::{VIEW_FIRST, view_material};
-use crate::voxel::{CellSize, Volume};
-use mscent_math::Vec3;
+use mscent_math::{Vec3, Vec3d};
 
 fn cuboid(lo: [f64; 3], hi: [f64; 3], op: Op, order: u32, material: u16) -> Brush {
     let v = |a: [f64; 3]| Vec3d::new(a[0], a[1], a[2]);
@@ -133,23 +132,6 @@ fn a_mover_with_a_view_face_is_named() {
             group: "lift".into()
         }]
     );
-}
-
-#[test]
-fn a_voxel_volume_in_a_layers_room_is_not_drawn() {
-    let mut l = level(VIEW_FIRST);
-    l.entities.push(far_layer(0, 0));
-    let volume = Volume::new(Op::Add, 2, CellSize::One, [1010, 10, 10], [1, 1, 1]).unwrap();
-    l.volumes.push(volume);
-    assert_eq!(
-        vista_warnings(&l),
-        [VistaWarning::VoxelsInLayer { slot: 0, layer: 0 }]
-    );
-    // The same volume in the play room is fine.
-    l.volumes.clear();
-    let near = Volume::new(Op::Add, 2, CellSize::One, [0, 0, 0], [1, 1, 1]).unwrap();
-    l.volumes.push(near);
-    assert_eq!(vista_warnings(&l), []);
 }
 
 #[test]

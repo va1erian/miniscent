@@ -2,6 +2,7 @@
 //! thin at this distance. Uses the same metric as `tests/stability.rs`, on the
 //! Monument demo with the real textures.
 
+#[allow(dead_code)]
 #[path = "support/stability.rs"]
 mod stability;
 

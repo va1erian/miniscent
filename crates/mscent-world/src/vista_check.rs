@@ -8,9 +8,6 @@
 
 use core::fmt;
 
-use mscent_math::{DPlane, Vec3d};
-
-use crate::bsp::{Bsp, Child, LeafId};
 use crate::csg::compile;
 use crate::entity::{Entity, Level};
 use crate::faces::extract_faces;
@@ -30,8 +27,6 @@ pub enum VistaWarning {
     SlotWithoutLayer { slot: u8 },
     /// A mover's brush has a viewport face; a mover is never drawn as a hole.
     MoverWithViewport { group: String },
-    /// A voxel volume stands in the layer's room, and voxels are not drawn in a view.
-    VoxelsInLayer { slot: u8, layer: u8 },
 }
 
 impl fmt::Display for VistaWarning {
@@ -53,11 +48,6 @@ impl fmt::Display for VistaWarning {
             Self::MoverWithViewport { group } => write!(
                 f,
                 "mover group {group:?} has a viewport face, which a mover does not draw as a view"
-            ),
-            Self::VoxelsInLayer { slot, layer } => write!(
-                f,
-                "a voxel volume is in the room of vista slot {slot} layer {layer}, \
-                 and voxels are not drawn in a view"
             ),
         }
     }
@@ -84,45 +74,6 @@ fn movers_with_viewport(level: &Level) -> impl Iterator<Item = VistaWarning> + '
             group: g.name.clone(),
         })
     })
-}
-
-/// Whether a plane leaves the box `centre` +- `half` strictly on one side:
-/// `Some(true)` in front, `Some(false)` behind, `None` when it cuts the box.
-fn side_of_box(plane: &DPlane, centre: Vec3d, half: Vec3d) -> Option<bool> {
-    let d = plane.signed_distance(centre);
-    let reach = plane.normal.x.abs() * half.x
-        + plane.normal.y.abs() * half.y
-        + plane.normal.z.abs() * half.z;
-    if d > reach {
-        Some(true)
-    } else if d < -reach {
-        Some(false)
-    } else {
-        None
-    }
-}
-
-/// The leaves the box `lo..hi` reaches. A box touching a plane counts on both
-/// sides, which errs towards a warning.
-fn leaves_in_box(bsp: &Bsp, lo: Vec3d, hi: Vec3d) -> Vec<LeafId> {
-    let centre = (lo + hi) * 0.5;
-    let half = (hi - lo) * 0.5;
-    let mut found = Vec::new();
-    let mut stack = vec![bsp.root()];
-    while let Some(child) = stack.pop() {
-        match child {
-            Child::Leaf(id) => found.push(id),
-            Child::Node(id) => {
-                let Some(node) = bsp.node(id) else { continue };
-                match side_of_box(&node.plane, centre, half) {
-                    Some(true) => stack.push(node.front),
-                    Some(false) => stack.push(node.back),
-                    None => stack.extend([node.front, node.back]),
-                }
-            }
-        }
-    }
-    found
 }
 
 fn player_start(level: &Level) -> Option<mscent_math::Vec3> {
@@ -164,16 +115,6 @@ pub fn vista_warnings(level: &Level) -> Vec<VistaWarning> {
         };
         if Some(island) == home {
             out.push(VistaWarning::SharesPlayerIsland { slot, layer });
-        }
-        let voxels = level.volumes.iter().any(|v| {
-            let (lo, hi) = v.bounds();
-            let leaves = leaves_in_box(&bsp, lo, hi);
-            leaves
-                .into_iter()
-                .any(|l| islands.island_of(l) == Some(island))
-        });
-        if voxels {
-            out.push(VistaWarning::VoxelsInLayer { slot, layer });
         }
     }
     let mut shown = [false; VIEW_SLOTS as usize];

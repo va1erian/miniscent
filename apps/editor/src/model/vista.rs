@@ -71,20 +71,25 @@ impl EditorState {
         }
     }
 
-    /// Where a room of `ROOM` units fits beyond the level: east, west, north,
+    /// Where a room of `ROOM` units fits beyond the level.
+    fn vista_room(&self) -> Option<([f64; 3], [f64; 3])> {
+        self.room_beyond(ROOM)
+    }
+
+    /// Where a room of `side` units fits beyond the level: east, west, north,
     /// then south of it, always `MARGIN` clear of everything. `None` when the
     /// editor's limits leave no place.
-    fn vista_room(&self) -> Option<([f64; 3], [f64; 3])> {
+    pub(super) fn room_beyond(&self, side: f64) -> Option<([f64; 3], [f64; 3])> {
         let (lo, hi) = self.doc.bounds().unwrap_or_default();
         let mid = [0, 1, 2].map(|i| ((lo[i] + hi[i]) * 0.5).round());
-        let half = ROOM * 0.5;
+        let half = side * 0.5;
         let east = [hi[0] + MARGIN, mid[1] - half, mid[2] - half];
-        let west = [lo[0] - MARGIN - ROOM, mid[1] - half, mid[2] - half];
+        let west = [lo[0] - MARGIN - side, mid[1] - half, mid[2] - half];
         let north = [mid[0] - half, hi[1] + MARGIN, mid[2] - half];
-        let south = [mid[0] - half, lo[1] - MARGIN - ROOM, mid[2] - half];
+        let south = [mid[0] - half, lo[1] - MARGIN - side, mid[2] - half];
         [east, west, north, south].into_iter().find_map(|min| {
             let min = min.map(f64::round);
-            let max = min.map(|v| v + ROOM);
+            let max = min.map(|v| v + side);
             box_ok(min, max).then_some((min, max))
         })
     }

@@ -21,7 +21,7 @@ Not in scope:
 - Recursion, mirrors, or a view from a viewport into another viewport.
 - Travel, shots or sight through a viewport. It is a wall to the game.
 - Render to texture, monitors and security cameras.
-- Actors, movers, particles or voxels inside a view (see "Later").
+- Actors, movers or particles inside a view (see "Later"). Voxels are drawn.
 - Light coming in from the sky (see "Later").
 - A hardware path, or prebaked cubemaps.
 
@@ -82,7 +82,9 @@ a negative or non-finite value counts as 0. `spin_rotation` turns about the axis
 orientation untouched. A positive `pan` slides the picture of a self-lit face towards
 +U and +V of its texture axes, by `pan * time` texels, whole textures dropped.
 
-`parallax` is the only scale control, and it covers each style:
+`parallax` is the only scale control, and it covers each style. People think of it
+as **scale**, its inverse (`scale = 1 / parallax`): level text takes `x16` where the
+parallax goes, and the editor panel has a Scale field (see "Scale" below).
 
 | `parallax` | Reads as | Reference |
 |---|---|---|
@@ -96,6 +98,47 @@ makes a miniature continue the real floor exactly: a plane at height `z` in the
 play space lines up with `pos.z + (z - centre.z) * parallax` in the view.
 
 A level with no viewport face does no new work and draws the same pixels.
+
+### Scale
+
+A room at scale `s` is authored `s` times smaller than it looks. The stored field
+stays `parallax`; scale is how it is set:
+
+- **Level text:** `vista` takes `x16` in the parallax position, meaning 1/16. It is
+  `x` and a finite number of at least 1, so `x0` is an error. Dumping writes the
+  parallax, which reads back to the same bits.
+- **Editor panel:** the field is "Scale (0 = infinite)": 1 to 4096, clamped, and 0
+  for parallax 0 (infinitely far). Undo covers it like any field.
+- **Luxels follow scale.** A face in a layer's room bakes `luxel_size * f` where
+  `f = VIEW_LUXEL_SCALE / scale`, never under 1, so a luxel looks the same size
+  whatever the scale; an infinite layer keeps `VIEW_LUXEL_SCALE`. Layers sharing a
+  room use the largest `f`. `VIEW_LUXEL_SCALE` is 8 (one-unit luxels at scale 1):
+  at 32 a two-unit pole's shadow washed out to 5% of its depth, at 8 it keeps 80%.
+  A face's luxels per side are capped at `MAX_FACE_LUXELS` (128), so a big room
+  cannot take more atlas than that however fine `f` is, and a floor wider than 128
+  luxels coarsens to fit. `vista_scale` in `mscent-world` holds the rule.
+
+| Scale | `f` | Luxel at `luxel_size` 0.125 |
+|---|---|---|
+| infinite, 1 | 8 | 1 unit |
+| 2 | 4 | 0.5 |
+| 4 | 2 | 0.25 |
+| 8 and more | 1 | 0.125 |
+
+What scale saves is the room's size, so cells and faces: the same apparent range of
+mountains, 256 across, built at scale 1 (one-unit cells in a 288-unit room) and at
+scale 16 (cells of 1/8 in an 18-unit room) measured by the `scale_lightmap` example:
+
+| Scale | `f` | Faces | Atlas luxels | Voxel cell records | Chunks | Bake |
+|---|---|---|---|---|---|---|
+| 1 | 8 | 22 | 70 688 | 116 085 | 1280 | 844 ms |
+| 16 | 1 | 22 | 63 120 | 29 579 | 192 | 224 ms |
+
+The atlas is the same because both rooms' big faces reach the 128-luxel cap, one at
+2.25 units a luxel and the other at 0.14, which both look 2.25 units wide. The
+saving is in the voxel cells (3.9 times fewer) and the bake (3.8 times quicker). At
+scale 1 a range wider than 256 units cannot exist at all: a volume is at most 16
+chunks of 16 cells a side, and a level at most 65 536 chunks.
 
 ## Why this and not the alternatives
 
@@ -142,8 +185,11 @@ per band:
 - **Several slots in one frame** need telling apart, so the mark is alpha 0 with
   the slot in the low colour bits, and each slot resolves in turn.
 
-A layer is drawn with lightmap and texture only. No bump, no specular and no dynamic
-lights: it is far away, and lamps in the play space cannot reach it.
+A layer is shaded at the frame's quality, like the play space: lightmap, bump and
+highlights, with the highlights taken from the layer's own eye. Self-lit faces stay
+flat. Dynamic lights stay off, since they cannot reach a sealed room. Its voxels
+are filled before its faces, into the same masked depth: a covered pixel has depth
+infinity, which both voxel fills reject.
 
 ### A viewport face inside a layer
 
@@ -160,12 +206,14 @@ a flood over `Portals`. Each layer belongs to the island around `pos`.
 - The layer's flood stays in its island. If the eye has moved out of it (small
   rooms, high parallax) every leaf **of the island** counts as visible, and frustum
   and back-face culling do the rest. The whole-level fallback is not used.
-- Lamps in a layer's island that is not the player start's leave `mesh_lighting`
-  and the voxel lights. The bake keeps them all, since solid stops the rays and a
+- Lamps in a layer's island that is not the player start's leave `mesh_lighting`.
+  A voxel surface in such a room, made by a live edit before the next bake, is lit
+  from every lamp, since that is what the bake lit it with; one in the play space
+  from the play lamps only. The bake keeps them all, since solid stops the rays and a
   key made of the same lamps stays valid. Skip them per luxel only if bake time
   shows it matters.
-- A face in such an island bakes at a coarser luxel: `luxel_size * 32` as the
-  starting point (4 units), as `LuxelDensity::Coarse` on its `LightFace`. A
+- A face in such an island bakes at a coarser luxel (see "Scale"), as
+  `LuxelDensity::Coarse` on its `LightFace`. A
   self-lit face is `LuxelDensity::None`: an empty rectangle in the atlas, no rays,
   no bounce. The input key hashes a density only when it is not `Full`, so
   existing caches stay valid. The play space keeps its density whatever the
@@ -173,7 +221,7 @@ a flood over `Portals`. Each layer belongs to the island around `pos`.
 
 Editor and `--check` warnings, not errors: the view shares an island with the player
 start (a leak), a layer in solid, a viewport face on a slot with no layer, a mover
-with a viewport face, voxels in a layer's island (not drawn). `vista_warnings` in
+with a viewport face. `vista_warnings` in
 `mscent-world` finds them; the editor puts them in its log when they change. A sky or
 cutout material on a voxel volume is not checked.
 
@@ -248,6 +296,12 @@ material lists.
 3. Place a Vista Layer in it: slot 0, layer 1, `parallax` 1/16, with fog at the far
    end for depth.
 
+**Mountains: a range past the platform.** **New mountains** does this in one step. By
+hand: subtract a 128-unit room with View walls, add a floor, drop in a volume from
+`mountains` (or the Mountains generator), a lamp, and a layer at scale 16 (`x16`) of
+the same slot, after the stars. The demo's plain has three such ranges, one on each
+flank and one behind the gate, which leave the avenue of towers clear.
+
 **Original Unreal: clouds over a horizon.** Add a third room with one big plate in
 `sky-clouds`, layer 2, a `pan`, walls painted **View 0**. It costs no lightmap.
 
@@ -259,6 +313,42 @@ It goes through the normal commands, so undo covers it, and with all 8 slots use
 does nothing and says so. Then the mapper only paints faces: **View 0** to **View 7**
 are the last rows of both material lists. The panel edits the fog colour as three
 channels, and every field is held to the ranges of `Entity::is_valid`.
+
+## Voxels and mountains in a layer
+
+A layer has a `VoxelList` of its own. The walk that lists its faces also collects the
+voxel chunks of the island's visible leaves, so another room's voxels never show, and
+the list is prepared from the layer's camera and eye. The distance a chunk switches
+level of detail at is measured from that eye in the room's units, so a miniature picks
+coarse levels by itself: at scale 16 a range 100 units off is 1600 away. Budgets: a
+layer's list may submit `LAYER_VOXEL_TRIS` (12 000) before the rest take the lowest
+level, all layers together `VISTA_VOXEL_TRIS` (24 000), and the main scene keeps its
+own `MAX_VOXEL_TRIS`. The lowest level still has a cost (cells on a chunk's border never
+merge), so a frame can pass these; the demo submits 70 253 triangles to its layers at
+the gate and 33 400 looking up. `SceneStats::vista_triangles` reports it.
+
+`mountains` in `mscent-world` (`voxel/mountains.rs`) fills an add volume from a ridged
+heightfield: crests where noise crosses zero, a broad mask for foothills, an envelope
+that takes the surface to the ground at the box's edges, solid below. It is pure, built
+from integer-hash noise and IEEE arithmetic only, so the same `MountainRange` always
+gives the same bytes. The box grows to whole chunks; at most 16 chunks a side, so 256
+units at one-unit cells, which is the cell to choose for a distant range. Bad input is
+a `MountainError`. Level text has a line for it, expanded at parse into a `Volume`:
+
+```
+mountains <order> <material> <min x y z> <max x y z> <cell> <peak> <seed>
+```
+
+Dumping cannot turn a volume back into this line (a sculpted range is no longer one),
+so `--dump-level` refuses a level with volumes, as it did.
+
+The editor has a Mountains generator beside the others (it builds a whole volume at the
+aimed place, wide in proportion to the radius), and **New mountains** (Edit menu), which
+adds a miniature room at scale 16 beyond the level: a sealed 128-unit room whose walls
+and ceiling are the slot's View material, a rock floor, a range, one large lamp, and a
+layer that is the next of the existing vista's slot (or the next free slot). The layer's
+height makes the room's floor continue the play floor. One undo step; with the slot's
+layers full it does nothing and says so.
 
 ## Costs and budget
 
@@ -342,7 +432,6 @@ Each stands on its own and none is needed for the goal:
 - **Sky light.** Viewport faces lighting a room during the bake. Until then, a far lamp
   with a large radius plays the sun.
 - **Actors and movers in a view:** a passing ship, a turning wheel, driven by script.
-- **Voxels in a view,** through a `VoxelList` per layer.
 - **Script control:** switch a slot's layers, or change `spin`, for a day that turns to
   night.
 - **Custom self-lit materials,** from a manifest flag, with the Texture Studio.

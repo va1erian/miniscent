@@ -213,6 +213,8 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         "the layer back, the sky returns",
     );
 
+    mountains(run, stage, probe, &sky);
+
     play(run, stage, probe);
 
     // Undo every step: the level and the picture are as they were.
@@ -235,6 +237,41 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     if (start.0, start.1) == (end.0, end.1) {
         run.check(start.2 == end.2, "after undo every pixel is the same");
     }
+}
+
+/// New Mountains: one undo step that adds a miniature layer, which changes the
+/// picture through the painted wall; undo puts the picture back.
+fn mountains(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe, sky: &Pixels) {
+    let state = probe.state();
+    let depth = state.borrow().history.depth();
+    let layers = state.borrow().doc.entities().len();
+    stage.emit(Msg::Menu(cmd::NEW_MOUNTAINS));
+    run.check(
+        state.borrow().history.depth() == depth + 1
+            && state.borrow().doc.entities().len() == layers + 2,
+        &format!(
+            "New Mountains added a room in one step: {}",
+            probe.message()
+        ),
+    );
+    let Some(with) = neutral(stage, probe) else {
+        return;
+    };
+    run.shot(stage, "vista-04-mountains.png");
+    let moved = middle_diff(sky, &with);
+    run.check(
+        moved.is_some_and(|d| d >= MIN_CHANGE),
+        &format!("the mountains changed the picture: mean diff {moved:?}"),
+    );
+    stage.emit(Msg::Menu(cmd::UNDO));
+    let Some(undone) = neutral(stage, probe) else {
+        return;
+    };
+    let diff = middle_diff(sky, &undone);
+    run.check(
+        state.borrow().history.depth() == depth && diff.is_none_or(|d| d <= UNDO_TOLERANCE),
+        &format!("undo took the mountains away again: mean diff {diff:?}"),
+    );
 }
 
 /// The painted wall is still found by a click, and painting it back restores it.

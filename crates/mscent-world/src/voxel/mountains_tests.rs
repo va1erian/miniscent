@@ -1,0 +1,92 @@
+use super::*;
+use crate::voxel::test_util::{mesh_all, open_edges};
+
+fn range() -> Range {
+    Range {
+        min: Vec3d::new(0.0, 0.0, 0.0),
+        max: Vec3d::new(128.0, 128.0, 64.0),
+        cell: CellSize::One,
+        peak: 40.0,
+        seed: 7,
+        material: 4,
+        order: 5,
+    }
+}
+
+fn bytes(v: &Volume) -> Vec<u8> {
+    super::super::wire::write_volumes(std::slice::from_ref(v))
+}
+
+#[test]
+fn the_same_seed_gives_the_same_bytes_and_another_seed_another_range() {
+    let a = mountains(&range()).unwrap();
+    assert_eq!(bytes(&a), bytes(&mountains(&range()).unwrap()));
+    let other = Range { seed: 8, ..range() };
+    assert_ne!(bytes(&a), bytes(&mountains(&other).unwrap()));
+}
+
+#[test]
+fn the_surface_is_closed_peaks_reach_the_peak_and_nothing_stands_above_it() {
+    let r = range();
+    let v = mountains(&r).unwrap();
+    assert_eq!(v.op(), Op::Add);
+    let meshes = mesh_all(&v, &[]);
+    assert!(open_edges(&meshes).is_empty(), "a hole in the surface");
+    let top = meshes
+        .iter()
+        .flat_map(|(_, m)| m.vertices.iter().map(|v| v.pos.z))
+        .fold(f32::MIN, f32::max);
+    let limit = (2.0 + r.peak) as f32;
+    assert!(top <= limit + 1.0, "{top} above {limit}");
+    assert!(top >= limit - 4.0, "the tallest crest is the peak: {top}");
+}
+
+#[test]
+fn the_range_falls_to_the_ground_at_the_edges() {
+    let r = range();
+    let v = mountains(&r).unwrap();
+    let h = Heights::new(&v, &r);
+    let ground = 2.0;
+    // Every column on the border is at the ground; the middle is not.
+    let n = 128usize;
+    for k in 1..=n {
+        for (i, j) in [(k, 1), (k, n), (1, k), (n, k)] {
+            let at = h.at(i, j).unwrap();
+            assert!(at <= ground + 0.5, "edge column {i},{j} at {at}");
+        }
+    }
+    let middle = (h.z.iter().copied()).fold(f64::MIN, f64::max);
+    assert!(middle > ground + 30.0);
+    // Solid below the surface, air above, at a crest.
+    let (i, j) = (0..h.z.len())
+        .map(|k| (k % h.stride, k / h.stride))
+        .max_by(|a, b| h.at(a.0, a.1).unwrap().total_cmp(&h.at(b.0, b.1).unwrap()))
+        .unwrap();
+    let (x, y) = ((i as f64 - 1.0) * h.cell, (j as f64 - 1.0) * h.cell);
+    let crest = h.at(i, j).unwrap();
+    assert!(h.field(Vec3d::new(x, y, crest - 3.0)) > 0.0);
+    assert!(h.field(Vec3d::new(x, y, crest + 3.0)) < 0.0);
+}
+
+#[test]
+fn hostile_ranges_are_errors_not_panics() {
+    let bad = |f: fn(&mut Range)| {
+        let mut r = range();
+        f(&mut r);
+        mountains(&r)
+    };
+    assert_eq!(bad(|r| r.peak = f64::NAN), Err(MountainError::NotFinite));
+    assert_eq!(bad(|r| r.peak = 0.0), Err(MountainError::NotFinite));
+    assert_eq!(
+        bad(|r| r.max.x = f64::INFINITY),
+        Err(MountainError::NotFinite)
+    );
+    assert_eq!(bad(|r| r.max.x = 0.0), Err(MountainError::BadBounds));
+    assert_eq!(bad(|r| r.max.x = 1.0e9), Err(MountainError::BadBounds));
+    assert_eq!(bad(|r| r.max.x = 4000.0), Err(MountainError::TooLarge));
+    assert_eq!(bad(|r| r.peak = 100.0), Err(MountainError::PeakAboveBox));
+    assert!(matches!(
+        bad(|r| r.min = Vec3d::new(32000.0, 0.0, 0.0)),
+        Err(MountainError::BadBounds | MountainError::Volume(_))
+    ));
+}

@@ -108,9 +108,11 @@ fn vertex_light(
 
 /// Lamps and ambient with no shadows: for a surface no bake has seen, until the
 /// next one has. Nothing is traced, so it is fit for a stroke and for play.
-pub(super) fn lamp_light(
+/// `lamps` says which lamps light a point: the play space's, or every one in a
+/// layer's room, whose own lamps are what its surfaces are baked with.
+pub(super) fn lamp_light<'a>(
     mesh: &ChunkMesh,
-    lights: &[PointLight],
+    lamps: impl Fn(Vec3) -> &'a [PointLight],
     ambient: Vec3,
 ) -> Vec<VertexLight> {
     mesh.vertices
@@ -118,7 +120,7 @@ pub(super) fn lamp_light(
         .map(|v| {
             let mut color = ambient;
             let mut dir = Vec3::ZERO;
-            for l in lights {
+            for l in lamps(v.pos) {
                 let to = l.position - v.pos;
                 let d = to.length();
                 if d <= 0.0 || d >= l.radius {

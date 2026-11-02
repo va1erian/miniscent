@@ -84,6 +84,7 @@ pub mod cmd {
     pub const LAYOUT_QUAD: MenuId = MenuId::new(24);
     pub const LEVEL_SETTINGS: MenuId = MenuId::new(25);
     pub const NEW_VISTA: MenuId = MenuId::new(27);
+    pub const NEW_MOUNTAINS: MenuId = MenuId::new(28);
 }
 
 pub struct Editor {

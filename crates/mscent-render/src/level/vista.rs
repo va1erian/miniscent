@@ -11,6 +11,7 @@ use std::f64::consts::TAU;
 use mscent_math::{Quat, Vec3};
 use mscent_world::lightmap::{LightFace, LuxelDensity, PointLight};
 use mscent_world::materials::{VIEW_SLOTS, is_self_lit};
+use mscent_world::vista_scale::luxel_factor;
 use mscent_world::{Bsp, Entity, Face, Islands, LeafId, Level, Portals};
 
 use super::{FAR_VISTA, LevelRenderer, NEAR, Quality, View};
@@ -19,6 +20,8 @@ use crate::framebuffer::Framebuffer;
 use crate::raster::{DrawStats, PolyList, Vertex};
 use crate::scene::eye_of;
 use crate::shade::Fog;
+use crate::voxel::fill::{FillContext, fill_voxels};
+use crate::voxel::list::VoxelList;
 
 /// One layer of a vista, as the renderer keeps it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -35,28 +38,39 @@ struct Layer {
     fog: Option<Fog>,
 }
 
-/// How much coarser than the play space a face in a layer's room is lit. Its
-/// light is seen from far away, and a big room at the play space's density
-/// would take the atlas from it.
-const VIEW_LUXEL_SCALE: f32 = 32.0;
-
 /// A level's vista layers, far to near within each slot.
 #[derive(Clone, Debug)]
 pub(super) struct Vistas {
     layers: Vec<Layer>,
     islands: Islands,
-    /// Islands that hold a layer and are not the player start's, sorted.
-    remote: Vec<u32>,
+    /// Islands that hold a layer and are not the player start's, sorted, each with
+    /// how much coarser than the play space its faces are baked.
+    remote: Vec<(u32, f32)>,
 }
 
 /// One layer's polygons for a frame. No camera: its slot is not seen.
-#[derive(Clone, Debug, Default)]
+#[derive(Default)]
 pub(super) struct LayerList {
     faces: PolyList,
     cam: Option<Camera>,
     /// Room for a panned face's shifted vertices, kept so a frame makes none.
     scratch: Vec<Vertex>,
+    /// The voxel chunks of the room, listed from the layer's own eye.
+    voxels: VoxelList,
 }
+
+impl LayerList {
+    pub(super) fn voxel_triangles(&self) -> u32 {
+        self.voxels.triangles
+    }
+}
+
+/// Triangles one layer's voxels may submit, and all layers' together in a frame.
+/// The main scene has [`MAX_VOXEL_TRIS`] to itself, since each list is its own.
+/// A layer is far and small on screen, and its miniature picks coarse detail by
+/// distance in its own room units, so a range seldom comes near the cap.
+const LAYER_VOXEL_TRIS: u32 = 12_000;
+const VISTA_VOXEL_TRIS: u32 = 24_000;
 
 /// A time to animate by: seconds of the game's own clock, never negative or
 /// not a number.
@@ -145,11 +159,17 @@ impl Vistas {
         }
         found.sort_by_key(|&(order, layer)| (layer.slot, order));
         let home = player_island(level, bsp, &islands);
-        let mut remote: Vec<u32> = (found.iter().map(|(_, l)| l.island))
-            .filter(|&island| Some(island) != home)
-            .collect();
-        remote.sort_unstable();
-        remote.dedup();
+        let away = found.iter().filter(|(_, l)| Some(l.island) != home);
+        let mut remote: Vec<(u32, f32)> = Vec::new();
+        for (_, l) in away {
+            // Layers sharing a room share its luxels: the coarsest factor of them.
+            let factor = luxel_factor(l.parallax);
+            match remote.iter_mut().find(|(island, _)| *island == l.island) {
+                Some(entry) => entry.1 = entry.1.max(factor),
+                None => remote.push((l.island, factor)),
+            }
+        }
+        remote.sort_unstable_by_key(|&(island, _)| island);
         Self {
             layers: found.into_iter().map(|(_, layer)| layer).collect(),
             islands,
@@ -170,24 +190,49 @@ impl Vistas {
         kept.copied().collect()
     }
 
+    /// The lamps that light a surface made without a bake at `pos`: all of them in
+    /// a layer's room, whose surfaces are baked with its own lamps, else the play
+    /// space's. Cheap when no layer has a room of its own.
+    pub(super) fn lamps_at<'a>(
+        &self,
+        bsp: &Bsp,
+        pos: Vec3,
+        all: &'a [PointLight],
+        play: &'a [PointLight],
+    ) -> &'a [PointLight] {
+        if !self.remote.is_empty() && self.holds(bsp, pos) {
+            all
+        } else {
+            play
+        }
+    }
+
     /// Sets how finely each face is baked: sky materials not at all, faces in a
     /// layer's room coarsely. A mover face has no leaves, so it stays as it was.
     pub(super) fn set_densities(&self, faces: &[Face], light_faces: &mut [LightFace]) {
         for (face, light) in faces.iter().zip(light_faces) {
-            let remote = face.front_leaves.iter().any(|&leaf| self.in_remote(leaf));
-            light.density = if is_self_lit(face.material) {
-                LuxelDensity::None
-            } else if remote {
-                LuxelDensity::Coarse(VIEW_LUXEL_SCALE)
-            } else {
-                LuxelDensity::Full
+            let coarse = (face.front_leaves.iter()).filter_map(|&leaf| self.factor_at(leaf));
+            let coarse = coarse.fold(None, |m: Option<f32>, f| Some(m.map_or(f, |m| m.max(f))));
+            light.density = match (is_self_lit(face.material), coarse) {
+                (true, _) => LuxelDensity::None,
+                (false, Some(factor)) => LuxelDensity::Coarse(factor),
+                (false, None) => LuxelDensity::Full,
             };
         }
     }
 
+    /// How much coarser than the play space `leaf` is baked, if it is in a layer's room.
+    fn factor_at(&self, leaf: LeafId) -> Option<f32> {
+        let island = self.islands.island_of(leaf)?;
+        let at = self
+            .remote
+            .binary_search_by_key(&island, |&(i, _)| i)
+            .ok()?;
+        self.remote.get(at).map(|&(_, factor)| factor)
+    }
+
     fn in_remote(&self, leaf: LeafId) -> bool {
-        let island = self.islands.island_of(leaf);
-        island.is_some_and(|island| self.remote.binary_search(&island).is_ok())
+        self.factor_at(leaf).is_some()
     }
 }
 
@@ -205,10 +250,13 @@ impl LevelRenderer {
     ) -> u32 {
         let time = clean_time(time);
         let mut listed = 0;
+        let mut left = VISTA_VOXEL_TRIS;
         let layers = &self.vistas.layers;
         out.resize_with(layers.len(), LayerList::default);
         for (layer, list) in layers.iter().zip(out.iter_mut()) {
             list.cam = None;
+            list.voxels.chunks.clear();
+            list.voxels.triangles = 0;
             let Some(window) = holes.bounds_of(u32::from(layer.slot)) else {
                 continue;
             };
@@ -224,9 +272,13 @@ impl LevelRenderer {
             };
             let islands = &self.vistas.islands;
             let pan = pan_texels(layer.pan, time).map(|texels| (texels, &mut list.scratch));
-            let st =
-                (self.scene).list_layer(&cam, islands, layer.island, window, &mut list.faces, pan);
+            let out = (&mut list.faces, &mut list.voxels.candidates);
+            let st = (self.scene).list_layer(&cam, islands, layer.island, window, out, pan);
             listed += st.drawn.len() as u32;
+            list.voxels.budget = Some(left.min(LAYER_VOXEL_TRIS));
+            let voxels = self.scene.voxels();
+            list.voxels.prepare(voxels, &cam, eye_of(&cam), |_| 0);
+            left = left.saturating_sub(list.voxels.triangles);
             list.cam = Some(cam);
         }
         listed
@@ -238,6 +290,7 @@ impl LevelRenderer {
         fb: &mut Framebuffer,
         holes: &PolyList,
         lists: &[LayerList],
+        quality: Quality,
     ) -> DrawStats {
         let mut total = DrawStats::default();
         let seen = self.scene.fill_holes(fb, holes);
@@ -249,7 +302,7 @@ impl LevelRenderer {
                 if i > 0 {
                     fb.next_view_layer();
                 }
-                let st = self.fill_layer(fb, layer, list);
+                let st = self.fill_layer(fb, layer, list, quality);
                 total.pixels += st.pixels;
                 total.spans += st.spans;
             }
@@ -258,16 +311,39 @@ impl LevelRenderer {
         total
     }
 
-    /// Lightmap and texture only: a layer is far away, and neither the player's
-    /// lamps nor their highlights reach it.
-    fn fill_layer(&self, fb: &mut Framebuffer, layer: &Layer, list: &LayerList) -> DrawStats {
+    /// Shaded at the frame's quality, by the layer's own eye: a far room gets the
+    /// bump and highlights a near one does. Only the player's dynamic lights are
+    /// left out, since they cannot reach a sealed room. Voxels first, as in the
+    /// main scene.
+    fn fill_layer(
+        &self,
+        fb: &mut Framebuffer,
+        layer: &Layer,
+        list: &LayerList,
+        quality: Quality,
+    ) -> DrawStats {
         let Some(cam) = list.cam.as_ref() else {
             return DrawStats::default();
         };
         let eye = eye_of(cam);
-        self.scene
-            .fill_frame(fb, &list.faces, None, &mut |i, face| {
-                self.face_shader(i, face, eye, Quality::Low, &[], layer.fog)
-            })
+        let texture_of = |id: u16| self.scene.texture_of(id);
+        let ctx = FillContext {
+            scene: self.scene.voxels(),
+            cam,
+            eye,
+            fog: layer.fog,
+            bump: quality != Quality::Low,
+            specular: quality == Quality::High,
+            lights: &[],
+            spec: &self.spec,
+            texture_of: &texture_of,
+        };
+        let mut total = fill_voxels(fb, &list.voxels, &ctx);
+        let faces = (self.scene).fill_frame(fb, &list.faces, None, &mut |i, face| {
+            self.face_shader(i, face, eye, quality, &[], layer.fog)
+        });
+        total.pixels += faces.pixels;
+        total.spans += faces.spans;
+        total
     }
 }

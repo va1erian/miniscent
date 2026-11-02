@@ -19,6 +19,7 @@ pub mod stroke;
 pub mod tools;
 pub mod view;
 pub mod vista;
+mod vista_mountains;
 pub mod voxel;
 
 #[cfg(test)]
@@ -35,6 +36,8 @@ mod review_tests;
 mod tests;
 #[cfg(test)]
 mod tools_tests;
+#[cfg(test)]
+mod vista_mountains_tests;
 #[cfg(test)]
 mod vista_tests;
 #[cfg(test)]

@@ -172,18 +172,34 @@ pub enum Kind {
     Coral,
     Tree,
     Hive,
+    /// A whole ridged-noise range, built as a volume by `mscent_world`. It has no
+    /// plan: the other kinds are pieces dabbed into a volume.
+    Mountains,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 5] = [
+    pub const ALL: [Kind; 6] = [
         Kind::Stalactites,
         Kind::Mushrooms,
         Kind::Coral,
         Kind::Tree,
         Kind::Hive,
+        Kind::Mountains,
     ];
 
-    pub const NAMES: [&'static str; 5] = ["Stalactites", "Mushrooms", "Coral", "Tree", "Hive"];
+    pub const NAMES: [&'static str; 6] = [
+        "Stalactites",
+        "Mushrooms",
+        "Coral",
+        "Tree",
+        "Hive",
+        "Mountains",
+    ];
+
+    /// Whether [`generate`] returns pieces for it.
+    pub fn planned(self) -> bool {
+        self != Kind::Mountains
+    }
 
     pub fn name(self) -> &'static str {
         Self::NAMES[Self::ALL.iter().position(|&k| k == self).unwrap_or(0)]
@@ -203,6 +219,8 @@ pub fn generate(kind: Kind, site: &Site, seed: u32) -> Plan {
         Kind::Coral => coral::grow(&mut plan, &frame, site, &mut rng),
         Kind::Tree => trees::grow(&mut plan, &frame, site, &mut rng),
         Kind::Hive => hive::grow(&mut plan, &frame, site, &mut rng),
+        // Built whole by `Sculptor::raise_mountains`, not from pieces.
+        Kind::Mountains => return plan,
     }
     if kind == Kind::Hive {
         plan.smooth_carved();

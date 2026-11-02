@@ -6,6 +6,7 @@ use mscent_world::entity::{
     MAX_ENTITY_COORD, MAX_VISTA_FOG, MAX_VISTA_LAYERS, MAX_VISTA_PAN, MAX_VISTA_SPIN,
 };
 use mscent_world::materials::VIEW_SLOTS;
+use mscent_world::vista_scale::{parallax_of_scale, scale_of_parallax};
 
 /// What the entity tools can place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -161,7 +162,7 @@ pub fn params(e: &Entity) -> Vec<(&'static str, f64)> {
         } => vec![
             ("Slot", f64::from(slot)),
             ("Layer", f64::from(layer)),
-            ("Parallax", short(parallax)),
+            ("Scale (0 = infinite)", short(scale_of_parallax(parallax))),
             ("Centre X", short(centre.x)),
             ("Centre Y", short(centre.y)),
             ("Centre Z", short(centre.z)),
@@ -239,7 +240,8 @@ fn set_vista_param(e: &mut Entity, i: usize, v: f64) {
     match i {
         0 => *slot = whole(v, VIEW_SLOTS),
         1 => *layer = whole(v, MAX_VISTA_LAYERS),
-        2 => *parallax = v.clamp(0.0, 1.0) as f32,
+        // Scale is how small the room is built: 1 to 4096, or 0 for infinitely far.
+        2 => *parallax = parallax_of_scale(v as f32),
         3 => centre.x = within(MAX_ENTITY_COORD),
         4 => centre.y = within(MAX_ENTITY_COORD),
         5 => centre.z = within(MAX_ENTITY_COORD),

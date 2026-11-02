@@ -1,8 +1,12 @@
-//! What a vista costs a frame: the Monument demo at 640x360, one thread, High
-//! quality, from two views. Variants take turns batch by batch, and the fastest
+//! What a vista costs a frame: the Monument demo at 640x360, from two views.
+//! One thread and High quality unless told otherwise. Variants take turns batch by batch, and the fastest
 //! batch of each is reported, as `mover_bench` does.
 //!
 //!   cargo run --release -p mscent-render --example vista_bench
+//!   cargo run --release -p mscent-render --example vista_bench -- --workers 0 --quality low
+//!
+//! `--workers N` sets the worker count, 0 for the renderer's default (every
+//! hardware thread); `--quality low|medium|high`.
 //!
 //! - `wall`: the sky faces are plain metal, and nothing else differs.
 //! - `holes`: viewport faces with no layers, so a frame marks and resolves its
@@ -46,16 +50,30 @@ fn walled(level: &Level) -> Level {
     out
 }
 
-fn frame_batch(r: &LevelRenderer, fb: &mut Framebuffer, view: &View) -> f64 {
+fn frame_batch(r: &LevelRenderer, fb: &mut Framebuffer, view: &View, q: Quality) -> f64 {
     let t = Instant::now();
     for _ in 0..FRAMES {
-        r.render(fb, view, Quality::High, &[], None)
-            .expect("renders");
+        r.render(fb, view, q, &[], None).expect("renders");
     }
     t.elapsed().as_secs_f64() * 1e3 / FRAMES as f64
 }
 
+/// The value after `flag` on the command line.
+fn option(flag: &str) -> Option<String> {
+    let args: Vec<String> = std::env::args().collect();
+    let at = args.iter().position(|a| a == flag)?;
+    args.get(at + 1).cloned()
+}
+
 fn main() {
+    let workers: usize = option("--workers")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
+    let quality = match option("--quality").as_deref() {
+        Some("low") => Quality::Low,
+        Some("medium") => Quality::Medium,
+        _ => Quality::High,
+    };
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures");
     let materials = MaterialTable::load_dir(&dir).expect("textures");
     let level = demo();
@@ -73,7 +91,15 @@ fn main() {
         })
         .collect();
     for (_, r) in &mut renderers {
-        r.set_tiling(H, 1);
+        if workers > 0 {
+            r.set_tiling(H, workers);
+        } else {
+            // The game's own setting: bands of 24 rows on every hardware thread.
+            r.set_tiling(
+                24,
+                std::thread::available_parallelism().map_or(4, usize::from),
+            );
+        }
     }
     let eye = Vec3::new(0.0, -22.0, 0.0);
     let poses = [
@@ -88,17 +114,17 @@ fn main() {
         let mut best = [f64::MAX; 3];
         for _ in 0..BATCHES {
             for (slot, (_, r)) in best.iter_mut().zip(&renderers) {
-                *slot = slot.min(frame_batch(r, &mut fb, view));
+                *slot = slot.min(frame_batch(r, &mut fb, view, quality));
             }
         }
         println!("{label}:");
         for ((name, r), ms) in renderers.iter().zip(best) {
             let stats = r
-                .render(&mut fb, view, Quality::High, &[], None)
+                .render(&mut fb, view, quality, &[], None)
                 .expect("renders");
             println!(
-                "  {name:6} {ms:6.3} ms  {:6} pixels, {:6} from the vista, {:3} vista faces",
-                stats.pixels, stats.vista_pixels, stats.vista_faces
+                "  {name:6} {ms:6.3} ms  {:6} pixels, {:6} from the vista, {:3} vista faces, {:5} vista triangles",
+                stats.pixels, stats.vista_pixels, stats.vista_faces, stats.vista_triangles
             );
         }
     }

@@ -40,6 +40,7 @@ pub(super) fn menus(m: &mut xui::widget::MenuScope<'_>) {
         e.item(cmd::EXTRUDE_IN, "Extrude face &in   Ctrl+Shift+E");
         e.separator();
         e.item(cmd::NEW_VISTA, "New &vista");
+        e.item(cmd::NEW_MOUNTAINS, "New &mountains");
         e.item(cmd::LEVEL_SETTINGS, "Level &settings...");
     });
     m.submenu(MenuId::new(102), "&View", |v| {
@@ -129,6 +130,10 @@ impl Editor {
             cmd::NEW_VISTA => {
                 st.commit_pending();
                 st.new_vista();
+            }
+            cmd::NEW_MOUNTAINS => {
+                st.commit_pending();
+                st.new_mountains();
             }
             _ => {}
         }

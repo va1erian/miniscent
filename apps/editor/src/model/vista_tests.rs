@@ -86,7 +86,8 @@ fn no_panel_edit_makes_a_layer_that_will_not_save() {
     let mut e = selected_layer(&st);
     set_param(&mut e, 0, 99.0);
     set_param(&mut e, 1, 99.0);
-    set_param(&mut e, 2, 3.0);
+    // Scale 0.5 is below the smallest, so it is held to 1: parallax 1.
+    set_param(&mut e, 2, 0.5);
     set_param(&mut e, 4, -1.0e30);
     set_param(&mut e, 8, 1.0e30);
     let Entity::VistaLayer {
@@ -316,4 +317,27 @@ fn view_ids_are_safe_in_texture_size_lookups() {
     for id in [VIEW_FIRST, VIEW_FIRST + 7, u16::MAX] {
         assert_eq!(st.texture_size(id), super::facetex::DEFAULT_TEXTURE);
     }
+}
+
+#[test]
+fn scale_is_the_inverse_of_parallax_with_zero_for_infinite() {
+    let mut st = level_with_room();
+    st.place_entity(EntityKind::VistaLayer, [100.0, 8.0, 4.0]);
+    let mut e = selected_layer(&st);
+    let scale = |e: &Entity| params(e)[2];
+    assert_eq!(scale(&e), ("Scale (0 = infinite)", 0.0));
+    set_param(&mut e, 2, 16.0);
+    let Entity::VistaLayer { parallax, .. } = e else {
+        panic!("not a layer");
+    };
+    assert_eq!(parallax, 0.0625);
+    assert_eq!(scale(&e).1, 16.0);
+    set_param(&mut e, 2, 1.0e9);
+    assert_eq!(scale(&e).1, 4096.0, "held to the largest scale");
+    set_param(&mut e, 2, -3.0);
+    assert_eq!(scale(&e).1, 1.0, "held to the smallest scale");
+    set_param(&mut e, 2, 0.0);
+    assert_eq!(scale(&e).1, 0.0, "0 is infinitely far");
+    set_param(&mut e, 2, f64::NAN);
+    assert_eq!(scale(&e).1, 0.0, "not a number changes nothing");
 }
