@@ -6,10 +6,9 @@
 //! original (rather than clipping the already clipped velocity) is what keeps
 //! corners from jittering: the result depends only on the set of planes.
 
-use crate::sweep::sweep_sphere_d;
+use crate::sweep::{Solids, sweep_sphere_d};
 use crate::tuning::{CLIP_SLACK, MIN_SPEED};
 use mscent_math::{Vec3, Vec3d};
-use mscent_world::Bsp;
 
 /// Most surfaces one move may bounce off. Three planes already pin a sphere
 /// in a corner; the fourth bump is the spare for numerical coincidences.
@@ -40,7 +39,14 @@ impl SlideResult {
 /// Moves a sphere of `radius` from `pos` with velocity `vel` for `dt`
 /// seconds, sliding along whatever it hits. Never panics on bad input: a
 /// non-finite state leaves the sphere where it is with zero velocity.
-pub fn slide_move(bsp: &Bsp, pos: Vec3, vel: Vec3, dt: f32, radius: f32) -> SlideResult {
+pub fn slide_move<'a>(
+    solids: impl Into<Solids<'a>>,
+    pos: Vec3,
+    vel: Vec3,
+    dt: f32,
+    radius: f32,
+) -> SlideResult {
+    let solids = solids.into();
     let mut planes = Planes::default();
     let mut p = pos.to_f64();
     let orig = vel.to_f64();
@@ -54,7 +60,7 @@ pub fn slide_move(bsp: &Bsp, pos: Vec3, vel: Vec3, dt: f32, radius: f32) -> Slid
         if v.length() < MIN_SPEED || left <= 0.0 {
             break;
         }
-        let tr = sweep_sphere_d(bsp, p, p + v * left, f64::from(radius));
+        let tr = sweep_sphere_d(solids, p, p + v * left, f64::from(radius));
         if tr.start_solid {
             v = Vec3d::ZERO;
             break;

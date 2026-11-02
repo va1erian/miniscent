@@ -15,6 +15,12 @@ use crate::texture::Texture;
 pub enum ActorKind {
     Enemy,
     Goal,
+    /// An enemy on the player's side.
+    Friendly,
+    Switch,
+    Keycard,
+    Terminal,
+    Crate,
 }
 
 /// A mesh placed in the level. `yaw` turns it about +Z.
@@ -32,6 +38,11 @@ const ACTOR_SCALE: f32 = 1.5;
 pub(super) struct ActorMeshes {
     enemy: Mesh,
     goal: Mesh,
+    friendly: Mesh,
+    switch: Mesh,
+    keycard: Mesh,
+    terminal: Mesh,
+    crate_box: Mesh,
     /// Carries the vertex light in its `u` coordinate; its texel is unused.
     carrier: Texture,
 }
@@ -41,6 +52,11 @@ impl ActorMeshes {
         Self {
             enemy: Mesh::enemy(),
             goal: Mesh::goal(),
+            friendly: Mesh::friendly(),
+            switch: Mesh::switch(),
+            keycard: Mesh::keycard(),
+            terminal: Mesh::terminal(),
+            crate_box: Mesh::crate_box(),
             carrier: Texture::solid(0xffff_ffff),
         }
     }
@@ -58,6 +74,11 @@ impl ActorMeshes {
             let mesh = match a.kind {
                 ActorKind::Enemy => &self.enemy,
                 ActorKind::Goal => &self.goal,
+                ActorKind::Friendly => &self.friendly,
+                ActorKind::Switch => &self.switch,
+                ActorKind::Keycard => &self.keycard,
+                ActorKind::Terminal => &self.terminal,
+                ActorKind::Crate => &self.crate_box,
             };
             let pose = Pose {
                 pos: a.pos,

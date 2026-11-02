@@ -14,6 +14,11 @@
 //! * [`Enemy`], [`AiState`] (`enemy.rs`): patrol, chase, attack.
 //! * [`hitscan`], [`line_of_sight`], [`ray`] (`combat.rs`): traces shared by
 //!   weapon, enemy sight and enemy fire. [`Weapon`] (`weapon.rs`).
+//! * [`Mover`], [`WhenBlocked`] (`mover.rs`): named poses, eased motion and what
+//!   happens when a body is in the way; driven through `Game`.
+//! * Level scripts (`script.rs`): [`Game::load_script`] compiles `mscent_script`
+//!   sources, and `script_api.rs` and `script_world.rs` are the game functions
+//!   they can call, all in one table, [`natives`].
 //! * [`HudModel`], [`draw_hud`], [`draw_menu`] (`hud.rs`); [`Menu`]
 //!   (`menu.rs`).
 //!
@@ -27,17 +32,36 @@ pub mod game;
 pub mod hud;
 pub mod input;
 pub mod menu;
+pub mod mover;
 pub mod player;
+pub mod prop;
+pub mod script;
+mod script_api;
+mod script_props;
+pub mod script_test_api;
+mod script_world;
 pub mod weapon;
 
-pub use arena::{Arena, EnemySpawn, Goal, LightSpec, LoadError};
+pub use arena::{
+    Arena, EnemySpawn, Goal, LevelNames, LightSpec, LoadError, MarkerSpec, MoverSpec, Thing,
+    ZoneSpec,
+};
 pub use combat::{Hitscan, Sphere, hitscan, line_of_sight, ray};
-pub use enemy::{AiState, Enemy, EnemyStats, stats_for};
+pub use enemy::{AiState, Enemy, EnemyStats, Faction, stats_for};
 pub use game::{Event, Game, Phase};
 pub use hud::{HudModel, draw_hud, draw_menu};
 pub use input::Input;
 pub use menu::{Menu, MenuAction, MenuCommand, Screen};
+pub use mover::{Mover, MoverError, WhenBlocked};
 pub use player::Player;
+pub use prop::{Prop, PropMesh};
+pub use script_api::natives;
+pub use script_test_api::Check;
+
+/// The game functions only a test script gets, for `--script-api`.
+pub fn test_natives() -> &'static [(&'static str, mscent_script::Native<Game>)] {
+    script_test_api::NATIVES
+}
 pub use weapon::{Shot, Weapon};
 
 #[cfg(test)]
@@ -49,6 +73,14 @@ mod game_tests;
 #[cfg(test)]
 mod hud_tests;
 #[cfg(test)]
+mod mover_tests;
+#[cfg(test)]
 mod player_tests;
+#[cfg(test)]
+mod script_error_tests;
+#[cfg(test)]
+mod script_prop_tests;
+#[cfg(test)]
+mod script_tests;
 #[cfg(test)]
 mod test_util;

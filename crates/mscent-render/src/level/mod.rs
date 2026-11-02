@@ -11,6 +11,7 @@
 
 mod cache;
 mod compiled;
+mod movers;
 mod overlay;
 mod shader;
 pub mod view;
@@ -21,7 +22,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use mscent_math::Vec3;
 use mscent_world::lightmap::{Lightmap, LightmapError, PointLight};
 use mscent_world::materials::{self, LIGHTPANEL};
-use mscent_world::{CsgError, Entity, Level};
+use mscent_world::{CsgError, Entity, Face, Level};
 
 use crate::framebuffer::Framebuffer;
 use crate::lighting_shader::{FaceLight, LightingShader, UvToLuxel};
@@ -37,6 +38,7 @@ use shader::FaceShader;
 
 pub use cache::{BakeCache, BakeReport, BakedLight, Source};
 pub use compiled::Compiled;
+pub use movers::MoverPose;
 pub use overlay::{Actor, ActorKind, Overlay};
 pub use view::View;
 
@@ -123,6 +125,7 @@ pub struct LevelRenderer {
     lighting: MeshLighting,
     actors: Vec<Actor>,
     meshes: overlay::ActorMeshes,
+    mover_faces: Vec<movers::MoverFaces>,
     cfg: BuildConfig,
     /// Band height and worker count of [`Self::render`].
     tiling: (u32, usize),
@@ -135,6 +138,7 @@ struct FrameState {
     tiles: TileRenderer,
     faces: PolyList,
     actors: PolyList,
+    movers: movers::MoverList,
 }
 
 fn check_materials(table: &MaterialTable) -> Result<(), BuildError> {
@@ -266,6 +270,7 @@ impl LevelRenderer {
         let compiled::Parts {
             bsp,
             faces,
+            mover_ranges,
             portals,
             lights,
             actors,
@@ -283,7 +288,20 @@ impl LevelRenderer {
                 UvToLuxel::from_vertices(proj, verts, scene.texture_of(face.material))
             })
             .collect();
+        let mover_faces = mover_ranges
+            .into_iter()
+            .map(|faces| {
+                let polys = scene.polys().get(faces.clone()).unwrap_or(&[]);
+                let (centre, radius) = movers::bounding_sphere(polys);
+                movers::MoverFaces {
+                    faces,
+                    centre,
+                    radius,
+                }
+            })
+            .collect();
         Self {
+            mover_faces,
             lighting: mesh_lighting(&lights, cfg.ambient),
             actors,
             meshes: overlay::ActorMeshes::new(),
@@ -337,21 +355,38 @@ impl LevelRenderer {
         actors: &[Actor],
         hud: Option<&Overlay>,
     ) -> Option<SceneStats> {
+        self.render_posed(fb, view, quality, actors, hud, &[])
+    }
+
+    /// The same, with movers at `poses`, by their order in the level. A mover
+    /// with no entry is drawn as authored.
+    pub fn render_posed(
+        &self,
+        fb: &mut Framebuffer,
+        view: &View,
+        quality: Quality,
+        actors: &[Actor],
+        hud: Option<&Overlay>,
+        poses: &[MoverPose],
+    ) -> Option<SceneStats> {
         let cam = view.camera(self.cfg.fov_y, NEAR, FAR, fb.width(), fb.height())?;
         let mut slot = self.frame.lock().unwrap_or_else(PoisonError::into_inner);
         let frame = self.frame_for(&mut slot, fb.width(), fb.height())?;
         let mut stats = self.scene.list_frame(&cam, None, &mut frame.faces);
+        self.list_movers(&cam, poses, &mut frame.movers);
         self.meshes
             .list(&cam, actors, &self.lighting, &mut frame.actors);
-        let (faces, meshes) = (&frame.faces, &frame.actors);
+        let (faces, meshes, movers) = (&frame.faces, &frame.actors, &frame.movers);
         let (pixels, spans) = (AtomicU32::new(0), AtomicU32::new(0));
         let eye = eye_of(&cam);
         frame.tiles.pass(&|band: &mut Framebuffer| {
             band.clear_sky(self.cfg.sky_top, self.cfg.sky_bottom);
+            // First, so the z-buffer saves shading whatever a door covers.
+            let moved = self.fill_movers(band, movers, quality);
             let st = self.fill_level(band, faces, quality, eye);
             self.meshes.fill(band, meshes, self.fog());
-            pixels.fetch_add(st.pixels, Ordering::Relaxed);
-            spans.fetch_add(st.spans, Ordering::Relaxed);
+            pixels.fetch_add(moved.pixels + st.pixels, Ordering::Relaxed);
+            spans.fetch_add(moved.spans + st.spans, Ordering::Relaxed);
         });
         frame.tiles.composite(fb).ok()?;
         drop(slot);
@@ -376,6 +411,7 @@ impl LevelRenderer {
                 tiles: TileRenderer::new(width, height, self.tiling.0, self.tiling.1)?,
                 faces: PolyList::default(),
                 actors: PolyList::default(),
+                movers: movers::MoverList::default(),
             });
         }
         let frame = slot.as_mut()?;
@@ -392,39 +428,43 @@ impl LevelRenderer {
         quality: Quality,
         eye: Vec3,
     ) -> DrawStats {
-        let fog = self.fog();
-        let bump = quality != Quality::Low;
-        let specular = quality == Quality::High;
-        let flat = |light| FaceShader::Flat(FlatShader::new(light, fog));
         self.scene.fill_frame(fb, list, None, &mut |i, face| {
-            if face.material == LIGHTPANEL {
-                return flat(EMISSIVE);
-            }
-            let map = self.uv_maps.get(i).copied().flatten();
-            let Some(map) = map else {
-                return flat(UNLIT);
-            };
-            let fl = FaceLight {
-                lightmap: &self.lightmap,
-                mips: &self.light_mips,
-                face: i,
-                map,
-                texture: self.scene.texture_of(face.material),
-                fog,
-                bump,
-            };
-            let table = self
-                .spec
-                .get(usize::from(face.material))
-                .or(self.spec.last());
-            let spec = table
-                .filter(|t| specular && t.is_visible())
-                .and_then(|t| LightingShader::with_specular(fl, eye, t));
-            if let Some(s) = spec {
-                return FaceShader::Spec(s);
-            }
-            LightingShader::new(fl).map_or_else(|| flat(UNLIT), FaceShader::Lit)
+            self.face_shader(i, face, eye, quality)
         })
+    }
+
+    /// The lit shader of a face, seen from `eye` in the space the face was
+    /// authored in.
+    fn face_shader(&self, i: usize, face: &Face, eye: Vec3, quality: Quality) -> FaceShader<'_> {
+        let fog = self.fog();
+        let flat = |light| FaceShader::Flat(FlatShader::new(light, fog));
+        if face.material == LIGHTPANEL {
+            return flat(EMISSIVE);
+        }
+        let map = self.uv_maps.get(i).copied().flatten();
+        let Some(map) = map else {
+            return flat(UNLIT);
+        };
+        let fl = FaceLight {
+            lightmap: &self.lightmap,
+            mips: &self.light_mips,
+            face: i,
+            map,
+            texture: self.scene.texture_of(face.material),
+            fog,
+            bump: quality != Quality::Low,
+        };
+        let table = self
+            .spec
+            .get(usize::from(face.material))
+            .or(self.spec.last());
+        let spec = table
+            .filter(|t| quality == Quality::High && t.is_visible())
+            .and_then(|t| LightingShader::with_specular(fl, eye, t));
+        if let Some(s) = spec {
+            return FaceShader::Spec(s);
+        }
+        LightingShader::new(fl).map_or_else(|| flat(UNLIT), FaceShader::Lit)
     }
 }
 

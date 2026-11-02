@@ -8,7 +8,11 @@ use mscent_platform::Platform;
 use mscent_render::png_encode::encode_png;
 use mscent_render::resolution::{ResolutionConfig, ResolutionController};
 
+use crate::scripts::ScriptWatcher;
 use crate::session::{FrameStats, GameSession};
+
+/// How often scripts are checked for changes, in platform seconds.
+const WATCH_SECONDS: f64 = 0.25;
 
 /// Longest frame time the simulation is told about (a stall must not become
 /// a burst of catch-up steps).
@@ -29,6 +33,8 @@ pub struct RunOptions {
     pub shot_times: Vec<f64>,
     /// `<stem>_<t>s.png` is written for each shot time.
     pub shot_stem: Option<PathBuf>,
+    /// Reload the level's scripts when they change on disk.
+    pub watch: Option<ScriptWatcher>,
 }
 
 /// What a run measured. Times are real (wall clock) milliseconds of the
@@ -69,6 +75,8 @@ pub fn run(platform: &mut dyn Platform, session: &mut GameSession, opts: &RunOpt
     let mut captured = false;
     let mut last = platform.now();
     let mut smooth_ms = 16.6f32;
+    let mut watch = opts.watch.clone();
+    let mut next_watch = 0.0;
     let target = opts
         .cap_fps
         .map(|f| Duration::from_secs_f32(1.0 / f.max(1.0)));
@@ -78,6 +86,16 @@ pub fn run(platform: &mut dyn Platform, session: &mut GameSession, opts: &RunOpt
         let now = platform.now();
         let dt = now.saturating_sub(last).min(MAX_FRAME);
         last = now;
+        if let Some(watcher) = watch.as_mut()
+            && now.as_secs_f64() >= next_watch
+        {
+            next_watch = now.as_secs_f64() + WATCH_SECONDS;
+            match watcher.reload_if_changed(session) {
+                Ok(true) => eprintln!("script reloaded"),
+                Ok(false) => {}
+                Err(problem) => eprintln!("{problem}\nthe old script keeps running"),
+            }
+        }
         let outcome = session.step(dt, &events);
         if outcome.quit || opts.autoclose.is_some_and(|d| now >= d) {
             break;

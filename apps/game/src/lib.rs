@@ -13,13 +13,18 @@
 //! The game depends on `mscent-platform` only; no GUI toolkit. The `desktop`
 //! feature (on by default for the binary) adds the winit window backend.
 
+pub mod agent;
 pub mod app;
 pub mod assets;
 pub mod cli;
 pub mod controls;
+mod drawn;
 mod feedback;
 pub mod levels;
 pub mod lightcache;
+mod notices;
+pub mod scripts;
 pub mod session;
+pub mod trace;
 
 pub use session::{FrameStats, GameSession, SessionConfig, SessionError, StepOutcome};

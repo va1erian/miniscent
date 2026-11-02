@@ -4,13 +4,14 @@
 //! lightmap, falls back to a draft that takes milliseconds, and leaves the full
 //! bake to a thread that can be cancelled and holds no lock on the cache.
 
+use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use mscent_world::lightmap::store::input_key;
 use mscent_world::lightmap::{BakeConfig, LightFace, Lightmap, PointLight, bake, bake_cancellable};
-use mscent_world::{Bsp, Face, Level, Portals, compile, extract_faces};
+use mscent_world::{Bsp, Face, Level, Portals, brush_faces, compile, extract_faces};
 
 use super::{
     Actor, BakeCache, BakedLight, BuildConfig, BuildError, LevelRenderer, actors_of,
@@ -21,10 +22,28 @@ use crate::texture::MaterialTable;
 /// Draft luxel size; the baker coarsens it further if the atlas asks for that.
 const DRAFT_LUXEL: f32 = 1.0;
 
+/// Appends every mover's faces, lit at the pose they were authored in.
+fn append_mover_faces(level: &Level, faces: &mut Vec<Face>) -> Vec<Range<usize>> {
+    let mut ranges = Vec::with_capacity(level.mover_groups.len());
+    for group in &level.mover_groups {
+        let start = faces.len();
+        for &index in &group.brushes {
+            if let Some(brush) = level.brushes.get(index as usize) {
+                faces.extend(brush_faces(brush));
+            }
+        }
+        ranges.push(start..faces.len());
+    }
+    ranges
+}
+
 /// What the renderer keeps of a compiled level.
 pub(super) struct Parts {
     pub bsp: Bsp,
+    /// The world's faces, then each mover's.
     pub faces: Vec<Face>,
+    /// For each mover, which of `faces` are its own.
+    pub mover_ranges: Vec<Range<usize>>,
     pub portals: Portals,
     pub lights: Vec<PointLight>,
     pub actors: Vec<Actor>,
@@ -41,8 +60,10 @@ pub struct Compiled {
 impl Compiled {
     /// Runs CSG, face extraction and portals. No light is traced.
     pub fn new(level: &Level, cfg: &BuildConfig) -> Result<Self, BuildError> {
-        let bsp = compile(&level.brushes).map_err(BuildError::Csg)?;
-        let faces = extract_faces(&bsp, &level.brushes);
+        let brushes = level.static_brushes();
+        let bsp = compile(&brushes).map_err(BuildError::Csg)?;
+        let mut faces = extract_faces(&bsp, &brushes);
+        let mover_ranges = append_mover_faces(level, &mut faces);
         let portals = Portals::build(&bsp);
         let light_faces = faces.iter().map(LightFace::from).collect();
         let bake_cfg = BakeConfig {
@@ -56,6 +77,7 @@ impl Compiled {
         let parts = Parts {
             bsp,
             faces,
+            mover_ranges,
             portals,
             lights: lights_of(level, cfg.light_gain),
             actors: actors_of(level),

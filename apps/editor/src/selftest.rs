@@ -23,6 +23,7 @@ use crate::ui::{Editor, Msg, Probe, cmd};
 
 mod faces;
 mod keys;
+mod scripting;
 
 /// Ticks the UI `n` times, 16 ms apart, so the render thread's frames arrive
 /// and show before a snapshot.
@@ -66,6 +67,12 @@ struct Holder {
 
 /// Runs the script; returns the process exit code.
 pub fn run(dir: &Path) -> i32 {
+    let scripted = run_theme(
+        &dir.join("scripting"),
+        Theme::light(),
+        (1280.0, 800.0),
+        scripting::script,
+    );
     let light = run_theme(dir, Theme::light(), (1280.0, 800.0), script);
     let dark = run_theme(&dir.join("dark"), Theme::dark(), (1280.0, 800.0), script);
     // The layout at 2000 px wide: side panels and the build log must fit.
@@ -75,7 +82,7 @@ pub fn run(dir: &Path) -> i32 {
         (2000.0, 1124.0),
         wide_script,
     );
-    light.max(dark).max(wide)
+    light.max(dark).max(wide).max(scripted)
 }
 
 fn run_theme(

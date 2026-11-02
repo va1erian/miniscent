@@ -4,9 +4,11 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use miniscent_game::agent::{self, TestOutput};
 use miniscent_game::app::{self, RunOptions, RunReport};
 use miniscent_game::cli::{self, Options, USAGE};
-use miniscent_game::{GameSession, SessionConfig, assets, levels, lightcache};
+use miniscent_game::scripts::ScriptWatcher;
+use miniscent_game::{GameSession, SessionConfig, assets, levels, lightcache, scripts};
 use mscent_platform::{HeadlessPlatform, Script};
 use mscent_render::png_encode::encode_png;
 use mscent_render::{BakeCache, LevelRenderer};
@@ -69,6 +71,7 @@ fn run_options(o: &Options, cap: bool) -> RunOptions {
         shot_stem: o.screenshot.clone().or_else(|| {
             (!o.shots_at.is_empty()).then(|| Path::new("target/shots/play.png").to_path_buf())
         }),
+        watch: None,
     }
 }
 
@@ -109,12 +112,42 @@ fn run_desktop(o: &Options, session: &mut GameSession) -> Result<RunReport, Stri
         height: o.res.1 * o.scale,
     })
     .map_err(|e| format!("cannot open a window: {e}"))?;
-    Ok(app::run(&mut platform, session, &run_options(o, true)))
+    let opts = RunOptions {
+        watch: o.level.as_deref().map(ScriptWatcher::new),
+        ..run_options(o, true)
+    };
+    Ok(app::run(&mut platform, session, &opts))
 }
 
 #[cfg(not(feature = "desktop"))]
 fn run_desktop(_: &Options, _: &mut GameSession) -> Result<RunReport, String> {
     Err("built without the `desktop` feature; use --screenshot, --script or --bench".into())
+}
+
+/// The commands that do their one job and exit. `None` if this is not one.
+fn agent_command(o: &Options) -> Option<Result<String, String>> {
+    let needs_level = |what: &str| format!("{what} needs --level <file.msl>");
+    if o.script_api {
+        return Some(Ok(agent::script_api()));
+    }
+    if let Some(path) = &o.dump_level {
+        return Some(agent::dump_level(path));
+    }
+    if let Some((from, to)) = &o.pack_level {
+        return Some(agent::pack_level(from, to));
+    }
+    if o.check {
+        let level = o.level.as_deref().ok_or_else(|| needs_level("--check"));
+        return Some(level.and_then(agent::check));
+    }
+    let test = o.test.as_deref()?;
+    let out = TestOutput {
+        trace: o.trace.clone(),
+        shots_dir: o.shots_dir.clone().unwrap_or_else(|| "target/shots".into()),
+        assets: o.assets.clone(),
+    };
+    let level = o.level.as_deref().ok_or_else(|| needs_level("--test"));
+    Some(level.and_then(|level| agent::run_test(level, test, &out)))
 }
 
 fn real_main() -> Result<(), String> {
@@ -123,10 +156,17 @@ fn real_main() -> Result<(), String> {
         print!("{USAGE}");
         return Ok(());
     }
+    if let Some(result) = agent_command(&o) {
+        println!("{}", result?);
+        return Ok(());
+    }
     let level = level_of(&o)?;
     let materials = assets::load_materials(o.assets.as_deref())?;
+    let scripts = o.level.as_deref().map(scripts::for_level).transpose()?;
+    let scripts = scripts.flatten();
     let cfg = SessionConfig {
         quality: o.quality,
+        scripted: scripts.is_some(),
         ..SessionConfig::default()
     };
     let name = if o.corridor { "corridor" } else { "showcase" };
@@ -137,6 +177,11 @@ fn real_main() -> Result<(), String> {
     let started = std::time::Instant::now();
     let mut session =
         GameSession::new_cached(&level, materials, &cfg, &mut cache).map_err(|e| e.to_string())?;
+    if let Some(scripts) = &scripts {
+        for warning in scripts::start(&mut session, scripts)? {
+            eprintln!("script warning: {warning}");
+        }
+    }
     println!("level ready in {:.2}s", started.elapsed().as_secs_f32());
     if let Some(rep) = cache.last_report() {
         println!("{}", rep.describe());

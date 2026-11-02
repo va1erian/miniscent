@@ -10,6 +10,11 @@ pub const SKIN: f64 = 1.0e-3;
 /// extracting cell geometry and when testing that a contact is on a face.
 pub const ON_PLANE: f64 = 1.0e-6;
 
+/// A pushed body may overlap its mover by this much before it counts as
+/// squeezed: several times the skin, since a body pressed between a wall and a
+/// mover sits a skin off each.
+pub const SQUEEZE_SLACK: f64 = 2.0e-3;
+
 /// Extra reach, beyond the sphere radius, when deciding which BSP subtrees a
 /// sweep can touch; covers the skin and embedded (t = 0) contacts.
 pub const PRUNE_MARGIN: f64 = 1.0e-2;

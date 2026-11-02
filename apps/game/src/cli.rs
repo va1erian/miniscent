@@ -26,6 +26,15 @@ miniscent [options]
   --bench                  headless: print ms/frame for the run
   --no-adaptive            keep the internal resolution fixed
   --autoclose-ms <n>       desktop: quit after n milliseconds
+  --check                  with --level: compile the level's script, run its top
+                           level and list every name; fails on any error
+  --test <file.st>         with --level: play with no window until this test
+                           script ends; fails on a failed assert or script error
+  --trace <out.jsonl>      with --test: write what happened, one JSON object a line
+  --shots-dir <dir>        with --test: where shot: writes (default target/shots)
+  --script-api             print the language and every function a script can call
+  --dump-level <file.msl>  print a level as text
+  --pack-level <in> <out>  read a level as text and write it as a .msl
   --help
 ";
 
@@ -49,6 +58,13 @@ pub struct Options {
     pub adaptive: bool,
     pub autoclose_ms: Option<u64>,
     pub help: bool,
+    pub check: bool,
+    pub test: Option<PathBuf>,
+    pub trace: Option<PathBuf>,
+    pub shots_dir: Option<PathBuf>,
+    pub script_api: bool,
+    pub dump_level: Option<PathBuf>,
+    pub pack_level: Option<(PathBuf, PathBuf)>,
 }
 
 impl Options {
@@ -99,6 +115,13 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
         adaptive: true,
         autoclose_ms: None,
         help: false,
+        check: false,
+        test: None,
+        trace: None,
+        shots_dir: None,
+        script_api: false,
+        dump_level: None,
+        pack_level: None,
     };
     let mut it = args.into_iter();
     while let Some(arg) = it.next() {
@@ -147,6 +170,17 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
                         .parse()
                         .map_err(|_| "--autoclose-ms must be a number")?,
                 );
+            }
+            "--check" => o.check = true,
+            "--test" => o.test = Some(value("--test")?.into()),
+            "--trace" => o.trace = Some(value("--trace")?.into()),
+            "--shots-dir" => o.shots_dir = Some(value("--shots-dir")?.into()),
+            "--script-api" => o.script_api = true,
+            "--dump-level" => o.dump_level = Some(value("--dump-level")?.into()),
+            "--pack-level" => {
+                let from = value("--pack-level")?.into();
+                let to = value("--pack-level")?.into();
+                o.pack_level = Some((from, to));
             }
             "--help" | "-h" => o.help = true,
             file if !file.starts_with('-') && o.level.is_none() => o.level = Some(file.into()),
