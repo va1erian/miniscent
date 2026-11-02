@@ -241,7 +241,8 @@ fn facing(tri: &[VoxelVertex; 3], w: [f64; 3]) -> Vec3d {
     let [a, b, c] = tri.map(|v| v.pos.to_f64());
     let face = (b - a).cross(c - a);
     let blend = (0..3).fold(Vec3d::ZERO, |sum, i| sum + tri[i].normal.to_f64() * w[i]);
-    if blend.dot(face) > 0.0 { blend } else { face }
+    // A triangle with no area, as at a pole of a shape, has no facing to disagree with.
+    if blend.dot(face) >= 0.0 { blend } else { face }
 }
 
 /// Point of the triangle `t` nearest to `p`, with its barycentric weights.

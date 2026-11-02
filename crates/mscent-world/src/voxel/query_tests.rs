@@ -380,3 +380,41 @@ fn the_nearest_surface_search_finds_what_a_full_scan_finds() {
         );
     }
 }
+
+/// Surface nets folds four cells onto one point at a pole of a shape, which makes
+/// triangles with no area. They are the nearest surface to points on that axis,
+/// and must still say which side those points are on.
+#[test]
+fn a_point_facing_a_pole_of_a_shape_is_told_the_right_side() {
+    let room =
+        Brush::cuboid(v(-20.0, -20.0, -20.0), v(20.0, 20.0, 20.0), Op::Subtract, 0).expect("valid");
+    let brushes = vec![room];
+    let mut volume =
+        Volume::new(Op::Add, 1, CellSize::Half, [10, -8, -8], [1, 1, 1]).expect("valid");
+    let shape = volume.clone();
+    let mut ctx = Context::new(&shape, &brushes);
+    let ball = Prim::sphere(v(9.0, 0.0, 0.0), 3.0).expect("valid");
+    apply_dab(&mut volume, &mut ctx, &ball, DabOp::Add { material: 1 });
+    let level = Level {
+        brushes,
+        volumes: vec![volume],
+        ..Default::default()
+    };
+    let bsp = compile(&level.csg_brushes()).expect("compiles");
+    let world = VoxelWorld::build(&level, &level.static_brushes(), &bsp);
+    for (y, z) in [(0.0, 0.0), (0.01, 0.0), (0.0, 0.01)] {
+        for i in 0..18 {
+            let x = 5.05 + f64::from(i) * 0.05;
+            assert!(
+                !world.is_solid(v(x, y, z)),
+                "air at x = {x}, y = {y}, z = {z}"
+            );
+        }
+        for x in [6.5, 9.0, 11.5] {
+            assert!(
+                world.is_solid(v(x, y, z)),
+                "rock at x = {x}, y = {y}, z = {z}"
+            );
+        }
+    }
+}
