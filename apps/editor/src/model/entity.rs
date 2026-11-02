@@ -2,6 +2,8 @@
 
 use mscent_math::Vec3;
 use mscent_world::Entity;
+use mscent_world::entity::MAX_VISTA_LAYERS;
+use mscent_world::materials::VIEW_SLOTS;
 
 /// What the entity tools can place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,6 +70,7 @@ pub fn entity_name(e: &Entity) -> &'static str {
         Entity::World { .. } => "World",
         Entity::Marker { .. } => EntityKind::Marker.name(),
         Entity::Zone { .. } => EntityKind::Zone.name(),
+        Entity::VistaLayer { .. } => "Vista Layer",
     }
 }
 
@@ -92,7 +95,8 @@ pub fn with_pos(e: &Entity, p: [f64; 3]) -> Entity {
         | Entity::Goal { pos, .. }
         | Entity::World { pos, .. }
         | Entity::Marker { pos, .. }
-        | Entity::Zone { pos, .. } => *pos = np,
+        | Entity::Zone { pos, .. }
+        | Entity::VistaLayer { pos, .. } => *pos = np,
     }
     out
 }
@@ -124,6 +128,16 @@ pub fn params(e: &Entity) -> Vec<(&'static str, f64)> {
             ("Half X", short(half.x)),
             ("Half Y", short(half.y)),
             ("Half Z", short(half.z)),
+        ],
+        Entity::VistaLayer {
+            slot,
+            layer,
+            parallax,
+            ..
+        } => vec![
+            ("Slot", f64::from(slot)),
+            ("Layer", f64::from(layer)),
+            ("Parallax", short(parallax)),
         ],
     }
 }
@@ -157,6 +171,14 @@ pub fn set_param(e: &mut Entity, i: usize, v: f64) {
             2 => half.z = v as f32,
             _ => {}
         },
+        Entity::VistaLayer { slot, .. } if i == 0 => *slot = whole(v, VIEW_SLOTS),
+        Entity::VistaLayer { layer, .. } if i == 1 => *layer = whole(v, MAX_VISTA_LAYERS),
+        Entity::VistaLayer { parallax, .. } if i == 2 => *parallax = v as f32,
         _ => {}
     }
+}
+
+/// `v` as a whole number below `limit`; the panel can type anything.
+fn whole(v: f64, limit: u8) -> u8 {
+    v.clamp(0.0, f64::from(limit - 1)) as u8
 }

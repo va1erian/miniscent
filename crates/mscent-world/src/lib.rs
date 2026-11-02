@@ -49,6 +49,7 @@ mod format_labels;
 mod format_wire;
 pub mod r#gen;
 pub mod gen_level;
+pub mod islands;
 pub mod labels;
 pub mod level_builder;
 pub mod level_text;
@@ -68,6 +69,7 @@ pub use faces::{Face, brush_faces, extract_faces};
 pub use format::FormatError;
 pub use r#gen::{GenParams, generate, room_centers};
 pub use gen_level::generate_level;
+pub use islands::Islands;
 pub use labels::{EntityLabel, LabelError, MoverGroup};
 pub use level_builder::LevelBuilder;
 pub use portals::{Portal, Portals};
@@ -84,6 +86,8 @@ mod csg_tests;
 mod format_tests;
 #[cfg(test)]
 mod gen_tests;
+#[cfg(test)]
+mod islands_tests;
 #[cfg(test)]
 mod labels_tests;
 #[cfg(test)]

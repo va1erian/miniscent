@@ -32,6 +32,31 @@ pub const WAX: u16 = 9;
 /// where the voxel surface closes in front of it. Not a texture.
 pub const NO_DRAW: u16 = u16::MAX;
 
+/// The material of viewport slot 0. A face with `VIEW_FIRST + slot` collides like
+/// any wall but is drawn as a hole onto that slot's vista, not as a texture.
+pub const VIEW_FIRST: u16 = 0xFFF0;
+/// How many viewport slots there are, so ids `VIEW_FIRST..VIEW_FIRST + VIEW_SLOTS`.
+pub const VIEW_SLOTS: u8 = 8;
+
+/// The viewport slot a material id stands for, or `None` for a texture and for
+/// [`NO_DRAW`], which sits just above the slots.
+pub const fn view_slot(material: u16) -> Option<u8> {
+    if material >= VIEW_FIRST && material - VIEW_FIRST < VIEW_SLOTS as u16 {
+        Some((material - VIEW_FIRST) as u8)
+    } else {
+        None
+    }
+}
+
+/// The material id of viewport `slot`, or `None` when the slot is out of range.
+pub const fn view_material(slot: u8) -> Option<u16> {
+    if slot < VIEW_SLOTS {
+        Some(VIEW_FIRST + slot as u16)
+    } else {
+        None
+    }
+}
+
 /// Whether a shot carves voxel rock of this material. Rock breaks; the made
 /// materials do not. A table of the game's own materials, not level data.
 pub const fn is_destructible(material: u8) -> bool {
@@ -40,3 +65,22 @@ pub const fn is_destructible(material: u8) -> bool {
 
 /// Stock texture names in id order.
 pub const NAMES: [&str; 5] = ["brick", "floor", "lightpanel", "metal", "rock"];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn view_slots_cover_exactly_eight_ids_below_no_draw() {
+        assert_eq!(view_slot(0xFFEF), None);
+        assert_eq!(view_slot(0xFFF0), Some(0));
+        assert_eq!(view_slot(0xFFF7), Some(7));
+        assert_eq!(view_slot(0xFFF8), None);
+        assert_eq!(view_slot(NO_DRAW), None);
+        assert_eq!(view_slot(BRICK), None);
+        for slot in 0..VIEW_SLOTS {
+            assert_eq!(view_slot(view_material(slot).unwrap()), Some(slot));
+        }
+        assert_eq!(view_material(VIEW_SLOTS), None);
+    }
+}

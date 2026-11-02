@@ -211,6 +211,8 @@ impl Arena {
                 Entity::Goal { pos, radius } => goals.push(Goal { pos, radius }),
                 // Look settings only; the renderer reads them.
                 Entity::World { .. } => {}
+                // Drawn by the renderer's viewport faces, which come later.
+                Entity::VistaLayer { .. } => {}
                 Entity::Marker { pos, yaw } => {
                     things[i] = Some(Thing::Marker(markers.len()));
                     markers.push(MarkerSpec { pos, yaw });

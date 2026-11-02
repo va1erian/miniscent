@@ -14,8 +14,13 @@
 //! world 0 0 0  4 26                               # x y z, fog start, fog end
 //! marker 3 0 0  0  name trap_hinge                # x y z yaw
 //! zone 0 10 0  2 2 2  name hall  tag alarm        # x y z, half sizes
+//! vista 0 0 0  0 0 0  0 0 0.0625  0 0 0.1  0 0  0 1e5  0x8090a0  # see below
 //! mover vault_door  tag doors  brushes 1 2        # brush lines, counted from 0
 //! ```
+//!
+//! A `vista` line is a vista layer: position, centre, slot, layer, parallax, spin
+//! (axis times radians per second), pan, fog start, fog end, fog colour as decimal
+//! or `0x` hex. A face's `material` of 65520 to 65527 is viewport slot 0 to 7.
 //!
 //! A plane in a `brush` line is `nx ny nz dist` then its texture mapping:
 //! `material ux uy uz vx vy vz ushift vshift uscale vscale rotation lock`.
@@ -179,6 +184,25 @@ fn entity_text(e: &Entity) -> String {
         } => format!("world {} {fog_start} {fog_end}", v32(pos)),
         Entity::Marker { pos, yaw } => format!("marker {} {yaw}", v32(pos)),
         Entity::Zone { pos, half } => format!("zone {} {}", v32(pos), v32(half)),
+        Entity::VistaLayer {
+            pos,
+            centre,
+            slot,
+            layer,
+            parallax,
+            spin,
+            pan,
+            fog_start,
+            fog_end,
+            fog_color,
+        } => format!(
+            "vista {} {} {slot} {layer} {parallax} {} {} {} {fog_start} {fog_end} {fog_color:#08x}",
+            v32(pos),
+            v32(centre),
+            v32(spin),
+            pan[0],
+            pan[1]
+        ),
     }
 }
 
@@ -218,6 +242,16 @@ impl<'a> Words<'a> {
         } else {
             Err(format!("{what} must be finite"))
         }
+    }
+
+    /// A `u32` in decimal or, after `0x`, hex.
+    fn colour(&mut self, what: &str) -> Res<u32> {
+        let w = self.word(what)?;
+        let parsed = match w.strip_prefix("0x") {
+            Some(hex) => u32::from_str_radix(hex, 16),
+            None => w.parse(),
+        };
+        parsed.map_err(|_| format!("expected {what}, not '{}'", clip(w)))
     }
 
     fn v3(&mut self, what: &str) -> Res<Vec3> {
@@ -324,6 +358,18 @@ fn read_entity(kind: &str, w: &mut Words) -> Res<Option<Entity>> {
         "zone" => Entity::Zone {
             pos: pos(w)?,
             half: w.v3("the half sizes")?,
+        },
+        "vista" => Entity::VistaLayer {
+            pos: pos(w)?,
+            centre: w.v3("the centre")?,
+            slot: w.parse("the slot")?,
+            layer: w.parse("the layer")?,
+            parallax: w.f32("the parallax")?,
+            spin: w.v3("the spin")?,
+            pan: [w.f32("the pan")?, w.f32("the pan")?],
+            fog_start: w.f32("the fog start")?,
+            fog_end: w.f32("the fog end")?,
+            fog_color: w.colour("the fog colour")?,
         },
         _ => return Ok(None),
     }))
