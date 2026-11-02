@@ -19,6 +19,9 @@ use super::lights::{LightSpec, Lights};
 use super::recipes;
 use super::{Effect, EffectArgs, Fx};
 
+mod big;
+pub use big::ViewKick;
+
 /// How fast a bolt's head travels, in units/s.
 const BOLT_SPEED: f32 = 400.0;
 /// The longest a bolt takes to arrive, so any range is covered in a handful of
@@ -90,6 +93,7 @@ impl Bolt {
 pub struct CombatFx {
     fx: Fx,
     lights: Lights,
+    blast_view: big::BlastView,
     bolts: [Option<Bolt>; MAX_BOLTS],
     decals: Decals,
     limits: Limits,
@@ -108,6 +112,7 @@ impl CombatFx {
         Self {
             fx: Fx::new(&recipes::CLASSES, SEED),
             lights: Lights::new(),
+            blast_view: big::BlastView::default(),
             bolts: [None; MAX_BOLTS],
             decals: Decals::new(),
             limits: Limits::of(Quality::High),
@@ -126,6 +131,7 @@ impl CombatFx {
     pub fn clear(&mut self) {
         self.fx.clear();
         self.lights.clear();
+        self.blast_view.clear();
         self.bolts = [None; MAX_BOLTS];
         self.decals.clear();
         self.keep = Keep::default();
@@ -164,6 +170,7 @@ impl CombatFx {
 
     /// Runs the particle clock and the bolts forward by `elapsed_ns`.
     pub fn advance(&mut self, elapsed_ns: u64, bsp: &Bsp) {
+        self.blast_view.advance(elapsed_ns);
         for slot in &mut self.bolts {
             let Some(bolt) = slot else { continue };
             bolt.age_ns = bolt.age_ns.saturating_add(elapsed_ns);

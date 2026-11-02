@@ -69,7 +69,7 @@ fn each_material_gives_its_own_particles() {
             by_class
                 .iter()
                 .enumerate()
-                .fold(0, |a, (i, n)| a * 31 + i * n)
+                .fold(0usize, |a, (i, n)| a.wrapping_mul(31).wrapping_add(i * n))
         })
         .collect();
     for (i, a) in counts.iter().enumerate() {

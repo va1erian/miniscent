@@ -25,6 +25,7 @@ pub mod emit;
 pub mod lights;
 mod pool;
 pub mod recipes;
+pub mod recipes_big;
 
 pub use class::{
     Blend, ClassId, Collide, MAX_CLASSES, MAX_TOTAL_CAPACITY, ParticleClass, Prim, PuffShape, Tier,

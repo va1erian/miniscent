@@ -1,6 +1,6 @@
 # Particles: combat effects in a software renderer
 
-M9.0 to M9.5 and M9.7 are built; the rest is design. It replaces the screen-space tracer that was in
+M9.0 to M9.8 are built, with the gaps each section lists. It replaces the screen-space tracer that was in
 [`apps/game/src/feedback.rs`](../apps/game/src/feedback.rs) with a world-space particle system
 that covers the shots, hits and explosions of combat and can later serve a destructible brush.
 See [What was built](#what-was-built-m91-to-m93) for where the code differs from this design.
@@ -418,6 +418,51 @@ not at the muzzle. Mutating the shader or the mesh path to ignore the lights mad
 tests fail. Not tested: a real window, the i3-7100U, or a kill through a full session with the
 light on screen.
 
+## What was built (M9.6 and M9.8, except the layer)
+
+`CombatFx::blast(pos, radius, bsp)` and `CombatFx::shatter(bounds, material, tint)`, in
+`fx/combat/big.rs` with tables in `fx/recipes_big.rs`. Nothing in the game fires either; only
+`GameSession::blast`, the tests and the gallery do. `cargo run --release -p miniscent-game --example
+fx_gallery` writes a sheet per effect to `target/shots/fx/`, six frames from 0.03 to 2.5 s, and prints
+each effect's worst frame. On the dev machine at 640x360, High, on the default workers, over an empty
+frame of 1.26 ms:
+
+| Effect | Worst frame | Over empty | Budget spent, screens |
+|---|---|---|---|
+| A hit, by material | 1.52 to 1.61 ms | 0.26 to 0.35 ms | 0.07 to 0.08 |
+| Drone hit | 1.67 ms | 0.41 ms | 0.04 |
+| Drone explosion | 1.48 ms | 0.22 ms | 1.51 |
+| `Blast` | 1.68 ms | 0.42 ms | 5.00 of 5.0 |
+
+These are one run each, and a hit's "worst" falls at a frame where it is long over, so differences
+under about 0.3 ms are noise. **`Blast` peaks at 0.42 ms over the empty frame on all cores**, against
+the design's unbudgeted 2.2 ms and budgeted 0.65 ms on one thread. That is not a one-thread figure,
+and it is not the i3-7100U. Its lights are included.
+
+The view (`CombatFx::view_kick`) takes a white overlay for 0.1 s and a shake of at most 0.15 units for
+0.5 s, weaker with distance out to three radii. A flood from the blast says which leaves can see it,
+so a blast behind a wall does neither. A shake that would enter a wall is dropped for that frame.
+
+What the sheets showed, looked at by the author and not by a player:
+
+- **A large fire sprite cuts the floor along a straight line.** Its one depth meets the floor at a
+  constant screen row, which is the risk under Decisions. It is plain on the `Blast` sheet at 0.25 s,
+  and it is what most needs a person's opinion; the next thing to try is the per-block fade.
+- **`Blast`'s smoke is faint** once the budget has cut it, and it climbs back slowly. The half-res
+  layer is meant to help here.
+- **A shatter is still faint** at 8 units. It read as nearly nothing with drone-chip sizes, so it got
+  its own classes, `SHARD` and `BRUSH_DUST`; on the sheet that is now grey dust and some small chips.
+  Its sizes and counts are the first thing to raise.
+
+Differences from the design:
+
+- **A sprite's world size does not scale with `radius`.** `EffectArgs::scale` spreads positions and
+  speeds. A blast of radius 4 still has fire and a ring sized for 12.
+- **Shards are still sprites**, not textured polygons, so debris does not look like brick up close.
+- **`Effect::Blast` and `Effect::Shatter` are methods**, since an `Effect` is a table and these also
+  set lights and the view.
+- **A shatter's debris scales in eight steps at most**, one per 8 cubic units.
+
 ## Design overview
 
 ```
@@ -742,9 +787,9 @@ crates/mscent-render/src/
 | M9.3 | **Done.** Bolts and hits: `Event::Shot`, `Hitscan.normal`, beams, `material_at`, surface rows; remove the tracer | M9.2 | M | Enemy shot behind a wall draws no pixels (the old tracer failed this); each material gives its own output; the replay test is unchanged |
 | M9.4 | **Done**, without the adaptive multiplier. Budget: costs, probes, tiers, `keep`, Quality rows | M9.2 | M | A frame at 100 full-screen sprites stays within 10% of budget, Essential is untouched, and a scripted run is pixel-identical twice |
 | M9.5 | **Done.** Dynamic lights: per-face shader variant, reach flood, mesh lights | M9.3 | M | No cost when no light is active (frame bench unchanged); wall behind a wall stays unlit; per-span cost measured |
-| M9.6 | Drone explosion and `Blast`, half-res layer, shake, overlay | M9.4, M9.5 | L | `fx_gallery` contact sheets looked at by a person; peak cost of `Blast` reported at 640x360 |
+| M9.6 | **Built; the contact sheets still need a person's look.** Drone explosion and `Blast`, half-res layer, shake, overlay | M9.4, M9.5 | L | `fx_gallery` contact sheets looked at by a person; peak cost of `Blast` reported at 640x360 |
 | M9.7 | **Done.** Scorch decals: blended polygon raster, ring of 64, depth bias | M9.3 | S | `apps/game/tests/decals.rs`: the decal stays on its face from six views, changes no pixel behind a wall, does not flicker between adjacent camera positions, and is pixel-identical at every worker count; `fx_collect_alloc.rs`: zero allocation |
-| M9.8 | `Effect::Shatter` and material rows | M9.6 | S | Gallery shows each material; a 1000-unit box stays within pool and budget |
+| M9.8 | **Built; the contact sheets still need a person's look.** `Effect::Shatter` and material rows | M9.6 | S | Gallery shows each material; a 1000-unit box stays within pool and budget |
 
 **Evidence.** A new `examples/fx_gallery.rs` renders each effect at fixed times over the showcase
 into `target/shots/fx/`, because neither `Blast` nor `Shatter` can be triggered in play yet. A

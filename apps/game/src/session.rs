@@ -9,7 +9,7 @@
 use std::time::Duration;
 
 use mscent_collide::FixedStepper;
-use mscent_game::fx::combat::{CombatFx, DRONE_TINT};
+use mscent_game::fx::combat::{CombatFx, DRONE_TINT, ViewKick};
 use mscent_game::{
     Arena, Event as GameEvent, Game, LoadError, Menu, MenuAction, MenuCommand, Phase, Screen,
 };
@@ -18,7 +18,7 @@ use mscent_platform::{Event, Key, MouseButton};
 use mscent_render::particles::{ParticleDraws, SpriteBank};
 use mscent_render::{
     Actor, ActorKind, BakeCache, BuildConfig, BuildError, Effects, Framebuffer, LevelRenderer,
-    MaterialTable, Quality, View,
+    MaterialTable, Quality, View, simd,
 };
 use mscent_world::Level;
 
@@ -32,6 +32,7 @@ mod shots;
 const DEFAULT_SENSITIVITY: f32 = 0.0022;
 /// Frames a hit marker stays on screen.
 const FLASH_FRAMES: u32 = 6;
+const WHITE: u32 = 0xffff_ffff;
 
 /// How a session is built and drawn.
 #[derive(Clone, Copy, Debug)]
@@ -101,6 +102,7 @@ pub struct GameSession {
     fx: CombatFx,
     draws: ParticleDraws,
     bank: SpriteBank,
+    kick: ViewKick,
 }
 
 /// Cheap interpolation between nearby orientations.
@@ -181,6 +183,7 @@ impl GameSession {
             fx,
             draws: CombatFx::new_draws(),
             bank: SpriteBank::new(),
+            kick: ViewKick::default(),
         }
     }
 
@@ -188,6 +191,12 @@ impl GameSession {
     /// lighting for the same level arrives while it is being played.
     pub fn set_renderer(&mut self, renderer: LevelRenderer) {
         self.renderer = renderer;
+    }
+
+    /// Sets off a blast. Nothing in the game does this yet; damage from one is
+    /// a separate gameplay item, and the effect waits for it.
+    pub fn blast(&mut self, pos: Vec3, radius: f32) {
+        self.fx.blast(pos, radius, &self.game.arena.bsp);
     }
 
     /// The renderer, once the game is over with.
@@ -377,10 +386,16 @@ impl GameSession {
         let alpha = self.stepper.alpha();
         let p = &self.game.player;
         View {
-            pos: p.body.prev_pos.lerp(p.body.pos, alpha) + p.bob_offset(),
+            pos: self.eye() + self.kick.shake,
             orientation: (nlerp(self.prev_orientation, p.orientation, alpha) * p.bank_rotation())
                 .normalized(),
         }
+    }
+
+    /// Where the camera is, before anything cosmetic moves it.
+    fn eye(&self) -> Vec3 {
+        let p = &self.game.player;
+        p.body.prev_pos.lerp(p.body.pos, self.stepper.alpha()) + p.bob_offset()
     }
 
     fn actors(&self) -> Vec<Actor> {
@@ -410,6 +425,7 @@ impl GameSession {
         if self.fb.as_ref().map(|f| (f.width(), f.height())) != Some((width, height)) {
             self.fb = Some(Framebuffer::new(width, height)?);
         }
+        self.kick = self.fx.view_kick(self.renderer.scene(), self.eye());
         let view = self.view();
         let actors = self.actors();
         let mut fb = self.fb.take()?;
@@ -435,6 +451,9 @@ impl GameSession {
             &effects,
         );
         if drawn.is_some() {
+            if self.kick.white > 0 {
+                simd::lerp_toward(fb.pixels_mut(), WHITE, self.kick.white);
+            }
             let fov = self.renderer.config().fov_y;
             self.feedback.draw(&mut fb, &view, fov);
             self.draw_overlays(&mut fb);

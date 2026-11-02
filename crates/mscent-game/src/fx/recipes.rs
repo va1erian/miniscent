@@ -22,12 +22,19 @@ pub const RING: ClassId = ClassId(10);
 pub const SMOKE: ClassId = ClassId(11);
 /// Sits right in front of the eye, so its world size has to be tiny.
 pub const GUN_FLASH: ClassId = ClassId(12);
+pub const BIG_FIRE: ClassId = ClassId(13);
+pub const BIG_RING: ClassId = ClassId(14);
+pub const BIG_SMOKE: ClassId = ClassId(15);
+pub const EMBER: ClassId = ClassId(16);
+pub const SHARD: ClassId = ClassId(17);
+pub const BRUSH_DUST: ClassId = ClassId(18);
 
 const HOT_RAMP: &[u32] = &[0xffff_ffff, 0xffff_d080, 0xffff_8020, 0xff60_1000];
 const COLD_RAMP: &[u32] = &[0xffff_ffff, 0xffc0_e0ff, 0xff40_6080];
 const CYAN_RAMP: &[u32] = &[0xffff_ffff, 0xff80_f0ff, 0xff10_6080];
 /// Only the alpha is read when a particle carries a surface colour.
 const CHIP_RAMP: &[u32] = &[0xff80_8080, 0xff80_8080, 0xc060_6060];
+const BRUSH_DUST_RAMP: &[u32] = &[0x9030_3030, 0x7020_2020, 0x0000_0000];
 const DUST_RAMP: &[u32] = &[0x6030_3030, 0x4020_2020, 0x0000_0000];
 const FLASH_RAMP: &[u32] = &[0xffff_ffff, 0xffff_b060, 0xff30_1000];
 const CYAN_FLASH_RAMP: &[u32] = &[0xffff_ffff, 0xff60_d0ff, 0xff00_2030];
@@ -76,7 +83,7 @@ const fn puff(
 }
 
 /// Indexed by the `ClassId`s above; capacities total 4096 at most.
-pub static CLASSES: [ParticleClass; 13] = [
+pub static CLASSES: [ParticleClass; 19] = [
     spark(Collide::Bounce { keep: 0.55 }, HOT_RAMP, 1024),
     spark(Collide::Die, HOT_RAMP, 512),
     spark(Collide::Die, COLD_RAMP, 256),
@@ -159,9 +166,67 @@ pub static CLASSES: [ParticleClass; 13] = [
         (0.05, 0.07),
         16,
     ),
+    puff(
+        PuffShape::Fire,
+        Blend::Add,
+        Tier::Normal,
+        FIRE_RAMP,
+        (2.0, 5.0),
+        64,
+    ),
+    puff(
+        PuffShape::Ring,
+        Blend::Add,
+        Tier::Normal,
+        RING_RAMP,
+        (1.0, 12.0),
+        4,
+    ),
+    puff(
+        PuffShape::Puff,
+        Blend::Over,
+        Tier::Cosmetic,
+        SMOKE_RAMP,
+        (2.5, 5.0),
+        96,
+    ),
+    ParticleClass {
+        // Rises with the heat, so its gravity is negative.
+        gravity: -0.3,
+        ..puff(
+            PuffShape::Soft,
+            Blend::Add,
+            Tier::Cosmetic,
+            GLOW_RAMP,
+            (0.05, 0.02),
+            128,
+        )
+    },
+    ParticleClass {
+        // A chunk of a broken brush, large enough to read across a room.
+        prim: Prim::Shard,
+        blend: Blend::Over,
+        tier: Tier::Normal,
+        gravity: 9.0,
+        drag: 0.3,
+        collide: Collide::Bounce { keep: 0.35 },
+        ramp: CHIP_RAMP,
+        size: (0.18, 0.1),
+        stretch: 0.0,
+        capacity: 256,
+        trail: None,
+    },
+    puff(
+        PuffShape::Puff,
+        Blend::Over,
+        Tier::Cosmetic,
+        BRUSH_DUST_RAMP,
+        (0.5, 1.6),
+        128,
+    ),
 ];
 
-const fn em(
+pub(super) const fn em(
     class: ClassId,
     count: (u16, u16),
     shape: Shape,
@@ -179,14 +244,14 @@ const fn em(
     }
 }
 
-const fn on_surface(e: Emitter) -> Emitter {
+pub(super) const fn on_surface(e: Emitter) -> Emitter {
     Emitter {
         tint: TintSource::Surface,
         ..e
     }
 }
 
-const fn after(delay: f32, e: Emitter) -> Emitter {
+pub(super) const fn after(delay: f32, e: Emitter) -> Emitter {
     Emitter { delay, ..e }
 }
 
