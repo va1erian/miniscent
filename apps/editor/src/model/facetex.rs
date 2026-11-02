@@ -18,7 +18,7 @@ use super::pick::{self, FaceHit, FaceRef, Ray, face_polygon};
 use super::state::{EditorState, Selection};
 
 /// Texel size assumed for a material the editor knows nothing about.
-const DEFAULT_TEXTURE: (u32, u32) = (128, 128);
+pub const DEFAULT_TEXTURE: (u32, u32) = (128, 128);
 
 /// One change to the mapping of the target faces.
 #[derive(Clone, Copy, Debug, PartialEq)]

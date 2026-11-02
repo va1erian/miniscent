@@ -1,0 +1,206 @@
+//! `materials.txt`: which materials exist and which id each one has.
+//!
+//! One line per id, in order, starting at 0: `id name gloss`, or `id retired`
+//! for an id whose material was deleted. Levels store ids, so ids never move and
+//! are never reused; new materials go at the end. Blank lines and lines starting
+//! with `#` are skipped. Names become file names, and the file comes from disk,
+//! so all of this is checked and every failure is an error.
+//!
+//! A directory with no manifest (a test fixture, an `--assets` directory) gets
+//! ids from its sorted file list and [`DEFAULT_GLOSS`], as all directories did
+//! before there were manifests.
+
+use std::collections::HashSet;
+use std::io::Read;
+use std::path::Path;
+
+use mscent_world::materials::NAMES as STOCK;
+
+use crate::texture::TextureError;
+
+/// The manifest's file name in a texture directory.
+pub const FILE: &str = "materials.txt";
+/// Gloss of materials in a directory with no manifest: mildly glossy.
+pub const DEFAULT_GLOSS: u8 = 40;
+/// Most ids a manifest may hold, retired ones included.
+pub const MAX_MATERIALS: usize = 1024;
+/// Largest file accepted, far above any real one and read no further.
+const MAX_BYTES: u64 = 64 * 1024;
+const MAX_LINE: usize = 128;
+const MAX_NAME: usize = 48;
+/// What an id's name is once its material is gone; no material can be called it.
+const RETIRED: &str = "retired";
+/// Names Windows opens as devices whatever the extension.
+const DEVICES: [&str; 22] = [
+    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
+    "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+];
+
+/// One id of the manifest; the id is its position in the list.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Entry {
+    Material { name: String, gloss: u8 },
+    Retired,
+}
+
+/// Why a manifest was refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ManifestError {
+    TooLarge,
+    NotText,
+    /// It lists no ids at all.
+    Empty,
+    /// It lists more than [`MAX_MATERIALS`] ids.
+    TooMany,
+    /// A line is wrong; the number counts from 1.
+    Line(usize, LineError),
+}
+
+/// What is wrong with a line of the manifest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineError {
+    TooLong,
+    /// Not `id name gloss` or `id retired`.
+    BadFields,
+    /// Not a plain decimal number that fits an id.
+    BadId,
+    /// An id that an earlier line already used: ids go up in order.
+    DuplicateId,
+    /// An id beyond the next one: a deleted material must stay as `retired`.
+    Gap,
+    /// A stock id marked retired: levels and the renderer need all of them.
+    RetiredStock,
+    /// Not usable as a file name; see [`name_is_valid`].
+    BadName,
+    DuplicateName,
+    /// Not a plain decimal number from 0 to 255.
+    BadGloss,
+}
+
+/// A name is 1 to 48 of `[a-z0-9-]`, starting and ending with a letter or digit,
+/// and is no Windows device. With no `_`, `/`, `\`, `.` or `:` it cannot leave
+/// the directory, and it cannot be read as a companion (`_n`, `_h`, `_s`) or
+/// hidden (`_`) file.
+pub fn name_is_valid(name: &str) -> bool {
+    let plain = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit();
+    let bytes = name.as_bytes();
+    (1..=MAX_NAME).contains(&bytes.len())
+        && bytes.iter().all(|&b| plain(b) || b == b'-')
+        && bytes.first().copied().is_some_and(plain)
+        && bytes.last().copied().is_some_and(plain)
+        && name != RETIRED
+        && !DEVICES.contains(&name)
+}
+
+/// A number written exactly as it prints, so `+5`, `007` and the like are out.
+fn number<T: std::str::FromStr + ToString>(text: &str) -> Option<T> {
+    let n: T = text.parse().ok()?;
+    (n.to_string() == text).then_some(n)
+}
+
+/// The entry of one line that is not blank or a comment, which must be id `next`.
+fn parse_line(text: &str, next: usize) -> Result<Entry, LineError> {
+    let mut fields = text.split_ascii_whitespace();
+    let (id, name, gloss, extra) = (fields.next(), fields.next(), fields.next(), fields.next());
+    let (Some(id), Some(name), None) = (id, name, extra) else {
+        return Err(LineError::BadFields);
+    };
+    let id = usize::from(number::<u16>(id).ok_or(LineError::BadId)?);
+    if id < next {
+        return Err(LineError::DuplicateId);
+    }
+    if id > next {
+        return Err(LineError::Gap);
+    }
+    match gloss {
+        None if name == RETIRED && id < STOCK.len() => Err(LineError::RetiredStock),
+        None if name == RETIRED => Ok(Entry::Retired),
+        None => Err(LineError::BadFields),
+        Some(gloss) if name_is_valid(name) => Ok(Entry::Material {
+            name: name.to_string(),
+            gloss: number(gloss).ok_or(LineError::BadGloss)?,
+        }),
+        Some(_) => Err(LineError::BadName),
+    }
+}
+
+/// The entries of a manifest's bytes, by id.
+pub fn parse(bytes: &[u8]) -> Result<Vec<Entry>, ManifestError> {
+    if bytes.len() as u64 > MAX_BYTES {
+        return Err(ManifestError::TooLarge);
+    }
+    let text = std::str::from_utf8(bytes).map_err(|_| ManifestError::NotText)?;
+    let mut entries = Vec::new();
+    let mut names = HashSet::new();
+    for (i, line) in text.lines().enumerate() {
+        let number = i + 1;
+        if line.len() > MAX_LINE {
+            return Err(ManifestError::Line(number, LineError::TooLong));
+        }
+        let line = line.trim_ascii();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if entries.len() == MAX_MATERIALS {
+            return Err(ManifestError::TooMany);
+        }
+        let entry =
+            parse_line(line, entries.len()).map_err(|why| ManifestError::Line(number, why))?;
+        if let Entry::Material { name, .. } = &entry
+            && !names.insert(name.clone())
+        {
+            return Err(ManifestError::Line(number, LineError::DuplicateName));
+        }
+        entries.push(entry);
+    }
+    if entries.is_empty() {
+        return Err(ManifestError::Empty);
+    }
+    Ok(entries)
+}
+
+/// Reads and checks the manifest at `path`, never holding more of it than the
+/// size limit allows. `None` when there is no such file.
+pub fn read(path: &Path) -> Result<Option<Vec<Entry>>, TextureError> {
+    let io = |e: std::io::Error| TextureError::Io(format!("{}: {e}", path.display()));
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(io(e)),
+    };
+    let mut bytes = Vec::new();
+    file.take(MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(io)?;
+    parse(&bytes).map(Some).map_err(TextureError::Manifest)
+}
+
+/// The entries of a directory with no manifest: every base texture, sorted by
+/// name. Files starting with `_` and the `_n`, `_h` and `_s` companions are not
+/// base textures.
+pub fn from_listing(dir: &Path) -> Result<Vec<Entry>, TextureError> {
+    let io = |e: std::io::Error| TextureError::Io(format!("{}: {e}", dir.display()));
+    let mut names = Vec::new();
+    for entry in std::fs::read_dir(dir).map_err(io)? {
+        let file = entry.map_err(io)?.file_name();
+        let file = file.to_string_lossy();
+        if let Some(stem) = file.strip_suffix(".png") {
+            let companion = ["_n", "_h", "_s"].iter().any(|s| stem.ends_with(s));
+            if !stem.starts_with('_') && !companion {
+                names.push(stem.to_string());
+            }
+        }
+    }
+    names.sort();
+    Ok(names
+        .into_iter()
+        .map(|name| Entry::Material {
+            name,
+            gloss: DEFAULT_GLOSS,
+        })
+        .collect())
+}
+
+#[cfg(test)]
+#[path = "manifest_tests.rs"]
+mod manifest_tests;

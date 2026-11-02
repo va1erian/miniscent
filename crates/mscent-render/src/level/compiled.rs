@@ -17,7 +17,7 @@ use super::{
     Actor, BakeCache, BakedLight, BuildConfig, BuildError, LevelRenderer, actors_of,
     check_materials, lights_of, with_level_fog,
 };
-use crate::texture::MaterialTable;
+use crate::material::MaterialTable;
 
 /// Draft luxel size; the baker coarsens it further if the atlas asks for that.
 const DRAFT_LUXEL: f32 = 1.0;

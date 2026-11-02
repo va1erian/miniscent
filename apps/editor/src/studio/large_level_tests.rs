@@ -40,7 +40,8 @@ fn a_level_too_tall_for_the_old_atlas_reaches_full_light_at_its_own_luxel_size()
     );
     assert_eq!(bakes(&studio), 1);
     let cache = studio.cache();
-    let job = build::start_preview(&doc, &cache, &studio.settings).expect("starts");
+    let job =
+        build::start_preview(&doc, &cache, &Default::default(), &studio.settings).expect("starts");
     let built = loop {
         if let Some(r) = job.poll() {
             break r.expect("builds");

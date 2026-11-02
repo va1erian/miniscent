@@ -2,7 +2,7 @@ use super::*;
 use mscent_math::Vec3d;
 use mscent_world::{Brush, Op, Portals, compile, extract_faces};
 
-use crate::texture::MaterialTable;
+use crate::material::MaterialTable;
 
 fn cuboid(a: [f64; 3], b: [f64; 3], op: Op, order: u32) -> Brush {
     let v = |p: [f64; 3]| Vec3d::new(p[0], p[1], p[2]);

@@ -3,13 +3,15 @@
 // Several parallel per-axis arrays are indexed by the same axis number.
 #![allow(clippy::needless_range_loop)]
 
-use mscent_world::{Entity, Op, materials::NAMES};
+use mscent_render::MaterialTable;
+use mscent_world::{Entity, Op};
 use xui::backend::WidgetId;
 use xui::prelude::*;
 use xui::widget::{Edit, GroupBox, HasText};
 
 use super::Msg;
 use super::facepanel::FacePanel;
+use super::material_list::MaterialChoices;
 use crate::model::entity::{entity_name, params, pos, set_param, with_pos};
 use crate::model::{EditorState, Shape, Tool};
 
@@ -17,7 +19,8 @@ use crate::model::{EditorState, Shape, Tool};
 #[derive(Clone, Debug, PartialEq)]
 pub enum Prop {
     Op(usize),
-    Material(usize),
+    /// A material picked in the list; `None` is the row that picks nothing.
+    Material(Option<u16>),
     Min(usize, f64),
     Max(usize, f64),
     Pos(usize, f64),
@@ -43,6 +46,11 @@ pub struct Panel {
     what: Handle<Label<Msg>>,
     op: Handle<ComboBox<Msg>>,
     material: Handle<ComboBox<Msg>>,
+    /// Holds `material`: a combo box's items are fixed, so a new list is a new one.
+    material_host: Handle<xui::widget::Panel<Msg>>,
+    materials: MaterialChoices,
+    /// The generation of the material table the lists were made from.
+    materials_shown: u64,
     min: [Handle<NumberField<Msg>>; 3],
     max: [Handle<NumberField<Msg>>; 3],
     pos: [Handle<NumberField<Msg>>; 3],
@@ -88,6 +96,44 @@ impl Panel {
             || self.material.get().id() == id
     }
 
+    /// The material list's handle, which follows it when it is remade, for tests.
+    #[cfg(test)]
+    pub fn material_handle(&self) -> Handle<ComboBox<Msg>> {
+        self.material.clone()
+    }
+
+    pub fn materials_shown(&self) -> u64 {
+        self.materials_shown
+    }
+
+    /// Fills the material lists from `table` of `generation`, remaking the
+    /// widgets if they exist, and returns the texel sizes by material id. No
+    /// table leaves the stock names and no thumbnails.
+    pub fn show_materials(
+        &mut self,
+        generation: u64,
+        table: Option<&MaterialTable>,
+    ) -> Vec<(u32, u32)> {
+        self.materials_shown = generation;
+        self.materials = table.map(MaterialChoices::from_table).unwrap_or_default();
+        let sizes = self.face.show_materials(table, self.ui.as_ref());
+        if let (Some(host), Some(ui)) = (self.material_host.try_get(), &self.ui) {
+            // A failure leaves the old list up, which is still usable.
+            let _ = host.set_layout(self.material_list());
+            ui.invalidate_layout();
+        }
+        sizes
+    }
+
+    /// The material list, in a layout of its own to mount in `material_host`.
+    fn material_list(&self) -> Layout<Msg> {
+        let choices = self.materials.clone();
+        let list = combo_box(&self.materials.labels())
+            .on_select(move |row| Msg::Prop(Prop::Material(choices.id_of(row))))
+            .bind(&self.material);
+        column().child(list)
+    }
+
     /// Gives the panel the UI it needs to show and hide its sections.
     pub fn attach(&mut self, ui: &Ui<Msg>) {
         self.ui = Some(ui.clone());
@@ -110,9 +156,9 @@ impl Panel {
             )
             .child(label("Material"))
             .child(
-                combo_box(&NAMES)
-                    .on_select(|i| Msg::Prop(Prop::Material(i)))
-                    .bind(&self.material),
+                panel(self.material_list())
+                    .plain()
+                    .bind(&self.material_host),
             );
         // Min and Max take one row each (X, Y, Z side by side) so the
         // Face section below stays on screen.
@@ -220,7 +266,7 @@ impl Panel {
             self.op.get().select(usize::from(b.op == Op::Subtract));
             self.material
                 .get()
-                .select((b.material as usize).min(NAMES.len() - 1));
+                .select(self.materials.row_of(b.material));
         }
         for a in 0..3 {
             self.min[a].get().set_value(lo[a]);
@@ -251,7 +297,8 @@ pub fn apply(st: &mut EditorState, prop: Prop) -> bool {
         Prop::Op(i) => st.edit_selected_brush(|b| {
             b.op = if i == 0 { Op::Add } else { Op::Subtract };
         }),
-        Prop::Material(i) => st.edit_selected_brush(|b| b.set_material(i as u16)),
+        Prop::Material(Some(id)) => st.edit_selected_brush(|b| b.set_material(id)),
+        Prop::Material(None) => false,
         Prop::Min(a, v) => st.edit_selected_brush(|b| {
             if let Shape::Box { min, .. } = &mut b.shape {
                 min[a] = v;

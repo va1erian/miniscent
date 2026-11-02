@@ -91,7 +91,9 @@ impl Studio {
             Preview::Empty
         } else if self.error.is_some() {
             Preview::Failed
-        } else if self.built_doc.as_ref() != Some(doc) {
+        } else if self.built_doc.as_ref() != Some(doc)
+            || self.built_materials != self.materials_seen
+        {
             Preview::Updating
         } else if self.light == Light::Full {
             Preview::Full
@@ -125,6 +127,7 @@ impl Studio {
         }
         self.empty = false;
         self.watch_script();
+        self.watch_materials();
         let changed = self.wanted.as_ref() != Some(doc);
         if changed {
             self.changed_at = Instant::now();
@@ -142,6 +145,18 @@ impl Studio {
         self.script_watch.checked = Instant::now();
         let files = self.script_watch.files.as_mut();
         self.refresh |= files.is_some_and(ScriptWatcher::changed);
+    }
+
+    /// A new generation of the material table builds the picture again, as a
+    /// finished bake does: same document, so the same lightmap comes back.
+    fn watch_materials(&mut self) {
+        let generation = self.materials.generation();
+        if generation != self.materials_seen {
+            self.materials_seen = generation;
+            self.refresh = true;
+            // The table that failed is gone; this one has not been tried.
+            self.error = None;
+        }
     }
 
     /// An empty level draws nothing, so the last picture must go; whatever is
@@ -166,7 +181,7 @@ impl Studio {
         self.refresh = false;
         self.flush_cache_path();
         self.wanted = Some(doc.clone());
-        match build::start_preview(doc, &self.cache, &self.settings) {
+        match build::start_preview(doc, &self.cache, &self.materials, &self.settings) {
             Ok(job) => self.preview_job = Some(job),
             Err(e) => self.preview_failed(e, doc, doc, out),
         }
@@ -223,6 +238,7 @@ impl Studio {
         self.error = None;
         self.light = built.light;
         self.light_key = built.light_key;
+        self.built_materials = built.materials;
         let why = built.unplayable().map(str::to_string);
         self.script_watch.files = built.watch.clone();
         self.attach(Box::new(LevelScene::new(built)), made_for, why);
@@ -242,6 +258,7 @@ impl Studio {
         match &mut self.worker {
             Some(w) if same_level && built.light == Light::Full => {
                 self.light = Light::Full;
+                self.built_materials = built.materials;
                 w.relight(built);
             }
             _ => self.wanted = None,

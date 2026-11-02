@@ -30,9 +30,10 @@ use mscent_world::{Bsp, Face, LeafKind, Portals};
 
 use crate::camera::Camera;
 use crate::framebuffer::Framebuffer;
+use crate::material::{MaterialId, MaterialTable};
 use crate::raster::{DrawStats, PolyList, Vertex};
 use crate::shade::{FlatShader, Fog, SpanShader};
-use crate::texture::{MaterialId, MaterialTable, Texture};
+use crate::texture::Texture;
 
 /// How far behind a portal plane the eye may be and still look through it,
 /// in world units. Absorbs the `f32` rounding of the camera position.

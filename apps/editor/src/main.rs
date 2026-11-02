@@ -9,6 +9,7 @@
 
 mod build;
 mod files;
+mod materials;
 mod model;
 mod selftest;
 mod studio;

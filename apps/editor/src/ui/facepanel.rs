@@ -1,7 +1,7 @@
 //! The "Face / texture" section of the properties column: a material
 //! browser and Hammer's Face Edit fields for the faces being edited.
 
-use mscent_render::Texture;
+use mscent_render::{MaterialTable, Texture};
 use mscent_world::texinfo::Justify;
 use xui::Image;
 use xui::backend::WidgetId;
@@ -12,7 +12,7 @@ use super::Msg;
 use super::app::cmd;
 use super::toolbar::IconButton;
 use crate::model::EditorState;
-use crate::model::facetex::FaceEdit;
+use crate::model::facetex::{DEFAULT_TEXTURE, FaceEdit};
 
 /// Side of a material preview, in dip.
 const THUMB: i32 = 40;
@@ -35,10 +35,20 @@ fn edit(e: FaceEdit) -> Msg {
     Msg::Face(FaceMsg::Edit(e))
 }
 
+/// A material in the browser. Its place in the list is not its id: retired ids
+/// have no place.
+struct Preview {
+    id: u16,
+    name: String,
+    image: Image,
+}
+
 /// Handles to every widget of the section.
 #[derive(Default)]
 pub struct FacePanel {
-    previews: Vec<(String, Image)>,
+    previews: Vec<Preview>,
+    /// Holds the thumbnails, which are made once per list.
+    thumb_host: Handle<xui::widget::Panel<Msg>>,
     group: Handle<GroupBox<Msg>>,
     summary: Handle<Label<Msg>>,
     thumbs: Vec<Handle<IconButton<Msg>>>,
@@ -84,24 +94,47 @@ fn round(v: f32) -> f64 {
 }
 
 impl FacePanel {
-    /// Reads the textures for the previews and returns their texel sizes,
-    /// by material id. Without textures the browser is empty.
-    pub fn load_previews(&mut self) -> Vec<(u32, u32)> {
-        let Ok(table) = miniscent_game::assets::load_materials(None) else {
-            return Vec::new();
-        };
-        let mut sizes = Vec::new();
-        for i in 0..table.len() as u16 {
-            let Some(m) = table.get(mscent_render::MaterialId(i)) else {
-                continue;
-            };
-            sizes.push((m.texture.width(), m.texture.height()));
-            if let Some(img) = preview_of(&m.texture) {
-                self.previews.push((m.name.clone(), img));
+    /// Makes the previews of `table`, remaking the thumbnails if they exist, and
+    /// returns the texel sizes by material id: a retired id, which draws the grey
+    /// fallback, has the size the scene gives that. Without textures the browser
+    /// is empty. `root` is as in [`Self::layout`].
+    pub fn show_materials(
+        &mut self,
+        table: Option<&MaterialTable>,
+        root: Option<&Ui<Msg>>,
+    ) -> Vec<(u32, u32)> {
+        let mut sizes = vec![DEFAULT_TEXTURE; table.map_or(0, MaterialTable::len)];
+        self.previews.clear();
+        for (id, m) in table.iter().flat_map(|t| t.iter()) {
+            sizes[usize::from(id.0)] = (m.texture.width(), m.texture.height());
+            if let Some(image) = preview_of(&m.texture) {
+                let (id, name) = (id.0, m.name.clone());
+                self.previews.push(Preview { id, name, image });
             }
         }
         self.thumbs = self.previews.iter().map(|_| Handle::new()).collect();
+        if let Some(host) = self.thumb_host.try_get() {
+            // A failure leaves an empty browser; the fields still work.
+            let _ = host.set_layout(self.thumbnails(root.cloned()));
+        }
         sizes
+    }
+
+    /// The material browser, in a layout of its own to mount in `thumb_host`.
+    fn thumbnails(&self, root: Option<Ui<Msg>>) -> Layout<Msg> {
+        let mut thumbs = wrap().gap(4);
+        for (preview, handle) in self.previews.iter().zip(&self.thumbs) {
+            let tip = format!("{} (material {})", preview.name, preview.id);
+            let (image, msg) = (preview.image.clone(), edit(FaceEdit::Material(preview.id)));
+            let root = root.clone();
+            thumbs = thumbs.child(
+                build(move |ui| {
+                    IconButton::picture(ui, root.as_ref().unwrap_or(ui), image, &tip, msg, THUMB)
+                })
+                .bind(handle),
+            );
+        }
+        thumbs
     }
 
     /// Whether `id` is one of the section's text fields.
@@ -116,18 +149,7 @@ impl FacePanel {
     /// `root` is the window-level handle the thumbnails' tooltips are made
     /// through, so they are not clipped to this panel.
     pub fn layout(&self, root: Option<Ui<Msg>>) -> impl IntoEntry<Msg> + use<> {
-        let mut thumbs = wrap().gap(4);
-        for (i, ((name, image), handle)) in self.previews.iter().zip(&self.thumbs).enumerate() {
-            let (image, tip) = (image.clone(), format!("{name} (material {i})"));
-            let msg = edit(FaceEdit::Material(i as u16));
-            let root = root.clone();
-            thumbs = thumbs.child(
-                build(move |ui| {
-                    IconButton::picture(ui, root.as_ref().unwrap_or(ui), image, &tip, msg, THUMB)
-                })
-                .bind(handle),
-            );
-        }
+        let thumbs = panel(self.thumbnails(root)).plain().bind(&self.thumb_host);
         let scale_range = (-1000.0, 1000.0, 0.0625);
         let shift_range = (-65_536.0, 65_536.0, 1.0);
         let pair = |label_text: &str,
@@ -242,11 +264,12 @@ impl FacePanel {
         };
         let name = self
             .previews
-            .get(usize::from(t.material))
-            .map_or("?", |p| p.0.as_str());
+            .iter()
+            .find(|p| p.id == t.material)
+            .map_or("?", |p| p.name.as_str());
         self.summary.get().set_text(&format!("{faces}: {name}"));
-        for (h, i) in self.thumbs.iter().zip(0u16..) {
-            h.get().set_checked(i == t.material);
+        for (h, p) in self.thumbs.iter().zip(&self.previews) {
+            h.get().set_checked(p.id == t.material);
         }
         for (h, value) in self.scale.iter().zip([t.u_scale, t.v_scale]) {
             h.get().set_value(round(value));

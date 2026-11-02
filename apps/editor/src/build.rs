@@ -9,18 +9,16 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
-use miniscent_game::assets::load_materials;
 use miniscent_game::scripts::{self, ScriptFiles, ScriptWatcher};
 use miniscent_game::{GameSession, SessionConfig};
 use mscent_game::{Arena, LoadError};
-use mscent_render::{
-    BakeCache, BakeReport, BuildError, Compiled, LevelRenderer, MaterialTable, Source,
-};
+use mscent_render::{BakeCache, BakeReport, BuildError, Compiled, LevelRenderer, Source};
 use mscent_world::lightmap::LightmapError;
 use mscent_world::{Entity, Level};
 
+use crate::materials::SharedMaterials;
 use crate::model::Document;
 
 /// The last full lightmap, shared by every job: an edit that leaves faces and
@@ -44,6 +42,8 @@ pub struct Built {
     pub light: Light,
     /// Identifies the full lightmap of this level.
     pub light_key: u64,
+    /// The generation of the material table it draws with.
+    pub materials: u64,
     /// The cache's account of a [`Light::Full`] lightmap.
     pub report: Option<BakeReport>,
     /// Reloads the level's script while it is played, for a saved level.
@@ -186,10 +186,13 @@ pub(crate) fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
 pub fn start_preview(
     doc: &Document,
     cache: &SharedCache,
+    materials: &SharedMaterials,
     cfg: &SessionConfig,
 ) -> Result<Job<Built>, String> {
-    let (cache, cfg) = (Arc::clone(cache), *cfg);
-    spawn("mscent-preview", doc, move |doc| preview(doc, &cache, &cfg))
+    let (cache, materials, cfg) = (Arc::clone(cache), Arc::clone(materials), *cfg);
+    spawn("mscent-preview", doc, move |doc| {
+        preview(doc, &cache, &materials, &cfg)
+    })
 }
 
 /// Starts the full bake of `doc`, whose [`Built::light_key`] is `key`.
@@ -208,13 +211,6 @@ pub fn start_bake(
     Ok(BakeJob { job, key, cancel })
 }
 
-/// One decode for the whole session: at 67 ms it would be most of the cost of
-/// a preview, and a clone shares the pixels.
-fn materials() -> Result<MaterialTable, String> {
-    static TABLE: OnceLock<Result<MaterialTable, String>> = OnceLock::new();
-    TABLE.get_or_init(|| load_materials(None)).clone()
-}
-
 fn lock(cache: &SharedCache) -> std::sync::MutexGuard<'_, BakeCache> {
     cache.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -223,7 +219,12 @@ fn compile_level(level: &Level, cfg: &SessionConfig) -> Result<Compiled, String>
     Compiled::new(level, &cfg.build).map_err(|e| format!("CSG failed: {e:?}"))
 }
 
-fn preview(doc: &Document, cache: &SharedCache, cfg: &SessionConfig) -> Result<Built, String> {
+fn preview(
+    doc: &Document,
+    cache: &SharedCache,
+    materials: &SharedMaterials,
+    cfg: &SessionConfig,
+) -> Result<Built, String> {
     let level = validate(doc)?;
     let compiled = compile_level(&level, cfg)?;
     let light_key = compiled.light_key();
@@ -241,8 +242,11 @@ fn preview(doc: &Document, cache: &SharedCache, cfg: &SessionConfig) -> Result<B
             (Arc::new(draft), Light::Draft, None)
         }
     };
+    // One decode for the whole session: at 67 ms it would be most of the cost
+    // of a preview. The table's clone shares its pixels and mips.
+    let (generation, table) = materials.current();
     let renderer = compiled
-        .into_renderer(map, materials()?)
+        .into_renderer(map, table?)
         .map_err(|e| format!("cannot prepare the level: {e:?}"))?;
     // Before the script is read, so an edit made meanwhile is seen as a change.
     let watch = doc.level_path().map(ScriptWatcher::new);
@@ -250,6 +254,7 @@ fn preview(doc: &Document, cache: &SharedCache, cfg: &SessionConfig) -> Result<B
         product: product(&level, renderer, cfg, doc.level_path()),
         light,
         light_key,
+        materials: generation,
         report,
         watch,
     })
@@ -366,6 +371,11 @@ mod tests {
         }
     }
 
+    fn previewed(doc: &Document, cache: &SharedCache) -> Result<Built, String> {
+        let materials = SharedMaterials::default();
+        wait(&start_preview(doc, cache, &materials, &SessionConfig::default()).expect("starts"))
+    }
+
     #[test]
     fn invalid_brushes_and_empty_levels_are_errors_that_name_the_problem() {
         assert!(
@@ -404,9 +414,7 @@ mod tests {
             entities: vec![],
             ..Default::default()
         });
-        let job = start_preview(&doc, &SharedCache::default(), &SessionConfig::default())
-            .expect("starts");
-        let built = wait(&job).expect("builds");
+        let built = previewed(&doc, &SharedCache::default()).expect("builds");
         assert!(built.unplayable().is_some());
     }
 
@@ -421,8 +429,7 @@ player 0 0 0 0
         std::fs::create_dir_all(&dir).expect("dir");
         let mut doc = Document::from_level(&level);
         let cache = SharedCache::default();
-        let cfg = SessionConfig::default();
-        let build = |doc: &Document| wait(&start_preview(doc, &cache, &cfg).expect("starts"));
+        let build = |doc: &Document| previewed(doc, &cache);
 
         let without = build(&doc).expect("builds");
         assert!(without.unplayable().is_some(), "no script, no goal");
@@ -451,8 +458,7 @@ player 0 0 0 0
     fn the_showcase_previews_playable_on_a_draft_and_a_bake_makes_it_full() {
         let doc = Document::from_level(&mscent_world::showcase_level());
         let cache = SharedCache::default();
-        let first = wait(&start_preview(&doc, &cache, &SessionConfig::default()).expect("starts"))
-            .expect("builds");
+        let first = previewed(&doc, &cache).expect("builds");
         assert!(first.unplayable().is_none());
         assert_eq!(first.light, Light::Draft);
         assert_eq!(
@@ -466,8 +472,7 @@ player 0 0 0 0
         let report = wait(&job.job).expect("bakes").expect("not cancelled");
         assert_eq!(report.source, Source::Baked);
 
-        let second = wait(&start_preview(&doc, &cache, &SessionConfig::default()).expect("starts"))
-            .expect("builds");
+        let second = previewed(&doc, &cache).expect("builds");
         assert_eq!(second.light, Light::Full);
         assert_eq!(second.light_key, first.light_key);
         assert_eq!(cache.lock().expect("cache").bakes(), 1);

@@ -31,13 +31,14 @@ use crate::dynlight::MAX_DYN_LIGHTS;
 use crate::framebuffer::Framebuffer;
 use crate::lighting_shader::UvToLuxel;
 use crate::lightmap_mips::LightMips;
+use crate::manifest::DEFAULT_GLOSS;
+use crate::material::{MaterialId, MaterialTable};
 use crate::mesh::{MeshLighting, PointLight as MeshLight};
 use crate::particles::{ParticleDraws, SpriteBank, draw_particles};
 use crate::raster::PolyList;
 use crate::scene::{Scene, SceneStats, eye_of};
 use crate::shade::Fog;
 use crate::specular::SpecTable;
-use crate::texture::{MaterialId, MaterialTable};
 use crate::tiles::TileRenderer;
 
 pub use cache::{BakeCache, BakeReport, BakedLight, Source};
@@ -114,8 +115,8 @@ impl Default for BuildConfig {
 pub enum BuildError {
     Csg(CsgError),
     Bake(LightmapError),
-    /// The material table does not hold the standard textures in id order;
-    /// the value is the first id that is wrong.
+    /// The material table does not hold the stock materials at their ids; the
+    /// value is the first id that is wrong.
     Materials(u16),
 }
 
@@ -240,9 +241,12 @@ fn default_workers() -> usize {
 fn spec_tables(table: &MaterialTable) -> Vec<SpecTable> {
     let mut tables: Vec<SpecTable> = (0u16..)
         .take(table.len())
-        .map(|i| SpecTable::new(table.get(MaterialId(i)).map_or(40, |m| m.gloss)))
+        .map(|i| {
+            let gloss = table.get(MaterialId(i)).map_or(DEFAULT_GLOSS, |m| m.gloss);
+            SpecTable::new(gloss)
+        })
         .collect();
-    tables.push(SpecTable::new(40));
+    tables.push(SpecTable::new(DEFAULT_GLOSS));
     tables
 }
 

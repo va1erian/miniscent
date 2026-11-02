@@ -6,14 +6,15 @@
 //! than a luxel ([`crate::lightmap_mips`]). Sampling per pixel instead of
 //! stepping between samples keeps a shadow edge from sliding with the span
 //! grid. Bump mapping adds a normal fetch and one dot product
-//! ([`crate::bump`]); specular ([`crate::specular`]) adds one more dot and a
-//! table lookup, and only exists in the `SPEC = true` instantiation, so the
+//! ([`crate::bump`]); specular ([`crate::specular`]) adds one more dot, a table
+//! lookup and, inside a highlight, the specular mask from the alpha of the
+//! normal texels. It only exists in the `SPEC = true` instantiation, so the
 //! default path pays nothing for it.
 
 use mscent_math::Vec3;
 use mscent_world::lightmap::{FaceProjection, Lightmap};
 
-use crate::bump::{FLAT_NORMAL, bump_gain, view_normal};
+use crate::bump::{FLAT_NORMAL, NormalSample, bump_gain};
 use crate::face_points::FacePoints;
 use crate::light_sampler::{Cell, FaceSampler, Plan};
 use crate::lightmap_mips::{LightMips, Rgbx};
@@ -87,12 +88,15 @@ const EMPTY_SEG: DirSeg = DirSeg {
     dhalf: Vec3::ZERO,
 };
 
-/// Eye position and power table for the specular path.
+/// Eye position, power table and mask for the specular path.
 #[derive(Clone, Copy)]
 struct SpecInput<'a> {
     /// Eye in the face tangent frame (origin at the face frame's origin).
     eye_t: Vec3,
     table: &'a SpecTable,
+    /// The texture's mean specular mask, for where the mask is not fetched or
+    /// has faded out.
+    mean_mask: f32,
 }
 
 /// Lightmap, bump and optional specular in one span shader.
@@ -141,7 +145,13 @@ impl<'a> LightingShader<'a, true> {
     pub fn with_specular(face: FaceLight<'a>, eye: Vec3, table: &'a SpecTable) -> Option<Self> {
         let proj = face.lightmap.projections().get(face.face)?;
         let eye_t = proj.to_tangent(eye - proj.origin);
-        Self::build(face, Some(SpecInput { eye_t, table }))
+        let mean_mask = face.texture.spec_mean();
+        let spec = SpecInput {
+            eye_t,
+            table,
+            mean_mask,
+        };
+        Self::build(face, Some(spec))
     }
 }
 
@@ -184,6 +194,23 @@ impl<'a, const SPEC: bool> LightingShader<'a, SPEC> {
     /// Whether anything downstream reads the baked light direction.
     fn wants_dir(&self) -> bool {
         (self.normals.is_some() && self.bump_scale > 0.0) || self.spec.is_some()
+    }
+
+    /// The specular mask of a pixel. It fades to the material's mean as the map
+    /// is minified, as the normal does: the normal array has no mips, so the raw
+    /// mask would shimmer. With no fetch to read it from (the fade is complete,
+    /// bump mapping is off or there is no map) the mean is the answer. A mean of
+    /// exactly 1 means every texel is full: no mask, nothing to blend, which
+    /// keeps both the pixels and the cost of a material without one.
+    #[inline]
+    fn spec_mask(&self, spec: &SpecInput, sample: Option<&NormalSample>) -> f32 {
+        if spec.mean_mask >= 1.0 {
+            return 1.0;
+        }
+        match sample {
+            Some(s) => spec.mean_mask + (s.mask() - spec.mean_mask) * self.bump_scale,
+            None => spec.mean_mask,
+        }
     }
 
     /// Unit direction from a point on the face (luxel coordinates) to the eye.
@@ -364,11 +391,17 @@ impl<const SPEC: bool> SpanShader for LightingShader<'_, SPEC> {
         let c = self.col[at];
         let mut k = Vec3::new(c[0], c[1], c[2]);
         let mut n = FLAT_NORMAL;
+        // The fetch the specular path can read the mask from, if there is one.
+        let mut sample = None;
         // Past BUMP_GONE the relief has faded to flat, whose gain is exactly
         // 1, so the normal fetch is skipped.
         if let Some(map) = self.normals.filter(|_| self.bump_scale > 0.0) {
+            let fetched = NormalSample::fetch(&map, fu, fv);
+            if SPEC {
+                sample = Some(fetched);
+            }
             // Fade the normal towards flat as the map is minified.
-            n = view_normal(&map, fu, fv);
+            n = fetched.normal();
             if self.bump_scale < 1.0 {
                 n = FLAT_NORMAL + (n - FLAT_NORMAL) * self.bump_scale;
             }
@@ -387,9 +420,11 @@ impl<const SPEC: bool> SpanShader for LightingShader<'_, SPEC> {
             // restores it.
             let s = spec.table.response(n.dot(h) * (1.5 - 0.5 * h.dot(h)));
             // Most pixels are outside the lobe; below this the add is under
-            // one level for any light the shader can produce.
+            // one level for any light the shader can produce. The mask only
+            // lowers the response, so those pixels need not blend it.
             if s > MIN_SPEC {
-                out = add_spec(out, k, s * SPEC_GAIN);
+                let mask = self.spec_mask(&spec, sample.as_ref());
+                out = add_spec(out, k, s * mask * SPEC_GAIN);
             }
         }
         match self.face.fog {
@@ -410,3 +445,6 @@ impl<const SPEC: bool> SpanShader for LightingShader<'_, SPEC> {
 #[cfg(test)]
 #[path = "lighting_shader_tests.rs"]
 mod lighting_shader_tests;
+#[cfg(test)]
+#[path = "specular_mask_tests.rs"]
+mod specular_mask_tests;
