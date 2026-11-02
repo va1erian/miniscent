@@ -54,6 +54,18 @@ impl Chunk {
         }
     }
 
+    /// Whether the two hold the same changes, materials aside.
+    pub(super) fn same_deltas(&self, other: &Chunk) -> bool {
+        match (self, other) {
+            (Chunk::Uniform { delta: a, .. }, Chunk::Uniform { delta: b, .. }) => a == b,
+            (Chunk::Detail(a), Chunk::Detail(b)) => Arc::ptr_eq(a, b) || a.delta == b.delta,
+            (Chunk::Uniform { delta, .. }, Chunk::Detail(d))
+            | (Chunk::Detail(d), Chunk::Uniform { delta, .. }) => {
+                d.delta.iter().all(|v| v == delta)
+            }
+        }
+    }
+
     /// Returns to the uniform form if the samples allow it.
     pub(super) fn normalize(&mut self) {
         let Chunk::Detail(d) = self else {

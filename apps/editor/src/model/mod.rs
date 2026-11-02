@@ -1,7 +1,7 @@
 //! The editor's pure model: no UI types, fully testable.
 
+pub mod brush_def;
 pub mod command;
-pub mod csg_order;
 pub mod document;
 pub mod entity;
 pub mod facetex;
@@ -12,11 +12,11 @@ pub mod pick;
 pub mod pointer;
 pub mod shape_ops;
 pub mod state;
+pub mod stroke;
 pub mod tools;
 pub mod view;
+pub mod voxel;
 
-#[cfg(test)]
-mod csg_order_tests;
 #[cfg(test)]
 mod facetex_tests;
 #[cfg(test)]
@@ -29,6 +29,8 @@ mod review_tests;
 mod tests;
 #[cfg(test)]
 mod tools_tests;
+#[cfg(test)]
+mod voxel_tests;
 
 pub use document::{Document, Shape};
 pub use entity::EntityKind;

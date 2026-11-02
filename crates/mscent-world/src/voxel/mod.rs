@@ -33,6 +33,7 @@ mod chunk;
 mod connectivity;
 mod context;
 mod dab;
+mod edit;
 mod lod;
 mod prim;
 mod surface;
@@ -42,6 +43,8 @@ mod world;
 
 #[cfg(test)]
 mod dab_tests;
+#[cfg(test)]
+mod edit_tests;
 #[cfg(test)]
 mod resolve_tests;
 #[cfg(test)]
@@ -57,6 +60,7 @@ pub use chunk::{Chunk, ChunkData};
 pub use connectivity::{AirMask, Face};
 pub use context::Context;
 pub use dab::{DabOp, apply_dab, fill};
+pub use edit::{MIN_ISLAND_SAMPLES, first_solid, remove_islands};
 pub use lod::Lod;
 pub use prim::Prim;
 pub use surface::{ChunkMesh, Mesher, VoxelVertex};

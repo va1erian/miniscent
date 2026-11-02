@@ -128,11 +128,14 @@ pub fn validate(doc: &Document) -> Result<Level, String> {
     if doc.brushes().is_empty() {
         return Err("nothing to build: the level has no brushes".into());
     }
-    let orders = doc.csg_orders();
-    let mut brushes = Vec::with_capacity(doc.brushes().len());
+    let (mut brushes, mut volumes) = (Vec::new(), Vec::new());
     for (i, def) in doc.brushes().iter().enumerate() {
+        if let Some(v) = def.volume() {
+            volumes.push(v.clone().with_order(i as u32));
+            continue;
+        }
         let brush = def
-            .to_brush(orders.brushes[i])
+            .to_brush(i as u32)
             .map_err(|e| format!("brush {} (id {}) is invalid: {e:?}", i + 1, def.id))?;
         brushes.push(brush);
     }
@@ -143,7 +146,7 @@ pub fn validate(doc: &Document) -> Result<Level, String> {
     let level = Level {
         brushes,
         entities,
-        volumes: orders.volumes,
+        volumes,
         labels: doc.export_labels(),
         mover_groups: doc.export_groups(),
     };

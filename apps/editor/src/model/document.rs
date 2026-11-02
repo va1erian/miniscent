@@ -5,12 +5,11 @@
 //! Names and mover groups refer to those ids, not to list positions, so
 //! reordering and deleting cannot point them at the wrong thing.
 
-use mscent_math::{DPlane, Vec3d};
+use mscent_math::DPlane;
+use mscent_world::voxel::Volume;
 use mscent_world::{Brush, BrushError, Entity, EntityLabel, Level, MoverGroup, Op, TexInfo};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-
-use super::csg_order::{CsgOrders, Volumes};
 
 /// A stable identity that survives reordering, deletion and undo.
 pub type Id = u32;
@@ -22,6 +21,8 @@ pub enum Shape {
     Box { min: [f64; 3], max: [f64; 3] },
     /// Any other convex brush (a ramp): it can move but not be resized.
     Convex(Vec<DPlane>),
+    /// A voxel volume: earlier brushes are what it starts from, later ones cut it.
+    Volume(Volume),
 }
 
 /// One brush as the editor sees it.
@@ -60,152 +61,21 @@ pub struct GroupDef {
     pub brushes: Vec<Id>,
 }
 
-impl BrushDef {
-    /// The axis-aligned bounds `(min, max)`.
-    pub fn bounds(&self) -> ([f64; 3], [f64; 3]) {
-        match &self.shape {
-            Shape::Box { min, max } => (*min, *max),
-            Shape::Convex(planes) => match Brush::new(planes, self.op, 0) {
-                Ok(b) => {
-                    let a = b.bounds();
-                    (
-                        [a.min.x as f64, a.min.y as f64, a.min.z as f64],
-                        [a.max.x as f64, a.max.y as f64, a.max.z as f64],
-                    )
-                }
-                Err(_) => ([0.0; 3], [0.0; 3]),
-            },
-        }
-    }
-
-    /// Whether the box can be resized.
-    pub fn is_box(&self) -> bool {
-        matches!(self.shape, Shape::Box { .. })
-    }
-
-    /// Moves the brush by `d`. A face whose texture is not locked to the
-    /// world keeps its place on the brush (see [`TexInfo::follow_translation`]).
-    pub fn translate(&mut self, d: [f64; 3]) {
-        let offset = Vec3d::new(d[0], d[1], d[2]);
-        for t in &mut self.texinfos {
-            t.follow_translation(offset);
-        }
-        match &mut self.shape {
-            Shape::Box { min, max } => {
-                for i in 0..3 {
-                    min[i] += d[i];
-                    max[i] += d[i];
-                }
-            }
-            Shape::Convex(planes) => {
-                for p in planes {
-                    p.dist += p.normal.x * d[0] + p.normal.y * d[1] + p.normal.z * d[2];
-                }
-            }
-        }
-    }
-
-    /// Builds the game brush with CSG order `order`.
-    pub fn to_brush(&self, order: u32) -> Result<Brush, BrushError> {
-        let brush = match &self.shape {
-            Shape::Box { min, max } => Brush::cuboid(
-                Vec3d::new(min[0], min[1], min[2]),
-                Vec3d::new(max[0], max[1], max[2]),
-                self.op,
-                order,
-            )?,
-            Shape::Convex(planes) => Brush::new(planes, self.op, order)?,
-        };
-        let mut brush = brush.with_material(self.material);
-        if self.texinfos.len() == brush.planes().len() {
-            for (i, t) in self.texinfos.iter().enumerate() {
-                brush.set_texinfo(i, *t);
-            }
-        }
-        Ok(brush)
-    }
-
-    /// The mapping of every plane with defaults filled in; empty for an
-    /// invalid brush.
-    pub fn full_texinfos(&self) -> Vec<TexInfo> {
-        self.to_brush(0)
-            .map(|b| b.texinfos().to_vec())
-            .unwrap_or_default()
-    }
-
-    /// Puts `material` on every plane (and makes it the brush's material).
-    pub fn set_material(&mut self, material: u16) {
-        self.material = material;
-        for t in &mut self.texinfos {
-            t.material = material;
-        }
-    }
-
-    pub(super) fn from_brush(id: Id, b: &Brush) -> BrushDef {
-        let shape = shape_of(b);
-        BrushDef {
-            id,
-            texinfos: texinfos_for(&shape, b),
-            shape,
-            op: b.op(),
-            material: b.material(),
-        }
+fn volume_def(id: Id, volume: &Volume) -> BrushDef {
+    BrushDef {
+        id,
+        shape: Shape::Volume(volume.clone()),
+        op: volume.op(),
+        material: 0,
+        texinfos: Vec::new(),
     }
 }
 
-/// The brush's mappings in the plane order [`BrushDef::to_brush`] will
-/// build (a box is rebuilt by `Brush::cuboid`, whose plane order may differ
-/// from a loaded file's).
-fn texinfos_for(shape: &Shape, b: &Brush) -> Vec<TexInfo> {
-    let Shape::Box { min, max } = shape else {
-        return b.texinfos().to_vec();
-    };
-    let canon = Brush::cuboid(
-        Vec3d::new(min[0], min[1], min[2]),
-        Vec3d::new(max[0], max[1], max[2]),
-        b.op(),
-        0,
-    );
-    let Ok(canon) = canon else {
-        return Vec::new();
-    };
-    let find = |n: Vec3d| {
-        b.planes()
-            .iter()
-            .position(|p| (p.normal - n).length() < 1e-9)
-    };
-    let mapped: Option<Vec<TexInfo>> = canon
-        .planes()
-        .iter()
-        .map(|p| find(p.normal).and_then(|i| b.texinfos().get(i).copied()))
-        .collect();
-    mapped.unwrap_or_default()
-}
-
-/// Recognises the six planes of an axis-aligned box.
-fn shape_of(b: &Brush) -> Shape {
-    let mut min = [f64::NAN; 3];
-    let mut max = [f64::NAN; 3];
-    if b.planes().len() == 6 {
-        for p in b.planes() {
-            let n = [p.normal.x, p.normal.y, p.normal.z];
-            for (axis, &c) in n.iter().enumerate() {
-                let others = n
-                    .iter()
-                    .enumerate()
-                    .all(|(i, o)| i == axis || o.abs() < 1e-9);
-                if others && (c - 1.0).abs() < 1e-9 {
-                    max[axis] = p.dist;
-                } else if others && (c + 1.0).abs() < 1e-9 {
-                    min[axis] = -p.dist;
-                }
-            }
-        }
-        if min.iter().chain(max.iter()).all(|v| v.is_finite()) {
-            return Shape::Box { min, max };
-        }
+fn same_shape(a: &Shape, b: &Shape) -> bool {
+    match (a, b) {
+        (Shape::Volume(x), Shape::Volume(y)) => x.same_shape(y),
+        _ => a == b,
     }
-    Shape::Convex(b.planes().to_vec())
 }
 
 /// The whole editable level.
@@ -213,9 +83,6 @@ fn shape_of(b: &Brush) -> Shape {
 pub struct Document {
     brushes: Vec<BrushDef>,
     entities: Vec<EntityDef>,
-    /// Kept so loading and saving a level does not lose them; nothing edits
-    /// them yet.
-    volumes: Volumes,
     labels: BTreeMap<Id, LabelDef>,
     groups: Vec<GroupDef>,
     next_id: Id,
@@ -231,20 +98,26 @@ impl Document {
     /// Imports a level (brush order is list order).
     pub fn from_level(level: &Level) -> Document {
         let mut doc = Document::new();
-        let mut brushes: Vec<(usize, &Brush)> = level.brushes.iter().enumerate().collect();
-        brushes.sort_by_key(|(_, b)| b.order());
-        let orders: Vec<u32> = brushes.iter().map(|(_, b)| b.order()).collect();
+        let mut items: Vec<(u32, usize, bool)> = (level.brushes.iter().enumerate())
+            .map(|(i, b)| (b.order(), i, false))
+            .chain((level.volumes.iter().enumerate()).map(|(i, v)| (v.order(), i, true)))
+            .collect();
+        items.sort_by_key(|&(order, _, volume)| (order, volume));
         let mut brush_ids = vec![0; level.brushes.len()];
-        for (index, b) in brushes {
+        for (_, index, volume) in items {
             let id = doc.alloc_id();
-            brush_ids[index] = id;
-            doc.brushes.push(BrushDef::from_brush(id, b));
+            if volume {
+                doc.brushes.push(volume_def(id, &level.volumes[index]));
+            } else {
+                brush_ids[index] = id;
+                doc.brushes
+                    .push(BrushDef::from_brush(id, &level.brushes[index]));
+            }
         }
         for e in &level.entities {
             let id = doc.alloc_id();
             doc.entities.push(EntityDef { id, entity: *e });
         }
-        doc.volumes = Volumes::new(&level.volumes, &orders, &doc.brushes);
         doc.import_labels(level, &brush_ids);
         doc
     }
@@ -290,9 +163,12 @@ impl Document {
     /// Mover groups as indices. A brush that was deleted or made subtractive
     /// leaves its group, and a group left empty is not exported.
     pub fn export_groups(&self) -> Vec<MoverGroup> {
+        // Volumes are not brushes of the level, so they do not count here.
         let index_of = |id: &Id| {
             let index = self.brush_index(*id)?;
-            (self.brushes[index].op == Op::Add).then_some(index as u32)
+            let def = &self.brushes[index];
+            let before = self.brushes[..index].iter().filter(|b| !b.is_volume());
+            (def.op == Op::Add && !def.is_volume()).then_some(before.count() as u32)
         };
         self.groups
             .iter()
@@ -309,42 +185,35 @@ impl Document {
 
     /// Exports to the game's level type; fails on the first invalid brush.
     pub fn to_level(&self) -> Result<Level, BrushError> {
-        let orders = self.csg_orders();
-        let brushes = self
-            .brushes
-            .iter()
-            .zip(&orders.brushes)
-            .map(|(b, &order)| b.to_brush(order))
-            .collect::<Result<Vec<_>, _>>()?;
+        let (mut brushes, mut volumes) = (Vec::new(), Vec::new());
+        for (order, b) in (0u32..).zip(&self.brushes) {
+            match b.volume() {
+                Some(v) => volumes.push(v.clone().with_order(order)),
+                None => brushes.push(b.to_brush(order)?),
+            }
+        }
         Ok(Level {
             brushes,
             entities: self.entities.iter().map(|e| e.entity).collect(),
-            volumes: orders.volumes,
+            volumes,
             labels: self.export_labels(),
             mover_groups: self.export_groups(),
         })
     }
 
-    /// The CSG order of every brush and volume.
-    pub fn csg_orders(&self) -> CsgOrders {
-        self.volumes.orders(&self.brushes)
-    }
-
     /// Whether `other` has the same shapes, operations, entities and volumes, in
-    /// the same order; only brush materials and texture mappings may differ. The
+    /// the same order; only materials and texture mappings may differ. The
     /// lightmap depends on nothing else. A mover group counts, because it takes
-    /// its brushes out of the CSG. A volume compares whole, materials too, until
-    /// the bake reads volumes (M11.5).
+    /// its brushes out of the CSG.
     pub fn same_geometry(&self, other: &Document) -> bool {
         self.entities == other.entities
             && self.groups == other.groups
-            && self.volumes == other.volumes
             && self.brushes.len() == other.brushes.len()
             && self
                 .brushes
                 .iter()
                 .zip(&other.brushes)
-                .all(|(a, b)| a.id == b.id && a.shape == b.shape && a.op == b.op)
+                .all(|(a, b)| a.id == b.id && same_shape(&a.shape, &b.shape) && a.op == b.op)
     }
 
     pub fn alloc_id(&mut self) -> Id {
