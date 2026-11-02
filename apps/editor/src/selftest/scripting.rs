@@ -120,9 +120,9 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         &format!("a broken script is reported: {}", probe.message()),
     );
 
-    // A good one plays, and the door moves.
+    // Fixing it, with no help from the editor, lets it play: the door moves.
     std::fs::write(&script_file, SCRIPT).expect("writes");
-    stage.emit(Msg::OpenPath(file.clone()));
+    run_for(stage, 1.5);
     wait_for_preview(stage, probe);
     stage.emit(Msg::Menu(cmd::PLAY));
     run.check(

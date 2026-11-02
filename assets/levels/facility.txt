@@ -1,0 +1,28 @@
+miniscent-level 1
+# A sample of level scripting. Three rooms in a row, split by two doors: shoot
+# the switches to open the first, find the keycard to open the second. The
+# terminal turns the guards friendly. Wiring is all in facility.st.
+#
+# Pack it after an edit:
+#   cargo run --release -p miniscent-game -- --pack-level assets/levels/facility.txt assets/levels/facility.msl
+box subtract 0 3  -16 -8 -4  34 8 4
+box add 1 2  0 -8 -4  1 8 4
+box add 2 0  17 -8 -4  18 8 4
+player -12 0 0 -1.5708
+light -8 0 3  1 0.9 0.75  18 1.3
+light 9 0 3  0.8 0.9 1  18 1.3
+light 26 0 3  1 0.7 0.6  18 1.3
+marker -3 -5 -1 0  name door_switch_1
+marker -3 0 2 0  name door_switch_2
+marker -3 5 -1 0  name door_switch_3
+marker 9 -6 -3 0  name key_spot
+marker 9 6.5 -3 0  name sec_terminal
+marker 26 -5 0 0  name wave_1
+marker 26 5 0 0  name wave_2
+enemy 13 4 0 0  tag sec_drones
+enemy 13 -4 0 0  tag sec_drones
+zone 17.5 0 0  4 7.5 3.5  name red_door_area
+zone 26 0 0  7 7.5 3.5  name far_room
+goal 32 0 0 1.5
+mover first_door brushes 1
+mover red_door brushes 2

@@ -62,6 +62,7 @@ pub struct Studio {
     changed_at: Instant,
     /// A bake finished: the next preview picks up its lightmap.
     refresh: bool,
+    script_watch: preview::ScriptWatch,
     /// The document the picture was made from.
     built_doc: Option<Document>,
     /// The lighting of that picture.
@@ -110,6 +111,7 @@ impl Studio {
             wanted: None,
             changed_at: Instant::now(),
             refresh: false,
+            script_watch: Default::default(),
             built_doc: None,
             light: Light::Draft,
             light_key: 0,

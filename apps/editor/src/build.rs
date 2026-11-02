@@ -232,12 +232,14 @@ fn preview(doc: &Document, cache: &SharedCache) -> Result<Built, String> {
     let renderer = compiled
         .into_renderer(map, materials()?)
         .map_err(|e| format!("cannot prepare the level: {e:?}"))?;
+    // Before the script is read, so an edit made meanwhile is seen as a change.
+    let watch = doc.level_path().map(ScriptWatcher::new);
     Ok(Built {
         product: product(&level, renderer, &cfg, doc.level_path()),
         light,
         light_key,
         report,
-        watch: doc.level_path().map(ScriptWatcher::new),
+        watch,
     })
 }
 
