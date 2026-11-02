@@ -4,6 +4,19 @@
 const TAU: f32 = core::f32::consts::TAU;
 const LN2: f32 = core::f32::consts::LN_2;
 
+/// The part of `x` past the whole tile below it, `0.0..1.0`.
+#[inline]
+pub fn frac(x: f32) -> f32 {
+    x - x.floor()
+}
+
+/// Signed distance along a tile whose edges meet: `d` folded into
+/// `-0.5..0.5`, so a shape near one edge reaches texels at the other.
+#[inline]
+pub fn wrap_delta(d: f32) -> f32 {
+    d - (d + 0.5).floor()
+}
+
 /// Sine and cosine of `angle` in radians. Finite for every input; a non-finite
 /// angle reads as 0.
 pub fn sin_cos(angle: f32) -> (f32, f32) {
@@ -92,6 +105,17 @@ mod tests {
                 assert!((got - b.powf(p)).abs() < 1e-3, "{b}^{p}: {got}");
             }
         }
+    }
+
+    #[test]
+    fn wrapped_distances_fold_into_half_a_tile() {
+        assert_eq!(wrap_delta(0.75), -0.25);
+        assert_eq!(wrap_delta(-0.75), 0.25);
+        assert_eq!(wrap_delta(3.0), 0.0);
+        assert_eq!(wrap_delta(0.25), 0.25);
+        assert_eq!(frac(-0.25), 0.75);
+        assert_eq!(frac(2.5), 0.5);
+        assert!(wrap_delta(1e30).abs() <= 0.5);
     }
 
     #[test]
