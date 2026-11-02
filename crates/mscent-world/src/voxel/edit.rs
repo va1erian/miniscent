@@ -306,6 +306,46 @@ fn resolved_at(volume: &Volume, ctx: &mut Context, g: [i32; 3]) -> Option<i8> {
     Some(super::context::apply_cuts(&cuts, value, at, l.cell.units()))
 }
 
+/// The material of the solid sample nearest `p` within a cell, which is what a
+/// shot ending on the surface at `p` struck. `None` when no sample there is solid:
+/// a brush face inside the box, not this field.
+pub fn solid_material_near(volume: &Volume, ctx: &mut Context, p: Vec3d) -> Option<u8> {
+    if ctx.lattice != volume.lattice {
+        return None;
+    }
+    let l = volume.lattice;
+    let own = l.cell.units();
+    let at = [p.x, p.y, p.z];
+    let centre: [i32; 3] = std::array::from_fn(|a| (at[a] / own).round() as i32 - l.origin[a]);
+    let mut best: Option<(f64, u8)> = None;
+    for dz in -1..=1 {
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                let g = [centre[0] + dx, centre[1] + dy, centre[2] + dz];
+                if !resolved_at(volume, ctx, g).is_some_and(|v| v >= 0) {
+                    continue;
+                }
+                let d = (l.position(g) - p).length();
+                if best.is_none_or(|(b, _)| d < b) {
+                    best = material_at(volume, ctx, g).map(|m| (d, m)).or(best);
+                }
+            }
+        }
+    }
+    best.map(|(_, m)| m)
+}
+
+fn material_at(volume: &Volume, ctx: &mut Context, g: [i32; 3]) -> Option<u8> {
+    let edge = CHUNK_EDGE as i32;
+    let coord = g.map(|v| v.div_euclid(edge));
+    let index = volume.lattice.chunk_index(coord)?;
+    let local = g.map(|v| v.rem_euclid(edge) as usize);
+    let i = sample_index(local[0], local[1], local[2]);
+    ctx.ensure_base(index, coord);
+    let (_, stored) = volume.table.get(index)?.sample(i);
+    Some(ctx.cached_base(index)?.material(i, stored))
+}
+
 /// Clears solid samples in `chunks` that belong to a group of fewer than
 /// [`MIN_ISLAND_SAMPLES`]: floating crumbs cost triangles and look like bugs. A
 /// group reaching the box's border is not a crumb, as it may go on outside.

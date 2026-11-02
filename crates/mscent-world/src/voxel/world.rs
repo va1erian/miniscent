@@ -131,10 +131,10 @@ impl VoxelWorld {
         index
     }
 
-    /// Meshes `chunks` of each listed volume of `level` again, off to the side.
-    /// The grids must be those of this world's level.
+    /// Meshes `chunks` of each listed one of `volumes` again, off to the side. The
+    /// grids must be those of this world's level.
     pub fn remesh(
-        level: &Level,
+        volumes: &[Volume],
         brushes: &[Brush],
         bsp: &Bsp,
         wanted: &[(usize, Vec<[u16; 3]>)],
@@ -142,10 +142,10 @@ impl VoxelWorld {
         let mut mesher = Mesher::new();
         let mut out = Vec::new();
         for (v, chunks) in wanted {
-            let Some(volume) = level.volumes.get(*v) else {
+            let Some(volume) = volumes.get(*v) else {
                 continue;
             };
-            let mut ctx = Context::in_level(volume, brushes, &level.volumes);
+            let mut ctx = Context::in_level(volume, brushes, volumes);
             let margin = buried_margin(volume);
             for &c in chunks {
                 let Some(mesh) = mesher.mesh(volume, &mut ctx, c) else {

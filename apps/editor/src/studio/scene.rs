@@ -86,6 +86,10 @@ impl Scene for LevelScene {
         if req.play {
             return self.built.session_mut()?.render(req.w, req.h);
         }
+        // The editor shows the level, not what the last run did to it.
+        if let Some(session) = self.built.session_mut() {
+            session.restore_voxels();
+        }
         if self.fb.as_ref().map(|f| (f.width(), f.height())) != Some((req.w, req.h)) {
             self.fb = Some(Framebuffer::new(req.w, req.h)?);
         }

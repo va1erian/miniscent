@@ -66,7 +66,7 @@ pub use chunk::{Chunk, ChunkData};
 pub use connectivity::{AirMask, Face};
 pub use context::Context;
 pub use dab::{DabOp, apply_dab, fill};
-pub use edit::{MIN_ISLAND_SAMPLES, first_solid, remove_islands};
+pub use edit::{MIN_ISLAND_SAMPLES, first_solid, remove_islands, solid_material_near};
 pub use index::{CellIndex, INDEX_EDGE};
 pub use lod::Lod;
 pub use prim::Prim;

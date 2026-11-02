@@ -104,7 +104,7 @@ fn run_plan(doc: &Document, plan: &LivePlan, bsp: &Bsp) -> Result<VoxelChange, S
     Ok(match plan {
         LivePlan::All => VoxelChange::All(Box::new(VoxelWorld::build(&level, &brushes, bsp))),
         LivePlan::Chunks(wanted) => {
-            VoxelChange::Chunks(VoxelWorld::remesh(&level, &brushes, bsp, wanted))
+            VoxelChange::Chunks(VoxelWorld::remesh(&level.volumes, &brushes, bsp, wanted))
         }
     })
 }

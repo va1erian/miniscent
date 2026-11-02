@@ -19,5 +19,11 @@ pub const ROCK: u16 = 4;
 /// where the voxel surface closes in front of it. Not a texture.
 pub const NO_DRAW: u16 = u16::MAX;
 
+/// Whether a shot carves voxel rock of this material. Rock breaks; the made
+/// materials do not. A table of the game's own materials, not level data.
+pub const fn is_destructible(material: u8) -> bool {
+    material as u16 == ROCK
+}
+
 /// Texture names in id order.
 pub const NAMES: [&str; 5] = ["brick", "floor", "lightpanel", "metal", "rock"];

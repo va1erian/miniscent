@@ -4,8 +4,8 @@
 
 use mscent_collide::{MoverShape, MoverSolid, Solids};
 use mscent_math::{Vec3, Vec3d};
-use mscent_world::voxel::VoxelWorld;
-use mscent_world::{Bsp, CsgError, Entity, LabelError, Level, compile};
+use mscent_world::voxel::{Volume, VoxelWorld};
+use mscent_world::{Brush, Bsp, CsgError, Entity, LabelError, Level, compile};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -128,6 +128,9 @@ pub struct Arena {
     /// The surfaces of the level's voxel volumes, which collision sweeps with
     /// the BSP. Empty for a level without volumes.
     pub voxels: VoxelWorld,
+    /// The level's volumes, and the brushes they rest on, for damage to read.
+    pub volumes: Vec<Volume>,
+    pub static_brushes: Vec<Brush>,
     pub player_start: Vec3,
     pub player_yaw: f32,
     pub goals: Vec<Goal>,
@@ -215,9 +218,17 @@ impl Arena {
         if goal_required && goals.is_empty() {
             return Err(LoadError::NoGoal);
         }
+        // A level with no volumes has no use for a copy of its brushes.
+        let static_brushes = if level.volumes.is_empty() {
+            Vec::new()
+        } else {
+            level.static_brushes().into_owned()
+        };
         Ok(Self {
             bsp,
             voxels,
+            volumes: level.volumes.clone(),
+            static_brushes,
             player_start,
             player_yaw,
             goals,

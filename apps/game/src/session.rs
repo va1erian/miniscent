@@ -9,6 +9,7 @@
 use std::time::Duration;
 
 use mscent_collide::FixedStepper;
+use mscent_game::destruct::VoxelUpdate;
 use mscent_game::fx::combat::{CombatFx, DRONE_TINT, ViewKick};
 use mscent_game::{
     Arena, Event as GameEvent, Game, LoadError, Menu, MenuAction, MenuCommand, Phase, Screen,
@@ -18,6 +19,7 @@ use mscent_platform::{Event, Key, MouseButton};
 use mscent_render::particles::{ParticleDraws, SpriteBank};
 use mscent_render::{
     BakeCache, BuildConfig, BuildError, Framebuffer, LevelRenderer, MaterialTable, Quality, View,
+    VoxelChange,
 };
 use mscent_world::Level;
 
@@ -263,10 +265,28 @@ impl GameSession {
         self.controls.release_all();
         self.menu = Menu::new();
         self.menu.press(MenuCommand::Select);
+        self.sync_voxels();
         (self.hit, self.kill) = (0, 0);
         self.feedback.clear();
         self.fx.clear();
         self.notices.clear();
+    }
+
+    /// Gives the renderer what collision already has, in the same frame.
+    fn sync_voxels(&mut self) {
+        for update in self.game.take_voxel_updates() {
+            self.renderer.apply_voxels(match update {
+                VoxelUpdate::Chunks(list) => VoxelChange::Chunks(list),
+                VoxelUpdate::Reset(world) => VoxelChange::All(world),
+            });
+        }
+    }
+
+    /// Takes the shot-up rock of a run back to the level's, for a view of the
+    /// level between runs.
+    pub fn restore_voxels(&mut self) {
+        self.game.restore_voxels();
+        self.sync_voxels();
     }
 
     fn playing(&self) -> bool {
@@ -297,6 +317,7 @@ impl GameSession {
                 self.prev_orientation = self.game.player.orientation;
                 self.game.step(&input);
             }
+            self.sync_voxels();
             self.note_events();
             self.report_script();
             self.menu.sync_phase(self.game.phase);

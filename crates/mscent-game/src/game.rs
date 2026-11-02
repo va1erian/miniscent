@@ -6,6 +6,7 @@
 
 use crate::arena::Arena;
 use crate::combat::{Sphere, line_of_sight};
+use crate::destruct::Destruction;
 use crate::enemy::{Enemy, Faction};
 use crate::input::Input;
 use crate::mover::{Mover, spawn_movers};
@@ -123,6 +124,8 @@ pub struct Game {
     pub(crate) script: ScriptState,
     /// The script has the test functions, and keeps running after the level ends.
     pub(crate) script_test_mode: bool,
+    /// Shots carving voxel rock.
+    pub destruct: Destruction,
     stepper: FixedStepper,
 }
 
@@ -150,12 +153,14 @@ impl Game {
             vm: None,
             script,
             script_test_mode: false,
+            destruct: Destruction::default(),
             stepper: FixedStepper::new(),
         }
     }
 
     /// Puts everything back at its spawn; valid in any phase.
     pub fn restart(&mut self) {
+        self.destruct.restore(&mut self.arena.voxels);
         let (player, enemies) = spawn(&self.arena);
         self.player = player;
         self.enemies = enemies;
@@ -213,6 +218,7 @@ impl Game {
         let solids = self.arena.solids(&self.solids);
         self.player.step(solids, input);
         self.fire(input);
+        self.step_destruction();
         self.run_enemies();
         self.run_movers();
         self.run_script(mark, input);
@@ -231,6 +237,7 @@ impl Game {
             .weapon
             .fire(solids, origin, dir, enemies, &mut self.props);
         let Some(shot) = shot else { return };
+        self.carve_struck(&shot);
         self.events.push(Event::PlayerFired);
         self.events.push(Event::Shot {
             shooter: Shooter::Player,
