@@ -179,19 +179,21 @@ All five stock recipes need only the first set.
    since `check_materials` needs them. Ids are append-only: deleting a material
    marks its row retired, which keeps a placeholder slot that draws the grey
    fallback, so existing levels keep working. A directory with no manifest keeps
-   sorted ids with gloss 40, for fixtures and `--assets`. A PNG not listed is
-   ignored, and a row with no PNG is an error. Names become file paths, so they
-   match `[a-z0-9-]`, have a length bound, and exclude Windows reserved names.
-   `default_gloss` goes away.
+   sorted ids, with the old gloss values for stock names and 40 for others, so
+   existing `--assets` directories render the same. A PNG not listed is ignored,
+   and a row with no PNG is an error. Names become file paths, so they match
+   `[a-z0-9-]`, have a length bound, and exclude Windows reserved names.
 2. **Specular map (engine side of M5.7).** On load, `_s.png` goes into the alpha
    of the normal texels, which are already fetched per pixel, so there is no
    second texture fetch. The highlight is multiplied by that alpha, only in the
    `SPEC = true` shader. Without `_s` the load forces alpha to 255, including for
    an RGBA `_n.png`, so existing materials must render the same pixels; a test
    asserts it. The mask fades to the material's mean with `bump_scale`, because
-   the normal array has no mips and an unfiltered mask would shimmer. M12.5 also
-   handles the paths that skip the fetch or the highlight: no normal map, zero
-   `bump_scale`, the `is_visible` fallback and the emissive flat path.
+   the normal array has no mips and an unfiltered mask would shimmer. A `_s.png`
+   with no `_n.png` is a load error, since the mask has nowhere to live; Save
+   always writes a normal map. M12.5 also handles the paths that skip the fetch
+   or the highlight: zero `bump_scale`, the `is_visible` fallback and the emissive
+   flat path.
 3. **Reloadable table.** `MaterialTable` holds `Arc<Material>`, filtered once at
    table build, and `assemble` skips textures already filtered. The editor keeps
    one table plus a generation number in place of the two loads. A new generation
