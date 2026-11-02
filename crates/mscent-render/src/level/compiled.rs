@@ -9,9 +9,7 @@ use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use mscent_world::lightmap::store::input_key;
-use mscent_world::lightmap::{
-    BakeConfig, LightFace, Lightmap, LightmapError, PointLight, bake, bake_cancellable,
-};
+use mscent_world::lightmap::{BakeConfig, LightFace, Lightmap, PointLight, bake, bake_cancellable};
 use mscent_world::{Bsp, Face, Level, Portals, compile, extract_faces};
 
 use super::{
@@ -20,9 +18,8 @@ use super::{
 };
 use crate::texture::MaterialTable;
 
-/// Draft luxel sizes, tried in order: one that does not fit the atlas falls
-/// through to the next.
-const DRAFT_LUXELS: [f32; 4] = [1.0, 2.0, 4.0, 8.0];
+/// Draft luxel size; the baker coarsens it further if the atlas asks for that.
+const DRAFT_LUXEL: f32 = 1.0;
 
 /// What the renderer keeps of a compiled level.
 pub(super) struct Parts {
@@ -97,21 +94,14 @@ impl Compiled {
     /// bounce. The same lamps light the same surfaces, so the picture is right
     /// about where light falls until the full bake replaces it.
     pub fn draft(&self) -> Result<Lightmap, BuildError> {
-        let mut last = LightmapError::InvalidConfig;
-        for luxel in DRAFT_LUXELS {
-            let cfg = BakeConfig {
-                luxel_size: luxel.max(self.bake_cfg.luxel_size),
-                light_radius: 0.0,
-                shadow_samples: 1,
-                bounce_gain: 0.0,
-                ..self.bake_cfg
-            };
-            match bake(&self.parts.bsp, &self.light_faces, &self.parts.lights, &cfg) {
-                Err(e @ LightmapError::Atlas(_)) => last = e,
-                other => return other.map_err(BuildError::Bake),
-            }
-        }
-        Err(BuildError::Bake(last))
+        let cfg = BakeConfig {
+            luxel_size: DRAFT_LUXEL.max(self.bake_cfg.luxel_size),
+            light_radius: 0.0,
+            shadow_samples: 1,
+            bounce_gain: 0.0,
+            ..self.bake_cfg
+        };
+        bake(&self.parts.bsp, &self.light_faces, &self.parts.lights, &cfg).map_err(BuildError::Bake)
     }
 
     /// The full bake on `workers` threads, touching no cache. Setting `cancel`
@@ -134,6 +124,7 @@ impl Compiled {
             key: self.light_key(),
             map,
             ms: t.elapsed().as_secs_f64() * 1e3,
+            asked_luxel: cfg.luxel_size,
         })
     }
 
@@ -155,6 +146,7 @@ mod tests {
     use crate::level::{Quality, Source, View};
     use crate::{Framebuffer, MaterialTable};
     use mscent_math::Vec3;
+    use mscent_world::lightmap::LightmapError;
     use mscent_world::showcase_level;
     use std::path::Path;
     use std::sync::atomic::Ordering;

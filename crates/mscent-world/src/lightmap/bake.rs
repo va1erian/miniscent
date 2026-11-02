@@ -3,9 +3,10 @@
 use super::atlas::{Atlas, PADDING, Rect, ppm};
 use super::bounce;
 use super::filter;
+use super::layout::{Layout, lay_out};
 use super::parallel::par_map;
 use super::soft;
-use super::uv::{FaceProjection, project_face};
+use super::uv::FaceProjection;
 use super::{BakeConfig, LightFace, LightmapError, Luxel, PointLight};
 use crate::bsp::Bsp;
 use mscent_math::Vec3;
@@ -62,6 +63,13 @@ impl Lightmap {
     /// Per-face UV frames, indexed like the faces given to [`bake`].
     pub fn projections(&self) -> &[FaceProjection] {
         &self.proj
+    }
+
+    /// The finest luxel size of any face, in world units: the size asked for
+    /// unless the level had to be coarsened to fit the atlas.
+    pub fn finest_luxel(&self) -> Option<f32> {
+        let sizes = self.proj.iter().map(|p| p.luxel_size);
+        sizes.reduce(f32::min)
     }
 
     /// Luxel at an absolute atlas position (gutter included).
@@ -170,13 +178,7 @@ pub fn bake_cancellable(
     cancel: &AtomicBool,
 ) -> Result<Lightmap, LightmapError> {
     validate(lights, cfg)?;
-    let proj = faces
-        .iter()
-        .enumerate()
-        .map(|(i, f)| project_face(f, i, cfg.luxel_size))
-        .collect::<Result<Vec<_>, _>>()?;
-    let sizes: Vec<(u32, u32)> = proj.iter().map(|p| (p.width, p.height)).collect();
-    let atlas = Atlas::pack(&sizes, cfg.atlas_width, cfg.atlas_max_height)?;
+    let Layout { atlas, proj } = lay_out(faces, cfg)?;
     let scene = Scene {
         bsp,
         faces,

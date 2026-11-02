@@ -77,7 +77,7 @@ fn the_baked_bytes_do_not_depend_on_the_worker_count() {
 /// between machines do not trip it.
 #[test]
 fn a_change_of_baker_output_needs_a_version_bump() {
-    const PINNED: (u16, u64) = (3, 0xebc4_7bbf_19bb_6735);
+    const PINNED: (u16, u64) = (4, 0xebc4_7bbf_19bb_6735);
     let (bsp, faces, lights) = scene();
     let map = bake(&bsp, &faces, &lights, &cfg(1)).expect("bakes");
     let mut bytes = Vec::new();

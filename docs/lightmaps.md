@@ -8,10 +8,42 @@ a fixed set of numbers, the same on every frame and every launch.
 ## What a bake is
 
 `mscent-world/src/lightmap/` projects every face onto a grid of luxels
-(`BuildConfig` defaults: 0.25 units per luxel, lamp radius 0.3, 16 shadow
+(`BuildConfig` defaults: 0.125 units per luxel, lamp radius 0.3, 64 shadow
 samples), traces shadow rays from each luxel to each lamp, adds one bounce, and
 stores colour plus a dominant light direction per luxel. The result is one
 `Lightmap`.
+
+## How big the atlas gets
+
+The atlas is 1024 luxels wide and grows downwards to at most 8192 rows: 201 MiB
+at 24 bytes per luxel, which stays under the 256 MiB a cache file may have.
+`lightmap/layout.rs` lays the faces out at the luxel size asked for. A level past
+that limit is laid out again with luxels 1.25 times larger, until it fits, before
+any ray is traced. The whole level coarsens together, so no room looks sharper
+than the next, and the bake report says so (`too big for the atlas: luxels
+coarsened from 0.125 to ...`). A bake fails on the atlas only when one luxel per
+face is too much, which takes about 900 000 faces.
+
+Growing comes first because coarsening costs what the level looks like. Measured
+on the 8 by 8 generated level (348 brushes, 1251 faces, 5.85 million luxels, 24
+threads, release):
+
+| settings | atlas | luxel size | bake | memory and file |
+|---|---|---|---|---|
+| grown limit (what ships) | 1024 x 6472 | 0.125 | 19.8 s | 152 MiB |
+| old limit, coarsened | 1024 x 3032 | 0.244 | 10.1 s | 71 MiB |
+
+The coarsened bake would have had half the detail along each axis, because the
+limit is crossed in steps of 1.25 and 0.195 still overflows by a little. A wider
+atlas holds no more for the same memory: this level takes 148 MiB at width 2048,
+150 at 4096 and 155 at 8192, while the showcase goes from 11 MiB at 1024 to 13,
+18 and 26 because a few tall shelves leave more waste. Keeping the width also
+keeps the showcase's layout and every luxel of it.
+
+The showcase is not affected: 1024 x 486, 11 MiB, about 140 ms before and after,
+and every luxel is bit for bit the same. The generated level, which could not be
+baked before, reloads from its file in 250 ms; the game's peak working set is 486
+MiB after a cold bake and 314 MiB after a reload, and a frame takes 9.8 ms (`--screenshot`).
 
 ## When it runs
 
@@ -72,8 +104,8 @@ or moving an enemy, finds the full lightmap and never shows a draft.
 A **full bake** starts once the picture is current on a draft and the document
 has been still for 150 ms. It uses all cores but one and holds no lock on the
 cache, so previews, Save and Open carry on. A preview whose key differs cancels
-it within one luxel row per worker; a bake that fails (`Atlas(TooTall)` on a very
-large level) leaves the draft up, says so once and is not retried for that key.
+it within one luxel row per worker; a bake that fails leaves the draft up, says
+so once and is not retried for that key.
 When a bake ends, the next preview finds the result and swaps it in.
 
 The picture and the status bar say which stage it is in (`BAKING LIGHT`, `Baking

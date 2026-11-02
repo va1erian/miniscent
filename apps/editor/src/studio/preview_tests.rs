@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use mscent_math::Vec3;
 use mscent_platform::{Event, Key};
 use mscent_render::Framebuffer;
+use mscent_world::lightmap::MAX_SHADOW_SAMPLES;
 use mscent_world::{Entity, Op};
 
 use super::scene::LevelScene;
@@ -25,11 +26,11 @@ fn showcase() -> Document {
 /// What ticking until a condition held looked like from the UI's side.
 #[derive(Default)]
 pub(super) struct Watch {
-    states: HashSet<String>,
-    log: Vec<String>,
-    status: Vec<String>,
-    costs: TickCosts,
-    took: Duration,
+    pub states: HashSet<String>,
+    pub log: Vec<String>,
+    pub status: Vec<String>,
+    pub costs: TickCosts,
+    pub took: Duration,
 }
 
 /// Ticks until `done`, with nothing but ticks.
@@ -38,9 +39,18 @@ pub(super) fn tick_until(
     doc: &Document,
     done: impl Fn(&Studio) -> bool,
 ) -> Watch {
+    tick_within(studio, doc, Duration::from_secs(120), done)
+}
+
+pub(super) fn tick_within(
+    studio: &mut Studio,
+    doc: &Document,
+    limit: Duration,
+    done: impl Fn(&Studio) -> bool,
+) -> Watch {
     let mut w = Watch::default();
     let t0 = Instant::now();
-    let end = t0 + Duration::from_secs(120);
+    let end = t0 + limit;
     loop {
         let tick = w.costs.timed(|| studio.tick(&[], PANE, doc));
         w.log.extend(tick.log);
@@ -227,7 +237,7 @@ fn an_edit_during_a_bake_drops_it_and_the_newest_level_gets_the_light() {
     // The picture's lightmap is the second level's, not the dropped one's.
     let key = studio.light_key;
     let cache = studio.cache();
-    let job = build::start_preview(&second, &cache).expect("starts");
+    let job = build::start_preview(&second, &cache, &SessionConfig::default()).expect("starts");
     let built = loop {
         if let Some(r) = job.poll() {
             break r.expect("builds");
@@ -239,19 +249,15 @@ fn an_edit_during_a_bake_drops_it_and_the_newest_level_gets_the_light() {
 }
 
 #[test]
-fn a_bake_that_cannot_fit_keeps_the_draft_says_so_and_is_not_retried() {
-    // Eight by eight rooms overflow the atlas at the full luxel size.
-    let params = mscent_world::GenParams {
-        cols: 8,
-        rows: 8,
-        ..mscent_world::GenParams::default()
-    };
-    let doc = Document::from_level(&mscent_world::generate_level(7, &params));
+fn a_bake_that_fails_keeps_the_draft_says_so_and_is_not_retried() {
+    // The baker lays any real level out by coarsening, so the bake is made to
+    // fail on settings only it reads: a draft always traces one ray.
+    let doc = showcase();
     let mut studio = Studio::new(&doc);
+    studio.settings.build.shadow_samples = MAX_SHADOW_SAMPLES + 1;
     let shown = tick_until(&mut studio, &doc, |s| s.is_current(&doc));
     println!(
-        "{} brushes: first picture {:?}, worst UI tick {:?}",
-        doc.brushes().len(),
+        "first picture {:?}, worst UI tick {:?}",
         shown.took,
         shown.costs.worst()
     );
@@ -388,15 +394,16 @@ fn new_light_replaces_the_renderer_under_a_running_game() {
         }
         std::thread::sleep(Duration::from_millis(5));
     };
-    let draft = wait(build::start_preview(&doc, &cache).expect("starts"));
+    let draft =
+        wait(build::start_preview(&doc, &cache, &SessionConfig::default()).expect("starts"));
     let key = draft.light_key;
     let area = |b: &build::Built| b.renderer().lightmap().atlas().height();
     let draft_height = area(&draft);
-    let bake = build::start_bake(&doc, key, &cache).expect("starts");
+    let bake = build::start_bake(&doc, key, &cache, &SessionConfig::default()).expect("starts");
     while bake.job.poll().is_none() {
         std::thread::sleep(Duration::from_millis(5));
     }
-    let full = wait(build::start_preview(&doc, &cache).expect("starts"));
+    let full = wait(build::start_preview(&doc, &cache, &SessionConfig::default()).expect("starts"));
     assert!(area(&full) > draft_height);
 
     let mut scene = LevelScene::new(draft);

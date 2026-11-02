@@ -13,6 +13,7 @@ pub mod atlas;
 mod bake;
 mod bounce;
 mod filter;
+mod layout;
 mod parallel;
 pub mod ray;
 mod soft;
@@ -88,7 +89,8 @@ impl Luxel {
 /// Baker settings.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BakeConfig {
-    /// World units per luxel (grown automatically for huge faces).
+    /// World units per luxel. Grown automatically for huge faces, and for the
+    /// whole level when it would not fit the atlas otherwise.
     pub luxel_size: f32,
     /// Worker threads, at least one.
     pub workers: usize,
@@ -106,6 +108,7 @@ pub struct BakeConfig {
     /// Multiplier on the gathered bounce light.
     pub bounce_gain: f32,
     pub atlas_width: u32,
+    /// The limit on memory and on the cache file: past it the level coarsens.
     pub atlas_max_height: u32,
 }
 
@@ -121,7 +124,8 @@ impl Default for BakeConfig {
             albedo: 0.5,
             bounce_gain: 1.0,
             atlas_width: 1024,
-            atlas_max_height: 4096,
+            // 201 MiB of luxels, under store::MAX_BYTES so such a bake reloads.
+            atlas_max_height: 8192,
         }
     }
 }
@@ -137,7 +141,7 @@ pub enum LightmapError {
     InvalidLight(usize),
     /// Config value out of range.
     InvalidConfig,
-    /// The atlas could not hold every face.
+    /// The atlas could not hold every face, even at one luxel each.
     Atlas(AtlasError),
     /// The caller abandoned the bake.
     Cancelled,
