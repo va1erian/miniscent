@@ -17,6 +17,7 @@ pub(crate) mod list;
 pub(crate) mod shader;
 mod tri;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use mscent_math::Vec3;
@@ -59,8 +60,10 @@ pub(crate) fn axis_map(axis: u8) -> (Vec3, Vec3) {
     AXES[usize::from(axis.min(2))]
 }
 
-/// How far a new cell looks for light to inherit.
+/// How far a new cell can be from the light it inherits and take all of it.
 const INHERIT_CELLS: i32 = 2;
+/// What is left of that light farther in.
+const DEEP_LIGHT: f32 = 0.6;
 
 /// Texels per world unit of a voxel surface.
 pub(crate) const TEXELS_PER_UNIT: f32 = 1.0 / DEFAULT_SCALE;
@@ -135,7 +138,8 @@ fn inherit(
         .collect()
 }
 
-/// The light of the nearest old cell within [`INHERIT_CELLS`].
+/// The light of the nearest old cell. Past [`INHERIT_CELLS`] the cell is deep in
+/// something new, where less of the old light reaches.
 fn nearest_light(cell: [i8; 3], old: &[CellLight]) -> Option<VertexLight> {
     let gap = |c: &[i8; 3]| {
         (0..3)
@@ -143,11 +147,14 @@ fn nearest_light(cell: [i8; 3], old: &[CellLight]) -> Option<VertexLight> {
             .max()
             .unwrap_or(0)
     };
-    old.iter()
+    let (d, mut light) = old
+        .iter()
         .map(|(c, l)| (gap(c), *l))
-        .filter(|&(d, _)| d <= INHERIT_CELLS)
-        .min_by_key(|&(d, _)| d)
-        .map(|(_, l)| l)
+        .min_by_key(|&(d, _)| d)?;
+    if d > INHERIT_CELLS {
+        light.color = light.color * DEEP_LIGHT;
+    }
+    Some(light)
 }
 
 /// A level's voxel surfaces as the renderer keeps them.
@@ -247,6 +254,44 @@ impl VoxelScene {
             });
         }
         self.index();
+    }
+
+    /// The same scene over a remade `world`. A surface that did not move keeps its
+    /// light, found by where its vertices are, so an add volume growing does not
+    /// disturb the rest; `fresh` lights what is new.
+    pub fn remade(
+        &self,
+        world: VoxelWorld,
+        leaf_count: usize,
+        fresh: impl Fn(&ChunkMesh) -> Vec<VertexLight>,
+    ) -> Self {
+        let key = |p: Vec3| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()];
+        let mut old = HashMap::new();
+        for (chunk, data) in self.world.chunks.iter().zip(&self.lods) {
+            for (v, l) in chunk.lods[0].vertices.iter().zip(&data[0].light) {
+                old.insert(key(v.pos), *l);
+            }
+        }
+        let mut full: Vec<CellLight> = Vec::new();
+        Self::new(world, leaf_count, |_, level, mesh| {
+            if level > 0 {
+                return inherit(mesh, &full, &fresh);
+            }
+            let lamps = fresh(mesh);
+            let lit: Vec<VertexLight> = mesh
+                .vertices
+                .iter()
+                .zip(lamps)
+                .map(|(v, lamp)| old.get(&key(v.pos)).copied().unwrap_or(lamp))
+                .collect();
+            full = mesh
+                .vertices
+                .iter()
+                .map(|v| v.cell)
+                .zip(lit.iter().copied())
+                .collect();
+            lit
+        })
     }
 
     fn chunk_at(&self, volume: usize, coord: [u16; 3]) -> Option<u32> {

@@ -337,3 +337,50 @@ fn a_dynamic_light_brightens_a_voxel_wall() {
     });
     assert!(lit > dark + dark / 8, "{dark} then {lit}");
 }
+
+#[test]
+fn remeshed_chunks_open_no_hole_trace_no_ray_and_restore_exactly() {
+    use mscent_world::voxel::VoxelWorld;
+    let level = gyroid_level();
+    let mut r = renderer(&level);
+    let map: *const _ = r.lightmap();
+    let eye = air_pose(&mut Rng::new(1));
+    let view = View::from_angles(eye, 0.4, 0.0, 0.0);
+    // Enough frames for the governor to settle: it is free to change the picture
+    // of a frame over budget, and that is not what this compares.
+    let frame = |r: &LevelRenderer| {
+        let mut fb = Framebuffer::new(320, 180).expect("fb");
+        for _ in 0..80 {
+            r.render(&mut fb, &view, Quality::Low, &[], None)
+                .expect("renders");
+        }
+        fb
+    };
+    let before = frame(&r);
+    let world = r.scene().voxels().world().clone();
+    let brushes = level.static_brushes();
+    let bsp = r.scene().bsp().clone();
+    let mut volumes = level.volumes.clone();
+    let shape = volumes[0].clone();
+    let bite = Prim::sphere(eye.to_f64() + v(0.0, 2.0, 0.0), 1.5).expect("valid");
+    let mut ctx = Context::new(&shape, &brushes);
+    let chunks = apply_dab(&mut volumes[0], &mut ctx, &bite, DabOp::Carve);
+    assert!(!chunks.is_empty());
+    let list = VoxelWorld::remesh(&volumes, &brushes, &bsp, &[(0, chunks)]);
+    r.apply_voxels(crate::VoxelChange::Chunks(list));
+    assert_eq!(holes(&frame(&r)), 0, "a carve opens onto rock, not the sky");
+    assert!(std::ptr::eq(map, r.lightmap()), "the lightmap stays");
+    r.apply_voxels(crate::VoxelChange::Restore(Box::new(world)));
+    assert_eq!(frame(&r).pixels(), before.pixels(), "restored bit for bit");
+}
+
+#[test]
+fn a_remade_world_keeps_the_light_of_what_did_not_move() {
+    let level = gyroid_level();
+    let mut r = renderer(&level);
+    let eye = air_pose(&mut Rng::new(1));
+    let before = picture(&r, eye, 0.4, 0.0);
+    let world = r.scene().voxels().world().clone();
+    r.apply_voxels(crate::VoxelChange::All(Box::new(world)));
+    assert_eq!(picture(&r, eye, 0.4, 0.0).pixels(), before.pixels());
+}

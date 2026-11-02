@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use mscent_math::Vec3;
-use mscent_world::lightmap::{Lightmap, LightmapError, PointLight};
+use mscent_world::lightmap::{CellSites, Lightmap, LightmapError, PointLight};
 use mscent_world::materials;
 use mscent_world::voxel::{RemeshedChunk, VoxelWorld};
 use mscent_world::{CsgError, Level};
@@ -130,6 +130,8 @@ pub enum VoxelChange {
     Chunks(Vec<RemeshedChunk>),
     /// Everything new: an add volume came, went or grew.
     All(Box<VoxelWorld>),
+    /// The surfaces the lightmap was baked for, back again after damage.
+    Restore(Box<VoxelWorld>),
 }
 
 /// A level compiled, lit and ready to draw.
@@ -143,6 +145,8 @@ pub struct LevelRenderer {
     lighting: MeshLighting,
     /// The level's lamps, for voxel surfaces made after the build.
     voxel_lights: Vec<PointLight>,
+    /// The cells the lightmap holds records for.
+    voxel_sites: CellSites,
     actors: Vec<Actor>,
     meshes: overlay::ActorMeshes,
     mover_faces: Vec<movers::MoverFaces>,
@@ -220,11 +224,12 @@ impl LevelRenderer {
             actors,
             cfg,
             voxels,
+            sites,
         } = parts;
         let spec = spec_tables(&materials);
         // The game path pays for smooth texture sampling; the raw
         // rasterizer benchmark does not.
-        let voxels = compiled::lit_voxels(voxels, bsp.leaves().len(), &lights, cfg.ambient);
+        let voxels = compiled::lit_voxels(voxels, bsp.leaves().len(), &sites, &lightmap);
         let scene = Scene::with_voxels(bsp, faces, portals, materials.filtered(), voxels);
         let uv_maps = (0..scene.faces().len())
             .map(|i| {
@@ -250,6 +255,7 @@ impl LevelRenderer {
             mover_faces,
             lighting: mesh_lighting(&lights, cfg.ambient),
             voxel_lights: lights,
+            voxel_sites: sites,
             actors,
             meshes: overlay::ActorMeshes::new(),
             scene,
@@ -271,12 +277,18 @@ impl LevelRenderer {
     pub fn apply_voxels(&mut self, change: VoxelChange) {
         let (lights, ambient) = (&self.voxel_lights, self.cfg.ambient);
         let leaves = self.scene.bsp().leaves().len();
+        let (sites, lightmap) = (&self.voxel_sites, &self.lightmap);
         self.scene.update_voxels(|voxels| match change {
             VoxelChange::Chunks(list) => {
-                voxels.apply(list, |mesh| compiled::vertex_light(mesh, lights, ambient));
+                voxels.apply(list, |mesh| compiled::lamp_light(mesh, lights, ambient));
             }
             VoxelChange::All(world) => {
-                *voxels = compiled::lit_voxels(*world, leaves, lights, ambient);
+                *voxels = voxels.remade(*world, leaves, |mesh| {
+                    compiled::lamp_light(mesh, lights, ambient)
+                });
+            }
+            VoxelChange::Restore(world) => {
+                *voxels = compiled::lit_voxels(*world, leaves, sites, lightmap);
             }
         });
     }

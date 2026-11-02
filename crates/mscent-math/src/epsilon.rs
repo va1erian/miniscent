@@ -25,6 +25,26 @@ pub const VOXEL_SEAM_BIAS_CELLS: f64 = 1.0 / 16.0;
 /// bias of the smallest cell, so a surface sunk behind a brush face stays buried.
 pub const VOXEL_BURIED_MARGIN: f64 = 1.0e-3;
 
+/// Fraction of a shadow ray, at each end, where a voxel triangle does not count
+/// as a hit. A ray starts a fixed bias off the surface it lights and ends at a
+/// lamp, so only a surface touching an end could reach into this band.
+pub const OCCLUDER_RAY_MARGIN: f64 = 1.0e-6;
+
+/// Slack on the edges of a voxel triangle in a shadow ray test, in barycentric
+/// units. A ray through the shared edge of two triangles must hit one of them,
+/// or light would leak through the seams of a mesh.
+pub const OCCLUDER_EDGE_SLACK: f64 = 1.0e-9;
+
+/// A ray whose determinant against a triangle is smaller than this runs in its
+/// plane and misses it. The determinant is unnormalised: ray length times
+/// twice the triangle's area.
+pub const OCCLUDER_PARALLEL: f64 = 1.0e-12;
+
+/// How far, in cells, a voxel cell's light is taken from the surface: its
+/// shadow rays start this far along the normal, as a luxel's start the
+/// normal bias off its wall.
+pub const VOXEL_LIGHT_LIFT_CELLS: f32 = 1.5;
+
 /// Vectors shorter than this are treated as zero when normalizing, so a
 /// degenerate input yields `None` instead of NaN or infinity.
 pub const MIN_LENGTH_F64: f64 = 1.0e-9;

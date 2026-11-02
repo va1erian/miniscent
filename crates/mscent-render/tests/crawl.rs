@@ -16,6 +16,9 @@ mod crawl;
 #[allow(dead_code)]
 #[path = "support/stability.rs"]
 mod stability;
+#[allow(dead_code)]
+#[path = "support/voxel_scene.rs"]
+mod voxel_scene;
 
 use crawl::{COARSE, FULL, Motion, REDUCED, Rig};
 use mscent_render::Quality;
@@ -101,4 +104,24 @@ fn shadow_edges_are_straight_and_steady_at_every_distance_and_scale() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The same goal on a voxel floor, where the light is a colour at each vertex of
+/// the surface and not a texel of an atlas. The values belong to world points, so
+/// the edge must stay put when the camera moves, whatever its shape.
+#[test]
+fn a_shadow_edge_on_a_voxel_floor_is_found_and_does_not_crawl() {
+    let r = stability::build(&voxel_scene::shadowed_room(), Look::Flat);
+    let rig = voxel_scene::rig();
+    for size in [FULL, REDUCED] {
+        let c = crawl::measure(&r, &rig, Quality::Low, size, COARSE).expect("measure");
+        println!("{} {size:?}: {c:?}", rig.name);
+        assert_eq!(c.points, 35);
+        assert!(c.contour_samples >= 38, "found {}", c.contour_samples);
+        assert!(c.lum_rms_edge < 0.9, "luminance noise {}", c.lum_rms_edge);
+        assert!(c.contour_px < 0.06, "contour crawl {}", c.contour_px);
+        // Measured 0.29 (full) and 0.22 (reduced): a Gouraud edge on cells of a
+        // quarter unit steps a little, steadily, which is not crawl.
+        assert!(c.saw_px < 0.5, "stair-step {}", c.saw_px);
+    }
 }

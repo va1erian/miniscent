@@ -277,7 +277,7 @@ impl GameSession {
         for update in self.game.take_voxel_updates() {
             self.renderer.apply_voxels(match update {
                 VoxelUpdate::Chunks(list) => VoxelChange::Chunks(list),
-                VoxelUpdate::Reset(world) => VoxelChange::All(world),
+                VoxelUpdate::Reset(world) => VoxelChange::Restore(world),
             });
         }
     }

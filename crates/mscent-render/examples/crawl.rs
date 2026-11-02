@@ -17,6 +17,9 @@ mod crawl;
 #[allow(dead_code)]
 #[path = "../tests/support/stability.rs"]
 mod stability;
+#[allow(dead_code)]
+#[path = "../tests/support/voxel_scene.rs"]
+mod voxel_scene;
 
 use std::path::Path;
 
@@ -81,6 +84,32 @@ fn dump(dir: &Path, rig: &Rig, run: &Run, tag: &str) {
     );
 }
 
+/// The shadow edge on a voxel floor, at the sizes and steps of the others.
+fn voxel_floor(out: &Path) {
+    let r = stability::build(&voxel_scene::shadowed_room(), Look::Flat);
+    let rig = voxel_scene::rig();
+    println!("== Flat Low, voxel floor: lum = levels, contour/saw = pixels");
+    for (tag, size) in [("full", FULL), ("s750", REDUCED), ("s500", LOW)] {
+        for (step_name, px) in [("1/16px", FINE), ("1/4px", COARSE)] {
+            let c = crawl::measure(&r, &rig, Quality::Low, size, px).expect("measure");
+            println!(
+                "{:<10} {tag:<5} {step_name:<6} lum {:.2} (edge {:.2})  contour {:.3} (max {:.3})  saw {:.3} (pp {:.2})  [{} pts, {} samples]",
+                rig.name,
+                c.lum_rms,
+                c.lum_rms_edge,
+                c.contour_px,
+                c.contour_max,
+                c.saw_px,
+                c.saw_pp,
+                c.points,
+                c.contour_samples
+            );
+        }
+        let run = crawl::run(&r, &rig, Motion::Strafe, Quality::Low, size, COARSE, true);
+        dump(out, &rig, &run.expect("run"), &format!("voxel_{tag}"));
+    }
+}
+
 fn main() {
     let out = std::path::PathBuf::from(
         std::env::args_os()
@@ -127,4 +156,5 @@ fn main() {
             }
         }
     }
+    voxel_floor(&out);
 }
