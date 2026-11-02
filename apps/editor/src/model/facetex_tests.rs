@@ -290,3 +290,20 @@ fn edited_mappings_survive_save_and_load() {
     let all = back.doc.brushes()[0].full_texinfos();
     assert_eq!(all.iter().filter(|t| t.material == 4).count(), 1);
 }
+
+#[test]
+fn the_select_tool_picks_the_brush_under_a_view_ray() {
+    let mut st = EditorState::default();
+    let room = room(&mut st);
+    assert!(
+        st.select_brush_at(&ray([0.0, 0.0, 1.5], [0.0, 0.0, -1.0]))
+            .is_some()
+    );
+    assert_eq!(st.selection, Some(Selection::Brush(room)));
+    // Looking out of the level hits nothing and clears the selection.
+    assert!(
+        st.select_brush_at(&ray([0.0, 0.0, 10.0], [0.0, 0.0, 1.0]))
+            .is_none()
+    );
+    assert_eq!(st.selection, None);
+}

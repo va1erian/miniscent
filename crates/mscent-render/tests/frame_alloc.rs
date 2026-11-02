@@ -47,6 +47,9 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static ALLOC: Counting = Counting;
 
+/// Allocations a showcase frame may make, enemies and goal included.
+const MAX_ALLOCATIONS: usize = 1600;
+
 #[test]
 fn frames_do_not_bake_and_do_not_copy_the_atlas() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures");
@@ -66,12 +69,16 @@ fn frames_do_not_bake_and_do_not_copy_the_atlas() {
     let mut fb = Framebuffer::new(320, 180).expect("fb");
     let view =
         |i: usize| View::from_angles(Vec3::new(3.0 + i as f32 * 0.01, 3.0, 2.5), -0.8, 0.0, 0.0);
+    // The level's own enemies and goal: meshes must not allocate per band.
+    let actors = r.actors().to_vec();
     for q in [Quality::Low, Quality::High] {
-        r.render(&mut fb, &view(0), q, &[], None).expect("warm up");
+        r.render(&mut fb, &view(0), q, &actors, None)
+            .expect("warm up");
         let (c0, b0) = (CALLS.load(Ordering::Relaxed), BYTES.load(Ordering::Relaxed));
         let frames = 8;
         for i in 1..=frames {
-            r.render(&mut fb, &view(i), q, &[], None).expect("frame");
+            r.render(&mut fb, &view(i), q, &actors, None)
+                .expect("frame");
         }
         let calls = (CALLS.load(Ordering::Relaxed) - c0) / frames;
         let bytes = (BYTES.load(Ordering::Relaxed) - b0) / frames;
@@ -79,6 +86,9 @@ fn frames_do_not_bake_and_do_not_copy_the_atlas() {
             "{q:?}: {calls} allocations, {bytes} bytes per frame; atlas is {atlas_bytes} bytes"
         );
         assert!(bytes < atlas_bytes / 8, "{q:?}: {bytes} bytes per frame");
+        // Polygons are clipped once per frame, whatever the band count; per
+        // band they would come to many times this.
+        assert!(calls < MAX_ALLOCATIONS, "{q:?}: {calls} allocations");
     }
     assert_eq!(cache.bakes(), 1, "rendering never bakes");
 }

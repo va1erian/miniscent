@@ -13,6 +13,8 @@ pub struct Input {
     pub yaw: f32,
     pub roll: f32,
     pub fire: bool,
+    /// Held down on something usable.
+    pub use_key: bool,
 }
 
 fn unit(v: f32) -> f32 {
@@ -43,6 +45,7 @@ impl Input {
             yaw: unit(self.yaw),
             roll: unit(self.roll),
             fire: self.fire,
+            use_key: self.use_key,
         }
     }
 }
@@ -59,6 +62,7 @@ mod tests {
             yaw: -3.0,
             roll: f32::NAN,
             fire: true,
+            use_key: false,
         }
         .sanitized();
         assert!(i.thrust.length() <= 1.0 + 1e-6);

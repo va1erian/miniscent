@@ -122,7 +122,8 @@ impl EditorState {
         let cmd = match (self.keep, back, front) {
             (Keep::Both, Some(back), Some(mut front)) => {
                 front.id = self.doc.alloc_id();
-                Command::Batch(vec![
+                let joins = [(def.id, front.id)];
+                let mut list = vec![
                     Command::EditBrush {
                         before: def,
                         after: back,
@@ -131,7 +132,9 @@ impl EditorState {
                         index: index + 1,
                         brush: front,
                     },
-                ])
+                ];
+                list.extend(self.doc.pieces_join_movers(&joins));
+                Command::Batch(list)
             }
             // The discarded side must exist too, or the line missed the brush.
             (Keep::Left, Some(after), Some(_)) | (Keep::Right, Some(_), Some(after)) => {
@@ -157,6 +160,7 @@ impl EditorState {
             return false;
         };
         let mut cmds = Vec::new();
+        let mut joins = Vec::new();
         let mut carved = 0;
         // Last to first, so an edit never moves the index of an earlier one.
         for index in (0..self.doc.brushes().len()).rev() {
@@ -172,12 +176,13 @@ impl EditorState {
                 continue;
             };
             carved += 1;
-            cmds.extend(self.carve_commands(index, target, pieces));
+            cmds.extend(self.carve_commands(index, target, pieces, &mut joins));
         }
         if carved == 0 {
             self.message = "The brush overlaps nothing to carve".into();
             return false;
         }
+        cmds.extend(self.doc.pieces_join_movers(&joins));
         self.history.run(&mut self.doc, Command::Batch(cmds));
         self.selection = None;
         self.faces.clear();
@@ -185,13 +190,16 @@ impl EditorState {
         true
     }
 
-    /// Replaces `target` (at `index`) by `pieces`; the first keeps its id.
+    /// Replaces `target` (at `index`) by `pieces`; the first keeps its id, and
+    /// `joins` gets each other piece with the brush it came from.
     fn carve_commands(
         &mut self,
         index: usize,
         target: BrushDef,
         pieces: Vec<BrushDef>,
+        joins: &mut Vec<(Id, Id)>,
     ) -> Vec<Command> {
+        let source = target.id;
         let mut pieces = pieces.into_iter();
         let Some(mut first) = pieces.next() else {
             return vec![Command::RemoveBrush {
@@ -206,6 +214,7 @@ impl EditorState {
         }];
         for (k, mut brush) in pieces.enumerate() {
             brush.id = self.doc.alloc_id();
+            joins.push((source, brush.id));
             cmds.push(Command::AddBrush {
                 index: index + 1 + k,
                 brush,

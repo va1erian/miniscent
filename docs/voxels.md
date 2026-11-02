@@ -77,6 +77,11 @@ move that loses a corner. Touching volumes must read each other's resolved sampl
 **Not yet:** today a volume's ring sees only brushes, so a tunnel across a shared face is sealed by a
 wall on each side. M11.3 does this before volumes can be seen in a level.
 
+A mover brush stays out of the CSG, so M11.3 builds a `Context` from `Level::static_brushes`.
+
+`--dump-level` refuses a level with volumes, because the text form has none and packing it again
+would lose them. A text form can follow if an agent needs to write volumes.
+
 A volume may not share an order with a brush, because it would then be neither before nor after it.
 The loader refuses that. Until a volume is a `BrushDef` (M11.7), the editor keeps each one right after
 the last surviving brush that preceded it when loaded, and renumbers brushes and volumes as one
@@ -148,7 +153,7 @@ Limits: `MAX_VOLUMES` 256, 4096 chunks per volume, `MAX_DETAIL_CHUNKS` 16 384 pe
 
 ### File format
 
-Level format version 3 adds section `4`. Versions 1 and 2 still load, with no volumes.
+Level format version 4 adds section `5`. Versions 1 to 3 still load, with no volumes.
 
 ```text
 count u32
@@ -514,7 +519,7 @@ Crate edges do not change: field and meshing live in `mscent-world`, so render a
 
 ```text
 crates/mscent-world/src/voxel/   volume, chunk, context and block (fold, base, ring), prim, dab,
-                                 surface (nets), lod, connectivity, wire (section 4), query (grid walk)
+                                 surface (nets), lod, connectivity, wire (section 5), query (grid walk)
 crates/mscent-world/src/lightmap/occluders.rs, cells.rs
 crates/mscent-collide/src/voxel.rs, solids.rs
 crates/mscent-render/src/voxel/  prepare, fill, flood, shader, governor

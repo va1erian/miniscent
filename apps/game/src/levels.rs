@@ -49,6 +49,6 @@ pub fn corridor_level() -> Level {
                 radius: 1.5,
             },
         ],
-        volumes: Vec::new(),
+        ..Default::default()
     }
 }

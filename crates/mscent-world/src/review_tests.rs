@@ -198,7 +198,7 @@ fn extreme_plane_values_in_files() {
     let bytes = format::write(&Level {
         brushes: vec![base],
         entities: vec![],
-        volumes: Vec::new(),
+        ..Default::default()
     });
     // Header 12 + section head 8 + count 4 + brush head 11 = first plane.
     let first = 12 + 8 + 4 + 11;
@@ -242,7 +242,7 @@ fn many_complex_brushes_load_in_bounded_time() {
     let level = Level {
         brushes: vec![b; 2000],
         entities: vec![],
-        volumes: Vec::new(),
+        ..Default::default()
     };
     let bytes = format::write(&level);
     let t = std::time::Instant::now();

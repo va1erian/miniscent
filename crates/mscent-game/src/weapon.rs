@@ -2,9 +2,9 @@
 
 use crate::combat::{Sphere, hitscan};
 use crate::enemy::Enemy;
-use mscent_collide::STEP_HZ;
+use crate::prop::Prop;
+use mscent_collide::{STEP_HZ, Solids};
 use mscent_math::Vec3;
-use mscent_world::Bsp;
 
 /// Shots reach this far.
 pub const WEAPON_RANGE: f32 = 200.0;
@@ -20,6 +20,12 @@ pub struct Shot {
     pub hit: Option<usize>,
     pub killed: bool,
     pub point: Vec3,
+    /// Mover struck, if any.
+    pub mover: Option<usize>,
+    /// Prop struck, if any.
+    pub prop: Option<usize>,
+    /// That prop was destroyed by this shot.
+    pub prop_destroyed: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -37,12 +43,13 @@ impl Weapon {
     }
 
     /// Fires if ready. Dead enemies are not targets.
-    pub fn fire(
+    pub fn fire<'a>(
         &mut self,
-        bsp: &Bsp,
+        solids: impl Into<Solids<'a>>,
         origin: Vec3,
         dir: Vec3,
         enemies: &mut [Enemy],
+        props: &mut [Prop],
     ) -> Option<Shot> {
         if !self.ready() {
             return None;
@@ -54,14 +61,26 @@ impl Weapon {
             .filter(|(_, e)| e.alive())
             .map(|(i, e)| (i, e.sphere()))
             .collect();
-        let spheres: Vec<Sphere> = live.iter().map(|&(_, s)| s).collect();
-        let result = hitscan(bsp, origin, dir, WEAPON_RANGE, &spheres);
-        let hit = result.target.map(|t| live[t].0);
+        let shootable = props.iter().enumerate().filter(|(_, p)| p.shootable());
+        let shootable: Vec<(usize, Sphere)> = shootable.map(|(i, p)| (i, p.sphere())).collect();
+        let spheres: Vec<Sphere> = live.iter().chain(&shootable).map(|&(_, s)| s).collect();
+        let result = hitscan(solids, origin, dir, WEAPON_RANGE, &spheres);
+        // Targets are the enemies, then the props.
+        let hit = result.target.and_then(|t| live.get(t)).map(|e| e.0);
+        let prop = result
+            .target
+            .and_then(|t| t.checked_sub(live.len()))
+            .and_then(|t| shootable.get(t))
+            .map(|p| p.0);
         let killed = hit.is_some_and(|i| enemies[i].damage(WEAPON_DAMAGE));
+        let prop_destroyed = prop.is_some_and(|i| props[i].damage(WEAPON_DAMAGE));
         Some(Shot {
             hit,
             killed,
             point: result.point,
+            mover: result.mover,
+            prop,
+            prop_destroyed,
         })
     }
 }

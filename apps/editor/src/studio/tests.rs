@@ -2,12 +2,14 @@
 //! render thread's promise that a slow scene never slows the UI.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::{Duration, Instant};
 
 use mscent_platform::{Event, Key};
 use mscent_render::{BuildConfig, Framebuffer, LevelRenderer, Quality};
 
+use super::tick_costs::TickCosts;
 use super::worker::Request;
 use super::*;
 
@@ -187,12 +189,35 @@ fn frame_size_keeps_the_aspect_and_caps_the_width() {
     assert_eq!(frame_size((0, 0), 480), (16, 16));
 }
 
-/// A scene that draws its frame number as the colour, with injectable delay,
+/// How long a gated frame waits to be let go: far beyond any run of ticks,
+/// however busy the machine, so only a UI thread that really waits sees it end.
+const PATIENCE: Duration = Duration::from_secs(30);
+
+/// Holds every frame of a scene until the test lets it go.
+struct Gate {
+    started: Sender<()>,
+    open: Receiver<()>,
+    gave_up: Arc<AtomicBool>,
+}
+
+impl Gate {
+    fn pass(&self) {
+        let _ = self.started.send(());
+        if matches!(
+            self.open.recv_timeout(PATIENCE),
+            Err(RecvTimeoutError::Timeout)
+        ) {
+            self.gave_up.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+/// A scene that draws its frame number as the colour, with injectable gate,
 /// panic and quit, so tests can tell which frame they were shown.
 #[derive(Default)]
 struct Probe {
     frames: Arc<AtomicU32>,
-    delay: Duration,
+    gate: Option<Gate>,
     panic_at: Option<u32>,
     quit_after_steps: Option<u32>,
     steps: u32,
@@ -210,7 +235,9 @@ impl Scene for Probe {
     }
 
     fn render(&mut self, req: &Request) -> Option<&Framebuffer> {
-        std::thread::sleep(self.delay);
+        if let Some(gate) = &self.gate {
+            gate.pass();
+        }
         let n = self.frames.fetch_add(1, Ordering::SeqCst) + 1;
         if self.panic_at == Some(n) {
             panic!("scene exploded at frame {n}");
@@ -226,67 +253,69 @@ fn frame_number(f: &Frame) -> u32 {
     u32::from(f.rgba[0]) << 16 | u32::from(f.rgba[1]) << 8 | u32::from(f.rgba[2])
 }
 
+/// The scene needs as long as the test says, so no clock is involved: every tick
+/// here runs while a frame is held, and a tick that waited for that frame could
+/// only get through once the gate gave up.
 #[test]
-fn a_100_ms_scene_does_not_slow_the_ui_ticks_and_the_newest_frame_is_shown() {
+fn a_scene_stuck_in_a_frame_does_not_hold_up_the_ui_and_the_newest_frame_is_shown() {
     let doc = showcase();
-    let frames = Arc::new(AtomicU32::new(0));
+    let (started_tx, started) = channel();
+    let (open, gate) = channel();
+    let gave_up = Arc::new(AtomicBool::new(false));
     let mut studio = Studio::new(&doc);
     studio.attach_scene(
         Box::new(Probe {
-            frames: frames.clone(),
-            delay: Duration::from_millis(100),
+            gate: Some(Gate {
+                started: started_tx,
+                open: gate,
+                gave_up: gave_up.clone(),
+            }),
             ..Probe::default()
         }),
         &doc,
     );
     studio.enter_play().expect("plays");
-    let (mut worst, mut total) = (Duration::ZERO, Duration::ZERO);
-    let mut shown = Vec::new();
-    let t0 = Instant::now();
+    let frame_begins = || started.recv_timeout(PATIENCE).expect("a frame began");
+    assert!(studio.tick(&[], PANE, &doc).frame.is_none());
+    frame_begins();
+
+    // More ticks than the input queue holds, so a full queue is among them.
+    let mut costs = TickCosts::default();
     for i in 0..200u32 {
         let events = [key(Key::Char('W'), i % 2 == 0)];
-        let t = Instant::now();
-        let tick = studio.tick(&events, PANE, &doc);
-        let spent = t.elapsed();
-        worst = worst.max(spent);
-        total += spent;
-        if let Some(f) = tick.frame {
-            // Only ever shown after it was made, and never an older one.
-            assert!(frame_number(&f) <= frames.load(Ordering::SeqCst));
-            shown.push(frame_number(&f));
-        }
-        std::thread::sleep(Duration::from_millis(3));
+        let tick = costs.timed(|| studio.tick(&events, PANE, &doc));
+        assert!(tick.frame.is_none(), "frame 1 is not finished");
     }
-    let wall = t0.elapsed();
     println!(
-        "200 UI ticks over {wall:?}: worst tick {worst:?}, mean {:?}; scene made {} frames, UI showed {}",
-        total / 200,
-        frames.load(Ordering::SeqCst),
-        shown.len()
+        "200 UI ticks during one frame: p90 {:?}, worst {:?}",
+        costs.p90(),
+        costs.worst()
     );
-    assert!(
-        worst < Duration::from_millis(5),
-        "a UI tick took {worst:?} while the scene needs 100 ms per frame"
-    );
-    assert!(
-        shown.windows(2).all(|w| w[0] < w[1]),
-        "frames only move forward: {shown:?}"
-    );
-    assert!(
-        shown.len() >= 2 && (shown.len() as u32) < frames.load(Ordering::SeqCst) + 1,
-        "slow frames are shown as they finish: {shown:?}"
-    );
-    // After the run the newest finished frame is what the UI ends up showing.
-    let end = Instant::now() + Duration::from_secs(5);
-    loop {
-        let before = frames.load(Ordering::SeqCst);
-        let tick = studio.tick(&[], PANE, &doc);
-        if tick.frame.is_some_and(|f| frame_number(&f) + 1 >= before) {
-            break;
-        }
-        assert!(Instant::now() < end, "the UI never caught up");
-        std::thread::sleep(Duration::from_millis(5));
+    costs.assert_cheap();
+
+    // Once the next frame has begun the last one is in the mailbox: the first
+    // tick has it, and it is shown once.
+    open.send(()).expect("frame 1");
+    frame_begins();
+    let shown = studio.tick(&[], PANE, &doc).frame.expect("frame 1 is done");
+    assert_eq!(frame_number(&shown), 1);
+    assert!(studio.tick(&[], PANE, &doc).frame.is_none(), "shown once");
+
+    // Frames the UI did not collect are replaced, not queued.
+    for _ in 0..3 {
+        open.send(()).expect("next frame");
+        frame_begins();
     }
+    let shown = studio.tick(&[], PANE, &doc).frame.expect("frame 4 is done");
+    assert_eq!(frame_number(&shown), 4, "the newest, not the oldest");
+    assert!(studio.tick(&[], PANE, &doc).frame.is_none(), "none older");
+
+    // Lets the last frame go, so the thread can stop with the studio.
+    drop(open);
+    assert!(
+        !gave_up.load(Ordering::SeqCst),
+        "the UI thread waited for the scene"
+    );
 }
 
 #[test]

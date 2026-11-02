@@ -9,6 +9,7 @@ mscent-math.workspace = true
 mscent-world.workspace = true
 mscent-collide.workspace = true
 mscent-render.workspace = true
+mscent-script.workspace = true
 
 [lints]
 workspace = true

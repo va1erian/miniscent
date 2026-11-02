@@ -1,0 +1,23 @@
+[package]
+name = "mscent-script-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+mscent-script = { path = ".." }
+
+[[bin]]
+name = "load_and_run"
+path = "fuzz_targets/load_and_run.rs"
+test = false
+doc = false
+bench = false
+
+# Its own workspace, so the repo's pinned toolchain and workspace lints stay
+# unaffected by the nightly-only fuzz build.
+[workspace]

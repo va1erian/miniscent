@@ -156,7 +156,7 @@ pub fn showcase_level() -> Level {
     Level {
         brushes: brushes(),
         entities: entities(),
-        volumes: Vec::new(),
+        ..Default::default()
     }
 }
 

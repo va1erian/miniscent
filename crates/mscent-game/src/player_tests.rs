@@ -182,6 +182,7 @@ fn hostile_input_never_poisons_the_state() {
         yaw: f32::NEG_INFINITY,
         roll: 1e30,
         fire: true,
+        use_key: false,
     };
     g.run_trace(&[bad; 200]);
     assert!(g.player.pos().is_finite());

@@ -1,6 +1,6 @@
 //! Undoable edits. Every command stores enough to be inverted exactly.
 
-use super::document::{BrushDef, Document, EntityDef, Id};
+use super::document::{BrushDef, Document, EntityDef, GroupDef, Id, LabelDef};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
@@ -34,6 +34,17 @@ pub enum Command {
         before: EntityDef,
         after: EntityDef,
     },
+    /// Names and tags one entity.
+    SetLabel {
+        entity: Id,
+        before: Option<LabelDef>,
+        after: Option<LabelDef>,
+    },
+    /// Replaces the mover groups.
+    SetGroups {
+        before: Vec<GroupDef>,
+        after: Vec<GroupDef>,
+    },
     Batch(Vec<Command>),
 }
 
@@ -51,6 +62,8 @@ impl Command {
                 doc.remove_entity(entity.id);
             }
             Command::EditEntity { after, .. } => doc.replace_entity(after),
+            Command::SetLabel { entity, after, .. } => doc.set_label(*entity, after.clone()),
+            Command::SetGroups { after, .. } => doc.set_groups(after.clone()),
             Command::Batch(list) => list.iter().for_each(|c| c.apply(doc)),
         }
     }
@@ -118,6 +131,19 @@ impl Command {
             Command::EditEntity { before, after } => Command::EditEntity {
                 before: *after,
                 after: *before,
+            },
+            Command::SetLabel {
+                entity,
+                before,
+                after,
+            } => Command::SetLabel {
+                entity: *entity,
+                before: after.clone(),
+                after: before.clone(),
+            },
+            Command::SetGroups { before, after } => Command::SetGroups {
+                before: after.clone(),
+                after: before.clone(),
             },
             Command::Batch(list) => {
                 Command::Batch(list.iter().rev().map(Command::inverse).collect())

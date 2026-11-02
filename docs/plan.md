@@ -15,8 +15,9 @@ are in [work-items.md](work-items.md).
 - Precomputed lightmaps.
 - Software renderer, 60 fps with every graphics feature on, on the reference
   machine. No hardware renderer.
-- Game elements are limited to: the player start, point lights, enemies and a
-  goal to reach.
+- Game elements are the player start, point lights, enemies, a goal to reach,
+  and what level scripting adds: movers, zones, markers, and props spawned by a
+  script ([scripting.md](scripting.md)).
 - Rock-solid collision with the world and with other entities.
 - Level editor with instant play, built on xui.
 - Windows and LazyOS.
@@ -50,6 +51,7 @@ hardware (`lazyos/docs/compat/kabylake/hw-survey/03-cpuinfo.txt`).
 | Lighting | Offline bake: colour plus a dominant light direction per luxel | Enables bump mapping at no per-pixel lightmap cost |
 | Bump mapping | Tangent-space normal map against the baked direction; the light itself is sampled per pixel (was per 16 px span) | Measured in `examples/bump_bench.rs` at 640x360: bump roughly doubles span-stepped shading (0.47 to 0.94 ms per frame on the dev machine, an estimated 4 to 5 ms on the i3-7100U at overdraw 1); evaluating the light per pixel instead of per span costs about twice that again |
 | Specular | High-detail option only, from the same baked direction and a per-material gloss | No extra lightmap data; zero cost when off |
+| Level scripting | One script per level in a small in-repo Smalltalk-style language, no logic entities | About 228 KB against 4 MB for Rhai, no dependencies, real suspension, typos caught at load ([scripting-language.md](scripting-language.md)) |
 
 ## Deviations since the first plan
 
@@ -58,6 +60,9 @@ hardware (`lazyos/docs/compat/kabylake/hw-survey/03-cpuinfo.txt`).
 - **Stock xui.** The editor builds against upstream xui (rev `0b1b7ef`, which has the monitor-change fix, pointer lock and F5 to F12 keys); nothing is vendored. The game has no xui dependency.
 - **Threaded play.** Instant Play runs the game on a render thread with a one-slot frame mailbox,
   not on the UI thread, so a slow scene never slows the UI.
+- **Parallel frames by default.** The game renders in bands on a pool of parked threads with at
+  least 4 workers (`jobs.rs`), with visibility and clipping done once per frame. A kernel or platform
+  without useful threads takes the one-worker path through `LevelRenderer::set_tiling`.
 - **Bake cache and soft shadows.** The lightmap is baked once per distinct set of inputs
   (`BakeCache`, optional file mirror) and frames never touch it; lamps are discs so shadow edges are
   smooth, and albedo is mipmapped, to stop shimmer at a distance.
@@ -70,7 +75,8 @@ crates/
   mscent-world     brushes, CSG to BSP, portals, lightmap bake, level format
   mscent-collide   trace and sweep against the BSP and entities
   mscent-render    software rasterizer
-  mscent-game      6DoF player, enemies, goal, fixed-timestep loop
+  mscent-script    the level scripting language and VM; knows nothing about the game
+  mscent-game      6DoF player, enemies, goal, fixed-timestep loop, script API
   mscent-platform  Platform trait, desktop (winit) and headless backends; LazyOS backend later
 apps/
   game/            runtime, no xui

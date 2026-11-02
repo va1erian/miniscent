@@ -17,6 +17,11 @@ pub fn save(doc: &Document, path: &Path) -> Result<String, String> {
     let level = doc
         .to_level()
         .map_err(|e| format!("cannot save: a brush is invalid ({e:?})"))?;
+    // Flipping a brush can bring two names back together; a file with them
+    // would not load again, so the level on disk stays as it was.
+    level
+        .check_labels()
+        .map_err(|e| format!("cannot save: fix the names first ({e:?})"))?;
     let bytes = format::write(&level);
     let tmp = path.with_extension("msl.tmp");
     std::fs::write(&tmp, &bytes).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
@@ -46,7 +51,9 @@ pub fn load(path: &Path) -> Result<Document, String> {
     let data = std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     let level = format::read(&data)
         .map_err(|e| format!("{} is not a valid level ({e:?})", path.display()))?;
-    Ok(Document::from_level(&level))
+    let mut doc = Document::from_level(&level);
+    doc.set_level_path(Some(path.to_path_buf()));
+    Ok(doc)
 }
 
 /// Where the last used path is remembered.
@@ -93,6 +100,7 @@ mod tests {
         assert!(msg.contains("Saved"), "{msg}");
         let back = load(&path).expect("load");
         assert_eq!(back.brushes().len(), doc.brushes().len());
+        assert_eq!(back.groups(), doc.groups());
         assert_eq!(back.entities().len(), doc.entities().len());
         for (a, b) in doc.brushes().iter().zip(back.brushes()) {
             assert_eq!(

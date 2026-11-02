@@ -1,10 +1,13 @@
 //! The editor's pure model: no UI types, fully testable.
 
 pub mod command;
+pub mod csg_order;
 pub mod document;
 pub mod entity;
 pub mod facetex;
 pub mod fly;
+pub mod labels;
+pub mod outline;
 pub mod pick;
 pub mod pointer;
 pub mod shape_ops;
@@ -13,9 +16,13 @@ pub mod tools;
 pub mod view;
 
 #[cfg(test)]
+mod csg_order_tests;
+#[cfg(test)]
 mod facetex_tests;
 #[cfg(test)]
 mod hostile_tests;
+#[cfg(test)]
+mod outline_tests;
 #[cfg(test)]
 mod review_tests;
 #[cfg(test)]
@@ -30,3 +37,5 @@ pub use pointer::Pointer;
 pub use state::{EditorState, Selection, Tool};
 pub use tools::Keep;
 pub use view::{Camera2D, View};
+#[cfg(test)]
+mod label_tests;

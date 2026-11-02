@@ -2,12 +2,17 @@
 
 use std::path::{Path, PathBuf};
 
+use xui::prelude::Ui;
 use xui::widget::MenuId;
 
-use super::app::{Editor, cmd};
+use super::app::{Editor, Msg, cmd};
+use super::level_dialog;
 use crate::files;
 use crate::model::Document;
 use crate::studio::Mode;
+
+/// Fog the dialog starts from for a level without a world entity.
+const DEFAULT_FOG: (f32, f32) = (4.0, 26.0);
 
 /// The menu bar.
 pub(super) fn menus(m: &mut xui::widget::MenuScope<'_>) {
@@ -24,6 +29,7 @@ pub(super) fn menus(m: &mut xui::widget::MenuScope<'_>) {
         e.separator();
         e.item(cmd::DELETE, "&Delete   Del");
         e.item(cmd::FLIP, "&Flip add/subtract");
+        e.item(cmd::MAKE_MOVER, "Make &mover");
         e.item(cmd::FORWARD, "Move &later in order");
         e.item(cmd::BACK, "Move &earlier in order");
         e.separator();
@@ -32,6 +38,8 @@ pub(super) fn menus(m: &mut xui::widget::MenuScope<'_>) {
         e.item(cmd::CARVE, "&Carve with brush   Ctrl+Shift+C");
         e.item(cmd::EXTRUDE, "Extrude face &out   Ctrl+E");
         e.item(cmd::EXTRUDE_IN, "Extrude face &in   Ctrl+Shift+E");
+        e.separator();
+        e.item(cmd::LEVEL_SETTINGS, "Level &settings...");
     });
     m.submenu(MenuId::new(102), "&View", |v| {
         v.item(cmd::FIT, "&Fit views to level");
@@ -94,6 +102,9 @@ impl Editor {
             cmd::FLIP => {
                 st.flip_selected();
             }
+            cmd::MAKE_MOVER => {
+                st.make_mover();
+            }
             cmd::FORWARD => {
                 st.reorder_selected(1);
             }
@@ -114,6 +125,19 @@ impl Editor {
                 st.extrude_faces(-1.0);
             }
             _ => {}
+        }
+    }
+
+    /// Edit > Level settings: asks for the fog and applies it to the world
+    /// entity.
+    pub(super) fn level_settings(&mut self, ui: &Ui<Msg>) {
+        if self.studio.mode == Mode::Play {
+            return;
+        }
+        let current = self.state.borrow().fog().unwrap_or(DEFAULT_FOG);
+        if let Some((start, end)) = level_dialog::ask_fog(ui, current) {
+            self.state.borrow_mut().set_fog(start, end);
+            self.refresh();
         }
     }
 
@@ -158,6 +182,12 @@ impl Editor {
             Ok(msg) => {
                 files::remember(&path);
                 let lit = self.studio.save_lightmap(&path, &doc);
+                let mut doc = doc;
+                doc.set_level_path(Some(path.clone()));
+                self.state
+                    .borrow_mut()
+                    .doc
+                    .set_level_path(Some(path.clone()));
                 self.saved = doc;
                 self.path = Some(path);
                 lit.map_or(msg.clone(), |l| format!("{msg}; {l}"))

@@ -5,6 +5,7 @@
 //! never carries NaN, infinite or non-positive-radius values.
 
 use crate::brush::Brush;
+use crate::labels::{EntityLabel, MoverGroup};
 use crate::voxel::Volume;
 use mscent_math::Vec3;
 
@@ -35,6 +36,11 @@ pub enum Entity {
         fog_start: f32,
         fog_end: f32,
     },
+    /// A point a script refers to by name: where to spawn something, a hinge.
+    Marker { pos: Vec3, yaw: f32 },
+    /// A box a script is told the player entered or left. `half` is the
+    /// half-size on each axis.
+    Zone { pos: Vec3, half: Vec3 },
 }
 
 /// Largest fog distance a level may ask for.
@@ -86,6 +92,10 @@ impl Entity {
                     && fog_end > fog_start
                     && fog_end <= MAX_FOG_DEPTH
             }
+            Entity::Marker { pos, yaw } => coord_ok(pos) && yaw.is_finite(),
+            Entity::Zone { pos, half } => {
+                coord_ok(pos) && radius_ok(half.x) && radius_ok(half.y) && radius_ok(half.z)
+            }
         }
     }
 
@@ -96,7 +106,9 @@ impl Entity {
             | Entity::Light { pos, .. }
             | Entity::Enemy { pos, .. }
             | Entity::Goal { pos, .. }
-            | Entity::World { pos, .. } => pos,
+            | Entity::World { pos, .. }
+            | Entity::Marker { pos, .. }
+            | Entity::Zone { pos, .. } => pos,
         }
     }
 }
@@ -121,4 +133,8 @@ pub struct Level {
     pub entities: Vec<Entity>,
     /// Voxel volumes, none of which overlap. Their CSG order shares `Brush::order`.
     pub volumes: Vec<Volume>,
+    /// Names and tags of entities, for scripts.
+    pub labels: Vec<EntityLabel>,
+    /// Named brushes that move; they stay out of the CSG.
+    pub mover_groups: Vec<MoverGroup>,
 }

@@ -5,7 +5,9 @@
 //! draft. Once the edits stop, a full bake runs in the background; it does not
 //! block anything, and an edit that changes the lighting drops it.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+use miniscent_game::scripts::ScriptWatcher;
 
 use super::scene::LevelScene;
 use super::{HELP, Mode, Studio, Tick};
@@ -64,6 +66,24 @@ impl Preview {
     }
 }
 
+/// How often the script beside the level is looked at while editing.
+const SCRIPT_POLL: Duration = Duration::from_millis(500);
+
+/// The scripts of the level in the picture, as they were when it was built.
+pub(super) struct ScriptWatch {
+    files: Option<ScriptWatcher>,
+    checked: Instant,
+}
+
+impl Default for ScriptWatch {
+    fn default() -> Self {
+        Self {
+            files: None,
+            checked: Instant::now(),
+        }
+    }
+}
+
 impl Studio {
     /// Where the picture stands against `doc`.
     pub fn preview(&self, doc: &Document) -> Preview {
@@ -104,12 +124,24 @@ impl Studio {
             return;
         }
         self.empty = false;
+        self.watch_script();
         let changed = self.wanted.as_ref() != Some(doc);
         if changed {
             self.changed_at = Instant::now();
         }
         self.start_preview(doc, changed, out);
         self.start_bake(doc, out);
+    }
+
+    /// A script edited outside the editor decides whether the level plays, so
+    /// while editing a change builds it again. During Play the scene reloads it.
+    fn watch_script(&mut self) {
+        if self.mode != Mode::Edit || self.script_watch.checked.elapsed() < SCRIPT_POLL {
+            return;
+        }
+        self.script_watch.checked = Instant::now();
+        let files = self.script_watch.files.as_mut();
+        self.refresh |= files.is_some_and(ScriptWatcher::changed);
     }
 
     /// An empty level draws nothing, so the last picture must go; whatever is
@@ -134,7 +166,7 @@ impl Studio {
         self.refresh = false;
         self.flush_cache_path();
         self.wanted = Some(doc.clone());
-        match build::start_preview(doc, &self.cache) {
+        match build::start_preview(doc, &self.cache, &self.settings) {
             Ok(job) => self.preview_job = Some(job),
             Err(e) => self.preview_failed(e, doc, doc, out),
         }
@@ -152,7 +184,7 @@ impl Studio {
         if waiting {
             return;
         }
-        match build::start_bake(doc, self.light_key, &self.cache) {
+        match build::start_bake(doc, self.light_key, &self.cache, &self.settings) {
             Ok(job) => self.bake_job = Some(job),
             Err(e) => self.bake_failed(e, out),
         }
@@ -192,6 +224,7 @@ impl Studio {
         self.light = built.light;
         self.light_key = built.light_key;
         let why = built.unplayable().map(str::to_string);
+        self.script_watch.files = built.watch.clone();
         self.attach(Box::new(LevelScene::new(built)), made_for, why);
         if self.play_pending && self.built_doc.as_ref() == Some(doc) {
             self.play_pending = false;

@@ -82,7 +82,7 @@ fn level_of(brushes: Vec<Brush>) -> Level {
     Level {
         brushes,
         entities: Vec::new(),
-        volumes: Vec::new(),
+        ..Default::default()
     }
 }
 
@@ -180,11 +180,11 @@ fn version_one_files_load_with_default_mappings() {
     assert_eq!(read, level);
     assert!(read.brushes[0].texinfos().iter().all(|t| t.material == 2));
     let mut future = file.clone();
-    let next = format::VERSION + 1;
-    future[4..6].copy_from_slice(&next.to_le_bytes());
+    let newer = format::VERSION + 1;
+    future[4..6].copy_from_slice(&newer.to_le_bytes());
     assert_eq!(
         format::read(&future),
-        Err(FormatError::UnsupportedVersion(next))
+        Err(FormatError::UnsupportedVersion(newer))
     );
 }
 

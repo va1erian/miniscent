@@ -58,7 +58,7 @@ fn mapped_room() -> Level {
     Level {
         brushes: vec![room],
         entities: Vec::new(),
-        volumes: Vec::new(),
+        ..Default::default()
     }
 }
 
@@ -180,7 +180,7 @@ fn lit_room(edit: impl Fn(&mut Brush)) -> Level {
             radius: 30.0,
             intensity: 1.0,
         }],
-        volumes: Vec::new(),
+        ..Default::default()
     }
 }
 

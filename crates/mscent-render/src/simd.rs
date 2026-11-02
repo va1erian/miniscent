@@ -10,7 +10,7 @@
 //! The AVX2 path is chosen at run time; SSE2 is part of the x86-64 baseline
 //! and other architectures use the scalar code.
 
-// The crate denies unsafe code; this module is its one exception. Each unsafe
+// The crate denies unsafe code; this module is an exception. Each unsafe
 // block calls a `target_feature` kernel only after checking the CPU supports
 // it, or does a bounds-exact vector load or store, and says so in a SAFETY
 // comment.

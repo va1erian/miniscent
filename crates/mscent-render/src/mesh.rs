@@ -10,7 +10,7 @@ use mscent_math::Vec3;
 
 use crate::camera::Camera;
 use crate::framebuffer::Framebuffer;
-use crate::raster::{DrawStats, Vertex, draw_polygon};
+use crate::raster::{DrawStats, PolyList, Vertex};
 use crate::scene::eye_of;
 use crate::shade::{Fog, SpanEnd, SpanShader, lerp_rgb, mul_rgb};
 use crate::texture::Texture;
@@ -252,6 +252,61 @@ impl Mesh {
             .unwrap_or_else(Self::empty)
     }
 
+    /// An enemy on the player's side: the enemy's shape, in green.
+    pub fn friendly() -> Self {
+        let parts = [
+            (
+                Self::sphere(8, 14, 0.7, 0xff28_b048),
+                Vec3::new(0.0, 0.0, 0.1),
+            ),
+            (
+                Self::sphere(4, 8, 0.2, 0xfff8_e840),
+                Vec3::new(0.58, 0.0, 0.25),
+            ),
+        ];
+        Self::assembled(parts)
+    }
+
+    /// Something to shoot: an amber gem on a dark ball.
+    pub fn switch() -> Self {
+        Self::assembled([
+            (Self::sphere(6, 10, 0.4, 0xff30_3038), Vec3::ZERO),
+            (
+                Self::bipyramid(4, 0.22, 0.65, 0.65, 0xffff_a020),
+                Vec3::ZERO,
+            ),
+        ])
+    }
+
+    /// Something to pick up: a flat red diamond.
+    pub fn keycard() -> Self {
+        Self::assembled([(Self::bipyramid(4, 0.3, 0.3, 0.3, 0xffe0_3030), Vec3::ZERO)])
+    }
+
+    /// Something to use: a tall dark post with a cyan screen near the top.
+    pub fn terminal() -> Self {
+        Self::assembled([
+            (Self::bipyramid(4, 0.3, 0.6, 0.6, 0xff40_4858), Vec3::ZERO),
+            (
+                Self::sphere(4, 8, 0.16, 0xff40_e0f0),
+                Vec3::new(0.0, 0.0, 0.3),
+            ),
+        ])
+    }
+
+    /// A plain four-sided block.
+    pub fn crate_box() -> Self {
+        Self::assembled([(Self::bipyramid(4, 0.5, 0.5, 0.5, 0xff90_7040), Vec3::ZERO)])
+    }
+
+    fn assembled<const N: usize>(parts: [(Option<Self>, Vec3); N]) -> Self {
+        let parts: Option<Vec<(Mesh, Vec3)>> =
+            parts.into_iter().map(|(m, o)| Some((m?, o))).collect();
+        parts
+            .and_then(|p| Self::combine(&p))
+            .unwrap_or_else(Self::empty)
+    }
+
     fn empty() -> Self {
         Self {
             verts: Vec::new(),
@@ -334,9 +389,25 @@ pub fn draw_mesh(
     lighting: &MeshLighting,
     fog: Option<Fog>,
 ) -> DrawStats {
-    let mut total = DrawStats::default();
+    // The texture only supplies the carrier for the light; its texel is unused.
+    let carrier = Texture::solid(0xffff_ffff);
+    let mut list = PolyList::default();
+    list_mesh(cam, mesh, pose, lighting, &carrier, &mut list);
+    fill_meshes(fb, &list, &carrier, fog)
+}
+
+/// Adds the camera-facing triangles of `mesh` at `pose` to `list`, lit per
+/// vertex, for [`fill_meshes`]. `carrier` must be the texture filling will use.
+pub(crate) fn list_mesh(
+    cam: &Camera,
+    mesh: &Mesh,
+    pose: &Pose,
+    lighting: &MeshLighting,
+    carrier: &Texture,
+    list: &mut PolyList,
+) {
     if !pose.pos.is_finite() || !pose.yaw.is_finite() || !pose.scale.is_finite() {
-        return total;
+        return;
     }
     let eye = eye_of(cam);
     let world: Vec<(Vec3, f32)> = mesh
@@ -347,8 +418,6 @@ pub fn draw_mesh(
             (p, lighting.at(p, pose.direction(v.normal)))
         })
         .collect();
-    // The texture only supplies the carrier for the light; its texel is unused.
-    let carrier = Texture::solid(0xffff_ffff);
     for tri in &mesh.tris {
         let [a, b, c] = tri.indices.map(|i| world.get(usize::from(i)).copied());
         let (Some(a), Some(b), Some(c)) = (a, b, c) else {
@@ -359,15 +428,29 @@ pub fn draw_mesh(
             continue;
         }
         let verts = [a, b, c].map(|(pos, light)| Vertex::new(pos, light, 0.0));
+        list.push(cam, &verts, carrier, tri.color);
+    }
+}
+
+/// Fills the triangles of `list` that touch the rows `fb` holds. Their tag is
+/// their flat colour. Draw after the level, for the shared z-buffer.
+pub(crate) fn fill_meshes(
+    fb: &mut Framebuffer,
+    list: &PolyList,
+    carrier: &Texture,
+    fog: Option<Fog>,
+) -> DrawStats {
+    let mut total = DrawStats::default();
+    for poly in list.in_rows(fb.row_range()) {
         let mut shader = GouraudShader {
-            color: tri.color,
+            color: poly.tag,
             fog,
             light0: 0.0,
             light_step: 0.0,
             fog0: 0.0,
             fog_step: 0.0,
         };
-        let st = draw_polygon(fb, cam, &verts, &carrier, &mut shader);
+        let st = list.fill(fb, poly, carrier, &mut shader);
         total.pixels += st.pixels;
         total.spans += st.spans;
     }

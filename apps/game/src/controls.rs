@@ -82,6 +82,7 @@ impl Controls {
             yaw: self.axis(held(Key::Left), held(Key::Right)),
             roll: self.axis(self.down('Q'), self.down('E')),
             fire: self.firing(),
+            use_key: self.down('G'),
         }
     }
 }

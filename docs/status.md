@@ -58,10 +58,19 @@ one. Reported by the user from a real Windows session, and what was done:
   (`studio/preview_tests.rs`) and 29 to 60 ms through the whole UI (selftest), full light 285 to 490
   ms after the edit, worst UI tick in that span 113 microseconds. On a generated 348-brush level the
   first picture takes 706 ms with a worst UI tick of 207 microseconds. Cancelling a 928 ms bake
-  ended it in 1 ms. Known limit: that 348-brush level overflows the atlas at the full luxel size
-  (`Atlas(TooTall)`), as it did before; it now stays on draft lighting instead of failing to show.
-  Not verified: a real window, and a level whose full bake takes many seconds with real editing
-  during it.
+  ended it in 1 ms. Not verified: a real window, and a level whose full bake takes many seconds
+  with real editing during it.
+- **Large levels bake in full.** The 348-brush generated level no longer overflows the atlas: the
+  height limit went from 4096 to 8192 rows and a level past that coarsens its luxels automatically
+  instead of failing (`lightmap/layout.rs`, reasoning and table in `docs/lightmaps.md`). That level
+  stays at 0.125 units per luxel: 1024 x 6472, 152 MiB, 19.8 s cold on 24 threads, 250 ms from its
+  file, 9.8 ms per frame. In the editor it reaches full light 20.5 s after the first picture (717
+  ms) with a worst UI tick of 6 ms. The showcase is bit for bit unchanged. The editor test for this
+  runs only under `cargo test --release`: unoptimised, the bake takes minutes even with hard
+  shadows, so the debug run covers the layout and a lamp-free bake of that atlas with its file round
+  trip. Not verified: bake time on a machine with few cores (it scales with threads, and the 19.8 s
+  are on 24), and the coarsened path at the shipped limit end to end: the generator stops at 8 by 8,
+  so that path is tested with the limit brought down to 4096.
 - **F5 and F7.** Root cause: xui's winit keymap only produced `Key::F1` to `F4`, so a real window
   never raised F5 to F12 (offscreen tests inject events and hid it).
   Fixed upstream (xui#316, #317); the editor builds against stock xui `0b1b7ef` and the vendored
@@ -99,10 +108,13 @@ one. Reported by the user from a real Windows session, and what was done:
 - **Threaded Instant Play.** Play runs on a render thread (`studio/worker.rs`): input goes in over a
   bounded `try_send` channel, frames come out through a one-slot mailbox read with `try_lock`, stale
   frames are dropped, and a slow scene lowers the adaptive resolution instead of stalling the UI. A
-  panic in the scene is caught and reported. `studio/tests.rs`: with a scene that needs 100 ms per
-  frame, 200 UI ticks had a worst tick of 6.7 microseconds (mean 1.3); the scene made 6 frames and
-  the UI showed 6. `studio/race_tests.rs` covers start and stop races. Not verified: responsiveness
-  of a real window under load.
+  panic in the scene is caught and reported. `studio/tests.rs`: 200 UI ticks run while the test holds
+  a frame open, so a tick that waited for it is caught with no clock (release: p90 1 microsecond,
+  worst 2.5); uncollected frames are replaced by the newest. `studio/cache_lock_tests.rs` does the
+  same for preview and bake jobs by holding the cache lock. Tick cost is asserted at the 90th
+  percentile (`studio/tick_costs.rs`), as a single worst case measures the scheduler.
+  `studio/race_tests.rs` covers start and stop races. Not verified: responsiveness of a real window
+  under load.
 - **Hammer-style UV controls.** See the next section.
 
 Not verified: any real window, keyboard or multi-monitor use, the AVX2 paths on the i3-7100U, any
@@ -140,6 +152,27 @@ generated at runtime. Findings and changes:
   visible at the real window size; the AVX2 paths on the i3-7100U.
 - `cargo test --workspace` passes (one run saw `bake_cache::concurrent_writers_in_one_process_leave_a_valid_file`
   fail under full-workspace load; it passed alone and on rerun, so it is timing sensitive).
+
+## Parallel frames by default (M9.0, the groundwork of `docs/particles.md`)
+
+`LevelRenderer::render` draws in 24-row bands with `available_parallelism().max(4)` workers on a
+pool of parked threads (`jobs.rs`). Visibility, the BSP walk and the clipping and projection of every
+polygon run once per frame (`PolyList` in `raster.rs`); a band fills only the polygons in its rows.
+`LevelRenderer::set_tiling` overrides the band height and worker count. Game bench on the dev
+machine: 9.29 to 1.20 ms per frame. Pixels and depth equal one band on one worker at every tiling
+tried (`tests/tiled_level.rs`), and the scripted flythrough PNGs are byte-identical to the
+single-threaded renderer's. Allocations are unchanged (256 per frame, 1379 with actors;
+`tests/frame_alloc.rs`). Numbers and the scaling table are in `docs/particles.md`.
+
+Not verified: a real window, the i3-7100U (its 2 cores and 2 hyperthreads), and any LazyOS thread;
+no LazyOS backend passes the one-worker override yet. `frame_bench` still draws through `Scene::render`
+per band, on one worker, so the CI ratio does not measure this path.
+
+Seen failing on the code before this change as well as after it, and not addressed: the editor
+selftest check "a click on the picture picked the framed wall"; `tools/check_frame_cost.py` on the
+dev machine (ratio about 8.5 against a 7.61 baseline); intermittently
+`a_100_ms_scene_does_not_slow_the_ui_ticks_and_the_newest_frame_is_shown` (a 5 ms limit, under load)
+and `bake_cache::writes_are_atomic_and_rebake_overwrites`.
 
 ## Per-face texture mapping (TexInfo)
 
@@ -208,7 +241,7 @@ GUI itself was not driven by hand, only the model through the pointer API and th
 | M3.3 | Done | `raster.rs`; `tests/snapshot.rs::brick_quad_facing_the_camera` against `tests/ref/brick_quad.ppm` |
 | M3.4 | Done | `scene.rs` and `scene/walk.rs`; `scene_tests::flythrough_matches_brute_force_with_no_doubled_faces` |
 | M3.5 | Done | `snapshot::brick_wall_in_perspective_with_fog`, `flat_lit_fallback_scales_brightness`, `framebuffer_tests::sky_gradient_runs_from_top_to_bottom_colour`; the level renderer draws sky, fog and lit surfaces in the flythrough PNGs |
-| M3.6 | Partial | `tiles.rs`, `simd.rs`, `simd_x86.rs`; `tiles_tests::one_and_many_workers_give_identical_pixels`. Scaling not measured on multiple cores, AVX2 path unmeasured, no-syscall property not asserted |
+| M3.6 | Partial | `tiles.rs`, `jobs.rs`, `simd.rs`, `simd_x86.rs`; `tiles_tests::one_and_many_workers_give_identical_pixels`, `tests/tiled_level.rs`. Default in the game since M9.0; scaling measured on the dev machine only (`docs/particles.md`), AVX2 path unmeasured, no-syscall property not asserted |
 | M3.7 | Done | `resolution.rs` controller plus `upscale_nearest` (`resolution_tests`), wired in `apps/game/src/app.rs` (adaptive path, `--no-adaptive` to disable; headless runs fix the scale). Scale stayed at 1000 in the bench, so a drop under real load was not seen in the game itself |
 | M3.8 | Done | `crates/mscent-render/examples/frame_bench.rs`, `tools/check_frame_cost.py`, `docs/perf/baseline.json`, run in CI. The 10% regression failure was not demonstrated |
 | M3.9 | Done | `mesh.rs`; `mesh_tests` (fog, lighting, poses) |
@@ -273,6 +306,27 @@ GUI itself was not driven by hand, only the model through the pointer API and th
 | M8.5 | Not done | Needs the real Kaby Lake box |
 | M8.6 | Not done | Needs M8.5, M7.8 and a clean Windows machine |
 
+## M10 Level scripting
+
+Design in `docs/scripting.md`. Nothing a script can do exists yet.
+
+| ID | Status | Evidence |
+|---|---|---|
+| M10.1 | Done | `tools/check_size.py`, a Windows CI job. Run by hand: the real binary passes at 1,222,144 bytes, a lowered limit and a 1.7 MB file both fail. The CI job has not run yet |
+| M10.2 | Done | `labels.rs`, `format_labels.rs`, format version 3; `labels_tests.rs` (round trip, every validation error, truncation, 200,000 bit flips, shipped version 1 levels load); `game_tests::a_mover_brush_stays_out_of_the_world_bsp`; the editor keeps labels through load, delete, undo and save (`model/label_tests.rs`). Markers and zones draw in the 2D views but have no placing tool until M10.9, and that drawing was not looked at. A mover brush is simply absent from the world until M10.3 and M10.7. The release binary grew 37,888 bytes to 1,260,032, more than this much code should cost, and the cause was not found |
+| M10.3 | Done | `mscent-collide`: `mover.rs`, `push.rs`, `Solids`; `mscent-game/src/mover.rs` drives poses, eased motion and hold, reverse and crush. Shots and sight stop at movers. Evidence: `tests/fuzz_movers.rs` with an independent oracle (49,964 pushes and 1,595 blocked steps in a long run, no violations), `mover_tests.rs` in both crates, and six deliberate bugs each failing those tests. Levels with no movers replay bit-exact: 60,000-step hashes over 4 seeded runs on the showcase and corridor match before and after. Frame cost is unchanged: ten runs each of `frame_bench` average a ratio of 8.447 on `main` and 8.431 here, at 1.40 ms per frame. `tools/check_frame_cost.py` fails on this machine on both, against a stored baseline of 7.61, so that baseline needs looking at. Movers still cannot be seen (M10.7) or driven by a script (M10.5), only by Rust |
+| M10.1 follow-up | Done | The release profile now builds for size (`opt-level = "s"`, fat LTO, one codegen unit), with `mscent-render` and `mscent-math` kept at `opt-level = 3` because the renderer's hot paths run on its vector code. Panics still unwind, since Instant Play catches them. The game binary went from 1,298,432 to 992,768 bytes. Interleaved `frame_bench --workers 1` runs on this noisy machine (the clock swings between two modes, so ratios vary 8 to 23) gave a median 2.60 ms before and 2.53 ms after over 20 runs, and 2.69 ms before and 2.63 ms after over 30 more, so no regression. `blit_fit` 640x360 to 1920x1080 went from a best of 0.31 ms to 0.24 to 0.28 ms. A `--bake --rebake` of the showcase had medians of 336 and 340 ms over 30 interleaved runs (best 180 and 168), so `mscent-world` and `mscent-platform` stay at `s`. `tools/check_frame_cost.py` was not made to pass and `docs/perf/baseline.json` is unchanged |
+| M10.4 | Done, with gaps below | `crates/mscent-script`: 3,100 lines in 15 files, none over 400, no dependencies, `unwrap`, `expect` and slice indexing denied by lint in the library. 98 tests in `tests/`: every construct in the design's language section (`language.rs`); the design's examples and `ex/*.st` against a logging stub host, asserting the whole log and the tick of each line (`examples.rs`); hostile scripts (infinite loop, string, array and value-stack bombs, recursion, fork bombs, deep nesting, 1 MiB chains and literals, `hostile.rs`, `limits.rs`); the limits and the load errors for each (`limits.rs`); messages with file and line (`errors.rs`); stale references, `Clone`, fairness, garbage collection and replay (`state.rs`); a seeded mutation fuzz of 40,000 real-script mutants and 20,000 token soups, 1.4 s (`fuzz.rs`). The chain tests run on a 512 KiB thread stack, also with the crate at opt-level 0. A real `cargo fuzz` target is in `crates/mscent-script/fuzz` (its own workspace, nightly): built and run here with the Visual Studio ASAN DLL on `PATH` (`clang_rt.asan_dynamic-x86_64.dll`; without it the target exits with `STATUS_DLL_NOT_FOUND`, and `-s none` does not link), 65,569 runs in 61 s, then 152,473 in 181 s from the example scripts as seeds, then 55,082 with inputs up to 256 KiB, no crash. That harness adds `libfuzzer-sys` as a dependency of the fuzz crate only; nothing the game builds depends on it. Mutation checks: with chains rebuilt as nested boxes the chain tests overflow the stack, and with each of the constant wrap, task cap, generation check, byte-counted heap and fairness fixes removed its test fails. Size: a probe program that loads and runs a script with 30 natives, under the workspace release profile, is 290,816 bytes against 118,784 for an empty one, so 172,032 bytes added against the 300 KB limit; the probe was not committed, and `check_size.py` cannot see the crate until M10.5 links it. Not done: nothing binds the game API, `Game::step` does not run a VM, there are no CLI flags (M10.5, M10.6). The fuzz target ran for minutes, not hours. `arithmetic_side_effects` is not lint-enforced (30 sites, all read by hand and bounded by the source or heap limits). Stack depth was tested on Windows only |
+| M10.4 review | Done | Found by hostile scripts the crate's own tests missed, each now a test in `tests/review.rs`: a 1 MiB selector took 110 s to load (quadratic missing-period hint), hints were worked out past the 50-error cap (2 to 3 s), and a mostly live heap was collected on every step for the rest of the level (about 4 ms a step). The heap limit went from 16 to 4 MiB. `^` outside any `define` now ends the handler instead of being an error |
+| M10.5 | Done | `mscent-game`: `script.rs`, `script_api.rs`, `script_world.rs`; `apps/game/src/scripts.rs` loads `foo.st` beside `foo.msl` and `assets/scripts/lib/*.st`. Evidence: `script_tests.rs` and `script_error_tests.rs` play each use case through `Game::step` (shooting several to open a door, a key door, hinge and lift, spawn waves, disable and enable, win and lose, a handler's subject); a scripted run replays byte for byte; 27 bad requests each error on the calling line; hostile scripts hit caps. `apps/game/tests/scripted_level.rs` runs the real binary on a level file with a script. Levels with no script replay bit-exact: 60,000-step hashes over 4 seeded runs match before and after. The binary grew 222,720 bytes to 1,215,488, 75% of the budget. The renderer was not touched, so `frame_bench` was not rerun. Pickups, props, the use key and factions are M10.8, so the keycard is a zone for now and the terminal is not playable. `say:` and script errors go to the console. Not done: the editor does not load scripts (M10.9), and no one has played a scripted level by hand |
+| M10.6 | Done | `apps/game/src/agent.rs`, `trace.rs`, `scripts.rs`; `mscent-world/src/level_text.rs`. `apps/game/tests/agent_tools.rs` runs the real binary: a level from text, `--pack-level`, `--check`, then `--test` with a trace, with no build in the loop; the same test writes the same trace byte for byte; failures set the exit code and name file and line. Level text round-trips the showcase to the same bytes, and 40,000 mutations never panic. Hot reload is tested through a real session, not a real window |
+| M10.7 | Done | `mscent-render/src/level/movers.rs`: a mover's faces are lit with the level at their authored pose and drawn at their current one, interpolated between steps. `tests/mover_render.rs` reads pixels: a shut door is drawn lit and textured, opening it leaves about the same picture as no door, a door buried in rock or behind the eye draws nothing, a hinge swings, every quality runs, and hostile poses do not panic. `agent_tools.rs` sees a door move through `shot:`, and PNGs of a sliding and a hinged door were looked at by eye. Cost: `docs/perf/movers.md`. Limits as designed: no baked shadows from movers, so light passes a closed door, and a face keeps the light of its authored pose |
+| M10.8 | Done | `mscent-game`: `prop.rs`, `script_props.rs`, factions in `game.rs`; `apps/game/src/notices.rs` shows `say:` and script errors on screen. `script_prop_tests.rs` plays props through `Game::step`, and `agent_tools.rs` runs the keycard and the terminal end to end through `--test`. Writing that test caught a real bug: events a script raised while running were lost. A PNG of props, the use prompt and a friendly and a hostile drone was looked at. Not verified: a physical `G` key, and fights between many friendly and hostile enemies at frame rate |
+| Sample | Done | `assets/levels/facility.txt`, packed to `.msl`, with `facility.st` and `facility.test.st`: shoot three switches for one door, a keycard for the next, a terminal that turns two guards friendly, a spawned wave, a goal. `apps/game/tests/sample_level.rs` plays it through the real binary and checks the packed file matches its text. `flyTo:` is a teleport, so that test does not walk through the doors; mover collision is `mover_tests`. A screenshot of the first room was looked at. Nobody has played it by hand: `cargo run --release -p miniscent-game -- --level assets/levels/facility.msl` |
+| M10.9 | Done | `apps/editor/src/model/labels.rs`, `ui/props.rs` Script names panel, Edit > Make mover, Marker and Zone tools (M, Z), movers orange in the 2D views; `build.rs` loads the script beside a saved level, and a broken one refuses Play with its file and line; `studio/scene.rs` reloads it during Play. Evidence: `selftest/scripting.rs` runs through the editor's messages: names a brush and a marker, refuses a bad name, saves and reopens, is told about a broken script, then plays and samples the Play pane: door shut, opened by the script, shut again after a script saved during Play. The three shots were looked at. `label` tests cover undo, duplicates and subtract brushes. Fixing the selftest showed its face-tool index had pointed at the World tool since #6, so that check was already failing; corrected. An independent review then found, and tests now cover: Save overwriting a level with clashing names, slice and carve leaving part of a mover behind as world, stale fields after undo, joining a group wiping its tags, and an unbounded script read on the UI thread. It also found a reload error wiped from the screen on entering Play, now fixed with no test. Known and left: unapplied typing is lost on a new selection and Enter does not apply it; extruding a mover's face adds a static brush; adding a box and undoing leaves [modified] on, because `next_id` counts as a change (older than M10). Not verified: typing in the fields with a real keyboard, placing with the M and Z tools by clicking a view, and how a reload error looks on screen in Play |
+| Merge with `main` | Done | Numbered M10 because M9 is the particle system (`docs/particles.md`). Movers now list once and fill per band, like the level: `mover_render::every_tiling_draws_a_door_as_one_band_on_one_worker_does`. The World tool is gone from the palette (fog is in Level settings), so Marker and Zone close it at 11 tools. `MAKE_MOVER` and main's `LEVEL_SETTINGS` had the same menu id, which the `--selftest` caught; the timing tests take main's `TickCosts` fix over the one here. Binary 1,425,920 bytes, 89% of the budget. `check_frame_cost.py` still reads 8.44 against the 7.61 baseline on this machine, as `main` does |
+| Pre-PR review | Done | Fixed, each with a test that failed first: a mover blocked on its first step reversing past its own start; `onAllDestroyed:` firing once per death when several die in one step; a hostile ignoring the player in the open for a friendly behind a wall; an apostrophe in a comment breaking `--check`'s list of names; the trace's empty pose for an instant move on load; `--pack-level` reading an oversized file first. Also, loading a script no longer runs its top level twice (no test of its own). Left: picking up a group's last prop is not destroying it, so it fires no `onAllDestroyed:` though `waitDestroyed:` returns; the library falls back to the build tree's path; the editor checks script files on the UI tick |
+
 ## M11 Voxel volumes
 
 Design in [voxels.md](voxels.md). The game and editor load and keep volumes, but do not compile, draw or edit them yet: a level with volumes plays as if they were not there.
@@ -280,8 +334,10 @@ Design in [voxels.md](voxels.md). The game and editor load and keep volumes, but
 | ID | Status | Evidence |
 |---|---|---|
 | M11.1 | Done | `mscent-world/src/voxel/`: `surface_tests` (closed across chunks and any mix of detail levels, border vertices keep their bits, only reported chunks change), `resolve_tests` (an untouched volume leaves the world as solid as it was, moving a brush keeps the sculpting, the surface runs past the box), `dab_tests`; `crates/mscent-bench/examples/voxel_bench.rs`; `crates/mscent-render/examples/voxel_shot.rs` draws five views with 0 hole pixels through `draw_polygon` with stand-in light. Dabs are Add, Carve, Smooth and Paint; Flatten and Roughen come with the tool in M11.7. Not measured on the i3-7100U |
-| M11.2 | Done | `voxel/wire.rs`, section 4 of level format version 3; `voxel/wire_tests.rs`: round trip, versions 1 and 2 load, bit flips and truncation never panic and whatever loads can be meshed, forged runs refused, detail chunks charged before allocation. The editor document keeps volumes across load and save. `voxel_bench` reports 0.84 MiB and 1.2 ms to read for the 256-chunk cave. The writer does not enforce the read limits yet (M11.7) |
+| M11.2 | Done | `voxel/wire.rs`, section 5 of level format version 4; `voxel/wire_tests.rs`: round trip, versions 1 to 3 load, bit flips and truncation never panic and whatever loads can be meshed, forged runs refused, detail chunks charged before allocation. The editor document keeps volumes across load and save. `voxel_bench` reports 0.84 MiB and 1.2 ms to read for the 256-chunk cave. The writer does not enforce the read limits yet (M11.7) |
 | M11.3 to M11.9 | Not done | |
+| Merge with `main` | Done | Numbered M11 because M9 is particles and M10 scripting. Scripting took section 4 and version 3, so volumes moved to section 5 and version 4 |
+| Pre-PR review | Done | Fixed, with tests: the editor moved a volume in the CSG order on save (`model/csg_order_tests.rs`); a volume tied with a brush's order loaded; Smooth gave new solid a stale material (that test failed with the fix turned off); shapes past the range of brushes could overflow to NaN. `--dump-level` refuses volumes rather than lose them. Left for M11.3 and written into its done-when: carved rock in a `Subtract` volume shows material 0, and touching volumes do not see each other. Left: the first dab after a snapshot copies the chunk table (at most 4096 entries, once per snapshot, not measured) |
 
 ## Deviations from the plan
 

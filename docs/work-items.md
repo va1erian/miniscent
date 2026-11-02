@@ -112,6 +112,23 @@ Sizes: S is under a day, M a few days, L a week or more.
 | M8.5 | Frame-time results on the real Kaby Lake box, fix the worst offender | M8.1, M3.8 | M | 60 fps with every feature on, written up under `docs/perf/` |
 | M8.6 | Windows packaging and release notes | M8.5, M7.8 | S | A zip that runs on a clean machine |
 
+## M10 Level scripting
+
+Design in [scripting.md](scripting.md), language choice in
+[scripting-language.md](scripting-language.md).
+
+| ID | Item | Deps | Size | Done when |
+|---|---|---|---|---|
+| M10.1 | `tools/check_size.py` in CI, failing above a budget for the release game binary, proposed at 1.6 MB (1.22 MB today) | | S | The tool fails a deliberately oversized build |
+| M10.2 | Level format v3: names, markers, zones, mover groups, `static_brushes` | | M | Round trip, bit-flip fuzz, v2 levels still load |
+| M10.3 | `Solids`, mover sweep, push and blocked policies, shots and sight | M10.2 | L | Extended `tests/fuzz.rs`; levels with no movers replay bit-exact; `frame_bench` unchanged |
+| M10.4 | `mscent-script`: language and VM, with the fixes listed in scripting-language.md, each file under 500 lines | | L | Language tests, `cargo fuzz` target, hostile scripts, size added under 300 KB |
+| M10.5 | Game API through one table, events, commands, tasks in `Game::step` | M10.2, M10.3, M10.4 | M | Each use case as a test; replay trace byte-identical |
+| M10.6 | `--check`, `--test`, `--trace`, `--script-api`, `--dump-level`, `--pack-level`, hot reload | M10.5 | M | An agent builds the switch-door level from nothing, with no `cargo build`, in a recorded session |
+| M10.7 | Mover rendering and lightmaps | M10.3 | M | Pixel tests read a door at both poses; `frame_bench` with movers recorded in `docs/perf/` |
+| M10.8 | Props, pickups, use key, factions, HUD messages | M10.5 | M | Keycard and terminal end to end through `--test` |
+| M10.9 | Editor: mover command, names, tags, script errors, reload in Play | M10.2, M10.5 | M | `--selftest` steps |
+
 ## M11 Voxel volumes
 
 Design in [voxels.md](voxels.md); status in [status.md](status.md#m11-voxel-volumes). Each item leaves the game and editor working, and levels
@@ -120,7 +137,7 @@ without volumes draw exactly the same pixels.
 | ID | Item | Deps | Size | Done when |
 |---|---|---|---|---|
 | M11.1 | `mscent-world::voxel`: chunks, copy on write, resolve, dabs, surface nets, LOD, connectivity; `voxel_bench` example | M2.3 | L | Closed-mesh test over chunk borders; `fold` sign agrees with `Bsp::is_solid`; benchmark reports the field and meshing numbers in the design |
-| M11.2 | Level format version 3, section 4 | M11.1, M2.6 | M | Round trip; versions 1 and 2 load; bit flips and forged RLE never panic or exceed the allocation cap |
+| M11.2 | Level format version 4, section 5 | M11.1, M2.6 | M | Round trip; versions 1 to 3 load; bit flips and forged RLE never panic or exceed the allocation cap |
 | M11.3 | Volumes in compile: shell brush, no-draw faces, chunks on leaves, node bounds | M11.1 | M | Seeded `Subtract` volume leaves a room looking the same; a volume with only shell faces still renders; a carved wall shows the material of the brush it came from; a tunnel across two touching volumes has no wall |
 | M11.4 | Triangle path, flood, governor, projection and shading | M11.3, M5.5 | L | Pinhole test over 1000 poses; `frame_alloc` unchanged; frame budget met in `check_frame_cost.py`; voxel pixel cost at High compared with a brush pixel |
 | M11.5 | Light: occluders, cell records, cache, seam blending | M11.4, M5.8 | L | Voxels shadow brushes and the reverse (pixel tests); `crawl` on a voxel shadow edge; stale and forged caches ignored; painting does not re-bake |

@@ -68,7 +68,7 @@ pub fn generate_level(seed: u64, params: &GenParams) -> Level {
     Level {
         brushes,
         entities: entities(seed, params, &centres, &mut rng),
-        volumes: Vec::new(),
+        ..Default::default()
     }
 }
 

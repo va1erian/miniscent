@@ -161,9 +161,8 @@ fn report_brushes() {
 /// What the volume adds to a level file, and how long it takes to read back.
 fn report_file(volume: &Volume) {
     let level = Level {
-        brushes: Vec::new(),
-        entities: Vec::new(),
         volumes: vec![volume.clone()],
+        ..Default::default()
     };
     let bytes = format::write(&level);
     let t = Instant::now();

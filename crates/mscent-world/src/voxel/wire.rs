@@ -1,4 +1,4 @@
-//! Volumes in the level file: section 4 of `format.rs`.
+//! Volumes in the level file: section 5 of `format.rs`.
 //!
 //! ```text
 //! count u32

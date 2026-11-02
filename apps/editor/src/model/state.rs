@@ -5,7 +5,7 @@ use mscent_world::{Entity, Op};
 
 use super::command::{Command, History};
 use super::document::{BrushDef, Document, EntityDef, Id, Shape};
-use super::entity::{EntityKind, kind};
+use super::entity::{EntityKind, fog_entity};
 use super::pick::FaceRef;
 use super::pointer::Drag;
 
@@ -66,6 +66,9 @@ pub struct EditorState {
     pub texture_sizes: Vec<(u32, u32)>,
     /// The last thing the user should be told.
     pub message: String,
+    /// The panel's name and tag fields while they are being typed in.
+    pub draft: super::labels::LabelDraft,
+    pub(super) script: super::labels::ScriptText,
 }
 
 impl Default for EditorState {
@@ -94,6 +97,8 @@ impl EditorState {
             face_key: None,
             texture_sizes: Vec::new(),
             message: "Ready".into(),
+            draft: Default::default(),
+            script: Default::default(),
         }
     }
 
@@ -107,6 +112,9 @@ impl EditorState {
         self.face_key = None;
         self.drag = None;
         self.cut = None;
+        self.draft = Default::default();
+        self.script = Default::default();
+        self.poll_script();
     }
 
     pub fn snap(&self, v: f64) -> f64 {
@@ -142,6 +150,7 @@ impl EditorState {
         self.cancel_drag();
         let ok = self.history.undo(&mut self.doc);
         self.drop_stale_selection();
+        self.draft.filled_for = None;
         self.message = if ok { "Undo" } else { "Nothing to undo" }.into();
         ok
     }
@@ -150,6 +159,7 @@ impl EditorState {
         self.cancel_drag();
         let ok = self.history.redo(&mut self.doc);
         self.drop_stale_selection();
+        self.draft.filled_for = None;
         self.message = if ok { "Redo" } else { "Nothing to redo" }.into();
         ok
     }
@@ -177,6 +187,60 @@ impl EditorState {
         Some(id)
     }
 
+    /// The level's fog `(start, end)`, if it has a world entity.
+    pub fn fog(&self) -> Option<(f32, f32)> {
+        self.doc.entities().iter().find_map(|e| match e.entity {
+            Entity::World {
+                fog_start, fog_end, ..
+            } => Some((fog_start, fog_end)),
+            _ => None,
+        })
+    }
+
+    /// Sets the level's fog through its world entity, creating the entity if
+    /// the level has none; rejected if the range is invalid.
+    pub fn set_fog(&mut self, fog_start: f32, fog_end: f32) -> bool {
+        let world = fog_entity(fog_start, fog_end);
+        if !world.is_valid() {
+            self.message = "Fog needs 0 <= start < end <= the maximum depth".into();
+            return false;
+        }
+        let existing = self
+            .doc
+            .entities()
+            .iter()
+            .find(|e| matches!(e.entity, Entity::World { .. }))
+            .copied();
+        let cmd = match existing {
+            Some(before) => {
+                let mut after = before;
+                if let Entity::World {
+                    fog_start: s,
+                    fog_end: e,
+                    ..
+                } = &mut after.entity
+                {
+                    (*s, *e) = (fog_start, fog_end);
+                }
+                if after == before {
+                    return false;
+                }
+                Command::EditEntity { before, after }
+            }
+            None => {
+                let id = self.doc.alloc_id();
+                let index = self.doc.entities().len();
+                Command::AddEntity {
+                    index,
+                    entity: EntityDef { id, entity: world },
+                }
+            }
+        };
+        self.history.run(&mut self.doc, cmd);
+        self.message = format!("Fog from {fog_start} to {fog_end}");
+        true
+    }
+
     /// Places an entity (a second player start replaces the first).
     pub fn place_entity(&mut self, k: EntityKind, p: [f64; 3]) -> Id {
         let id = self.doc.alloc_id();
@@ -185,9 +249,14 @@ impl EditorState {
             entity: k.make(p),
         };
         let mut cmds = Vec::new();
-        // There is one player start and one world entity.
-        if matches!(k, EntityKind::PlayerStart | EntityKind::World) {
-            for old in self.doc.entities().iter().filter(|e| kind(&e.entity) == k) {
+        // There is one player start.
+        if k == EntityKind::PlayerStart {
+            for old in self
+                .doc
+                .entities()
+                .iter()
+                .filter(|e| matches!(e.entity, Entity::PlayerStart { .. }))
+            {
                 // Each removal sees the list after the earlier ones.
                 let index = self
                     .doc

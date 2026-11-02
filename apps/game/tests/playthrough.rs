@@ -28,6 +28,7 @@ fn opts() -> RunOptions {
         autoclose: None,
         shot_times: vec![],
         shot_stem: None,
+        watch: None,
     }
 }
 

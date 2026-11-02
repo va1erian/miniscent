@@ -916,6 +916,7 @@ dependencies = [
  "mscent-math",
  "mscent-platform",
  "mscent-render",
+ "mscent-script",
  "mscent-world",
 ]
 
@@ -975,6 +976,7 @@ dependencies = [
  "mscent-collide",
  "mscent-math",
  "mscent-render",
+ "mscent-script",
  "mscent-world",
 ]
 
@@ -997,6 +999,10 @@ dependencies = [
  "mscent-math",
  "mscent-world",
 ]
+
+[[package]]
+name = "mscent-script"
+version = "0.1.0"
 
 [[package]]
 name = "mscent-world"

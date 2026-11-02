@@ -40,6 +40,7 @@ fn level(volumes: Vec<Volume>) -> Level {
             yaw: 0.0,
         }],
         volumes,
+        ..Default::default()
     }
 }
 
@@ -143,13 +144,15 @@ fn a_level_without_volumes_has_no_section_for_them() {
 
 #[test]
 fn older_versions_still_load_with_no_volumes() {
-    let mut bytes = format::write(&level(Vec::new()));
-    bytes[4..6].copy_from_slice(&2u16.to_le_bytes());
-    assert_eq!(format::read(&bytes), Ok(level(Vec::new())));
-    // Section 4 meant nothing to version 2: it is skipped like any unknown one.
-    let mut with = format::write(&level(vec![sculpted(Op::Add, [0; 3], 1)]));
-    with[4..6].copy_from_slice(&2u16.to_le_bytes());
-    assert_eq!(format::read(&with), Ok(level(Vec::new())));
+    for version in [2u16, 3] {
+        let mut bytes = format::write(&level(Vec::new()));
+        bytes[4..6].copy_from_slice(&version.to_le_bytes());
+        assert_eq!(format::read(&bytes), Ok(level(Vec::new())));
+        // Section 5 meant nothing to these versions: it is skipped like any unknown one.
+        let mut with = format::write(&level(vec![sculpted(Op::Add, [0; 3], 1)]));
+        with[4..6].copy_from_slice(&version.to_le_bytes());
+        assert_eq!(format::read(&with), Ok(level(Vec::new())));
+    }
 }
 
 #[test]
@@ -354,10 +357,10 @@ fn a_volume_sharing_an_order_with_a_brush_is_refused() {
             )
             .expect("valid"),
         ],
-        entities: Vec::new(),
         volumes: vec![
             Volume::new(Op::Add, order, CellSize::Quarter, [0; 3], [1, 1, 1]).expect("valid"),
         ],
+        ..Default::default()
     };
     let tied = format::write(&level_at(3));
     assert_eq!(format::read(&tied), Err(FormatError::BadVolume));
