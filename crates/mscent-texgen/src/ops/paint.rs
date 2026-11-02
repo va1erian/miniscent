@@ -22,8 +22,8 @@ pub const STROKE_RADIUS: RangeInclusive<f32> = 0.0..=0.5;
 /// Texel visits a `paint` may make, per texel of the tile, plus a floor for
 /// tiny tiles. Bounds the time a hostile recipe can take: 4096 strokes of 4096
 /// long segments would otherwise cost a tile each.
-const WORK_PER_TEXEL: u64 = 64;
-const WORK_FLOOR: u64 = 1 << 20;
+const WORK_PER_TEXEL: u64 = 512;
+const WORK_FLOOR: u64 = 1 << 23;
 
 /// Whether one stroke is something `paint` will run: finite numbers in range and
 /// no more points than the cap. The recipe reader and the editor ask this too, so
