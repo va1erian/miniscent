@@ -55,6 +55,9 @@ hardware (`lazyos/docs/compat/kabylake/hw-survey/03-cpuinfo.txt`).
 
 ## Deviations since the first plan
 
+- **Textures from recipes.** Stock materials ship as recipes that the game runs at load, in the
+  manner of .kkrieger, edited in the editor's Texture Studio ([texture-studio.md](texture-studio.md)).
+  Renderer depends on `mscent-texgen` for this.
 - **TexInfo.** Faces map textures with a Hammer-style per-plane `TexInfo` (axes, shift, scale,
   rotation, flips, fit, justify), not a fixed planar projection; level format version 2 stores it.
 - **Stock xui.** The editor builds against upstream xui (rev `0b1b7ef`, which has the monitor-change fix, pointer lock and F5 to F12 keys); nothing is vendored. The game has no xui dependency.
@@ -76,6 +79,7 @@ crates/
   mscent-collide   trace and sweep against the BSP and entities
   mscent-render    software rasterizer
   mscent-script    the level scripting language and VM; knows nothing about the game
+  mscent-texgen    procedural textures: operators, block graph, recipe files
   mscent-game      6DoF player, enemies, goal, fixed-timestep loop, script API
   mscent-platform  Platform trait, desktop (winit) and headless backends; LazyOS backend later
 apps/

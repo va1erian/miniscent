@@ -1,14 +1,26 @@
 # Texture Studio: plan
 
-Status: M12.1 to M12.8 are built, and the workspace is on the Texture menu. The
-sections below are the plan as written, with the changes noted under "As built".
-Time and size figures are targets to measure, not results. The work items move
-to [work-items.md](work-items.md) as M12 once this is accepted.
+Status: built. M12.1 to M12.11 are done, and the workspace is on the Texture menu.
+The sections after "As built" are the plan as written, kept for its reasoning;
+"As built" overrides them. Work items are in [work-items.md](work-items.md).
 
 ## As built
 
-- **Stock materials ship as recipes** (`name.mst`), which `load_texture` prefers
-  over PNGs. So Save writes the recipe and `materials.txt`, never PNGs, and
+- **All stock materials ship as recipes.** The ten stock materials are
+  `assets/textures/*.mst`, 11.4 KB against 902 KB of PNGs, and the game makes them
+  at load. `tools/gen_textures.py` is gone. So `mscent-render` depends on
+  `mscent-texgen`, unlike the plan below, and every caller of `load_dir` gets
+  recipes without knowing. PNG materials still load, and a recipe wins over a PNG
+  of the same name.
+- **Measured (`texgen_bench`, size-optimized release, dev machine).** All ten stock
+  recipes take 42.8 ms at 128 px, and one parameter change on brick at 256 px takes
+  19 ms. The game binary grows by about 140 KB to 2.02 MB, 92% of its 2.2 MB budget.
+- **Lookalikes.** Recipes reproduce the old pictures closely, not exactly, since
+  numpy's FFT noise is not reproducible in Rust. Metal and floor gained specular
+  masks, which closes M5.7. Detail finer than a texel raised shimmer past its limit
+  until recipes stopped their octaves where the old generator did: at 128 px, a
+  frequency doubled past 64 adds only aliasing.
+- **Save** writes the recipe and `materials.txt`, never PNGs, and
   `--bake-texture` writes PNGs to look at and adds a row when the directory it
   writes to has a manifest.
 - **Stacked blocks, no wires.** A block reads the row directly above it, under its
@@ -86,7 +98,7 @@ node graphs, animated textures, and custom emissive materials (see "Lit view").
 | xui at the pinned rev has `Tabs`, `Slider`, `ColorPicker`, `ComboBox`, `TreeView`, `Split` and context menus; the editor already has custom-painted nodes and hideable `stack`s | [app.rs](../apps/editor/src/ui/app.rs), [view3d.rs](../apps/editor/src/ui/view3d.rs) | No xui changes or new dependencies expected |
 | Normal texels are `0xAARRGGBB`, and decoding ignores alpha | `Texture::normal`, `NormalView` in texture.rs, [bump.rs](../crates/mscent-render/src/bump.rs) | The specular mask can live there; see "Engine changes" |
 | `encode_png` writes 8-bit RGB with stored (uncompressed) deflate | [png_encode.rs](../crates/mscent-render/src/png_encode.rs) | It loads correctly, but a 128 px map becomes about 49 KB (today 305 bytes to 29 KB) and a 1024 px map about 3 MB |
-| The game binary has a 2.2 MB budget | [check_size.py](../tools/check_size.py) | The game links the generator only if that is measured and worth it |
+| The game binary has a size budget (2.2 MB) | [check_size.py](../tools/check_size.py) | The game links the generator only if that is measured and worth it |
 
 ## What to take from kkrieger
 
@@ -321,7 +333,7 @@ Each leaves the game and the editor working. Sizes as in work-items.md.
 | M12.8 | Paint operator and tool | M12.6 | M | Replay at 128 and 512 px, downsampled, is within 2 levels mean; a stroke across the edge passes the seam test; undo restores identical pixels |
 | M12.9 | Later operator set, starter templates | M12.3, M12.4 | L | Same tests as M12.2; each template bakes into a contact sheet |
 | M12.10 | Stock recipes for all five materials with `out-specular` for `metal` and `floor` (closes M5.7), retire `gen_textures.py`; a compressing PNG encoder if file size needs it | M12.7 | M | Side-by-side contact sheet reviewed by the owner; full test suite passes, with snapshot changes explained; CI checks that committed PNGs equal the recipe output; assets size recorded |
-| M12.11 | Optional: game builds materials from recipes at load | M12.10 | M | Decided on measured numbers: binary size against the budget, load time against the 67 ms PNG decode noted in `build.rs` |
+| M12.11 | Game builds materials from recipes at load | M12.10 | M | Decided on measured numbers: binary size against the budget, load time against the 67 ms PNG decode noted in `build.rs` |
 
 M12.5 is independent of the rest and can start at any time, so it can run in
 parallel with M12.1 to M12.4. A first usable release is M12.1 to M12.7.
