@@ -6,7 +6,9 @@
 //! never shifts, like a distant sky; at 1/16 a room reads as 16 times its size.
 //! See `docs/viewports.md`.
 
-use mscent_math::Vec3;
+use std::f64::consts::TAU;
+
+use mscent_math::{Quat, Vec3};
 use mscent_world::lightmap::{LightFace, LuxelDensity, PointLight};
 use mscent_world::materials::{VIEW_SLOTS, is_self_lit};
 use mscent_world::{Bsp, Entity, Face, Islands, LeafId, Level, Portals};
@@ -14,7 +16,7 @@ use mscent_world::{Bsp, Entity, Face, Islands, LeafId, Level, Portals};
 use super::{FAR_VISTA, LevelRenderer, NEAR, Quality, View};
 use crate::camera::Camera;
 use crate::framebuffer::Framebuffer;
-use crate::raster::{DrawStats, PolyList};
+use crate::raster::{DrawStats, PolyList, Vertex};
 use crate::scene::eye_of;
 use crate::shade::Fog;
 
@@ -25,6 +27,10 @@ struct Layer {
     centre: Vec3,
     slot: u8,
     parallax: f32,
+    /// Axis times radians per second, turning the layer's camera.
+    spin: Vec3,
+    /// Texels per second, on self-lit faces.
+    pan: [f32; 2],
     island: u32,
     fog: Option<Fog>,
 }
@@ -48,6 +54,37 @@ pub(super) struct Vistas {
 pub(super) struct LayerList {
     faces: PolyList,
     cam: Option<Camera>,
+    /// Room for a panned face's shifted vertices, kept so a frame makes none.
+    scratch: Vec<Vertex>,
+}
+
+/// A time to animate by: seconds of the game's own clock, never negative or
+/// not a number.
+fn clean_time(seconds: f32) -> f32 {
+    if seconds.is_finite() && seconds > 0.0 {
+        seconds
+    } else {
+        0.0
+    }
+}
+
+/// The layer's camera turn at `time`: about the axis of `spin` by its length
+/// times `time`. Whole turns are dropped so a long session keeps its precision.
+/// No spin gives `None`, so the player's own orientation passes through bit for bit.
+fn spin_rotation(spin: Vec3, time: f32) -> Option<Quat> {
+    let rate = f64::from(spin.length());
+    if rate == 0.0 || !rate.is_finite() {
+        return None;
+    }
+    let angle = (rate * f64::from(time)).rem_euclid(TAU);
+    Some(Quat::from_axis_angle(spin, angle as f32))
+}
+
+/// Texels a layer's self-lit faces have scrolled at `time`, or `None` when it
+/// does not pan (so nothing is copied).
+fn pan_texels(pan: [f32; 2], time: f32) -> Option<[f32; 2]> {
+    let [u, v] = pan.map(|rate| rate * time);
+    (u != 0.0 || v != 0.0).then_some([u, v])
 }
 
 /// The island the first player start is in, if the level has one in empty space.
@@ -79,6 +116,8 @@ impl Vistas {
                 slot,
                 layer,
                 parallax,
+                spin,
+                pan,
                 fog_start,
                 fog_end,
                 fog_color,
@@ -96,6 +135,8 @@ impl Vistas {
                         centre,
                         slot,
                         parallax,
+                        spin,
+                        pan,
                         island,
                         fog,
                     },
@@ -152,14 +193,18 @@ impl Vistas {
 
 impl LevelRenderer {
     /// Lists every layer whose slot shows in `holes`, through the part of the
-    /// screen those holes cover.
+    /// screen those holes cover, as it looks `time` seconds in. Returns how many
+    /// faces were listed.
     pub(super) fn list_vistas(
         &self,
         view: &View,
         (width, height): (u32, u32),
         holes: &PolyList,
+        time: f32,
         out: &mut Vec<LayerList>,
-    ) {
+    ) -> u32 {
+        let time = clean_time(time);
+        let mut listed = 0;
         let layers = &self.vistas.layers;
         out.resize_with(layers.len(), LayerList::default);
         for (layer, list) in layers.iter().zip(out.iter_mut()) {
@@ -169,16 +214,22 @@ impl LevelRenderer {
             };
             let eye = View {
                 pos: layer.pos + (view.pos - layer.centre) * layer.parallax,
-                orientation: view.orientation,
+                orientation: match spin_rotation(layer.spin, time) {
+                    Some(turn) => turn * view.orientation,
+                    None => view.orientation,
+                },
             };
             let Some(cam) = eye.camera(self.cfg.fov_y, NEAR, FAR_VISTA, width, height) else {
                 continue;
             };
             let islands = &self.vistas.islands;
-            self.scene
-                .list_layer(&cam, islands, layer.island, window, &mut list.faces);
+            let pan = pan_texels(layer.pan, time).map(|texels| (texels, &mut list.scratch));
+            let st =
+                (self.scene).list_layer(&cam, islands, layer.island, window, &mut list.faces, pan);
+            listed += st.drawn.len() as u32;
             list.cam = Some(cam);
         }
+        listed
     }
 
     /// Marks the holes in the rows `fb` holds, then draws each slot that shows.

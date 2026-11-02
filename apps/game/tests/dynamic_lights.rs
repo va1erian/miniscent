@@ -84,6 +84,7 @@ fn frame(r: &LevelRenderer, view: &View, actors: &[Actor], lights: &[DynLight]) 
         particles: None,
         lights,
         poses: &[],
+        ..Effects::default()
     };
     r.render_with_effects(&mut fb, view, Quality::High, actors, None, &effects)
         .expect("a frame");
@@ -267,6 +268,7 @@ fn one_worker_and_many_give_identical_pixels() {
             particles: Some((&draws, &bank)),
             lights: &lights,
             poses: &[],
+            ..Effects::default()
         };
         r.render_with_effects(&mut fb, &view, Quality::High, &actors, None, &effects)
             .expect("a frame");

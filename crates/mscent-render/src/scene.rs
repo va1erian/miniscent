@@ -17,6 +17,7 @@
 //! sensible portal flood, so every leaf counts as visible.
 
 mod holes;
+mod pan;
 mod prep;
 mod reach;
 mod surface;
@@ -59,6 +60,10 @@ pub struct SceneStats {
     pub spans: u32,
     /// Voxel triangles submitted.
     pub voxel_triangles: u32,
+    /// Pixels drawn through viewport faces; `pixels` counts them too.
+    pub vista_pixels: u32,
+    /// Faces listed for the layers of the vistas in view.
+    pub vista_faces: u32,
 }
 
 /// A compiled level ready to draw.
@@ -223,6 +228,7 @@ impl Scene {
             faces: list,
             chunks: &mut Vec::new(),
             holes: None,
+            pan: None,
         };
         self.list_all(cam, texture, lists)
     }
@@ -241,6 +247,7 @@ impl Scene {
             faces: list,
             chunks,
             holes: Some(holes),
+            pan: None,
         };
         self.list_all(cam, None, lists)
     }
@@ -269,6 +276,8 @@ impl Scene {
     /// `island`, seen through the screen `window`. An eye that parallax has
     /// carried out of the island sees all of it, and culling does the rest; the
     /// whole-level answer a frame gives for an eye in solid would show other rooms.
+    /// `pan` is how many texels the layer's self-lit faces have scrolled, with
+    /// storage for the shifted vertices; `None` lists every face as authored.
     pub(crate) fn list_layer(
         &self,
         cam: &Camera,
@@ -276,6 +285,7 @@ impl Scene {
         island: u32,
         window: [f32; 4],
         list: &mut PolyList,
+        pan: Option<([f32; 2], &mut Vec<Vertex>)>,
     ) -> SceneStats {
         list.clear();
         let eye = eye_of(cam);
@@ -293,6 +303,7 @@ impl Scene {
             faces: list,
             chunks: &mut Vec::new(),
             holes: None,
+            pan: pan.map(|(texels, scratch)| pan::Pan { texels, scratch }),
         };
         let mut w = walk::Walk::new(self, lists, cam, eye, visible, None);
         w.visit(self.bsp.root());

@@ -74,6 +74,14 @@ eye = pos + (player - centre) * parallax
 orientation = spin_rotation(time) * player_orientation
 ```
 
+`time` is `Effects::vista_time`, in seconds. The game passes its fixed step count
+over `STEP_HZ`, plus the part of the next step, so it stands still when play does
+and a scripted shot is the same every run; the editor's 3D view leaves it at 0, and
+a negative or non-finite value counts as 0. `spin_rotation` turns about the axis of
+`spin` by `|spin| * time`, with whole turns dropped; zero spin leaves the player's
+orientation untouched. A positive `pan` slides the picture of a self-lit face towards
++U and +V of its texture axes, by `pan * time` texels, whole textures dropped.
+
 `parallax` is the only scale control, and it covers each style:
 
 | `parallax` | Reads as | Reference |

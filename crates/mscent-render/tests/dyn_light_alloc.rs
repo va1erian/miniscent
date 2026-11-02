@@ -125,6 +125,7 @@ fn lights_allocate_nothing_a_frame_without_them_does_not() {
             particles: None,
             lights: &lights,
             poses: &[],
+            ..Effects::default()
         };
         r.render_with_effects(&mut fb, &view(), Quality::High, &actors, None, &effects)
             .expect("a frame");
@@ -142,6 +143,7 @@ fn lights_allocate_nothing_a_frame_without_them_does_not() {
             particles: None,
             lights: &dark,
             poses: &[],
+            ..Effects::default()
         };
         r.render_with_effects(&mut fb, &view(), Quality::High, &actors, None, &effects)
             .expect("a frame");

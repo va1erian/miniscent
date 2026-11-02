@@ -4,6 +4,7 @@ use mscent_math::{Aabb, Vec3};
 use mscent_world::{Child, LeafId};
 
 use super::Scene;
+use super::pan::Pan;
 use crate::camera::{Camera, Frustum};
 use crate::raster::PolyList;
 use crate::texture::Texture;
@@ -15,6 +16,7 @@ pub(super) struct Walk<'a> {
     /// Where viewport faces go. A vista has none, so one seen from inside a
     /// layer is not drawn and the layer behind shows through it.
     holes: Option<&'a mut PolyList>,
+    pan: Option<Pan<'a>>,
     hole_drawn: Vec<bool>,
     cam: &'a Camera,
     frustum: Frustum,
@@ -30,6 +32,8 @@ pub(super) struct Lists<'a> {
     pub(super) faces: &'a mut PolyList,
     pub(super) chunks: &'a mut Vec<u32>,
     pub(super) holes: Option<&'a mut PolyList>,
+    /// Scrolls the self-lit faces of a vista layer; `None` lists them as they are.
+    pub(super) pan: Option<Pan<'a>>,
 }
 
 impl<'a> Walk<'a> {
@@ -51,6 +55,7 @@ impl<'a> Walk<'a> {
             list: lists.faces,
             chunks: lists.chunks,
             holes: lists.holes,
+            pan: lists.pan,
             hole_drawn: vec![false; scene.holes.polys.len()],
             cam,
             frustum: cam.frustum(),
@@ -170,7 +175,12 @@ impl<'a> Walk<'a> {
         let tex = self
             .texture
             .unwrap_or_else(|| self.scene.texture_of(face.material));
-        self.list.push(self.cam, poly, tex, fi);
+        let size = (tex.width(), tex.height());
+        let verts = match self.pan.as_mut() {
+            Some(pan) => pan.apply(face.material, poly, size),
+            None => poly,
+        };
+        self.list.push(self.cam, verts, tex, fi);
         self.stats.drawn.push(fi);
     }
 }

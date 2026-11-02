@@ -373,7 +373,8 @@ impl LevelRenderer {
             &mut frame.holes,
         );
         let size = (fb.width(), fb.height());
-        self.list_vistas(view, size, &frame.holes, &mut frame.layers);
+        let time = effects.vista_time;
+        stats.vista_faces = self.list_vistas(view, size, &frame.holes, time, &mut frame.layers);
         frame
             .voxels
             .prepare(self.scene.voxels(), &cam, eye_of(&cam), |leaf| {
@@ -393,6 +394,7 @@ impl LevelRenderer {
         let voxels = &frame.voxels;
         let (holes, layers) = (&frame.holes, &frame.layers);
         let (pixels, spans) = (AtomicU32::new(0), AtomicU32::new(0));
+        let vista_pixels = AtomicU32::new(0);
         let eye = eye_of(&cam);
         let texture_of = |id: u16| self.scene.texture_of(id);
         let voxel_fill = FillContext {
@@ -419,6 +421,7 @@ impl LevelRenderer {
             if let Some((draws, bank)) = effects.particles {
                 draw_particles(band, draws, bank);
             }
+            vista_pixels.fetch_add(sky.pixels, Ordering::Relaxed);
             let drawn = moved.pixels + vox.pixels + st.pixels + sky.pixels;
             pixels.fetch_add(drawn, Ordering::Relaxed);
             spans.fetch_add(
@@ -433,6 +436,7 @@ impl LevelRenderer {
         }
         stats.pixels = pixels.into_inner();
         stats.spans = spans.into_inner();
+        stats.vista_pixels = vista_pixels.into_inner();
         Some(stats)
     }
 
