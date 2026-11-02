@@ -12,6 +12,7 @@ use mscent_math::{Vec3, Vec3d};
 use mscent_script::{ScriptError, Source};
 use mscent_world::{Brush, Entity, Level, Op};
 
+use super::area::stranded_areas;
 use super::scan::{Define, defines};
 use crate::model::Document;
 
@@ -96,7 +97,8 @@ pub fn check(level: Level, level_path: Option<&Path>, text: &str) -> Report {
         name: &script,
         text,
     });
-    let problems = match Arena::from_scripted_level(&runnable(level)) {
+    let stranded = stranded_areas(&level, text);
+    let mut problems = match Arena::from_scripted_level(&runnable(level)) {
         Ok(arena) => run(arena, &sources, &script),
         Err(why) => vec![Problem {
             line: None,
@@ -104,6 +106,7 @@ pub fn check(level: Level, level_path: Option<&Path>, text: &str) -> Report {
             warning: true,
         }],
     };
+    problems.extend(stranded);
     Report { problems, library }
 }
 

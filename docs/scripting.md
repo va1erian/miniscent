@@ -453,7 +453,7 @@ The pane sits under the views or in a window of its own, and only its widgets di
 **Basic entities.** Script > Add entity places a door, lift, wave and so on. Each is ordinary level content
 (named brushes, zones and markers) and a few lines added to the script, mostly calls into
 `assets/scripts/lib/kit.st`. So the rule above holds: the level file gains no logic and no new kind of
-entity, and what a door does stays readable and changeable where all the logic is.
+entity, and what a door does stays readable and changeable where all the logic is. The editor does treat a mover and the zone named after it, `door_1_area`, as one thing: the name is the only link, and the zone follows when the mover is edited.
 
 **Samples and guide.** Script > Open sample writes a fresh copy of a level from `assets/samples` to the user's
 settings directory, so it plays at once and the shipped one stays as it is. The guide (F7) is

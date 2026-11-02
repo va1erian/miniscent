@@ -3,6 +3,7 @@
 //! types here, as in the model; `ui/script_pane.rs` is the widgets.
 
 pub mod api;
+pub mod area;
 pub mod buffer;
 pub mod check;
 pub mod complete;

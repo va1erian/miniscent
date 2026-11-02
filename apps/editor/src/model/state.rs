@@ -382,8 +382,7 @@ impl EditorState {
         if after == before {
             return false;
         }
-        self.history
-            .run(&mut self.doc, Command::EditBrush { before, after });
+        self.run_brush_edit(before, after);
         true
     }
 

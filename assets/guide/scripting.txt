@@ -95,7 +95,7 @@ A mover is a group of brushes with named poses. It starts in the pose 'closed', 
     (zone: 'gate_area') onEnter: [gate moveTo: 'open' in: 0.6].
     (zone: 'gate_area') onExit: [gate moveTo: 'closed' in: 0.8].
 
-That pattern has a name in the library, and a key of nil means anyone can use the door:
+That pattern has a name in the library, and a key of nil means anyone can use the door. It listens to the zone named after the door and _area, here gate_area. A door from Add entity brings that zone along when you move or resize it. Move the zone yourself to open the door from elsewhere, and the Problems list tells you if a zone does not reach its door.
 
     autoDoor: 'gate' travel: (x: 0 y: 0 z: 4) key: nil.
 
