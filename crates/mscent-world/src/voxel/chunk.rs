@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use super::{CHUNK_EDGE, CHUNK_SAMPLES};
+use super::{CHUNK_EDGE, CHUNK_SAMPLES, INHERIT_MATERIAL};
 
 /// Index of a sample inside a chunk. Coordinates must be below [`CHUNK_EDGE`].
 pub(super) const fn sample_index(x: usize, y: usize, z: usize) -> usize {
@@ -28,7 +28,7 @@ impl Chunk {
     /// The untouched chunk.
     pub const EMPTY: Chunk = Chunk::Uniform {
         delta: 0,
-        material: 0,
+        material: INHERIT_MATERIAL,
     };
 
     /// `(delta, material)` of sample `i`, which must be in range.

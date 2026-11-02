@@ -25,6 +25,7 @@
 //! * [`Mesher`] (`surface.rs`): surface nets, one [`ChunkMesh`] per chunk.
 //! * [`ChunkMesh::clustered`] (`lod.rs`): level of detail without cracks.
 //! * [`AirMask`] (`connectivity.rs`): which chunk faces air joins.
+//! * [`VoxelWorld`] (`world.rs`): every volume of a level meshed against its BSP.
 //! * `wire.rs`: the level file's section for volumes.
 
 mod block;
@@ -37,6 +38,7 @@ mod prim;
 mod surface;
 mod volume;
 pub(crate) mod wire;
+mod world;
 
 #[cfg(test)]
 mod dab_tests;
@@ -48,6 +50,8 @@ mod surface_tests;
 mod test_util;
 #[cfg(test)]
 mod wire_tests;
+#[cfg(test)]
+mod world_tests;
 
 pub use chunk::{Chunk, ChunkData};
 pub use connectivity::{AirMask, Face};
@@ -58,6 +62,7 @@ pub use prim::Prim;
 pub use surface::{ChunkMesh, Mesher, VoxelVertex};
 pub use volume::{CellSize, Volume, VolumeError};
 pub use wire::{MAX_DETAIL_CHUNKS, MAX_VOLUMES};
+pub use world::{NO_CHUNK, VolumeGeometry, VoxelChunk, VoxelWorld};
 
 /// Samples along one edge of a chunk.
 pub const CHUNK_EDGE: usize = 16;
@@ -71,6 +76,13 @@ pub const UNITS_PER_CELL: f64 = 32.0;
 pub const MAX_SAMPLE: i8 = 63;
 /// Largest magnitude of a `delta`: enough to override any base.
 pub const MAX_DELTA: i8 = 2 * MAX_SAMPLE;
+
+/// A stored material meaning "whatever brush this sample came from". Rock nobody
+/// painted looks like the wall it was carved out of.
+pub const INHERIT_MATERIAL: u8 = u8::MAX;
+/// What a sample shows for a brush material samples cannot name: not in any
+/// table, so it draws with the grey fallback.
+pub const FALLBACK_MATERIAL: u8 = u8::MAX - 1;
 
 /// World distance `d` as a sample, for a lattice of `cell` world units. The
 /// sign always survives, so a surface never moves to the wrong side of a

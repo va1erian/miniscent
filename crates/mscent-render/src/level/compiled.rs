@@ -11,6 +11,7 @@ use std::time::Instant;
 
 use mscent_world::lightmap::store::input_key;
 use mscent_world::lightmap::{BakeConfig, LightFace, Lightmap, PointLight, bake, bake_cancellable};
+use mscent_world::materials::NO_DRAW;
 use mscent_world::{Bsp, Face, Level, Portals, brush_faces, compile, extract_faces};
 
 use super::{
@@ -60,9 +61,11 @@ pub struct Compiled {
 impl Compiled {
     /// Runs CSG, face extraction and portals. No light is traced.
     pub fn new(level: &Level, cfg: &BuildConfig) -> Result<Self, BuildError> {
-        let brushes = level.static_brushes();
+        let brushes = level.csg_brushes();
         let bsp = compile(&brushes).map_err(BuildError::Csg)?;
         let mut faces = extract_faces(&bsp, &brushes);
+        // The voxel surface closes in front of a shell, before any light is laid out for it.
+        faces.retain(|f| f.material != NO_DRAW);
         let mover_ranges = append_mover_faces(level, &mut faces);
         let portals = Portals::build(&bsp);
         let light_faces = faces.iter().map(LightFace::from).collect();

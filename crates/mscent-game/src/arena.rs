@@ -150,7 +150,7 @@ impl Arena {
 
     fn build(level: &Level, goal_required: bool) -> Result<Self, LoadError> {
         level.check_labels().map_err(LoadError::Labels)?;
-        let bsp = compile(&level.static_brushes()).map_err(LoadError::Csg)?;
+        let bsp = compile(&level.csg_brushes()).map_err(LoadError::Csg)?;
         let mut start = None;
         let (mut goals, mut lights, mut enemies) = (Vec::new(), Vec::new(), Vec::new());
         let (mut markers, mut zones) = (Vec::new(), Vec::new());

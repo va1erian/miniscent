@@ -20,6 +20,11 @@ pub const SNAP_GRID: f64 = 0.125;
 /// the border of a volume, so the two never fight and never leave a gap.
 pub const VOXEL_SEAM_BIAS_CELLS: f64 = 1.0 / 16.0;
 
+/// How close to a BSP plane a voxel triangle's corner counts as on both sides
+/// of it, when deciding whether air can see the triangle. Well below the seam
+/// bias of the smallest cell, so a surface sunk behind a brush face stays buried.
+pub const VOXEL_BURIED_MARGIN: f64 = 1.0e-3;
+
 /// Vectors shorter than this are treated as zero when normalizing, so a
 /// degenerate input yields `None` instead of NaN or infinity.
 pub const MIN_LENGTH_F64: f64 = 1.0e-9;

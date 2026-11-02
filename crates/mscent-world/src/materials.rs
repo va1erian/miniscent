@@ -15,5 +15,9 @@ pub const METAL: u16 = 3;
 /// Rough cave rock.
 pub const ROCK: u16 = 4;
 
+/// A face with this material is never drawn or lit: the shell of a voxel volume,
+/// where the voxel surface closes in front of it. Not a texture.
+pub const NO_DRAW: u16 = u16::MAX;
+
 /// Texture names in id order.
 pub const NAMES: [&str; 5] = ["brick", "floor", "lightpanel", "metal", "rock"];
