@@ -13,7 +13,8 @@ use mscent_render::{
 use mscent_world::{Brush, Entity, Level, Op, showcase_level};
 
 const STOCK: &str = "0 brick 25\n1 floor 90\n2 lightpanel 120\n3 metal 200\n4 rock 10\n\
-    5 bark 8\n6 cap 70\n7 coral 30\n8 stem 20\n9 wax 90\n";
+    5 bark 8\n6 cap 70\n7 coral 30\n8 stem 20\n9 wax 90\n10 sky-stars 0\n11 sky-clouds 0\n\
+    12 sky-ridge 0\n13 sky-planet 0\n";
 
 fn stock_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures")
@@ -157,6 +158,10 @@ fn stock_names_with_no_manifest_keep_their_gloss_and_draw_the_same() {
             (7, "coral", 30),
             (8, "stem", 20),
             (9, "wax", 90),
+            (10, "sky-stars", 0),
+            (11, "sky-clouds", 0),
+            (12, "sky-ridge", 0),
+            (13, "sky-planet", 0),
         ]
     );
     let stock = MaterialTable::load_dir(&stock_dir()).expect("stock");
@@ -177,7 +182,7 @@ fn a_png_the_manifest_does_not_list_is_ignored_and_shifts_nothing() {
     f.png("aaa.png", 8, 0xffff_0000);
     f.png("concrete.png", 8, 0xffff_0000);
     let t = f.load().expect("loads");
-    assert_eq!(t.len(), 10);
+    assert_eq!(t.len(), 14);
     assert_eq!(t.find("brick"), Some(MaterialId(0)));
     assert_eq!(t.find("aaa"), None);
     assert_eq!(t.find("concrete"), None);
@@ -185,18 +190,18 @@ fn a_png_the_manifest_does_not_list_is_ignored_and_shifts_nothing() {
 
 #[test]
 fn a_listed_material_with_no_png_is_an_error_unless_retired() {
-    let f = Fixture::with_stock("missing", &format!("{STOCK}10 concrete 40\n"));
+    let f = Fixture::with_stock("missing", &format!("{STOCK}14 concrete 40\n"));
     assert!(matches!(f.load(), Err(TextureError::Io(_))));
     f.write(
         "materials.txt",
-        format!("{STOCK}10 retired\n11 rock2 3\n").as_bytes(),
+        format!("{STOCK}14 retired\n15 rock2 3\n").as_bytes(),
     );
     f.png("rock2.png", 8, 0xffff_0000);
     let t = f.load().expect("loads");
-    assert_eq!(t.len(), 12);
-    assert!(t.get(MaterialId(10)).is_none());
-    assert_eq!(t.find("rock2"), Some(MaterialId(11)));
-    assert_eq!(t.get(MaterialId(11)).expect("there").gloss, 3);
+    assert_eq!(t.len(), 16);
+    assert!(t.get(MaterialId(14)).is_none());
+    assert_eq!(t.find("rock2"), Some(MaterialId(15)));
+    assert_eq!(t.get(MaterialId(15)).expect("there").gloss, 3);
 }
 
 #[test]
@@ -357,7 +362,7 @@ fn pictures(r: &LevelRenderer, eye: Vec3) -> Vec<u32> {
 fn adding_a_material_leaves_stock_ids_and_the_pixels_of_a_level_unchanged() {
     // `aaa` sorts before every stock name: with ids from the file list it would
     // move them all, and the level would not even build.
-    let text = format!("{STOCK}10 aaa 200\n11 retired\n12 zzz 40\n");
+    let text = format!("{STOCK}14 aaa 200\n15 retired\n16 zzz 40\n");
     let f = Fixture::with_stock("added", &text);
     f.png("aaa.png", 128, 0xffff_00ff);
     f.png("aaa_n.png", 128, 0xff80_80ff);
@@ -410,32 +415,32 @@ fn room_picture(dir: &Fixture, material: u16, q: Quality) -> Vec<u32> {
 
 #[test]
 fn a_new_id_draws_its_own_material_and_a_retired_one_the_grey_fallback() {
-    let f = Fixture::with_stock("new_id", &format!("{STOCK}10 concrete 40\n11 retired\n"));
+    let f = Fixture::with_stock("new_id", &format!("{STOCK}14 concrete 40\n15 retired\n"));
     f.png("concrete.png", 128, 0xff00_ff00);
-    let green = room_picture(&f, 10, Quality::Low);
+    let green = room_picture(&f, 14, Quality::Low);
     let (r, g) = green.iter().fold((0u64, 0u64), |(r, g), p| {
         (r + u64::from(p >> 16 & 0xff), g + u64::from(p >> 8 & 0xff))
     });
-    assert!(g > r * 5, "id 10 is green: {g} against {r}");
+    assert!(g > r * 5, "id 14 is green: {g} against {r}");
 
-    let grey = room_picture(&f, 11, Quality::High);
+    let grey = room_picture(&f, 15, Quality::High);
     let (mut r, mut g) = (0u64, 0u64);
     for p in &grey {
         r += u64::from(p >> 16 & 0xff);
         g += u64::from(p >> 8 & 0xff);
     }
-    assert!(g > 0 && r.abs_diff(g) * 8 < g, "id 11 is grey: {r} and {g}");
+    assert!(g > 0 && r.abs_diff(g) * 8 < g, "id 15 is grey: {r} and {g}");
 }
 
 #[test]
 fn a_mask_on_a_material_too_dull_for_a_highlight_changes_nothing() {
     // Gloss 0 falls back to the lit shader, which never looks at the mask.
-    let f = Fixture::with_stock("dull", &format!("{STOCK}10 dull 0\n"));
+    let f = Fixture::with_stock("dull", &format!("{STOCK}14 dull 0\n"));
     f.png("dull.png", 128, 0xff80_8080);
     std::fs::copy(stock_dir().join("brick_n.png"), f.0.join("dull_n.png")).expect("copy");
-    let plain = room_picture(&f, 10, Quality::High);
+    let plain = room_picture(&f, 14, Quality::High);
     f.png("dull_s.png", 128, 0xff00_0000);
-    assert_eq!(plain, room_picture(&f, 10, Quality::High));
+    assert_eq!(plain, room_picture(&f, 14, Quality::High));
 }
 
 #[test]

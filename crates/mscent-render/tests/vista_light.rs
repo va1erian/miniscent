@@ -8,7 +8,6 @@ use mscent_math::{Vec3, Vec3d};
 use mscent_render::{
     Actor, ActorKind, BuildConfig, Framebuffer, LevelRenderer, MaterialTable, Quality, View,
 };
-use mscent_render::{FlatShader, SpanShader};
 use mscent_world::lightmap::uv::project_face;
 use mscent_world::lightmap::{LightFace, Lightmap};
 use mscent_world::materials::{FIRST_SKY, LIGHTPANEL, METAL};
@@ -317,7 +316,8 @@ fn a_huge_lamp_in_a_vista_room_changes_no_pixel_of_an_actor() {
 
 #[test]
 fn a_self_lit_face_draws_flat_whatever_lamps_there_are() {
-    // Material 10 has no texture yet, so it draws the grey fallback.
+    // The stars are a texture now, so the room is not one colour: what must hold is
+    // that no lamp, near or far, changes a pixel of it.
     let brushes = vec![cuboid(
         vd(-16.0, -16.0, -16.0),
         vd(16.0, 48.0, 16.0),
@@ -334,8 +334,6 @@ fn a_self_lit_face_draws_flat_whatever_lamps_there_are() {
     let none = renderer(brushes.clone(), Vec::new());
     let some = renderer(brushes.clone(), lamps(Vec::new()));
     let more = renderer(brushes, lamps(vec![far]));
-    let texel = none.scene().texture_of(FIRST_SKY).texel(0, 0);
-    let expected = FlatShader::new(256, None).shade(0, texel, 0, 0);
     let pixels = |r: &LevelRenderer| {
         let mut fb = Framebuffer::new(W, H).expect("fb");
         let view = View::from_angles(Vec3::new(0.0, 0.0, 0.0), 0.3, 0.1, 0.0);
@@ -344,11 +342,7 @@ fn a_self_lit_face_draws_flat_whatever_lamps_there_are() {
         fb.pixels().to_vec()
     };
     let shot = pixels(&none);
-    assert!(
-        shot.iter().all(|&p| p == expected),
-        "{:08x} expected",
-        expected
-    );
+    assert!(shot.windows(2).any(|w| w[0] != w[1]), "the starfield shows");
     assert_eq!(shot, pixels(&some));
     assert_eq!(shot, pixels(&more));
     let panel = LIGHTPANEL;

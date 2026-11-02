@@ -201,13 +201,20 @@ texels so mips do not fringe. `_h` and `_n` stay flat so the loader's rules hold
 
 | Id | Name | Size | Alpha | Tiles | Use on a brush |
 |---|---|---|---|---|---|
-| 10 | `sky_stars` | 512 | Opaque | Both | The inside of the room: the backdrop. Faint nebula noise, stars at least 2 texels so bilinear does not make them flicker |
-| 11 | `sky_clouds` | 512 | Soft | Both | A ceiling plane or big plate in a later layer, panned. Fractal noise thresholded to alpha |
-| 12 | `sky_ridge` | 512x256 | Hard top edge | U | A ring of thin brushes round the room: a mountain line, opaque below a fractal ridge. Fit V once with `TexInfo` |
-| 13 | `sky_planet` | 256 | Hard disc | No | One face of a plate, fit once: Facing Worlds' Earth. Limb darkening, cloud bands |
+| 10 | `sky-stars` | 512 | Opaque | Both | The inside of the room: the backdrop. Faint nebula noise, stars at least 2 texels so bilinear does not make them flicker |
+| 11 | `sky-clouds` | 512 | Soft | Both | A ceiling plane or big plate in a later layer, panned. Fractal noise thresholded to alpha |
+| 12 | `sky-ridge` | 512x256 | Hard top edge | U | A ring of thin brushes round the room: a mountain line, opaque below a fractal ridge. Fit V once with `TexInfo` |
+| 13 | `sky-planet` | 256 | Hard disc | No | One face of a plate, fit once: Facing Worlds' Earth. Limb darkening, cloud bands |
 
-Each gets one line in `materials.txt`, at the end, so no id moves. Non-square textures
-are assumed; M13.4 confirms the loader takes 512x256 or else makes it 512x512.
+Each gets one line in `materials.txt`, at the end, so no id moves. Names use a hyphen:
+the manifest allows no `_` in a name, which keeps a name from reading as a companion
+file (`_n`, `_h`, `_s`). The constants in `materials.rs` stay `SKY_STARS` and so on.
+The loader takes 512x256 as it is. Each texture comes with a flat `_h` and `_n`, and
+the generator draws them from their own random stream, so the older textures are
+byte for byte as they were.
+
+Cutouts draw only through the rasterizer's polygon path. A voxel face with a cutout
+texture draws its colour and ignores the alpha.
 
 ## Building one with the existing tools
 
@@ -216,8 +223,8 @@ material lists.
 
 **Facing Worlds: a planet behind a floating platform.**
 
-1. Subtract a big box far from the level, and paint it `sky_stars`.
-2. Add a thin plate near one wall, and paint its face `sky_planet` with Fit.
+1. Subtract a big box far from the level, and paint it `sky-stars`.
+2. Add a thin plate near one wall, and paint its face `sky-planet` with Fit.
 3. Place a Vista Layer in the box: slot 0, layer 0, `parallax` 0, a slow `spin`.
 4. In the play space, select the room's walls and ceiling, and pick **View 0** in
    the face panel. Add the platform brushes in rock as usual.
@@ -227,12 +234,12 @@ material lists.
 1. Subtract a second room, 100 units wide. Paint the walls and ceiling **View 0**.
    They become see-through to the stars.
 2. Add a floor, towers and arches with the ordinary tools, then a ring of plates in
-   `sky_ridge`, and lamps.
+   `sky-ridge`, and lamps.
 3. Place a Vista Layer in it: slot 0, layer 1, `parallax` 1/16, with fog at the far
    end for depth.
 
 **Original Unreal: clouds over a horizon.** Add a third room with one big plate in
-`sky_clouds`, layer 2, a `pan`, walls painted **View 0**. It costs no lightmap.
+`sky-clouds`, layer 2, a `pan`, walls painted **View 0**. It costs no lightmap.
 
 An editor command, **New Vista**, does the first recipe in one step: a stock room
 beyond the level bounds, the entity, and `centre` set to the bounds' centre. It goes
@@ -268,7 +275,7 @@ the flood's existing vectors per layer.
 - **Depth range.** Layer far is 100 000. `1/z` in `f32` holds this well because the
   precision grows toward zero, and depth is cleared per layer, but M13.2 checks for
   z-fighting at range.
-- **Box corners on a sky.** A flat-lit `sky_stars` box can show its corners. Stars hide
+- **Box corners on a sky.** A flat-lit `sky-stars` box can show its corners. Stars hide
   them, and a dome built with `hull_planes` (64 planes at most) is available if not.
 - **The main fog does not touch the hole.** A wall fogged in the play space can stand
   against a clear sky. Authors match the layer's fog colour. Revisit only if it reads

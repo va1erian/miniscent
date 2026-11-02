@@ -10,7 +10,10 @@ use xui::{Dip, Theme};
 use super::*;
 use crate::model::Selection;
 
-/// The stock materials, a new one at 10, a retired id at 11 and another at 12.
+/// How many ids the stock manifest fills: the first new material gets this id.
+const STOCK: u16 = mscent_world::materials::LAST_SKY + 1;
+
+/// The stock materials, a new one after them, a retired id and another new one.
 fn extended(stock: &MaterialTable) -> MaterialTable {
     let brick = stock.get(MaterialId(0)).expect("brick");
     let mut table = stock.clone();
@@ -46,8 +49,12 @@ fn script(ui: &mut Ui<Msg>) -> xui::backend::Result<Editor> {
     app.state.borrow_mut().selection = Some(Selection::Brush(first));
     app.refresh();
     assert_eq!(shown(&mut app, 3), "metal");
-    assert_eq!(shown(&mut app, 12), "(other id)", "not in this generation");
-    assert_eq!(app.state.borrow().texture_sizes.len(), 10);
+    assert_eq!(
+        shown(&mut app, STOCK),
+        "(other id)",
+        "not in this generation"
+    );
+    assert_eq!(app.state.borrow().texture_sizes.len(), usize::from(STOCK));
     let before = icon_buttons(&ui.layout_report());
 
     // What is being typed in a field stays through the replacement.
@@ -66,19 +73,19 @@ fn script(ui: &mut Ui<Msg>) -> xui::backend::Result<Editor> {
     app.follow_materials();
     assert_eq!(min_x.value(), model + 77.0, "the typing is gone");
     assert_eq!(app.panel.materials_shown(), 1);
-    assert_eq!(app.panel.material_text(), "glass", "the list did follow");
+    assert_eq!(app.panel.material_text(), "concrete", "the list did follow");
 
     assert_eq!(shown(&mut app, 3), "metal", "stock ids keep their rows");
-    assert_eq!(shown(&mut app, 10), "concrete");
+    assert_eq!(shown(&mut app, STOCK), "concrete");
     assert_eq!(
-        shown(&mut app, 11),
+        shown(&mut app, STOCK + 1),
         "(other id)",
         "a retired id has no name"
     );
-    assert_eq!(shown(&mut app, 12), "glass");
+    assert_eq!(shown(&mut app, STOCK + 2), "glass");
     assert_eq!(
         app.state.borrow().texture_sizes.len(),
-        13,
+        usize::from(STOCK) + 3,
         "the sizes followed"
     );
     let report = ui.layout_report();

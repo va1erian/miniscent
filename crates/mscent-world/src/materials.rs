@@ -3,8 +3,8 @@
 //! `assets/textures/materials.txt` decides every id, and may list more materials
 //! after these. It must keep the five in [`NAMES`] where they are: the renderer
 //! checks those names when it builds a level, so a mismatch is reported there.
-//! The living materials the voxel generators grow come after them, and their ids
-//! are held to the manifest by a test.
+//! The living materials the voxel generators grow and the four sky materials come
+//! after them, and their ids are held to the manifest by a test.
 
 /// Red brick walls.
 pub const BRICK: u16 = 0;
@@ -28,11 +28,19 @@ pub const STEM: u16 = 8;
 /// Honey-coloured comb wax.
 pub const WAX: u16 = 9;
 
-/// The first of the four stock sky materials: stars, clouds, ridge, planet. Their
-/// textures come with the masked-texture item; until then they draw as the fallback.
-pub const FIRST_SKY: u16 = 10;
+/// A tiling starfield with faint nebula: the backdrop of a sky room. Opaque.
+pub const SKY_STARS: u16 = 10;
+/// Soft-edged cloud, a cutout for a later layer.
+pub const SKY_CLOUDS: u16 = 11;
+/// A mountain line, opaque below the ridge and clear above it.
+pub const SKY_RIDGE: u16 = 12;
+/// An Earth-like disc, clear outside it.
+pub const SKY_PLANET: u16 = 13;
+
+/// The first of the four stock sky materials.
+pub const FIRST_SKY: u16 = SKY_STARS;
 /// The last of the sky materials.
-pub const LAST_SKY: u16 = 13;
+pub const LAST_SKY: u16 = SKY_PLANET;
 
 /// A face with this material is never drawn or lit: the shell of a voxel volume,
 /// where the voxel surface closes in front of it. Not a texture.

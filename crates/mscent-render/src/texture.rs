@@ -11,6 +11,7 @@ use std::path::Path;
 
 use mscent_math::Vec3;
 
+use crate::alpha::{AlphaPlane, AlphaSampler};
 use crate::manifest::ManifestError;
 use crate::mips;
 use crate::png::{self, Image, PngError};
@@ -58,6 +59,8 @@ pub struct Texture {
     /// Packed normals, with the specular mask in their alpha.
     normals: Option<Vec<u32>>,
     heights: Option<Vec<u8>>,
+    /// Coverage of a cutout texture; absent when every texel is solid.
+    alpha: Option<AlphaPlane>,
     /// Mean of the specular mask, 0 to 255, for where it is not fetched.
     spec_mean: u8,
 }
@@ -78,6 +81,7 @@ impl Texture {
             albedo,
             normals: None,
             heights: None,
+            alpha: None,
             spec_mean: u8::MAX,
         })
     }
@@ -92,6 +96,7 @@ impl Texture {
             filtered: false,
             normals: None,
             heights: None,
+            alpha: None,
             spec_mean: u8::MAX,
         }
     }
@@ -105,6 +110,10 @@ impl Texture {
             return self;
         }
         self.mips = mips::build(self.width, self.height, &self.albedo);
+        self.alpha = self
+            .alpha
+            .take()
+            .map(|a| a.with_mips(self.width, self.height));
         self.filtered = true;
         self
     }
@@ -155,6 +164,41 @@ impl Texture {
         }
         self.heights = Some(heights);
         Ok(self)
+    }
+
+    /// Attach coverage, one byte per texel, 255 solid. A plane with no texel
+    /// below 255 is dropped: the texture stays opaque and keeps the plain path.
+    /// The colour's own alpha is untouched, and so are the maps' (the
+    /// specular mask is the normal map's, not this).
+    pub fn with_alpha(mut self, alpha: Vec<u8>) -> Result<Self, TextureError> {
+        if alpha.len() != self.albedo.len() {
+            return Err(TextureError::SizeMismatch);
+        }
+        self.alpha = AlphaPlane::new(alpha);
+        if self.filtered {
+            self.alpha = self
+                .alpha
+                .take()
+                .map(|a| a.with_mips(self.width, self.height));
+        }
+        Ok(self)
+    }
+
+    /// Whether some texels are see-through or partly so: the cutout path.
+    pub fn is_masked(&self) -> bool {
+        self.alpha.is_some()
+    }
+
+    /// Coverage sampler over mip `level` (clamped), `None` for an opaque texture.
+    pub fn alpha_sampler(&self, level: u32) -> Option<AlphaSampler<'_>> {
+        Some(self.alpha.as_ref()?.sampler(self.width, self.height, level))
+    }
+
+    /// Coverage of a base texel with wrap-around addressing; 255 when opaque.
+    pub fn alpha_at(&self, x: i32, y: i32) -> u8 {
+        self.alpha
+            .as_ref()
+            .map_or(u8::MAX, |a| a.at(self.width, self.height, x, y))
     }
 
     pub fn width(&self) -> u32 {
@@ -391,7 +435,9 @@ fn mean_byte(bytes: impl ExactSizeIterator<Item = u8>) -> u8 {
 /// only `name_s.png` can mask a highlight.
 pub fn load_texture(dir: &Path, name: &str) -> Result<Texture, TextureError> {
     let base = read_png(&dir.join(format!("{name}.png")))?;
-    let mut tex = Texture::new(base.width, base.height, base.to_argb())?;
+    let texels = base.to_argb();
+    let alpha: Vec<u8> = texels.iter().map(|&t| (t >> 24) as u8).collect();
+    let mut tex = Texture::new(base.width, base.height, texels)?.with_alpha(alpha)?;
     let companion = |suffix: &str| -> Result<Option<Image>, TextureError> {
         let path = dir.join(format!("{name}_{suffix}.png"));
         if !path.is_file() {

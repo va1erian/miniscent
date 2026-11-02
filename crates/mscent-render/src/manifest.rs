@@ -190,9 +190,29 @@ fn listed_gloss(name: &str) -> u8 {
         "coral" => 30,
         "stem" => 20,
         "bark" => 8,
+        "sky-stars" | "sky-clouds" | "sky-ridge" | "sky-planet" => 0,
         _ => DEFAULT_GLOSS,
     }
 }
+
+/// Where the stock names go in a directory with no manifest: the ids of
+/// `assets/textures/materials.txt`.
+const LISTING_ORDER: [&str; 14] = [
+    "brick",
+    "floor",
+    "lightpanel",
+    "metal",
+    "rock",
+    "bark",
+    "cap",
+    "coral",
+    "stem",
+    "wax",
+    "sky-stars",
+    "sky-clouds",
+    "sky-ridge",
+    "sky-planet",
+];
 
 /// The entries of a directory with no manifest: every base texture, the stock
 /// names in their places and the others after them by name. Files starting with `_` and the `_n`, `_h` and `_s` companions are not
@@ -210,7 +230,7 @@ pub fn from_listing(dir: &Path) -> Result<Vec<Entry>, TextureError> {
             }
         }
     }
-    let place = |name: &String| STOCK.iter().position(|n| n == name);
+    let place = |name: &String| LISTING_ORDER.iter().position(|n| n == name);
     names.sort_by_key(|name| (place(name).unwrap_or(usize::MAX), name.clone()));
     Ok(names
         .into_iter()
