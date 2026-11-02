@@ -239,9 +239,14 @@ fn check_against_the_file(run: &mut Run, probe: &Probe) {
         .doc()
         .map(|d| recipe::write(d.recipe()))
         .unwrap_or_default();
-    let theirs = tutorial_recipe();
+    // Read and written again, so a value the tutorial states that is also the
+    // default (octaves=4) is written as the editor writes it, which is not at all.
+    let theirs = recipe::read(tutorial_recipe().as_bytes()).map_or_else(
+        |e| format!("the tutorial's recipe does not read: {e}"),
+        |r| recipe::write(&r),
+    );
     run.check(
-        !theirs.is_empty() && without_strokes(&ours) == without_strokes(&theirs),
+        without_strokes(&ours) == without_strokes(&theirs),
         &format!("the steps make the finished recipe:\n{ours}\nagainst\n{theirs}"),
     );
     let header = |text: &str| {
