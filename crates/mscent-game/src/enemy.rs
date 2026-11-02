@@ -6,7 +6,7 @@
 //! after `lose_steps`; seeing the player again at any point re-acquires.
 //! Randomness comes from a per-enemy seeded generator, so replays match.
 
-use crate::combat::{Sphere, hitscan, line_of_sight};
+use crate::combat::{Hitscan, Sphere, hitscan, line_of_sight};
 use mscent_collide::{Body, STEP_HZ, sweep_sphere};
 use mscent_math::Vec3;
 use mscent_math::rng::Rng;
@@ -77,9 +77,9 @@ pub struct Enemy {
     pub state: AiState,
     /// Where the player was last in sight, while hunting.
     pub last_seen: Option<Vec3>,
-    /// True for the step in which this enemy fired (hit or miss), so the
-    /// game can show where the shot came from.
-    pub fired: bool,
+    /// The shot of the step in which this enemy fired (hit or miss), so the
+    /// game can show where it came from and where it went.
+    pub last_shot: Option<Hitscan>,
     stats: EnemyStats,
     lost_steps: u32,
     cooldown: u32,
@@ -99,7 +99,7 @@ impl Enemy {
             hp: stats.max_hp,
             state: AiState::Patrol,
             last_seen: None,
-            fired: false,
+            last_shot: None,
             stats,
             lost_steps: 0,
             cooldown: stats.attack_cooldown,
@@ -139,10 +139,12 @@ impl Enemy {
 
     /// One fixed step. Returns the damage dealt to the player this step.
     pub fn step(&mut self, bsp: &Bsp, player: &Sphere) -> Option<i32> {
+        // Before the check below: an enemy killed the step after it fired must
+        // not go on reporting that shot for ever.
+        self.last_shot = None;
         if !self.alive() {
             return None;
         }
-        self.fired = false;
         self.cooldown = self.cooldown.saturating_sub(1);
         let to_player = player.centre - self.body.pos;
         let dist = to_player.length();
@@ -225,10 +227,10 @@ impl Enemy {
             return None;
         }
         self.cooldown = self.stats.attack_cooldown;
-        self.fired = true;
         let reach = self.stats.attack_range * ATTACK_HYSTERESIS;
         let dir = player.centre - self.body.pos;
         let shot = hitscan(bsp, self.body.pos, dir, reach, &[*player]);
+        self.last_shot = Some(shot);
         shot.target.map(|_| self.stats.attack_damage)
     }
 

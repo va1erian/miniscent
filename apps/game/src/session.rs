@@ -9,12 +9,14 @@
 use std::time::Duration;
 
 use mscent_collide::FixedStepper;
+use mscent_game::fx::combat::{CombatFx, DRONE_TINT, Impact, ShotFx};
 use mscent_game::{
     Arena, Event as GameEvent, Game, HudModel, LoadError, Menu, MenuAction, MenuCommand, Phase,
-    Screen, draw_hud, draw_menu,
+    Screen, Shooter, Struck, draw_hud, draw_menu,
 };
 use mscent_math::{Quat, Vec3};
 use mscent_platform::{Event, Key, MouseButton};
+use mscent_render::particles::{ParticleDraws, SpriteBank};
 use mscent_render::{
     Actor, ActorKind, BakeCache, BuildConfig, BuildError, Framebuffer, LevelRenderer,
     MaterialTable, Quality, View, draw_text, fill_rect,
@@ -26,8 +28,11 @@ use crate::feedback::Feedback;
 
 /// Radians of turn per pixel of mouse movement.
 const DEFAULT_SENSITIVITY: f32 = 0.0022;
-/// Frames a muzzle flash or hit marker stays on screen.
+/// Frames a hit marker stays on screen.
 const FLASH_FRAMES: u32 = 6;
+/// Where the player's bolt starts: right of and below the eye, and ahead of
+/// it, in the camera frame (+X right, +Y up, view along -Z).
+const GUN_OFFSET: Vec3 = Vec3::new(0.22, -0.18, -0.35);
 
 /// How a session is built and drawn.
 #[derive(Clone, Copy, Debug)]
@@ -91,10 +96,12 @@ pub struct GameSession {
     sensitivity: f32,
     stats: FrameStats,
     fb: Option<Framebuffer>,
-    muzzle: u32,
     hit: u32,
     kill: u32,
     feedback: Feedback,
+    fx: CombatFx,
+    draws: ParticleDraws,
+    bank: SpriteBank,
 }
 
 /// Cheap interpolation between nearby orientations.
@@ -167,10 +174,12 @@ impl GameSession {
             sensitivity: cfg.mouse_sensitivity,
             stats: FrameStats::default(),
             fb: None,
-            muzzle: 0,
             hit: 0,
             kill: 0,
             feedback: Feedback::default(),
+            fx: CombatFx::new(),
+            draws: ParticleDraws::default(),
+            bank: SpriteBank::new(),
         }
     }
 
@@ -219,8 +228,9 @@ impl GameSession {
         self.controls.release_all();
         self.menu = Menu::new();
         self.menu.press(MenuCommand::Select);
-        (self.muzzle, self.hit, self.kill) = (0, 0, 0);
+        (self.hit, self.kill) = (0, 0);
         self.feedback.clear();
+        self.fx.clear();
     }
 
     fn playing(&self) -> bool {
@@ -233,6 +243,13 @@ impl GameSession {
         let mut quit = false;
         for e in events {
             quit |= self.on_event(e);
+        }
+        // Before this step's shots, so a new bolt is drawn before it ages. The
+        // clock runs past the end of a level so a fatal explosion finishes, and
+        // stops only on the pause menu.
+        if self.menu.screen() != Screen::Paused {
+            let ns = u64::try_from(dt.as_nanos()).unwrap_or(u64::MAX);
+            self.fx.advance(ns, &self.game.arena.bsp);
         }
         if self.playing() {
             self.look();
@@ -333,13 +350,61 @@ impl GameSession {
     fn note_events(&mut self) {
         for e in self.game.take_events() {
             match e {
-                GameEvent::PlayerFired => self.muzzle = FLASH_FRAMES,
                 GameEvent::EnemyHit(_) => self.hit = FLASH_FRAMES,
-                GameEvent::EnemyKilled(_) => self.kill = FLASH_FRAMES * 2,
+                GameEvent::EnemyKilled(i) => {
+                    self.kill = FLASH_FRAMES * 2;
+                    if let Some(enemy) = self.game.enemies.get(i) {
+                        self.fx.drone_explosion(enemy.pos(), DRONE_TINT);
+                    }
+                }
+                GameEvent::Shot {
+                    shooter,
+                    origin,
+                    end,
+                    normal,
+                    struck,
+                } => self.shot_effect(shooter, origin, end, normal, struck),
                 _ => {}
             }
             self.feedback.note(&self.game, &e);
         }
+    }
+
+    fn shot_effect(
+        &mut self,
+        shooter: Shooter,
+        origin: Vec3,
+        end: Vec3,
+        normal: Vec3,
+        struck: Struck,
+    ) {
+        let by_player = shooter == Shooter::Player;
+        let muzzle = if by_player {
+            origin + self.game.player.orientation.rotate(GUN_OFFSET)
+        } else {
+            origin
+        };
+        let impact = match struck {
+            // A hit on the player would burst inside the camera.
+            Struck::Nothing | Struck::Player => Impact::None,
+            Struck::Enemy(_) => Impact::Drone,
+            Struck::Wall => {
+                self.renderer
+                    .scene()
+                    .surface_at(end, normal)
+                    .map_or(Impact::None, |s| Impact::Surface {
+                        material: s.material,
+                        tint: s.tint,
+                    })
+            }
+        };
+        self.fx.shot(&ShotFx {
+            by_player,
+            muzzle,
+            end,
+            normal,
+            impact,
+        });
     }
 
     /// The camera for this frame, interpolated between the last two steps.
@@ -383,15 +448,23 @@ impl GameSession {
         let view = self.view();
         let actors = self.actors();
         let mut fb = self.fb.take()?;
-        let drawn = self
-            .renderer
-            .render(&mut fb, &view, self.quality, &actors, None);
+        match self.renderer.camera(&view, width, height) {
+            Some(cam) => self.fx.collect(&cam, self.renderer.fog(), &mut self.draws),
+            None => self.draws.clear(),
+        }
+        let drawn = self.renderer.render_with_particles(
+            &mut fb,
+            &view,
+            self.quality,
+            &actors,
+            None,
+            Some((&self.draws, &self.bank)),
+        );
         if drawn.is_some() {
             let fov = self.renderer.config().fov_y;
             self.feedback.draw(&mut fb, &view, fov);
             self.draw_overlays(&mut fb);
         }
-        self.muzzle = self.muzzle.saturating_sub(1);
         self.hit = self.hit.saturating_sub(1);
         self.kill = self.kill.saturating_sub(1);
         self.fb = Some(fb);
@@ -404,10 +477,6 @@ impl GameSession {
         let stats = format!("{:.0} FPS {:.1} MS", self.stats.fps, self.stats.frame_ms);
         let size = mscent_render::text_size(&stats, 1);
         draw_text(fb, w - size.0 as i32 - 8, 8, &stats, 0xffff_ffff, 1);
-        if self.muzzle > 0 {
-            fill_rect(fb, w / 2 - 3, h - 34, 6, 18, 0xffff_e060);
-            fill_rect(fb, w / 2 - 8, h - 28, 16, 6, 0xffff_a030);
-        }
         let (cx, cy) = (w / 2, h / 2);
         if self.hit > 0 {
             fill_rect(fb, cx - 9, cy - 9, 4, 4, 0xffff_3030);

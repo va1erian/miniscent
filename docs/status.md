@@ -144,6 +144,15 @@ generated at runtime. Findings and changes:
 - `cargo test --workspace` passes (one run saw `bake_cache::concurrent_writers_in_one_process_leave_a_valid_file`
   fail under full-workspace load; it passed alone and on rerun, so it is timing sensitive).
 
+## Combat particles (M9.1 to M9.3, `docs/particles.md`)
+
+Shots are world-space now: a bolt with a muzzle flash, an impact chosen by the struck material
+(`Scene::surface_at`), sparks on a drone, and a drone explosion on a kill. They are depth tested, so
+a shot behind a wall draws nothing (`apps/game/tests/combat_fx.rs`), and the screen-space tracer and
+the HUD muzzle rectangle are gone. `Game` emits `Event::Shot` and never reads the effects. Not there
+yet: the pixel budget (M9.4), so fill is unlimited; dynamic light (M9.5); `Blast` and the half-res
+layer (M9.6); decals (M9.7). Recipe values are starting points that no player has judged.
+
 ## Parallel frames by default (M9.0, the groundwork of `docs/particles.md`)
 
 `LevelRenderer::render` draws in 24-row bands with `available_parallelism().max(4)` workers on a

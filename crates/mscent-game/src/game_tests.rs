@@ -2,7 +2,8 @@ use crate::test_util::{
     FACE_PLUS_X, enemy, far_goal, game, goal, open_level, split_level, start, v,
 };
 use crate::{
-    Arena, Event, Input, LoadError, Menu, MenuAction, MenuCommand, Phase, Screen, hitscan, ray,
+    Arena, Event, Input, LoadError, Menu, MenuAction, MenuCommand, Phase, Screen, Shooter, Struck,
+    hitscan, ray,
 };
 use mscent_math::Vec3;
 use mscent_world::{Entity, Level};
@@ -245,4 +246,93 @@ fn menu_flow_drives_start_pause_end_and_restart() {
     g.restart();
     m.sync_phase(g.phase);
     assert_eq!((m.screen(), g.phase), (Screen::Hidden, Phase::Playing));
+}
+
+fn shots(events: &[Event]) -> Vec<(Shooter, Vec3, Vec3, Vec3, Struck)> {
+    events
+        .iter()
+        .filter_map(|e| match *e {
+            Event::Shot {
+                shooter,
+                origin,
+                end,
+                normal,
+                struck,
+            } => Some((shooter, origin, end, normal, struck)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_shot_at_a_wall_reports_the_point_and_the_normal_facing_back() {
+    let level = split_level(vec![start(v(-5.0, 0.0, 0.0), FACE_PLUS_X), far_goal()]);
+    let mut g = game(&level);
+    g.step(&Input {
+        fire: true,
+        ..Input::default()
+    });
+    let all = shots(&g.take_events());
+    let &[(shooter, origin, end, normal, struck)] = all.as_slice() else {
+        panic!("one shot: {all:?}");
+    };
+    assert_eq!((shooter, struck), (Shooter::Player, Struck::Wall));
+    assert_eq!(origin, g.player.pos());
+    assert!((end.x - -1.0).abs() < 0.01, "the divider's face: {end:?}");
+    assert!((normal - v(-1.0, 0.0, 0.0)).length() < 1e-3, "{normal:?}");
+}
+
+#[test]
+fn a_shot_at_an_enemy_reports_the_sphere_normal_and_the_enemy() {
+    let level = open_level(vec![
+        start(v(0.0, 0.0, 0.0), FACE_PLUS_X),
+        enemy(v(5.0, 0.0, 0.0)),
+        far_goal(),
+    ]);
+    let mut g = game(&level);
+    g.step(&Input {
+        fire: true,
+        ..Input::default()
+    });
+    let all = shots(&g.take_events());
+    let (_, _, end, normal, struck) = all[0];
+    assert_eq!(struck, Struck::Enemy(0));
+    assert!(end.x < 5.0, "on the near side of the sphere: {end:?}");
+    assert!((normal - v(-1.0, 0.0, 0.0)).length() < 1e-3, "{normal:?}");
+}
+
+#[test]
+fn an_enemy_killed_after_firing_stops_reporting_that_shot() {
+    let level = open_level(vec![
+        start(v(0.0, 0.0, 0.0), FACE_PLUS_X),
+        enemy(v(5.0, 0.0, 0.0)),
+        far_goal(),
+    ]);
+    let mut g = game(&level);
+    let mut waited = 0;
+    while g.enemies[0].last_shot.is_none() {
+        g.step(&Input::default());
+        waited += 1;
+        assert!(waited < 2000, "the enemy never fired");
+    }
+    assert!(g.enemies[0].damage(1000));
+    g.take_events();
+    g.step(&Input::default());
+    assert!(shots(&g.take_events()).is_empty());
+    assert_eq!(g.enemies[0].last_shot, None);
+}
+
+#[test]
+fn shot_events_do_not_change_the_simulation() {
+    // The trace replays to the same state whether or not anyone reads events.
+    let level = lose_level();
+    let (mut read, mut unread) = (game(&level), game(&level));
+    for _ in 0..600 {
+        read.step(&Input::default());
+        read.take_events();
+        unread.step(&Input::default());
+    }
+    assert_eq!(read.player.health, unread.player.health);
+    assert_eq!(read.player.pos(), unread.player.pos());
+    assert_eq!(read.enemies[0].pos(), unread.enemies[0].pos());
 }

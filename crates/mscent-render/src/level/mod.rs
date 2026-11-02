@@ -23,10 +23,12 @@ use mscent_world::lightmap::{Lightmap, LightmapError, PointLight};
 use mscent_world::materials::{self, LIGHTPANEL};
 use mscent_world::{CsgError, Entity, Level};
 
+use crate::camera::Camera;
 use crate::framebuffer::Framebuffer;
 use crate::lighting_shader::{FaceLight, LightingShader, UvToLuxel};
 use crate::lightmap_mips::LightMips;
 use crate::mesh::{MeshLighting, PointLight as MeshLight};
+use crate::particles::{ParticleDraws, SpriteBank, draw_particles};
 use crate::raster::{DrawStats, PolyList};
 use crate::scene::{Scene, SceneStats, eye_of};
 use crate::shade::{FlatShader, Fog};
@@ -315,7 +317,8 @@ impl LevelRenderer {
         &self.actors
     }
 
-    fn fog(&self) -> Option<Fog> {
+    /// The level's fog, for effects drawn in the same frame.
+    pub fn fog(&self) -> Option<Fog> {
         Fog::new(self.cfg.sky_bottom, self.cfg.fog_start, self.cfg.fog_end)
     }
 
@@ -324,6 +327,11 @@ impl LevelRenderer {
     pub fn set_tiling(&mut self, rows: u32, workers: usize) {
         self.tiling = (rows.max(1), workers);
         *self.frame.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    }
+
+    /// The camera [`Self::render`] uses for this view and target size.
+    pub fn camera(&self, view: &View, width: u32, height: u32) -> Option<Camera> {
+        view.camera(self.cfg.fov_y, NEAR, FAR, width, height)
     }
 
     /// Draw one frame: visibility and projection once, then sky, level and
@@ -337,7 +345,21 @@ impl LevelRenderer {
         actors: &[Actor],
         hud: Option<&Overlay>,
     ) -> Option<SceneStats> {
-        let cam = view.camera(self.cfg.fov_y, NEAR, FAR, fb.width(), fb.height())?;
+        self.render_with_particles(fb, view, quality, actors, hud, None)
+    }
+
+    /// [`Self::render`] with particles over the finished scene. They are part
+    /// of the same pass over the bands, so they cost no second dispatch.
+    pub fn render_with_particles(
+        &self,
+        fb: &mut Framebuffer,
+        view: &View,
+        quality: Quality,
+        actors: &[Actor],
+        hud: Option<&Overlay>,
+        particles: Option<(&ParticleDraws, &SpriteBank)>,
+    ) -> Option<SceneStats> {
+        let cam = self.camera(view, fb.width(), fb.height())?;
         let mut slot = self.frame.lock().unwrap_or_else(PoisonError::into_inner);
         let frame = self.frame_for(&mut slot, fb.width(), fb.height())?;
         let mut stats = self.scene.list_frame(&cam, None, &mut frame.faces);
@@ -350,6 +372,9 @@ impl LevelRenderer {
             band.clear_sky(self.cfg.sky_top, self.cfg.sky_bottom);
             let st = self.fill_level(band, faces, quality, eye);
             self.meshes.fill(band, meshes, self.fog());
+            if let Some((draws, bank)) = particles {
+                draw_particles(band, draws, bank);
+            }
             pixels.fetch_add(st.pixels, Ordering::Relaxed);
             spans.fetch_add(st.spans, Ordering::Relaxed);
         });

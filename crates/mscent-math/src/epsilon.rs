@@ -27,6 +27,23 @@ pub const MIN_LENGTH_F32: f32 = 1.0e-6;
 /// as slivers after splitting.
 pub const MIN_POLYGON_AREA: f64 = 1.0e-8;
 
+/// How far off a wall to look for the leaf a surface lookup starts from. Past
+/// the collision skin, so a shot's end point is on the empty side.
+pub const SURFACE_PROBE: f32 = 0.05;
+
+/// Distance from a face's plane within which a shot's end point counts as on
+/// it: the probe distance again, since the end point may be off by that much.
+pub const FACE_MATCH_DISTANCE: f32 = 0.05;
+
+/// Least cosine between a shot's normal and a face's for them to be the same
+/// surface. Normals come from the same plane, so this only absorbs rounding.
+pub const FACE_MATCH_COS: f32 = 0.99;
+
 /// Largest allowed deviation of a unit quaternion's squared norm from one
 /// before tests consider it unnormalized.
 pub const UNIT_NORM_TOLERANCE: f32 = 1.0e-4;
+
+/// Distance from a particle's contact point at which the six axis probes look
+/// for solid when estimating a surface normal. Larger than the bisection
+/// error of a bounce, smaller than any wall the editor snaps to.
+pub const PARTICLE_NORMAL_PROBE: f32 = 5.0e-2;

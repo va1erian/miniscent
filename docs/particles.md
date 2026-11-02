@@ -1,10 +1,11 @@
 # Particles: combat effects in a software renderer
 
-Design; of its work items only M9.0 is built. It replaces the screen-space tracer in
+M9.0 to M9.3 are built; the rest is design. It replaces the screen-space tracer that was in
 [`apps/game/src/feedback.rs`](../apps/game/src/feedback.rs) with a world-space particle system
 that covers the shots, hits and explosions of combat and can later serve a destructible brush.
+See [What was built](#what-was-built-m91-to-m93) for where the code differs from this design.
 
-## What is there now
+## What was there before
 
 - **Enemy shots.** `Feedback` draws a dotted 2D line from the projected enemy to a fixed screen
   point (`w/2, h*0.62`), plus a square muzzle flash. Both ignore depth, so they show through walls,
@@ -144,6 +145,59 @@ the slot the particle pass takes.
 `LAZYOS_SMP=1` runs one core, and where threads in user code are still unproven (M1.3). The plan
 requires a working one-worker path there, so the minimum belongs to the default, and
 `LevelRenderer::set_tiling` is the override the LazyOS backend passes; no backend passes it yet.
+
+## What was built (M9.1 to M9.3)
+
+`crates/mscent-render/src/particles/` draws and `crates/mscent-game/src/fx/` simulates, as designed.
+There is no budget yet (M9.4), so nothing limits fill, and no dynamic light (M9.5).
+
+Measured with `cargo run --release -p mscent-render --example fx_bench` (640x360, one thread, dev
+machine). These replace the prototype figures in the table above where they differ:
+
+| Operation | Scalar | SSE2 | AVX2 |
+|---|---|---|---|
+| Additive sprite, ns per bbox pixel | 1.34 to 1.39 | 0.54 to 0.56 | 0.45 |
+| "Over" sprite, ns per bbox pixel | 1.79 to 1.88 | 0.67 to 0.70 | 0.53 |
+| Fully occluded sprite, ns per bbox pixel | 0.08 | 0.08 | 0.08 |
+
+Visible fill is about three times the prototype additive figure and 1.7 times its "over" figure,
+because these numbers include fetching the mask through the u-table. The budget weights in M9.4
+should come from this table. A spark costs 45 / 113 / 367 ns at 4 / 16 / 64 px, width 1 (about 5.7
+ns/px at 64 px, against the prototype's 2.3).
+
+**Sprite setup, the open risk from the design, is real.** A 2 px sprite costs 42 ns and a 16 px one
+375 ns, about 35 ns plus 20 ns per row. 4096 sprites of 2 to 4 px would cost about 0.2 to 0.3 ms, so
+M9.4 should cost small sprites by count as well as area, or draw them as points.
+
+The simulation ticks 4096 uncollided particles in 21 us, about 4 times the prototype, because each
+particle also has validity checks and a world bound. At the collision limits, about 3200 live
+particles of mixed classes tick in 56 us, inside the 90 us the design allowed.
+
+Where the code differs from the design:
+
+- **Bounce uses `is_solid` bisection, not `sweep_sphere`.** `sweep_sphere` allocates on every call,
+  which would break the zero-allocation promise. A bounce bisects the step 20 times and takes the
+  normal from six axis probes: exact for axis-aligned and 45 degree walls, coarse for other slopes.
+  Each query counts as one of the 32 "sweeps"; its extra `is_solid` calls (up to 28) do not count
+  against the 512.
+- **Over the test limit a bouncing particle dies** instead of skipping the test, since skipping
+  could leave it in solid. Bouncing classes step first, so this needs more than 512 of them.
+- **`Scene::material_at` became `Scene::surface_at`** and returns the material and its mean colour.
+- **Chips and shards are small soft sprites** until polygon shards arrive with M9.6.
+- **The drone explosion's tables landed in M9.3**, ahead of M9.6, because every primitive it needs
+  exists and a kill otherwise just removes the mesh. It has no light yet, and its smoke is not lit.
+- **Particles draw in the scene's band pass**, not a second one, which saves a dispatch. M9.2's
+  collect runs before the frame, so M9.4's depth probes will need a pass of their own.
+- **A hit on the player spawns no impact**, since it would burst inside the camera.
+- **`Enemy::step` clears `last_shot` before its alive check.** The old `fired` flag stayed set on an
+  enemy killed the step after it fired, so it reported `EnemyFired` on every later step.
+
+Evidence: `particles/*_tests.rs`, `fx_tests.rs`, `fx_collide_tests.rs`, `fx_combat_tests.rs`,
+`surface_tests.rs`, `tests/fx_alloc.rs`, `tests/fx_collect_alloc.rs` and `apps/game/tests/combat_fx.rs`,
+which draws through a real baked level: a shot behind a wall changes no pixels (the same effects in
+the open change more than 100), metal and brick give different pictures, and a scripted shot is
+pixel-identical twice. Screenshots of a kill and a close wall hit were looked at during development.
+Not tested: a real window, the i3-7100U, or whether the recipes look right to a person who plays it.
 
 ## Design overview
 
@@ -459,9 +513,9 @@ crates/mscent-game/src/fx/
 | ID | Item | Deps | Size | Done when |
 |---|---|---|---|---|
 | M9.0 | **Done.** Tiled frames by default: `JobPool`, one flood and clip per frame, passes over bands | M3.6 | M | `tests/tiled_level.rs`, `jobs_tests.rs`, `tiles_tests.rs`, `tests/frame_alloc.rs`: pixels and depth identical at every worker count and to one band on one worker; one worker makes no thread; allocations equal the old renderer; panics reach the caller |
-| M9.1 | Kernels, sprite bank, sprite and streak drawing, `fx_bench` in the repo | M9.0 | M | SIMD paths bit-identical to scalar; depth test proven by pixels behind and in front of a wall; bench reproduces the table above |
-| M9.2 | Pools, classes, emitters, 60 Hz tick, collision levels | M9.1 | M | Zero allocation per frame; same seed gives identical particles; hostile arguments never panic; particles never end in solid under `Bounce` |
-| M9.3 | Bolts and hits: `Event::Shot`, `Hitscan.normal`, beams, `material_at`, surface rows; remove the tracer | M9.2 | M | Enemy shot behind a wall draws no pixels (the old tracer failed this); each material gives its own output; the replay test is unchanged |
+| M9.1 | **Done.** Kernels, sprite bank, sprite and streak drawing, `fx_bench` in the repo | M9.0 | M | SIMD paths bit-identical to scalar; depth test proven by pixels behind and in front of a wall; bench reproduces the table above |
+| M9.2 | **Done.** Pools, classes, emitters, 60 Hz tick, collision levels | M9.1 | M | Zero allocation per frame; same seed gives identical particles; hostile arguments never panic; particles never end in solid under `Bounce` |
+| M9.3 | **Done.** Bolts and hits: `Event::Shot`, `Hitscan.normal`, beams, `material_at`, surface rows; remove the tracer | M9.2 | M | Enemy shot behind a wall draws no pixels (the old tracer failed this); each material gives its own output; the replay test is unchanged |
 | M9.4 | Budget: costs, probes, tiers, `keep`, Quality rows | M9.2 | M | A frame at 100 full-screen sprites stays within 10% of budget, Essential is untouched, and a scripted run is pixel-identical twice |
 | M9.5 | Dynamic lights: per-face shader variant, reach flood, mesh lights | M9.3 | M | No cost when no light is active (frame bench unchanged); wall behind a wall stays unlit; per-span cost measured |
 | M9.6 | Drone explosion and `Blast`, half-res layer, shake, overlay | M9.4, M9.5 | L | `fx_gallery` contact sheets looked at by a person; peak cost of `Blast` reported at 640x360 |

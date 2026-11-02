@@ -18,6 +18,7 @@ pub mod lighting_shader;
 pub mod lightmap_mips;
 pub mod mesh;
 pub mod mips;
+pub mod particles;
 pub mod png;
 pub mod png_encode;
 pub mod raster;

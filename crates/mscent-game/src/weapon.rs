@@ -20,6 +20,8 @@ pub struct Shot {
     pub hit: Option<usize>,
     pub killed: bool,
     pub point: Vec3,
+    /// Unit normal of what was struck; zero when nothing was.
+    pub normal: Vec3,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -62,6 +64,7 @@ impl Weapon {
             hit,
             killed,
             point: result.point,
+            normal: result.normal,
         })
     }
 }

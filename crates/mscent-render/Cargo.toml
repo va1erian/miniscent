@@ -9,7 +9,8 @@ mscent-math.workspace = true
 mscent-world.workspace = true
 
 # Not `workspace = true`: this crate alone needs unsafe (std::arch SIMD in
-# simd.rs, and lending a borrowed closure to parked threads in jobs.rs). The
+# simd.rs and particles/kernels.rs, and lending a borrowed closure to parked
+# threads in jobs.rs). The
 # workspace rules are repeated, with unsafe_code downgraded from forbid to deny
 # so that those modules can allow it explicitly.
 [lints.rust]

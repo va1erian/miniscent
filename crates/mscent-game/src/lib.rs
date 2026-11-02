@@ -14,15 +14,20 @@
 //! * [`Enemy`], [`AiState`] (`enemy.rs`): patrol, chase, attack.
 //! * [`hitscan`], [`line_of_sight`], [`ray`] (`combat.rs`): traces shared by
 //!   weapon, enemy sight and enemy fire. [`Weapon`] (`weapon.rs`).
+//! * [`fx::Fx`] (`fx/`): particle simulation, a 60 Hz tick with pools,
+//!   emitters and three collision levels. `Game` never reads it.
 //! * [`HudModel`], [`draw_hud`], [`draw_menu`] (`hud.rs`); [`Menu`]
 //!   (`menu.rs`).
 //!
 //! World convention: camera space of `mscent_render` (+X right, +Y up, view
 //! along -Z). Player yaw 0 looks along -Z and positive yaw turns left.
 
+#![forbid(unsafe_code)]
+
 pub mod arena;
 pub mod combat;
 pub mod enemy;
+pub mod fx;
 pub mod game;
 pub mod hud;
 pub mod input;
@@ -33,7 +38,7 @@ pub mod weapon;
 pub use arena::{Arena, EnemySpawn, Goal, LightSpec, LoadError};
 pub use combat::{Hitscan, Sphere, hitscan, line_of_sight, ray};
 pub use enemy::{AiState, Enemy, EnemyStats, stats_for};
-pub use game::{Event, Game, Phase};
+pub use game::{Event, Game, Phase, Shooter, Struck};
 pub use hud::{HudModel, draw_hud, draw_menu};
 pub use input::Input;
 pub use menu::{Menu, MenuAction, MenuCommand, Screen};

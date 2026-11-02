@@ -23,6 +23,8 @@ pub struct Hitscan {
     /// Distance from the origin to the strike, a wall or the end of range.
     pub distance: f32,
     pub point: Vec3,
+    /// Unit normal of what was struck; zero when nothing was.
+    pub normal: Vec3,
 }
 
 /// Zero-radius trace from `from` to `to`.
@@ -43,6 +45,7 @@ pub fn hitscan(bsp: &Bsp, origin: Vec3, dir: Vec3, range: f32, targets: &[Sphere
         target: None,
         distance: 0.0,
         point: origin,
+        normal: Vec3::ZERO,
     };
     let Some(dir) = dir
         .normalized()
@@ -65,9 +68,19 @@ pub fn hitscan(bsp: &Bsp, origin: Vec3, dir: Vec3, range: f32, targets: &[Sphere
         }
     }
     let fraction = best.map_or(wall_fraction, |(_, f)| f);
+    let point = origin + dir * (fraction * range);
+    let normal = match best {
+        // A ray starting inside the sphere has no direction to report.
+        Some((i, _)) => (point - targets[i].centre)
+            .normalized()
+            .unwrap_or(Vec3::ZERO),
+        None if wall.hit => wall.normal,
+        None => Vec3::ZERO,
+    };
     Hitscan {
         target: best.map(|(i, _)| i),
         distance: fraction * range,
-        point: origin + dir * (fraction * range),
+        point,
+        normal,
     }
 }

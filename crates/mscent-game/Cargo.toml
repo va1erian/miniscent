@@ -10,5 +10,11 @@ mscent-world.workspace = true
 mscent-collide.workspace = true
 mscent-render.workspace = true
 
-[lints]
-workspace = true
+# Not `workspace = true`: the allocation test (tests/fx_alloc.rs) needs an
+# `unsafe impl GlobalAlloc`. The library itself stays unsafe-free through
+# `#![forbid(unsafe_code)]` in src/lib.rs.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"

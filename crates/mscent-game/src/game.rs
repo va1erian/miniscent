@@ -10,6 +10,7 @@ use crate::input::Input;
 use crate::player::{PLAYER_RADIUS, Player};
 use crate::weapon::Weapon;
 use mscent_collide::{FixedStepper, STEP_HZ};
+use mscent_math::Vec3;
 
 /// Steps the hurt flash stays on after the player is hit.
 pub const HURT_FLASH_STEPS: u32 = (STEP_HZ / 4) as u32;
@@ -33,6 +34,32 @@ pub enum Event {
     PlayerDied,
     GoalReached,
     Restarted,
+    /// Where a shot went, from a player or an enemy, for effects. `normal` is
+    /// zero when `struck` is [`Struck::Nothing`].
+    Shot {
+        shooter: Shooter,
+        origin: Vec3,
+        end: Vec3,
+        normal: Vec3,
+        struck: Struck,
+    },
+}
+
+/// Who fired a shot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shooter {
+    Player,
+    Enemy(usize),
+}
+
+/// What a shot ended on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Struck {
+    /// Out of range, or fired from inside solid.
+    Nothing,
+    Wall,
+    Enemy(usize),
+    Player,
 }
 
 #[derive(Clone, Debug)]
@@ -128,6 +155,16 @@ impl Game {
             .fire(&self.arena.bsp, origin, dir, &mut self.enemies);
         let Some(shot) = shot else { return };
         self.events.push(Event::PlayerFired);
+        self.events.push(Event::Shot {
+            shooter: Shooter::Player,
+            origin,
+            end: shot.point,
+            normal: shot.normal,
+            struck: match shot.hit {
+                Some(i) => Struck::Enemy(i),
+                None => wall_or_nothing(shot.normal),
+            },
+        });
         if let Some(i) = shot.hit {
             self.events.push(Event::EnemyHit(i));
             if shot.killed {
@@ -143,8 +180,18 @@ impl Game {
         };
         for (i, e) in self.enemies.iter_mut().enumerate() {
             let dmg = e.step(&self.arena.bsp, &target);
-            if e.fired {
+            if let Some(shot) = e.last_shot {
                 self.events.push(Event::EnemyFired(i));
+                self.events.push(Event::Shot {
+                    shooter: Shooter::Enemy(i),
+                    origin: e.pos(),
+                    end: shot.point,
+                    normal: shot.normal,
+                    struck: match shot.target {
+                        Some(_) => Struck::Player,
+                        None => wall_or_nothing(shot.normal),
+                    },
+                });
             }
             if let Some(dmg) = dmg {
                 self.player.damage(dmg);
@@ -185,6 +232,15 @@ impl Game {
 
     pub fn enemies_alive(&self) -> usize {
         self.enemies.iter().filter(|e| e.alive()).count()
+    }
+}
+
+/// A shot that struck no target: only a wall gives it a normal.
+fn wall_or_nothing(normal: Vec3) -> Struck {
+    if normal == Vec3::ZERO {
+        Struck::Nothing
+    } else {
+        Struck::Wall
     }
 }
 
