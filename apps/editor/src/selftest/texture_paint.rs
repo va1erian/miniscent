@@ -149,6 +149,16 @@ fn save_and_reload(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe, dir: &P
     }
     let original = probe.materials().dir();
     probe.materials().set_dir(dir.to_path_buf());
+    // The running table holds selftest-mat at the id before this one's, and Save
+    // refuses to give a material an id the disk would not, so it goes first.
+    tex(stage, TexMsg::Open("selftest-mat".to_string()));
+    tex(stage, TexMsg::Save);
+    settle(stage, probe);
+    run.check(
+        probe.message().starts_with("Saved selftest-mat"),
+        &format!("the earlier material first: {}", probe.message()),
+    );
+    tex(stage, TexMsg::Open("selftest-paint".to_string()));
     tex(stage, TexMsg::Save);
     settle(stage, probe);
     let saved = probe.message();

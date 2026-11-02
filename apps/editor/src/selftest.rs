@@ -28,6 +28,7 @@ mod scripting;
 mod texture;
 mod texture_paint;
 mod texture_stock;
+mod texture_tutorial;
 mod voxel;
 
 /// Ticks the UI `n` times, 16 ms apart, so the render thread's frames arrive
@@ -93,6 +94,12 @@ pub fn run(dir: &Path) -> i32 {
         (1280.0, 800.0),
         texture::script,
     );
+    let tutorial = run_theme(
+        &dir.join("tutorial"),
+        Theme::light(),
+        (1280.0, 800.0),
+        texture_tutorial::script,
+    );
     let voxels = run_theme(
         &dir.join("voxel"),
         Theme::light(),
@@ -105,6 +112,7 @@ pub fn run(dir: &Path) -> i32 {
         .max(scripted)
         .max(voxels)
         .max(textures)
+        .max(tutorial)
 }
 
 fn run_theme(

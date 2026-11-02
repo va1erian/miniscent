@@ -108,12 +108,12 @@ pub(super) fn mouse_event(kind: u8, x: i32, y: i32, button: MouseButton) -> Even
 }
 
 /// Injects a mouse event at a point of the page.
-fn at_page(stage: &Stage<'_, Msg>, h: &Handles, kind: u8, x: i32, y: i32) {
+pub(super) fn at_page(stage: &Stage<'_, Msg>, h: &Handles, kind: u8, x: i32, y: i32) {
     let (ox, oy) = (h.origin)();
     stage.inject(mouse_event(kind, ox + x, oy + y, MouseButton::Left));
 }
 
-fn press(stage: &Stage<'_, Msg>, key: Key, modifiers: Modifiers) {
+pub(super) fn press(stage: &Stage<'_, Msg>, key: Key, modifiers: Modifiers) {
     stage.inject(Event::KeyDown {
         key,
         modifiers,
@@ -127,17 +127,17 @@ fn press(stage: &Stage<'_, Msg>, key: Key, modifiers: Modifiers) {
     });
 }
 
-const CTRL: Modifiers = Modifiers {
+pub(super) const CTRL: Modifiers = Modifiers {
     ctrl: true,
     ..Modifiers::NONE
 };
 
 /// The middle of a cell of the page, in the page's pixels at 96 DPI.
-fn cell(x: i32, y: i32) -> (i32, i32) {
+pub(super) fn cell(x: i32, y: i32) -> (i32, i32) {
     (x * 144 + 50, y * 56 + 28)
 }
 
-fn blocks(h: &Handles) -> Vec<(u16, u16, u16)> {
+pub(super) fn blocks(h: &Handles) -> Vec<(u16, u16, u16)> {
     let studio = h.studio.borrow();
     let doc = studio.doc().expect("open");
     let list = doc.recipe().blocks.iter();

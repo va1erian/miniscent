@@ -93,6 +93,9 @@ pub struct Workspace {
     menu_cell: Rc<std::cell::Cell<(u16, u16)>>,
     /// The material and block the page was last scrolled to show.
     revealed: RefCell<Option<(String, Option<usize>)>>,
+    /// The preview says "Working...", for a picture that has yet to come, or to be
+    /// refused.
+    working: std::cell::Cell<bool>,
 }
 
 fn gloss_msg(v: f64, live: bool) -> Option<Msg> {
@@ -154,6 +157,7 @@ impl Workspace {
             menu: None,
             menu_cell: Rc::new(std::cell::Cell::new((0, 0))),
             revealed: RefCell::new(None),
+            working: std::cell::Cell::new(false),
         }
     }
 
@@ -265,6 +269,11 @@ impl Workspace {
 
     pub fn is_open(&self) -> bool {
         self.studio.borrow().is_open()
+    }
+
+    /// Ends a drag of a block in progress with no effect; whether there was one.
+    pub fn cancel_drag(&self) -> bool {
+        self.page.try_get().is_some_and(|page| page.cancel_drag())
     }
 
     pub fn set_visible(&self, visible: bool) {
@@ -414,8 +423,12 @@ impl Workspace {
 }
 
 #[cfg(test)]
+mod page_drag_tests;
+#[cfg(test)]
 mod page_tests;
 #[cfg(test)]
 mod paint_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod working_tests;

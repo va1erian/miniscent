@@ -174,6 +174,12 @@ impl<M: 'static> Preview<M> {
         Some((image.width(), image.height(), image.pixels().to_vec()))
     }
 
+    /// The text shown when there is no picture, for scripted runs.
+    #[cfg(test)]
+    pub fn text(&self) -> String {
+        self.shared.text.borrow().clone()
+    }
+
     /// The window's pixel at `u`, `v` tiles from the picture's top left corner as
     /// last painted, for scripted runs to point at.
     pub fn pixel_at(&self, u: f32, v: f32) -> (i32, i32) {

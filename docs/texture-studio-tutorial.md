@@ -36,6 +36,7 @@ Mouse controls on the page:
 | Drag a block's right edge | Make it wider or narrower |
 | Right click a block | Duplicate or delete it |
 | Wheel, or middle-button drag | Scroll a long page |
+| **Esc** while dragging a block | Cancel the drag. A second **Esc** goes back to the level |
 
 **Ctrl+Z** and **Ctrl+Y** undo and redo in the recipe, not in your level.
 
@@ -119,8 +120,10 @@ out-specular** under it at row 1. Now the gaps have no shine, and the tiles do. 
    the stroke continues on the other side.
 
 A stroke is one undo step. A stroke is saved as coordinates, not pixels, so the recipe
-stays small and the drawing stays sharp at any size. If you draw so much that a `paint`
-block goes over its work limit, the page says so, and **Ctrl+Z** recovers it.
+stays small and the drawing stays sharp at any size. Its points are rounded to 1/4096
+of the tile, and one stroke stops growing after about 2000 of them, with a message:
+lift the pen and start another. If you draw so much that a `paint` block goes over its
+work limit, the page says so, and **Ctrl+Z** recovers it.
 
 ## 8. Use it
 
@@ -133,8 +136,16 @@ line to `assets/textures/materials.txt` that gives it a permanent id. Levels sto
 that id, so commit both files with any level that uses the material.
 
 Materials are saved in the order they were applied, so an id means the same thing in
-the running editor and on disk. If you applied another material first, Save asks you
-to save that one before this one.
+the running editor and on disk. If you applied another material first, Save refuses
+and names it: save that one before this one. Save also refuses a new name when a
+file `<name>.mst` is already in `assets/textures/` and `materials.txt` does not list
+it, so it never writes over a file it did not make, and it asks first before saving
+over any of the ten stock materials.
+
+If you save a level that uses a material you applied but have not saved, the level
+saves all the same and the status bar warns you, naming the material. Without the
+material's line in `materials.txt`, those faces would draw grey next time, or show
+another material once something else takes that id.
 
 ## Going further
 

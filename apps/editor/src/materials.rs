@@ -13,7 +13,7 @@ use mscent_render::MaterialTable;
 pub type SharedMaterials = Arc<MaterialStore>;
 
 /// A table and its generation. The lock is held for moments, never across a
-/// decode, so a UI tick can look at the generation.
+/// load, so a UI tick can look at the generation.
 #[derive(Default)]
 pub struct MaterialStore {
     slot: Mutex<Slot>,
@@ -39,8 +39,9 @@ impl MaterialStore {
     }
 
     /// The current table and its generation, loading it on the first call. Two
-    /// first calls at once both decode (at 67 ms, rare and harmless), and
-    /// a table installed meanwhile wins over both.
+    /// first calls at once both load it (generating the stock materials takes about
+    /// 4 ms each, so this is rare and harmless), and a table installed meanwhile
+    /// wins over both.
     pub fn current(&self) -> (u64, Result<MaterialTable, String>) {
         {
             let slot = self.slot();

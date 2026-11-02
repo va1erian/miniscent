@@ -56,6 +56,9 @@ pub(super) enum Drag {
 pub(super) struct Shared {
     pub(super) scroll: Cell<(i32, i32)>,
     pub(super) drag: Cell<Drag>,
+    /// The material and its step of history when a block was taken: a drag holds a
+    /// block index, which means another block, or none, once the page has changed.
+    taken_from: RefCell<Option<(String, u64)>>,
     /// By block index, as the worker last made them.
     pub(super) thumbs: RefCell<Vec<Option<Image>>>,
 }
@@ -79,6 +82,7 @@ fn press(c: &Ctx, x: i32, y: i32, button: MouseButton) -> Option<Msg> {
             c.ui.set_capture(c.id);
             let block = hit.map(|h| h.block);
             if let Some(h) = hit {
+                *c.shared.taken_from.borrow_mut() = history_stamp(&studio);
                 c.shared.drag.set(if h.on_right_edge {
                     let w = blocks.get(h.block).map_or(1, |b| b.w);
                     Drag::Resize { block: h.block, w }
@@ -108,6 +112,22 @@ fn press(c: &Ctx, x: i32, y: i32, button: MouseButton) -> Option<Msg> {
         }
         _ => None,
     }
+}
+
+/// Which page, at which step of its history, the pointer is working on.
+fn history_stamp(studio: &TexStudio) -> Option<(String, u64)> {
+    let doc = studio.doc()?;
+    Some((doc.name().to_string(), doc.edits()))
+}
+
+/// Ends a drag with no effect; whether there was one.
+fn end_drag(ui: &Ui<Msg>, id: WidgetId, shared: &Shared) -> bool {
+    let was = shared.drag.replace(Drag::None) != Drag::None;
+    if was {
+        ui.release_capture();
+        ui.invalidate(id);
+    }
+    was
 }
 
 /// Everything an event needs.
@@ -143,8 +163,20 @@ impl Ctx<'_> {
         self.ui.invalidate(self.id);
     }
 
+    /// Whether the page changed since a block was taken: an undo, an added or
+    /// deleted block, another material. A drag of a block is over then, with no
+    /// move, or it would move whichever block now has that index.
+    fn page_changed_under_drag(&self) -> bool {
+        let holds_a_block = !matches!(self.shared.drag.get(), Drag::None | Drag::Pan { .. });
+        holds_a_block && *self.shared.taken_from.borrow() != history_stamp(&self.studio.borrow())
+    }
+
     /// The pointer moved during a drag.
     fn dragged(&self, x: i32, y: i32) {
+        if self.page_changed_under_drag() {
+            end_drag(self.ui, self.id, self.shared);
+            return;
+        }
         let studio = self.studio.borrow();
         let Some(doc) = studio.doc() else {
             return;
@@ -218,9 +250,13 @@ impl Ctx<'_> {
     fn release(&self) -> Option<Msg> {
         // In this order: letting go of the capture reports a capture change, which
         // would end the drag before it is read.
+        let stale = self.page_changed_under_drag();
         let drag = self.shared.drag.replace(Drag::None);
         self.ui.release_capture();
         self.ui.invalidate(self.id);
+        if stale {
+            return None;
+        }
         match drag {
             Drag::Move { block, cell, .. } => Some(Msg::Tex(TexMsg::Move {
                 block,
@@ -306,6 +342,11 @@ impl Page {
 
     pub fn invalidate(&self) {
         self.control.invalidate();
+    }
+
+    /// Ends a drag in progress with no effect, as Esc does; whether there was one.
+    pub fn cancel_drag(&self) -> bool {
+        end_drag(&self.ui, self.control.id(), &self.shared)
     }
 
     pub fn focus(&self) {

@@ -24,6 +24,15 @@ the tool, follow the [tutorial](texture-studio-tutorial.md).
 - **Save** writes the recipe and `materials.txt`, never PNGs, and
   `--bake-texture` writes PNGs to look at and adds a row when the directory it
   writes to has a manifest.
+- **`--bake-texture` checks first.** It reads the recipe up to `MAX_FILE`, and
+  refuses an invalid name or a `name.mst` already in the output directory (which
+  the game would load in place of the PNGs) before it writes anything.
+- **The workspace and Play.** Opening the workspace cancels an F5 still waiting for
+  the level, and Play started by any route closes the workspace first. Esc during a
+  drag of a block cancels the drag, and a second Esc goes back to the level; an
+  undo, a deletion or another material during a drag also ends it with no move.
+  "Working..." in the preview ends when the work does, including a page that does
+  not compile or whose first draft fails.
 - **Stacked blocks, no wires.** A block reads the row directly above it, under its
   columns, left to right. A generator below a block starts a new chain.
 - **Preview.** Six tabs. Block shows the selected block; the others show one map
@@ -33,10 +42,28 @@ the tool, follow the [tutorial](texture-studio-tutorial.md).
   blocks, for the thumbnails, then the full size keeping only the selected block
   and the outputs, unless a drag is going on. A page of 256 blocks kept at 1024 px
   would not fit the evaluator's memory limit.
-- **Save also applies.** The running table and the disk must give a new material
-  the same id, because levels store ids. A material applied before another must
-  be saved before it, and Save says so if not. The page is baked before any file
-  is touched, since a row whose recipe fails stops the game loading any material.
+- **Save also applies.** The running table and the disk must give a material
+  the same id, because levels store ids. Before writing, Save works out the id
+  the material has in the running table and reads the manifest again from the
+  disk; if the disk's id differs it refuses and names the materials to save
+  first, so applying A and then saving B is refused until A is saved. It also
+  refuses a new name whose `.mst` file is already there unlisted, and so does
+  New. Saving over any of the ten stock materials asks first (the list is the
+  studio's own, held to the shipped `materials.txt` by a test). A read error on
+  the old recipe stops the save, since only a missing file means there was none to
+  put back, and files are synced before they are renamed into place.
+- **Save proves the page the way the game runs it.** Before any file is touched,
+  the worker reads back the text it will write, then compiles, runs (no cache) and
+  packs that, which is what `mscent_texgen::bake` does, with a cancel flag so
+  closing the editor does not wait for a slow bake. The texture it installs is that
+  one. A row whose recipe fails would stop the game loading any material.
+- **Applied, not saved.** A material applied under a new id is in the running table
+  only. Saving a level that uses one still saves, and the status bar names it in a
+  warning, since next session those faces would draw grey or another material.
+  Only brush faces are checked, not the materials of voxel volumes.
+- **Opening reads on the worker.** A recipe file is read and parsed on the worker
+  and the material opens on a later tick, so a large file never holds the UI
+  thread; the material on show stays until then, and one open at a time.
 - **Lit view.** `mscent_render::texel_light` holds the steps the lighting shader
   takes for a pixel once it knows the light, inlined into the shader, and
   `shade_texel` is those steps in one call. The tile is drawn at most 512 px wide.
@@ -52,8 +79,13 @@ the tool, follow the [tutorial](texture-studio-tutorial.md).
   a stroke is kept as one continuous run of coordinates, so one that crosses an edge
   continues on the other side. A stroke is one undo step, and its points are thinned
   to a quarter of the brush radius apart (at least 1/1024 tile) so a long one stays
-  small. It stops growing at `MAX_POINTS` with a message, and a block past
-  `MAX_STROKES` refuses a new one. While the pointer is down the worker runs the
+  small, and every point is rounded to 1/4096 of a tile as it is added. It stops
+  growing at `STROKE_POINTS` (2180) with a message, and a block past `MAX_STROKES`
+  refuses a new one. `STROKE_POINTS` is under the operator's `MAX_POINTS` (4096)
+  because a stroke is one line of the file and the reader refuses lines past 64 KB:
+  4096 points take up to 30 bytes each however they are rounded. The recipe's undo
+  history is kept to 256 steps and an estimated 64 MB, the oldest going first, since
+  a stroke list is copied whole into each step. While the pointer is down the worker runs the
   draft path, as for a slider, and the full picture comes on release. The brush
   (radius, hardness, colour) belongs to the workspace, so it is no undo step. The
   recipe reader holds `stroke` lines to `mscent_texgen::ops::stroke_fits`, the same

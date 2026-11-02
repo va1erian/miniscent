@@ -79,6 +79,10 @@ pub struct TexDoc {
     live: Option<Live>,
     /// Changes with every edit, so whoever shows the recipe can tell it moved.
     revision: u64,
+    /// Changes with every step of history: an edit, an undo, a redo. Not with a
+    /// selection or a value being dragged, so a pointer holding a block can tell
+    /// when the page it holds is no longer the one it took it from.
+    edits: u64,
     /// Changes when the parameter widgets no longer show the page: a selection,
     /// an undo. A drag leaves it alone, or it would remake the slider being held.
     panel_epoch: u64,
@@ -128,6 +132,7 @@ impl TexDoc {
             future: Vec::new(),
             live: None,
             revision: 0,
+            edits: 0,
             panel_epoch: 0,
             page,
         }
@@ -163,6 +168,10 @@ impl TexDoc {
 
     pub fn selected(&self) -> Option<usize> {
         self.selected
+    }
+
+    pub fn edits(&self) -> u64 {
+        self.edits
     }
 
     pub fn revision(&self) -> u64 {
@@ -209,6 +218,7 @@ impl TexDoc {
     fn checkpoint(&mut self) {
         self.past.push(self.snapshot());
         self.future.clear();
+        self.edits = self.edits.wrapping_add(1);
         let mut held: usize = self.past.iter().map(|s| s.bytes).sum();
         let mut oldest = 0;
         while self.past.len() - oldest > 1
@@ -406,6 +416,7 @@ impl TexDoc {
 
     fn restore(&mut self, state: Snapshot) {
         self.recipe = state.recipe;
+        self.edits = self.edits.wrapping_add(1);
         self.selected = state.selected;
         self.live = None;
         self.page_changed();

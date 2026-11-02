@@ -118,6 +118,11 @@ impl Studio {
         Ok(())
     }
 
+    /// Forgets a Play that was waiting for the preview: the user went elsewhere.
+    pub fn cancel_play_when_ready(&mut self) {
+        self.play_pending = false;
+    }
+
     /// One tick's worth of keeping up with `doc`. Never blocks.
     pub(super) fn sync_preview(&mut self, doc: &Document, out: &mut Tick) {
         self.poll_preview(doc, out);

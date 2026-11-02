@@ -12,6 +12,8 @@ use crate::ui::app::{Editor, Msg, cmd};
 impl Editor {
     /// Opens the workspace on the first material, if nothing is open yet.
     pub(in crate::ui) fn tex_open(&mut self) {
+        // An F5 still waiting for the level would start Play under the workspace.
+        self.studio.cancel_play_when_ready();
         self.tex.studio.borrow_mut().set_open(true);
         self.work_host.get().set_visible(false);
         self.tex.set_visible(true);
@@ -105,12 +107,19 @@ impl Editor {
         let tick = self.tex.studio.borrow_mut().tick();
         if tick.cleared {
             self.tex.preview.get().show_text("Working...");
+            self.tex.working.set(true);
             self.tex.page.get().set_thumbs(Vec::new());
             self.tex.caption.get().set_text("");
         }
         let changed = tick.message.is_some() || tick.cleared;
         if let Some(picture) = tick.picture {
+            self.tex.working.set(false);
             self.tex.show_picture(picture);
+        } else if self.tex.working.get() && self.tex.studio.borrow().settled() {
+            // No picture will come: the page does not compile, or its first draft
+            // failed. Either way the reason is in the error label, not here.
+            self.tex.working.set(false);
+            self.tex.preview.get().show_text("");
         }
         if let Some(thumbs) = tick.thumbs {
             self.tex.show_thumbs(thumbs);

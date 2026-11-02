@@ -308,6 +308,11 @@ F5 plays it.
     pub(super) fn begin_play(&mut self) {
         match self.studio.enter_play() {
             Ok(()) => {
+                // Play covers the work area, and with the workspace up behind it
+                // its shortcuts and its lit tab would go on.
+                if self.tex.is_open() {
+                    self.tex_close();
+                }
                 let play = self.play.get();
                 play.set_visible(true);
                 self.pane3d().set_grab(false);
@@ -418,7 +423,10 @@ impl App for Editor {
                 if self.studio.mode == Mode::Play {
                     self.end_play(Some("Back in the editor"));
                 } else if self.tex.is_open() {
-                    self.tex_close();
+                    // A drag of a block is cancelled first; the next Esc goes back.
+                    if !self.tex.cancel_drag() {
+                        self.tex_close();
+                    }
                 } else {
                     let mut st = self.state.borrow_mut();
                     st.cancel_drag();
