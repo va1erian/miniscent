@@ -56,6 +56,8 @@ fn room() -> LevelRenderer {
             radius: 40.0,
             intensity: 1.0,
         }],
+        labels: Vec::new(),
+        mover_groups: Vec::new(),
     };
     let cfg = BuildConfig {
         luxel_size: 1.0,
@@ -121,6 +123,7 @@ fn lights_allocate_nothing_a_frame_without_them_does_not() {
         let effects = Effects {
             particles: None,
             lights: &lights,
+            poses: &[],
         };
         r.render_with_effects(&mut fb, &view(), Quality::High, &actors, None, &effects)
             .expect("a frame");
@@ -137,6 +140,7 @@ fn lights_allocate_nothing_a_frame_without_them_does_not() {
         let effects = Effects {
             particles: None,
             lights: &dark,
+            poses: &[],
         };
         r.render_with_effects(&mut fb, &view(), Quality::High, &actors, None, &effects)
             .expect("a frame");

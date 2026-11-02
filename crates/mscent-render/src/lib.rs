@@ -40,7 +40,7 @@ pub use framebuffer::Framebuffer;
 pub use jobs::JobPool;
 pub use level::{
     Actor, ActorKind, BakeCache, BakeReport, BakedLight, BuildConfig, BuildError, Compiled,
-    Effects, LevelRenderer, Overlay, Quality, Source, View,
+    Effects, LevelRenderer, MoverPose, Overlay, Quality, Source, View,
 };
 pub use lighting_shader::{FaceLight, LightingShader, UvToLuxel};
 pub use lightmap_mips::LightMips;

@@ -17,14 +17,16 @@ use mscent_math::{Quat, Vec3};
 use mscent_platform::{Event, Key, MouseButton};
 use mscent_render::particles::{ParticleDraws, SpriteBank};
 use mscent_render::{
-    Actor, ActorKind, BakeCache, BuildConfig, BuildError, Effects, Framebuffer, LevelRenderer,
-    MaterialTable, Quality, View, simd,
+    BakeCache, BuildConfig, BuildError, Framebuffer, LevelRenderer, MaterialTable, Quality, View,
 };
 use mscent_world::Level;
 
 use crate::controls::Controls;
 use crate::feedback::Feedback;
+use crate::notices::Notices;
+use mscent_script::{ScriptError, Source};
 
+mod frame;
 mod overlay;
 mod shots;
 
@@ -32,7 +34,6 @@ mod shots;
 const DEFAULT_SENSITIVITY: f32 = 0.0022;
 /// Frames a hit marker stays on screen.
 const FLASH_FRAMES: u32 = 6;
-const WHITE: u32 = 0xffff_ffff;
 
 /// How a session is built and drawn.
 #[derive(Clone, Copy, Debug)]
@@ -41,6 +42,8 @@ pub struct SessionConfig {
     pub build: BuildConfig,
     /// Radians per mouse pixel.
     pub mouse_sensitivity: f32,
+    /// A script comes with this level, so it may have no goal of its own.
+    pub scripted: bool,
 }
 
 impl Default for SessionConfig {
@@ -49,6 +52,7 @@ impl Default for SessionConfig {
             quality: Quality::High,
             build: BuildConfig::default(),
             mouse_sensitivity: DEFAULT_SENSITIVITY,
+            scripted: false,
         }
     }
 }
@@ -103,23 +107,7 @@ pub struct GameSession {
     draws: ParticleDraws,
     bank: SpriteBank,
     kick: ViewKick,
-}
-
-/// Cheap interpolation between nearby orientations.
-fn nlerp(a: Quat, b: Quat, t: f32) -> Quat {
-    let sign = if a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w < 0.0 {
-        -1.0
-    } else {
-        1.0
-    };
-    let mix = |p: f32, q: f32| p + (q * sign - p) * t;
-    Quat {
-        x: mix(a.x, b.x),
-        y: mix(a.y, b.y),
-        z: mix(a.z, b.z),
-        w: mix(a.w, b.w),
-    }
-    .normalized()
+    notices: Notices,
 }
 
 /// The game library keeps the camera frame (view along -Z); the level is
@@ -148,7 +136,12 @@ impl GameSession {
         cfg: &SessionConfig,
         cache: &mut BakeCache,
     ) -> Result<Self, SessionError> {
-        let arena = Arena::from_level(level).map_err(SessionError::Load)?;
+        let arena = if cfg.scripted {
+            Arena::from_scripted_level(level)
+        } else {
+            Arena::from_level(level)
+        }
+        .map_err(SessionError::Load)?;
         let renderer = LevelRenderer::from_level_cached(level, materials, &cfg.build, cache)
             .map_err(SessionError::Build)?;
         Ok(Self::with_renderer(arena, renderer, cfg))
@@ -161,6 +154,11 @@ impl GameSession {
         let mut game = Game::new(arena);
         game.player.orientation = spawn_orientation(game.arena.player_yaw);
         game.player.up_ref = Some(Vec3::new(0.0, 0.0, 1.0));
+        Self::with_game(game, renderer, cfg)
+    }
+
+    /// Wraps a game already under way, as a test does to take a picture of it.
+    pub fn with_game(game: Game, renderer: LevelRenderer, cfg: &SessionConfig) -> Self {
         let mut menu = Menu::new();
         // Item 0 of the main menu is "Start".
         menu.press(MenuCommand::Select);
@@ -184,6 +182,7 @@ impl GameSession {
             draws: CombatFx::new_draws(),
             bank: SpriteBank::new(),
             kick: ViewKick::default(),
+            notices: Notices::default(),
         }
     }
 
@@ -197,6 +196,11 @@ impl GameSession {
     /// a separate gameplay item, and the effect waits for it.
     pub fn blast(&mut self, pos: Vec3, radius: f32) {
         self.fx.blast(pos, radius, &self.game.arena.bsp);
+    }
+
+    /// The game and the renderer, taken apart again.
+    pub fn into_parts(self) -> (Game, LevelRenderer) {
+        (self.game, self.renderer)
     }
 
     /// The renderer, once the game is over with.
@@ -229,9 +233,24 @@ impl GameSession {
         self.stats = stats;
     }
 
+    /// Compiles a level script and starts the level over on it. Returns the
+    /// compiler's warnings, or every error with nothing changed.
+    pub fn load_script(
+        &mut self,
+        sources: &[Source],
+    ) -> Result<Vec<ScriptError>, Vec<ScriptError>> {
+        let warnings = self.game.load_script(sources)?;
+        self.reset_after_game_restart();
+        Ok(warnings)
+    }
+
     /// Starts the level over: player, enemies, weapon and menu.
     pub fn restart(&mut self) {
         self.game.restart();
+        self.reset_after_game_restart();
+    }
+
+    fn reset_after_game_restart(&mut self) {
         self.game.player.up_ref = Some(Vec3::new(0.0, 0.0, 1.0));
         self.game.player.orientation = spawn_orientation(self.game.arena.player_yaw);
         self.prev_orientation = self.game.player.orientation;
@@ -242,6 +261,7 @@ impl GameSession {
         (self.hit, self.kill) = (0, 0);
         self.feedback.clear();
         self.fx.clear();
+        self.notices.clear();
     }
 
     fn playing(&self) -> bool {
@@ -273,6 +293,7 @@ impl GameSession {
                 self.game.step(&input);
             }
             self.note_events();
+            self.report_script();
             self.menu.sync_phase(self.game.phase);
         } else {
             self.controls.take_mouse();
@@ -280,6 +301,26 @@ impl GameSession {
         StepOutcome {
             quit,
             capture_mouse: self.playing(),
+        }
+    }
+
+    /// Tells the player a script could not be reloaded.
+    pub fn show_script_problem(&mut self, problem: &str) {
+        for line in problem.lines() {
+            eprintln!("{line}");
+            self.notices.error(line);
+        }
+    }
+
+    /// On screen for the player, and on the console for whoever is scripting.
+    fn report_script(&mut self) {
+        for message in self.game.take_messages() {
+            eprintln!("script says: {message}");
+            self.notices.message(&message);
+        }
+        for error in self.game.take_script_errors() {
+            eprintln!("script error: {error}");
+            self.notices.error(&error.to_string());
         }
     }
 
@@ -379,94 +420,5 @@ impl GameSession {
             }
             self.feedback.note(&self.game, &e);
         }
-    }
-
-    /// The camera for this frame, interpolated between the last two steps.
-    pub fn view(&self) -> View {
-        let alpha = self.stepper.alpha();
-        let p = &self.game.player;
-        View {
-            pos: self.eye() + self.kick.shake,
-            orientation: (nlerp(self.prev_orientation, p.orientation, alpha) * p.bank_rotation())
-                .normalized(),
-        }
-    }
-
-    /// Where the camera is, before anything cosmetic moves it.
-    fn eye(&self) -> Vec3 {
-        let p = &self.game.player;
-        p.body.prev_pos.lerp(p.body.pos, self.stepper.alpha()) + p.bob_offset()
-    }
-
-    fn actors(&self) -> Vec<Actor> {
-        let alpha = self.stepper.alpha();
-        let eye = self.game.player.pos();
-        let spin = self.game.ticks as f32 * 0.02;
-        let goals = self.game.arena.goals.iter().map(|g| Actor {
-            kind: ActorKind::Goal,
-            pos: g.pos,
-            yaw: spin,
-        });
-        let enemies = self.game.enemies.iter().filter(|e| e.alive()).map(|e| {
-            let pos = e.body.prev_pos.lerp(e.body.pos, alpha);
-            let to = eye - pos;
-            Actor {
-                kind: ActorKind::Enemy,
-                pos,
-                yaw: to.y.atan2(to.x) - core::f32::consts::FRAC_PI_2,
-            }
-        });
-        goals.chain(enemies).collect()
-    }
-
-    /// Draws the current state at `width` x `height`: world, HUD, feedback
-    /// and menus. `None` when the size is zero or the pose is invalid.
-    pub fn render(&mut self, width: u32, height: u32) -> Option<&Framebuffer> {
-        if self.fb.as_ref().map(|f| (f.width(), f.height())) != Some((width, height)) {
-            self.fb = Some(Framebuffer::new(width, height)?);
-        }
-        // The particle clock stops on the pause menu, and a flash must not stay
-        // up behind it for as long as the pause lasts.
-        self.kick = if self.menu.screen() == Screen::Paused {
-            ViewKick::default()
-        } else {
-            self.fx.view_kick(self.renderer.scene(), self.eye())
-        };
-        let view = self.view();
-        let actors = self.actors();
-        let mut fb = self.fb.take()?;
-        match self.renderer.camera(&view, width, height) {
-            // `fb` still holds the last frame, whose depth is the best guess
-            // at what this one hides.
-            Some(cam) => {
-                let fog = self.renderer.fog();
-                self.fx.collect(&cam, fog, Some(&fb), &mut self.draws);
-            }
-            None => self.draws.clear(),
-        }
-        let effects = Effects {
-            particles: Some((&self.draws, &self.bank)),
-            lights: self.fx.lights(self.renderer.scene()),
-        };
-        let drawn = self.renderer.render_with_effects(
-            &mut fb,
-            &view,
-            self.quality,
-            &actors,
-            None,
-            &effects,
-        );
-        if drawn.is_some() {
-            if self.kick.white > 0 {
-                simd::lerp_toward(fb.pixels_mut(), WHITE, self.kick.white);
-            }
-            let fov = self.renderer.config().fov_y;
-            self.feedback.draw(&mut fb, &view, fov);
-            self.draw_overlays(&mut fb);
-        }
-        self.hit = self.hit.saturating_sub(1);
-        self.kill = self.kill.saturating_sub(1);
-        self.fb = Some(fb);
-        drawn.and(self.fb.as_ref())
     }
 }

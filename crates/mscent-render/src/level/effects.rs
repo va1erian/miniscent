@@ -1,5 +1,6 @@
 //! What a frame draws beyond the level and its actors.
 
+use super::movers::MoverPose;
 use crate::dynlight::DynLight;
 use crate::particles::{ParticleDraws, SpriteBank};
 
@@ -13,4 +14,7 @@ pub struct Effects<'a> {
     /// Lights on the walls and actors they reach. Only the first
     /// [`crate::dynlight::MAX_DYN_LIGHTS`] are used.
     pub lights: &'a [DynLight],
+    /// Where each mover is, by its order in the level. A mover with no entry
+    /// is drawn as authored.
+    pub poses: &'a [MoverPose],
 }

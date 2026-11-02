@@ -47,6 +47,13 @@ pub struct BakeReport {
 }
 
 impl BakeReport {
+    fn add_note(&mut self, n: String) {
+        self.note = Some(match self.note.take() {
+            Some(old) => format!("{old}; {n}"),
+            None => n,
+        });
+    }
+
     /// One log line: baked vs cached, with timing and the file involved.
     pub fn describe(&self) -> String {
         let file = self
@@ -88,6 +95,8 @@ pub struct BakedLight {
     pub(super) key: u64,
     pub(super) map: Lightmap,
     pub(super) ms: f64,
+    /// The luxel size in the settings, to tell whether the bake had to coarsen.
+    pub(super) asked_luxel: f32,
 }
 
 /// Why a cache file cannot be used, in words.
@@ -124,6 +133,15 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
         let _ = std::fs::remove_file(&tmp);
         e.to_string()
     })
+}
+
+/// Says so when a level was too big for the atlas at the luxel size it asked
+/// for: its light is softer than the settings promise.
+fn coarsened_note(map: &Lightmap, asked: f32) -> Option<String> {
+    let got = map.finest_luxel().filter(|&got| got > asked)?;
+    Some(format!(
+        "too big for the atlas: luxels coarsened from {asked} to {got} units"
+    ))
 }
 
 fn ms_since(t: Instant) -> f64 {
@@ -202,7 +220,12 @@ impl BakeCache {
         let t = Instant::now();
         let map = bake(bsp, faces, lights, cfg)?;
         let ms = ms_since(t);
-        Ok(self.store(BakedLight { key, map, ms }))
+        Ok(self.store(BakedLight {
+            key,
+            map,
+            ms,
+            asked_luxel: cfg.luxel_size,
+        }))
     }
 
     /// The lightmap for `key` from memory or the file, without baking.
@@ -234,18 +257,26 @@ impl BakeCache {
     /// Takes in a finished bake: it becomes the held lightmap and is mirrored
     /// to the file.
     pub fn store(&mut self, baked: BakedLight) -> Arc<Lightmap> {
-        let BakedLight { key, map, ms } = baked;
+        let BakedLight {
+            key,
+            map,
+            ms,
+            asked_luxel,
+        } = baked;
         let map = Arc::new(map);
         let mut report = self.new_report();
         report.source = Source::Baked;
         report.ms = ms;
         report.note = self.miss_note.take();
+        if let Some(n) = coarsened_note(&map, asked_luxel) {
+            report.add_note(n);
+        }
         self.bakes += 1;
         if let Some(path) = &self.path {
             // A cache that cannot be written is only a slower next start.
             match write_atomic(path, &map.to_bytes(key)) {
                 Ok(()) => report.written = true,
-                Err(e) => report.note = Some(format!("cache file not written: {e}")),
+                Err(e) => report.add_note(format!("cache file not written: {e}")),
             }
         }
         self.last = Some(report);

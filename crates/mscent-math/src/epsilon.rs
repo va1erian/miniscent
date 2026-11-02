@@ -59,3 +59,6 @@ pub const PARTICLE_REST_SPEED: f32 = 0.5;
 /// two interpolations; this is relative, so it holds from near to far. Far
 /// below the gap between a wall and anything in front of it.
 pub const DECAL_DEPTH_BIAS: f32 = 2.0e-3;
+
+/// Above this cosine two rotations are close enough to blend linearly.
+pub const SLERP_LINEAR_COS: f32 = 0.9995;

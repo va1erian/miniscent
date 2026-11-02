@@ -223,7 +223,10 @@ fn brushes(pen: &mut Pen, scene: &Scene) {
         _ => None,
     };
     for br in scene.state.doc.brushes() {
+        // A mover stands out: it is no part of the world.
+        let moves = scene.state.doc.group_of(br.id).is_some();
         let color = match br.op {
+            Op::Add if moves => Color::rgb(230, 150, 40),
             Op::Add => ADD,
             Op::Subtract => SUBTRACT,
         };
@@ -314,6 +317,24 @@ fn entities(pen: &mut Pen, scene: &Scene) {
                     col,
                     1.0,
                 );
+            }
+            Entity::Marker { .. } => {
+                let col = Color::rgb(230, 190, 70);
+                let i = r as i32;
+                let (left, right) = (Point::new(c.x - i, c.y), Point::new(c.x + i, c.y));
+                let (top, bottom) = (Point::new(c.x, c.y - i), Point::new(c.x, c.y + i));
+                pen.canvas.draw_line(left, right, col, 2.0 * pen.s);
+                pen.canvas.draw_line(top, bottom, col, 2.0 * pen.s);
+            }
+            Entity::Zone { half, .. } => {
+                let h = [f64::from(half.x), f64::from(half.y), f64::from(half.z)];
+                let lo = pen.pt([q[a] - h[a], q[b] - h[b]]);
+                let hi = pen.pt([q[a] + h[a], q[b] + h[b]]);
+                let (x0, x1) = (lo.x.min(hi.x), lo.x.max(hi.x));
+                let (y0, y1) = (lo.y.min(hi.y), lo.y.max(hi.y));
+                let col = Color::rgb(70, 200, 200);
+                pen.canvas
+                    .stroke_rect(Rect::new(x0, y0, x1, y1), col, pen.s);
             }
             Entity::Goal { radius, .. } => {
                 let i = (r * 1.3) as i32;

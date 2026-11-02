@@ -74,5 +74,25 @@ fn same_plane(a: &DPlane, b: &DPlane) -> bool {
     (a.normal - b.normal).length() <= eps && (a.dist - b.dist).abs() <= eps
 }
 
+/// A mover brush's faces, as authored. They border no leaf: a mover is not part
+/// of the world's cells, and the world's faces do not know it is there.
+pub fn brush_faces(brush: &crate::brush::Brush) -> Vec<Face> {
+    let parts = brush
+        .planes()
+        .iter()
+        .zip(brush.faces())
+        .zip(brush.texinfos());
+    parts
+        .map(|((plane, polygon), texinfo)| Face {
+            plane: *plane,
+            polygon: polygon.clone(),
+            material: texinfo.material,
+            texinfo: *texinfo,
+            front_leaves: Vec::new(),
+            back_leaves: Vec::new(),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod faces_tests;

@@ -33,6 +33,8 @@ fn room() -> Result<LevelRenderer, String> {
             radius: 40.0,
             intensity: 1.0,
         }],
+        labels: Vec::new(),
+        mover_groups: Vec::new(),
     };
     let cfg = BuildConfig {
         luxel_size: 0.5,
@@ -76,6 +78,7 @@ fn time_frame(r: &LevelRenderer, view: &View, lights: &[DynLight]) -> (f64, u32,
     let effects = Effects {
         particles: None,
         lights,
+        poses: &[],
     };
     let (mut spans, mut best) = (0, f64::MAX);
     for _ in 0..batches {

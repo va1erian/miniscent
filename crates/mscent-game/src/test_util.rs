@@ -34,6 +34,7 @@ pub fn open_level(entities: Vec<Entity>) -> Level {
     Level {
         brushes: vec![room()],
         entities,
+        ..Default::default()
     }
 }
 
@@ -41,6 +42,7 @@ pub fn split_level(entities: Vec<Entity>) -> Level {
     Level {
         brushes: vec![room(), divider()],
         entities,
+        ..Default::default()
     }
 }
 
@@ -79,6 +81,7 @@ pub fn random_trace(seed: u64, len: usize) -> Vec<Input> {
             yaw: axis(),
             roll: axis(),
             fire: false,
+            use_key: false,
         })
         .collect()
 }

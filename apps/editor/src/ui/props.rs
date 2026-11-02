@@ -6,7 +6,7 @@
 use mscent_world::{Entity, Op, materials::NAMES};
 use xui::backend::WidgetId;
 use xui::prelude::*;
-use xui::widget::{GroupBox, HasText};
+use xui::widget::{Edit, GroupBox, HasText};
 
 use super::Msg;
 use super::facepanel::FacePanel;
@@ -22,6 +22,12 @@ pub enum Prop {
     Max(usize, f64),
     Pos(usize, f64),
     Param(usize, f64),
+    /// What is typed in the Name field.
+    NameText(String),
+    /// What is typed in the Tags field.
+    TagsText(String),
+    /// The Apply button: the name and tags become the selection's.
+    ApplyNames,
 }
 
 const AXES: [&str; 3] = ["X", "Y", "Z"];
@@ -42,6 +48,12 @@ pub struct Panel {
     pos: [Handle<NumberField<Msg>>; 3],
     param_labels: [Handle<Label<Msg>>; PARAMS],
     params: [Handle<NumberField<Msg>>; PARAMS],
+    names_group: Handle<GroupBox<Msg>>,
+    name: Handle<Edit<Msg>>,
+    tags: Handle<Edit<Msg>>,
+    uses: Handle<Label<Msg>>,
+    /// What the name and tag fields last showed, so typing is not overwritten.
+    shown_names: std::cell::RefCell<(String, String)>,
     pub face: FacePanel,
 }
 
@@ -68,7 +80,12 @@ impl Panel {
             .into_iter()
             .flatten()
             .any(|h| h.get().id() == id);
-        numbers || self.face.owns(id) || self.op.get().id() == id || self.material.get().id() == id
+        let names = self.name.get().id() == id || self.tags.get().id() == id;
+        numbers
+            || names
+            || self.face.owns(id)
+            || self.op.get().id() == id
+            || self.material.get().id() == id
     }
 
     /// Gives the panel the UI it needs to show and hide its sections.
@@ -125,16 +142,54 @@ impl Panel {
                 .child(label("-").bind(&self.param_labels[i]))
                 .child(field(&self.params[i], move |v| Prop::Param(i, v)));
         }
+        let names = grid([Track::Auto, Track::Fill(1)])
+            .gap(6)
+            .child(label("Name"))
+            .child(
+                edit()
+                    .then(|e| e.on_change(|t| Some(Msg::Prop(Prop::NameText(t.to_string())))))
+                    .bind(&self.name),
+            )
+            .child(label("Tags"))
+            .child(
+                edit()
+                    .then(|e| e.on_change(|t| Some(Msg::Prop(Prop::TagsText(t.to_string())))))
+                    .bind(&self.tags),
+            );
+        let names = column().gap(6).children((
+            names,
+            button("Apply names").on_click(Msg::Prop(Prop::ApplyNames)),
+            label("").bind(&self.uses),
+        ));
         scroll(column().padding(8).gap(8).children((
             label("Nothing selected").bind(&self.what),
+            group("Script names", names).bind(&self.names_group),
             group("Brush", brush).bind(&self.brush_group),
             self.face.layout(),
             group("Entity", ent).bind(&self.entity_group),
         )))
     }
 
+    /// The name and tag fields follow the selection, and leave typing alone.
+    fn sync_names(&self, st: &mut EditorState) {
+        let shown = st.sync_draft();
+        if *self.shown_names.borrow() != shown {
+            if self.name.get().text() != shown.0 {
+                self.name.get().set_text(&shown.0);
+            }
+            if self.tags.get().text() != shown.1 {
+                self.tags.get().set_text(&shown.1);
+            }
+            *self.shown_names.borrow_mut() = shown;
+        }
+        st.poll_script();
+        self.show(self.names_group.get().id(), st.selection.is_some());
+        self.uses.get().set_text(&st.script_uses());
+    }
+
     /// Shows the selection in the fields and enables only the relevant ones.
-    pub fn sync(&self, st: &EditorState) {
+    pub fn sync(&self, st: &mut EditorState) {
+        self.sync_names(st);
         let brush = st.selected_brush();
         let ent = st.selected_entity();
         let text = match (brush, ent) {
@@ -213,5 +268,16 @@ pub fn apply(st: &mut EditorState, prop: Prop) -> bool {
             *e = with_pos(e, p);
         }),
         Prop::Param(i, v) => st.edit_selected_entity(|e| set_param(e, i, v)),
+        Prop::NameText(text) => {
+            st.sync_draft();
+            st.draft.name = text;
+            false
+        }
+        Prop::TagsText(text) => {
+            st.sync_draft();
+            st.draft.tags = text;
+            false
+        }
+        Prop::ApplyNames => st.apply_draft(),
     }
 }

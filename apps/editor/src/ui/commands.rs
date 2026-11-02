@@ -29,6 +29,7 @@ pub(super) fn menus(m: &mut xui::widget::MenuScope<'_>) {
         e.separator();
         e.item(cmd::DELETE, "&Delete   Del");
         e.item(cmd::FLIP, "&Flip add/subtract");
+        e.item(cmd::MAKE_MOVER, "Make &mover");
         e.item(cmd::FORWARD, "Move &later in order");
         e.item(cmd::BACK, "Move &earlier in order");
         e.separator();
@@ -100,6 +101,9 @@ impl Editor {
             }
             cmd::FLIP => {
                 st.flip_selected();
+            }
+            cmd::MAKE_MOVER => {
+                st.make_mover();
             }
             cmd::FORWARD => {
                 st.reorder_selected(1);
@@ -178,6 +182,12 @@ impl Editor {
             Ok(msg) => {
                 files::remember(&path);
                 let lit = self.studio.save_lightmap(&path, &doc);
+                let mut doc = doc;
+                doc.set_level_path(Some(path.clone()));
+                self.state
+                    .borrow_mut()
+                    .doc
+                    .set_level_path(Some(path.clone()));
                 self.saved = doc;
                 self.path = Some(path);
                 lit.map_or(msg.clone(), |l| format!("{msg}; {l}"))

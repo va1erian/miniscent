@@ -35,7 +35,9 @@ fn nudge_first_light(level: &mut Level) {
 }
 
 fn temp_file(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("mscent_bake_cache_{}", std::process::id()));
+    // A directory per file: tests run at once, and one of them lists its
+    // directory to check for leftovers that another test's bake would be.
+    let dir = std::env::temp_dir().join(format!("mscent_bake_cache_{}_{name}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     dir.join(name)
 }

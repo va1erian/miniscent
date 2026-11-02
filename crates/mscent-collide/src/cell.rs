@@ -8,7 +8,7 @@ use mscent_math::Vec3d;
 use mscent_world::polytope::MAX_COORD;
 
 /// Half-space `normal . p <= dist` bounding a cell from outside.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct CellPlane {
     pub normal: Vec3d,
     pub dist: f64,
@@ -23,6 +23,7 @@ impl CellPlane {
 /// Convex cell with its boundary features. Cells on the world's outer shell
 /// are unbounded in the tree, so they are clipped to a box that no mover can
 /// reach; the box faces are artificial and never produce contacts.
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Cell {
     planes: Vec<CellPlane>,
     /// `has_face[i]`: real plane `i` bounds the cell with a non-degenerate face.
@@ -109,6 +110,17 @@ fn face_polygon(i: usize, all: &[CellPlane]) -> Vec<Vec3d> {
     }
 }
 
+fn nearest_on_segment(p: Vec3d, a: Vec3d, b: Vec3d) -> Vec3d {
+    let ab = b - a;
+    let len = ab.dot(ab);
+    let t = if len > 0.0 {
+        ((p - a).dot(ab) / len).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    a + ab * t
+}
+
 impl Cell {
     /// Builds the cell bounded by `planes` (all outward-facing).
     pub fn build(planes: &[CellPlane]) -> Self {
@@ -174,6 +186,40 @@ impl Cell {
             .iter()
             .enumerate()
             .all(|(j, pl)| j == skip || pl.signed(p) <= ON_PLANE)
+    }
+
+    /// True if `p` is inside every real plane of the cell.
+    pub fn contains_point(&self, p: Vec3d) -> bool {
+        self.planes[..self.real].iter().all(|pl| pl.signed(p) < 0.0)
+    }
+
+    /// The point of the cell's surface nearest to `p`, when `p` is outside.
+    /// `None` inside the cell, or if it has no features at all.
+    pub fn nearest_outside(&self, p: Vec3d) -> Option<Vec3d> {
+        if self.contains_point(p) {
+            return None;
+        }
+        let mut best: Option<(f64, Vec3d)> = None;
+        let mut offer = |q: Vec3d| {
+            let d = (p - q).length();
+            if best.is_none_or(|(b, _)| d < b) {
+                best = Some((d, q));
+            }
+        };
+        for i in (0..self.real).filter(|&i| self.has_face[i]) {
+            let pl = &self.planes[i];
+            let foot = p - pl.normal * pl.signed(p);
+            if self.contains_except(foot, i) {
+                offer(foot);
+            }
+        }
+        for &(a, b) in &self.edges {
+            offer(nearest_on_segment(p, a, b));
+        }
+        for &v in &self.verts {
+            offer(v);
+        }
+        best.map(|(_, q)| q)
     }
 
     /// First contact of a sphere of `radius` whose centre moves `from` to

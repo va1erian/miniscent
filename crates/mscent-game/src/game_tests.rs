@@ -68,6 +68,7 @@ fn unplayable_levels_are_errors_not_panics() {
     let solid = Level {
         brushes: Vec::new(),
         entities: vec![start(Vec3::ZERO, 0.0), far_goal()],
+        ..Default::default()
     };
     assert_eq!(Arena::from_level(&solid), Err(LoadError::SpawnInSolid(0)));
 }
@@ -335,4 +336,34 @@ fn shot_events_do_not_change_the_simulation() {
     assert_eq!(read.player.health, unread.player.health);
     assert_eq!(read.player.pos(), unread.player.pos());
     assert_eq!(read.enemies[0].pos(), unread.enemies[0].pos());
+}
+
+#[test]
+fn a_mover_brush_stays_out_of_the_world_bsp() {
+    use mscent_math::Vec3d;
+    use mscent_world::{Brush, MoverGroup, Op};
+    let door = Brush::cuboid(
+        Vec3d::new(0.0, -1.0, -1.0),
+        Vec3d::new(1.0, 1.0, 1.0),
+        Op::Add,
+        9,
+    );
+    let mut level = open_level(vec![start(Vec3::new(-3.0, 0.0, 0.0), 0.0), far_goal()]);
+    level.brushes.push(door.unwrap());
+    let inside = Vec3::new(0.5, 0.0, 0.0).to_f64();
+    let solid = Arena::from_level(&level).unwrap();
+    assert!(solid.bsp.is_solid(inside), "without a group it is world");
+    level.mover_groups.push(MoverGroup {
+        name: "door".to_string(),
+        tags: Vec::new(),
+        brushes: vec![level.brushes.len() as u32 - 1],
+    });
+    let open = Arena::from_level(&level).unwrap();
+    assert!(!open.bsp.is_solid(inside), "in a group it is not");
+    level.mover_groups[0].brushes = vec![u32::MAX];
+    let refused = Arena::from_level(&level).unwrap_err();
+    assert_eq!(
+        refused,
+        crate::arena::LoadError::Labels(mscent_world::LabelError::BadIndex)
+    );
 }

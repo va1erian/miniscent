@@ -48,6 +48,8 @@ fn renderer(divider: bool) -> LevelRenderer {
             radius: 40.0,
             intensity: 1.0,
         }],
+        labels: Vec::new(),
+        mover_groups: Vec::new(),
     };
     let cfg = BuildConfig {
         luxel_size: 1.0,
@@ -260,6 +262,7 @@ fn session_frame(script: &str, frames: u64) -> Vec<u32> {
         autoclose: None,
         shot_times: vec![],
         shot_stem: None,
+        watch: None,
     };
     run(&mut p, &mut s, &opts);
     p.last_frame().expect("a frame").pixels.clone()

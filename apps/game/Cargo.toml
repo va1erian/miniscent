@@ -22,6 +22,7 @@ mscent-collide.workspace = true
 mscent-render.workspace = true
 mscent-game.workspace = true
 mscent-platform.workspace = true
+mscent-script.workspace = true
 
 [lints]
 workspace = true

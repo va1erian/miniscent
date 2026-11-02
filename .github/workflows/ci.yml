@@ -19,3 +19,12 @@ jobs:
       - run: python3 tools/check_file_length.py
       - run: python3 tools/check_docs.py
       - run: python3 tools/check_frame_cost.py
+
+  # Windows, because that is the binary the budget was measured on.
+  size:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: python tools/check_size.py

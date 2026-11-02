@@ -2,11 +2,10 @@
 //!
 //! Everything here goes through `mscent_collide::sweep_sphere`, the same
 //! trace movement uses, so a shot can never pass through a wall the player
-//! could not fly through.
+//! could not fly through. That includes movers, so a closed door stops both.
 
-use mscent_collide::{Trace, sweep_sphere, sweep_sphere_sphere};
+use mscent_collide::{Solids, Trace, sweep_sphere, sweep_sphere_sphere};
 use mscent_math::Vec3;
-use mscent_world::Bsp;
 
 /// A shootable sphere.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -25,27 +24,36 @@ pub struct Hitscan {
     pub point: Vec3,
     /// Unit normal of what was struck; zero when nothing was.
     pub normal: Vec3,
+    /// The mover struck, when that came before any target.
+    pub mover: Option<usize>,
 }
 
 /// Zero-radius trace from `from` to `to`.
-pub fn ray(bsp: &Bsp, from: Vec3, to: Vec3) -> Trace {
-    sweep_sphere(bsp, from, to, 0.0)
+pub fn ray<'a>(solids: impl Into<Solids<'a>>, from: Vec3, to: Vec3) -> Trace {
+    sweep_sphere(solids, from, to, 0.0)
 }
 
 /// True when nothing solid lies between the two points.
-pub fn line_of_sight(bsp: &Bsp, a: Vec3, b: Vec3) -> bool {
-    let t = ray(bsp, a, b);
+pub fn line_of_sight<'a>(solids: impl Into<Solids<'a>>, a: Vec3, b: Vec3) -> bool {
+    let t = ray(solids, a, b);
     !t.start_solid && !t.hit
 }
 
 /// Fires a ray of `range` from `origin` along `dir` and reports the nearest
 /// of the walls and `targets`. A zero or non-finite direction misses.
-pub fn hitscan(bsp: &Bsp, origin: Vec3, dir: Vec3, range: f32, targets: &[Sphere]) -> Hitscan {
+pub fn hitscan<'a>(
+    solids: impl Into<Solids<'a>>,
+    origin: Vec3,
+    dir: Vec3,
+    range: f32,
+    targets: &[Sphere],
+) -> Hitscan {
     let miss = Hitscan {
         target: None,
         distance: 0.0,
         point: origin,
         normal: Vec3::ZERO,
+        mover: None,
     };
     let Some(dir) = dir
         .normalized()
@@ -54,7 +62,7 @@ pub fn hitscan(bsp: &Bsp, origin: Vec3, dir: Vec3, range: f32, targets: &[Sphere
         return miss;
     };
     let end = origin + dir * range;
-    let wall = ray(bsp, origin, end);
+    let wall = ray(solids, origin, end);
     if wall.start_solid {
         return miss;
     }
@@ -82,5 +90,6 @@ pub fn hitscan(bsp: &Bsp, origin: Vec3, dir: Vec3, range: f32, targets: &[Sphere
         distance: fraction * range,
         point,
         normal,
+        mover: wall.mover.filter(|_| best.is_none()),
     }
 }

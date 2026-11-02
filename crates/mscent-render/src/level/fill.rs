@@ -2,6 +2,7 @@
 //! of the frame added where they reach.
 
 use mscent_math::Vec3;
+use mscent_world::Face;
 use mscent_world::materials::LIGHTPANEL;
 
 use super::overlay::LitActors;
@@ -62,45 +63,56 @@ impl LevelRenderer {
         eye: Vec3,
         lights: &[DynLight],
     ) -> DrawStats {
-        let fog = self.fog();
-        let bump = quality != Quality::Low;
-        let specular = quality == Quality::High;
-        let flat = |light| FaceShader::Flat(FlatShader::new(light, fog));
         self.scene.fill_frame(fb, list, None, &mut |i, face| {
-            if face.material == LIGHTPANEL {
-                return flat(EMISSIVE);
-            }
-            let map = self.uv_maps.get(i).copied().flatten();
-            let Some(map) = map else {
-                return flat(UNLIT);
-            };
-            let fl = FaceLight {
-                lightmap: &self.lightmap,
-                mips: &self.light_mips,
-                face: i,
-                map,
-                texture: self.scene.texture_of(face.material),
-                fog,
-                bump,
-            };
-            let table = self
-                .spec
-                .get(usize::from(face.material))
-                .or(self.spec.last());
-            let spec = table
-                .filter(|t| specular && t.is_visible())
-                .and_then(|t| LightingShader::with_specular(fl, eye, t));
-            if let Some(mut s) = spec {
-                add_lights(&mut s, i, lights);
-                return FaceShader::Spec(s);
-            }
-            match LightingShader::new(fl) {
-                Some(mut s) => {
-                    add_lights(&mut s, i, lights);
-                    FaceShader::Lit(s)
-                }
-                None => flat(UNLIT),
-            }
+            self.face_shader(i, face, eye, quality, lights)
         })
+    }
+
+    /// The lit shader of a face, seen from `eye` in the space the face was
+    /// authored in.
+    pub(super) fn face_shader(
+        &self,
+        i: usize,
+        face: &Face,
+        eye: Vec3,
+        quality: Quality,
+        lights: &[DynLight],
+    ) -> FaceShader<'_> {
+        let fog = self.fog();
+        let flat = |light| FaceShader::Flat(FlatShader::new(light, fog));
+        if face.material == LIGHTPANEL {
+            return flat(EMISSIVE);
+        }
+        let map = self.uv_maps.get(i).copied().flatten();
+        let Some(map) = map else {
+            return flat(UNLIT);
+        };
+        let fl = FaceLight {
+            lightmap: &self.lightmap,
+            mips: &self.light_mips,
+            face: i,
+            map,
+            texture: self.scene.texture_of(face.material),
+            fog,
+            bump: quality != Quality::Low,
+        };
+        let table = self
+            .spec
+            .get(usize::from(face.material))
+            .or(self.spec.last());
+        let spec = table
+            .filter(|t| quality == Quality::High && t.is_visible())
+            .and_then(|t| LightingShader::with_specular(fl, eye, t));
+        if let Some(mut s) = spec {
+            add_lights(&mut s, i, lights);
+            return FaceShader::Spec(s);
+        }
+        match LightingShader::new(fl) {
+            Some(mut s) => {
+                add_lights(&mut s, i, lights);
+                FaceShader::Lit(s)
+            }
+            None => flat(UNLIT),
+        }
     }
 }

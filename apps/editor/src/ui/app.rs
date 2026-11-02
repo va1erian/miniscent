@@ -69,6 +69,7 @@ pub mod cmd {
     pub const SAVE_AS: MenuId = MenuId::new(7);
     pub const UNDO: MenuId = MenuId::new(10);
     pub const REDO: MenuId = MenuId::new(11);
+    pub const MAKE_MOVER: MenuId = MenuId::new(26);
     pub const DELETE: MenuId = MenuId::new(12);
     pub const FLIP: MenuId = MenuId::new(13);
     pub const FORWARD: MenuId = MenuId::new(14);
@@ -182,6 +183,7 @@ impl Editor {
             row()
                 .gap(2)
                 .children((tool_button(6), tool_button(7), tool_button(8))),
+            row().gap(2).children((tool_button(9), tool_button(10))),
         ));
         let op_button = |i: usize| {
             let (tip, glyph) = OPS[i];
@@ -239,8 +241,8 @@ impl Editor {
         for v in self.all_viewports() {
             v.get().invalidate();
         }
+        self.panel.sync(&mut self.state.borrow_mut());
         let st = self.state.borrow();
-        self.panel.sync(&st);
         self.studio.set_highlights(st.highlighted_faces());
         let dirty = st.doc != self.saved;
         let bar = self.status.get();

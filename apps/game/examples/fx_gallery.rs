@@ -110,6 +110,7 @@ fn draw(
     let effects = Effects {
         particles: Some((&*draws, bank)),
         lights: fx.lights(r.scene()),
+        poses: &[],
     };
     let start = Instant::now();
     r.render_with_effects(fb, &view, Quality::High, &[], None, &effects);

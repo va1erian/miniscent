@@ -252,6 +252,61 @@ impl Mesh {
             .unwrap_or_else(Self::empty)
     }
 
+    /// An enemy on the player's side: the enemy's shape, in green.
+    pub fn friendly() -> Self {
+        let parts = [
+            (
+                Self::sphere(8, 14, 0.7, 0xff28_b048),
+                Vec3::new(0.0, 0.0, 0.1),
+            ),
+            (
+                Self::sphere(4, 8, 0.2, 0xfff8_e840),
+                Vec3::new(0.58, 0.0, 0.25),
+            ),
+        ];
+        Self::assembled(parts)
+    }
+
+    /// Something to shoot: an amber gem on a dark ball.
+    pub fn switch() -> Self {
+        Self::assembled([
+            (Self::sphere(6, 10, 0.4, 0xff30_3038), Vec3::ZERO),
+            (
+                Self::bipyramid(4, 0.22, 0.65, 0.65, 0xffff_a020),
+                Vec3::ZERO,
+            ),
+        ])
+    }
+
+    /// Something to pick up: a flat red diamond.
+    pub fn keycard() -> Self {
+        Self::assembled([(Self::bipyramid(4, 0.3, 0.3, 0.3, 0xffe0_3030), Vec3::ZERO)])
+    }
+
+    /// Something to use: a tall dark post with a cyan screen near the top.
+    pub fn terminal() -> Self {
+        Self::assembled([
+            (Self::bipyramid(4, 0.3, 0.6, 0.6, 0xff40_4858), Vec3::ZERO),
+            (
+                Self::sphere(4, 8, 0.16, 0xff40_e0f0),
+                Vec3::new(0.0, 0.0, 0.3),
+            ),
+        ])
+    }
+
+    /// A plain four-sided block.
+    pub fn crate_box() -> Self {
+        Self::assembled([(Self::bipyramid(4, 0.5, 0.5, 0.5, 0xff90_7040), Vec3::ZERO)])
+    }
+
+    fn assembled<const N: usize>(parts: [(Option<Self>, Vec3); N]) -> Self {
+        let parts: Option<Vec<(Mesh, Vec3)>> =
+            parts.into_iter().map(|(m, o)| Some((m?, o))).collect();
+        parts
+            .and_then(|p| Self::combine(&p))
+            .unwrap_or_else(Self::empty)
+    }
+
     fn empty() -> Self {
         Self {
             verts: Vec::new(),

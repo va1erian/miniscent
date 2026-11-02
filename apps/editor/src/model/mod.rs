@@ -5,6 +5,7 @@ pub mod document;
 pub mod entity;
 pub mod facetex;
 pub mod fly;
+pub mod labels;
 pub mod outline;
 pub mod pick;
 pub mod pointer;
@@ -33,3 +34,5 @@ pub use pointer::Pointer;
 pub use state::{EditorState, Selection, Tool};
 pub use tools::Keep;
 pub use view::{Camera2D, View};
+#[cfg(test)]
+mod label_tests;

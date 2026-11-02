@@ -599,6 +599,24 @@ Left as they are, knowingly: first-use allocations land in the first combat fram
 `DynLight` slot's bit sets, the lit copy of the level's mesh lighting, and each worker's layer scratch.
 All are bounded and none repeats. `tests/layer_alloc.rs` covers one worker.
 
+## With level scripting (M10)
+
+M10 landed while this was being built. Where the two meet:
+
+- **Shots report movers and props.** `Struck` gained `Mover(i)` and `Prop(i)`. They spark as metal
+  whatever they are made of, because the surface lookup walks the world's leaves and holds neither. A
+  mover or prop takes no scorch: it has no fixed place for one to stay.
+- **A friendly's shots show too**, with `Struck::Enemy` when they reach their target.
+- **Movers go through `Effects::poses`**, so doors and effects share one pass.
+
+Not handled, and each will show once a level has doors and big explosions together:
+
+- **Effects ignore a closed door.** Movers are not in the world's BSP, so particles fly through one,
+  and a dynamic light's flood and a blast's view kick pass it as if it were open.
+- **Dynamic lights do not light a mover**, since they reach faces through leaves and a mover's faces
+  belong to none.
+- **A destroyed prop only sparks.** It does not call `shatter` yet.
+
 ## Design overview
 
 ```

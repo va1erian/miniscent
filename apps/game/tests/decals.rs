@@ -53,6 +53,8 @@ fn renderer(divider: bool) -> LevelRenderer {
             radius: 60.0,
             intensity: 1.0,
         }],
+        labels: Vec::new(),
+        mover_groups: Vec::new(),
     };
     let cfg = BuildConfig {
         luxel_size: 1.0,

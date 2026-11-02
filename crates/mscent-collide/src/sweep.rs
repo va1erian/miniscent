@@ -6,6 +6,7 @@
 //! radius, rounded edges, rounded vertices) picks the earliest contact.
 
 use crate::cell::{Cell, CellPlane};
+use crate::mover::MoverSolid;
 use crate::prim::Contact;
 use crate::tuning::{PRUNE_MARGIN, SKIN};
 use mscent_math::{Vec3, Vec3d};
@@ -26,6 +27,40 @@ pub struct Trace {
     /// True if the start was inside solid (or the input was invalid); the
     /// sphere does not move.
     pub start_solid: bool,
+    /// The mover struck, if the contact is with one rather than the world.
+    pub mover: Option<usize>,
+}
+
+/// Everything solid: the world and the movers at their current poses.
+#[derive(Clone, Copy, Debug)]
+pub struct Solids<'a> {
+    bsp: &'a Bsp,
+    movers: &'a [MoverSolid],
+    skip: Option<usize>,
+}
+
+impl<'a> Solids<'a> {
+    pub fn new(bsp: &'a Bsp, movers: &'a [MoverSolid]) -> Self {
+        Self {
+            bsp,
+            movers,
+            skip: None,
+        }
+    }
+
+    /// The same, ignoring one mover.
+    pub(crate) fn without(self, index: usize) -> Self {
+        Self {
+            skip: Some(index),
+            ..self
+        }
+    }
+}
+
+impl<'a> From<&'a Bsp> for Solids<'a> {
+    fn from(bsp: &'a Bsp) -> Self {
+        Self::new(bsp, &[])
+    }
 }
 
 /// Double-precision trace used internally so slide iterations do not round
@@ -37,6 +72,7 @@ pub(crate) struct TraceD {
     pub normal: Vec3d,
     pub hit: bool,
     pub start_solid: bool,
+    pub mover: Option<usize>,
 }
 
 impl TraceD {
@@ -47,6 +83,7 @@ impl TraceD {
             normal: Vec3d::ZERO,
             hit: true,
             start_solid: true,
+            mover: None,
         }
     }
 
@@ -57,6 +94,7 @@ impl TraceD {
             normal: self.normal.to_f32(),
             hit: self.hit,
             start_solid: self.start_solid,
+            mover: self.mover,
         }
     }
 }
@@ -64,11 +102,13 @@ impl TraceD {
 /// Sweeps a sphere of `radius` whose centre moves from `from` to `to`.
 /// Invalid input (non-finite values, negative radius) yields a blocked trace
 /// rather than a panic.
-pub fn sweep_sphere(bsp: &Bsp, from: Vec3, to: Vec3, radius: f32) -> Trace {
-    sweep_sphere_d(bsp, from.to_f64(), to.to_f64(), f64::from(radius)).to_f32()
+pub fn sweep_sphere<'a>(solids: impl Into<Solids<'a>>, from: Vec3, to: Vec3, radius: f32) -> Trace {
+    let d = (from.to_f64(), to.to_f64(), f64::from(radius));
+    sweep_sphere_d(solids.into(), d.0, d.1, d.2).to_f32()
 }
 
-pub(crate) fn sweep_sphere_d(bsp: &Bsp, from: Vec3d, to: Vec3d, radius: f64) -> TraceD {
+pub(crate) fn sweep_sphere_d(solids: Solids, from: Vec3d, to: Vec3d, radius: f64) -> TraceD {
+    let bsp = solids.bsp;
     if !from.is_finite() || !to.is_finite() || !radius.is_finite() || radius < 0.0 {
         return TraceD::blocked(from);
     }
@@ -85,24 +125,53 @@ pub(crate) fn sweep_sphere_d(bsp: &Bsp, from: Vec3d, to: Vec3d, radius: f64) -> 
         planes: Vec::new(),
     };
     walk.visit(bsp.root(), 0);
-    match walk.best {
+    let (best, d) = (walk.best, walk.d);
+    let (best, mover) = nearest_mover(solids, from, to, d, radius, best);
+    match best {
         None => TraceD {
             fraction: 1.0,
             end: to,
             normal: Vec3d::ZERO,
             hit: false,
             start_solid: false,
+            mover: None,
         },
         Some(c) => TraceD {
             fraction: c.t,
             // Backing off along the normal (not the path) keeps the sphere
             // clear of the surface even for grazing, near-parallel moves.
-            end: from + walk.d * c.t + c.normal * SKIN,
+            end: from + d * c.t + c.normal * SKIN,
             normal: c.normal,
             hit: true,
             start_solid: false,
+            mover,
         },
     }
+}
+
+/// The earliest contact once movers are counted, and which mover it is on.
+fn nearest_mover(
+    solids: Solids,
+    from: Vec3d,
+    to: Vec3d,
+    d: Vec3d,
+    radius: f64,
+    world: Option<Contact>,
+) -> (Option<Contact>, Option<usize>) {
+    let mut best = world;
+    let mut struck = None;
+    for (i, mover) in solids.movers.iter().enumerate() {
+        if solids.skip == Some(i) || !mover.near_segment(from, to, radius) {
+            continue;
+        }
+        let limit = best.map_or(1.0, |b| b.t);
+        let found = mover.sweep(from, d, radius, limit);
+        if let Some(c) = found.filter(|c| best.is_none_or(|b| c.t < b.t)) {
+            best = Some(c);
+            struck = Some(i);
+        }
+    }
+    (best, struck)
 }
 
 struct Walk<'a> {
