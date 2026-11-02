@@ -1,4 +1,4 @@
-//! Moving a mover through the bodies in its way (M9.3).
+//! Moving a mover through the bodies in its way (M10.3).
 //!
 //! Each body's position is read in the mover's frame at the old and new
 //! poses. The line between them is the body's path relative to the mover, so

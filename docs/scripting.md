@@ -1,6 +1,6 @@
 # Level scripting: design
 
-Status: accepted. The language and VM exist (M9.4, `crates/mscent-script`); no game API is bound to them yet. The work is M9 in [work-items.md](work-items.md). Why this
+Status: accepted. The language and VM exist (M10.4, `crates/mscent-script`); no game API is bound to them yet. The work is M10 in [work-items.md](work-items.md). Why this
 language, with measurements: [scripting-language.md](scripting-language.md).
 
 ## The short version

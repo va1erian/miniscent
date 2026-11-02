@@ -1,4 +1,4 @@
-//! Moving solids: convex brushes under a rigid pose (M9.3).
+//! Moving solids: convex brushes under a rigid pose (M10.3).
 //!
 //! A mover's cells are built once, in the coordinates the brushes were
 //! authored in, and a sweep is carried out in that local frame. A sphere's

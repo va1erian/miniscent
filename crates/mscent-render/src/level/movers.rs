@@ -1,4 +1,4 @@
-//! Drawing movers (M9.7). A mover's faces are ordinary faces of the scene, lit
+//! Drawing movers (M10.7). A mover's faces are ordinary faces of the scene, lit
 //! at their authored pose, that belong to no leaf, so the BSP walk never draws
 //! them. Here each is drawn wherever its mover is now, and the z-buffer sorts
 //! it against the world.

@@ -1,4 +1,4 @@
-//! Movers at play (M9.3): named poses, eased motion and what happens when a
+//! Movers at play (M10.3): named poses, eased motion and what happens when a
 //! body is in the way. Doors, lifts, trapdoors and crushers are all this.
 //!
 //! Collision and pushing are in `mscent_collide`; this decides where each

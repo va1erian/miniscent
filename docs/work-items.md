@@ -112,22 +112,22 @@ Sizes: S is under a day, M a few days, L a week or more.
 | M8.5 | Frame-time results on the real Kaby Lake box, fix the worst offender | M8.1, M3.8 | M | 60 fps with every feature on, written up under `docs/perf/` |
 | M8.6 | Windows packaging and release notes | M8.5, M7.8 | S | A zip that runs on a clean machine |
 
-## M9 Level scripting
+## M10 Level scripting
 
 Design in [scripting.md](scripting.md), language choice in
 [scripting-language.md](scripting-language.md).
 
 | ID | Item | Deps | Size | Done when |
 |---|---|---|---|---|
-| M9.1 | `tools/check_size.py` in CI, failing above a budget for the release game binary, proposed at 1.6 MB (1.22 MB today) | | S | The tool fails a deliberately oversized build |
-| M9.2 | Level format v3: names, markers, zones, mover groups, `static_brushes` | | M | Round trip, bit-flip fuzz, v2 levels still load |
-| M9.3 | `Solids`, mover sweep, push and blocked policies, shots and sight | M9.2 | L | Extended `tests/fuzz.rs`; levels with no movers replay bit-exact; `frame_bench` unchanged |
-| M9.4 | `mscent-script`: language and VM, with the fixes listed in scripting-language.md, each file under 500 lines | | L | Language tests, `cargo fuzz` target, hostile scripts, size added under 300 KB |
-| M9.5 | Game API through one table, events, commands, tasks in `Game::step` | M9.2, M9.3, M9.4 | M | Each use case as a test; replay trace byte-identical |
-| M9.6 | `--check`, `--test`, `--trace`, `--script-api`, `--dump-level`, `--pack-level`, hot reload | M9.5 | M | An agent builds the switch-door level from nothing, with no `cargo build`, in a recorded session |
-| M9.7 | Mover rendering and lightmaps | M9.3 | M | Pixel tests read a door at both poses; `frame_bench` with movers recorded in `docs/perf/` |
-| M9.8 | Props, pickups, use key, factions, HUD messages | M9.5 | M | Keycard and terminal end to end through `--test` |
-| M9.9 | Editor: mover command, names, tags, script errors, reload in Play | M9.2, M9.5 | M | `--selftest` steps |
+| M10.1 | `tools/check_size.py` in CI, failing above a budget for the release game binary, proposed at 1.6 MB (1.22 MB today) | | S | The tool fails a deliberately oversized build |
+| M10.2 | Level format v3: names, markers, zones, mover groups, `static_brushes` | | M | Round trip, bit-flip fuzz, v2 levels still load |
+| M10.3 | `Solids`, mover sweep, push and blocked policies, shots and sight | M10.2 | L | Extended `tests/fuzz.rs`; levels with no movers replay bit-exact; `frame_bench` unchanged |
+| M10.4 | `mscent-script`: language and VM, with the fixes listed in scripting-language.md, each file under 500 lines | | L | Language tests, `cargo fuzz` target, hostile scripts, size added under 300 KB |
+| M10.5 | Game API through one table, events, commands, tasks in `Game::step` | M10.2, M10.3, M10.4 | M | Each use case as a test; replay trace byte-identical |
+| M10.6 | `--check`, `--test`, `--trace`, `--script-api`, `--dump-level`, `--pack-level`, hot reload | M10.5 | M | An agent builds the switch-door level from nothing, with no `cargo build`, in a recorded session |
+| M10.7 | Mover rendering and lightmaps | M10.3 | M | Pixel tests read a door at both poses; `frame_bench` with movers recorded in `docs/perf/` |
+| M10.8 | Props, pickups, use key, factions, HUD messages | M10.5 | M | Keycard and terminal end to end through `--test` |
+| M10.9 | Editor: mover command, names, tags, script errors, reload in Play | M10.2, M10.5 | M | `--selftest` steps |
 
 ## Suggested order
 

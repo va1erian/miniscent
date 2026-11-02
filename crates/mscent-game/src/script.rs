@@ -1,4 +1,4 @@
-//! Level scripts at play (M9.5): loading one, starting handlers for this step's
+//! Level scripts at play (M10.5): loading one, starting handlers for this step's
 //! events and running due tasks. The game functions scripts can call are in
 //! `script_api.rs` and `script_world.rs`.
 //!

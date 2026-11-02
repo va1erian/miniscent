@@ -1,4 +1,4 @@
-//! Props (M9.8): things a script places that are not enemies. A switch to shoot,
+//! Props (M10.8): things a script places that are not enemies. A switch to shoot,
 //! a keycard to pick up, a terminal to use. A prop does nothing a script did not
 //! ask for: it can be shot if it has health or an `onHit:`, picked up if it has
 //! an `onPickup:`, and used if it has an `onUse:hold:`. Props are not solid.

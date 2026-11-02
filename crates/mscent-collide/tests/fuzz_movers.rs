@@ -1,4 +1,4 @@
-//! M9.3: property test for movers. Random boxes translate and swing through
+//! M10.3: property test for movers. Random boxes translate and swing through
 //! generated levels, with spheres flying around them. Size is set by
 //! `MSCENT_FUZZ_MOVER_STEPS` (simulated steps per level).
 //!
