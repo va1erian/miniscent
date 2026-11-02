@@ -2,7 +2,8 @@
 
 Status: built. M12.1 to M12.11 are done, and the workspace is on the Texture menu.
 The sections after "As built" are the plan as written, kept for its reasoning;
-"As built" overrides them. Work items are in [work-items.md](work-items.md).
+"As built" overrides them. Work items are in [work-items.md](work-items.md). To learn
+the tool, follow the [tutorial](texture-studio-tutorial.md).
 
 ## As built
 

@@ -3,6 +3,7 @@
 ## How to run
 
 ```
+# Texture > Texture Studio in the editor; see docs/texture-studio-tutorial.md
 # look at a recipe's maps as PNG files, with no window
 cargo run --release -p mscent-editor -- --bake-texture assets/textures/brick.mst target/shots/brick
 
