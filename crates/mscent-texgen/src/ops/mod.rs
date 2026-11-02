@@ -18,10 +18,21 @@ use std::sync::Arc;
 use crate::error::TexError;
 use crate::image::{Frame, Image};
 
+mod bricks;
+mod cells;
 mod combine;
+mod draw;
 mod filter;
 mod flow;
+mod font;
+mod height;
+mod paint;
 mod pattern;
+mod text;
+mod util;
+mod warp;
+
+pub use paint::{MAX_POINTS, MAX_STROKES};
 
 /// Longest text parameter, in bytes.
 pub const MAX_TEXT: usize = 64;
@@ -236,6 +247,13 @@ impl Ctx<'_> {
         }
     }
 
+    pub fn text(&self, name: &str) -> &str {
+        match self.value(name) {
+            Some(Value::Text(v)) => v,
+            _ => "",
+        }
+    }
+
     pub fn strokes(&self, name: &str) -> &[Stroke] {
         match self.value(name) {
             Some(Value::Strokes(v)) => v,
@@ -255,9 +273,21 @@ impl Ctx<'_> {
 
 /// Every operator, in menu order.
 pub fn all() -> impl Iterator<Item = &'static OpSpec> {
-    [pattern::OPS, combine::OPS, filter::OPS, flow::OPS]
-        .into_iter()
-        .flatten()
+    [
+        pattern::OPS,
+        bricks::OPS,
+        cells::OPS,
+        draw::OPS,
+        paint::OPS,
+        text::OPS,
+        combine::OPS,
+        filter::OPS,
+        warp::OPS,
+        height::OPS,
+        flow::OPS,
+    ]
+    .into_iter()
+    .flatten()
 }
 
 /// The operator of a name.
@@ -329,10 +359,32 @@ pub(crate) const fn text(name: &'static str, default: &'static str) -> ParamSpec
     }
 }
 
+/// Shorthand for the tables: brush strokes, which have no default but none.
+pub(crate) const fn strokes(name: &'static str) -> ParamSpec {
+    ParamSpec {
+        name,
+        kind: ParamKind::Strokes,
+    }
+}
+
 /// Shorthand for the tables: exactly `n` inputs.
 pub(crate) const fn exactly(n: u8) -> Inputs {
     Inputs { min: n, max: n }
 }
 
 #[cfg(test)]
+mod draw_tests;
+#[cfg(test)]
+mod filter_tests;
+#[cfg(test)]
+mod golden_tests;
+#[cfg(test)]
+mod height_tests;
+#[cfg(test)]
+mod pattern_tests;
+#[cfg(test)]
+mod test_util;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod warp_tests;
