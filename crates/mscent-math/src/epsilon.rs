@@ -91,3 +91,9 @@ pub const DECAL_DEPTH_BIAS: f32 = 2.0e-3;
 
 /// Above this cosine two rotations are close enough to blend linearly.
 pub const SLERP_LINEAR_COS: f32 = 0.9995;
+
+/// How near a bounce's contact point must be to a voxel surface for that
+/// surface's own normal to be used, not the six axis probes: four probe
+/// distances, so a contact the bisection left a hair off the rock still finds
+/// it, while a brush wall that merely shares the volume's box does not.
+pub const PARTICLE_VOXEL_NORMAL_REACH: f32 = 0.2;

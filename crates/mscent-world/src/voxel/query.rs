@@ -37,6 +37,17 @@ impl VoxelChunk {
 }
 
 impl VolumeGeometry {
+    /// `p` and the box's low corner as arrays, when `p` is in the box (low
+    /// side closed, high side open).
+    fn contains(&self, p: Vec3d) -> Option<([f64; 3], [f64; 3])> {
+        let (lo, hi) = (self.origin.to_f64(), self.extent().to_f64());
+        let q = [p.x, p.y, p.z];
+        let (lo, hi) = ([lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]);
+        (0..3)
+            .all(|a| q[a] >= lo[a] && q[a] < hi[a])
+            .then_some((q, lo))
+    }
+
     fn extent(&self) -> Vec3 {
         let s = self.chunk_size;
         let n = self.chunks.map(f32::from);
@@ -100,13 +111,39 @@ impl VoxelWorld {
         self.volumes.iter().any(|g| self.solid_in(g, p))
     }
 
-    fn solid_in(&self, g: &VolumeGeometry, p: Vec3d) -> bool {
-        let (lo, hi) = (g.origin.to_f64(), g.extent().to_f64());
-        let q = [p.x, p.y, p.z];
-        let (lo, hi) = ([lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]);
-        if !(0..3).all(|a| q[a] >= lo[a] && q[a] < hi[a]) {
-            return false;
+    /// Whether `p` lies in the box of some volume; outside every box
+    /// `is_solid` is `false` without a search. A cheap test for callers that
+    /// must decide whether a real `is_solid` is worth its cost.
+    pub fn in_volume(&self, p: Vec3d) -> bool {
+        self.volumes.iter().any(|g| g.contains(p).is_some())
+    }
+
+    /// The unit normal, pointing out of the rock, of the volume surface
+    /// nearest `p`, if one lies within `reach` of it. For a particle that
+    /// touched rock and needs to know which way the rock faces.
+    pub fn surface_normal(&self, p: Vec3d, reach: f64) -> Option<Vec3d> {
+        let mut best: Option<Hit> = None;
+        for g in &self.volumes {
+            let size = f64::from(g.chunk_size);
+            let origin = g.origin.to_f64();
+            let at = [p.x - origin.x, p.y - origin.y, p.z - origin.z];
+            // Past this the cast saturates, and a volume that far away is
+            // beyond `reach` all the same.
+            let home = at.map(|v| (v / size).floor().clamp(-1.0e6, 1.0e6) as i32);
+            let hit = self.nearest_surface(g, p, home, size);
+            best = match (best, hit) {
+                (Some(a), Some(b)) if a.d2 <= b.d2 => Some(a),
+                (_, b) => b,
+            };
         }
+        let hit = best.filter(|h| h.d2 <= reach * reach)?;
+        hit.normal.normalized()
+    }
+
+    fn solid_in(&self, g: &VolumeGeometry, p: Vec3d) -> bool {
+        let Some((q, lo)) = g.contains(p) else {
+            return false;
+        };
         let size = f64::from(g.chunk_size);
         let home = [0, 1, 2].map(|a| ((q[a] - lo[a]) / size).floor() as i32);
         match self.nearest_surface(g, p, home, size) {
@@ -156,12 +193,15 @@ impl VoxelWorld {
 pub(super) struct Hit {
     pub d2: f64,
     rock: bool,
+    /// Normal of the triangle nearest, facing out of the rock (not unit).
+    normal: Vec3d,
 }
 
 impl Hit {
     const NONE: Self = Self {
         d2: f64::INFINITY,
         rock: false,
+        normal: Vec3d::ZERO,
     };
 
     fn search(&mut self, chunk: &VoxelChunk, p: Vec3d) {
@@ -175,7 +215,8 @@ impl Hit {
             let d2 = (p - q).length_squared();
             if d2 < *bound {
                 *bound = d2;
-                self.rock = behind(p - q, &tri, w);
+                self.normal = facing(&tri, w);
+                self.rock = (p - q).dot(self.normal) <= 0.0;
             }
         });
     }
@@ -192,16 +233,15 @@ fn distance_squared_to(b: &Aabb, p: Vec3d) -> f64 {
     x * x + y * y + z * z
 }
 
-/// Whether `away`, the vector from a surface point to `p`, points into rock:
-/// against the surface normal there. At an edge or corner the normal is that
+/// The normal at the point of `tri` with weights `w`, pointing out of rock. A
+/// vector from there to `p` that goes against it points into rock. At an edge or corner the normal is that
 /// of the vertices blended by `w`, so both faces of a ridge agree; the plane's
 /// own normal serves where that blend is useless.
-fn behind(away: Vec3d, tri: &[VoxelVertex; 3], w: [f64; 3]) -> bool {
+fn facing(tri: &[VoxelVertex; 3], w: [f64; 3]) -> Vec3d {
     let [a, b, c] = tri.map(|v| v.pos.to_f64());
     let face = (b - a).cross(c - a);
     let blend = (0..3).fold(Vec3d::ZERO, |sum, i| sum + tri[i].normal.to_f64() * w[i]);
-    let normal = if blend.dot(face) > 0.0 { blend } else { face };
-    away.dot(normal) <= 0.0
+    if blend.dot(face) > 0.0 { blend } else { face }
 }
 
 /// Point of the triangle `t` nearest to `p`, with its barycentric weights.

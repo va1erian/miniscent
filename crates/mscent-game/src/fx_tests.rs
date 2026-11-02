@@ -3,6 +3,7 @@
 use super::*;
 use crate::test_util::{far_goal, game, open_level, random_trace, start, v};
 use mscent_math::Aabb;
+use mscent_world::Bsp;
 
 pub const fn class(collide: Collide, capacity: u16, tier: Tier) -> ParticleClass {
     ParticleClass {

@@ -2,6 +2,7 @@
 //! game runs on. Dynamic state (player, enemies) is created from it by
 //! [`crate::Game`], so a restart never has to reload the level.
 
+use crate::fx::FxWorld;
 use mscent_collide::{MoverShape, MoverSolid, Solids};
 use mscent_math::{Vec3, Vec3d};
 use mscent_world::voxel::{Volume, VoxelWorld};
@@ -146,6 +147,12 @@ impl Arena {
     /// What collision sweeps: the BSP, the voxel surfaces and `movers`.
     pub fn solids<'a>(&'a self, movers: &'a [MoverSolid]) -> Solids<'a> {
         Solids::new(&self.bsp, movers).with_voxels(&self.voxels)
+    }
+
+    /// What particles collide with: the BSP and the voxel surfaces, so sparks
+    /// stop at rock a shot has carved as well as at a brush wall.
+    pub fn fx_world(&self) -> FxWorld<'_> {
+        FxWorld::new(&self.bsp, &self.voxels)
     }
 
     /// True if `p` is inside rock: BSP solid, or a voxel volume's rock. Movers

@@ -326,7 +326,14 @@ As built (M11.6):
 - `Solids::with_voxels(&VoxelWorld)` adds the volumes; a plain `&Bsp` still converts, with none.
   `Arena` builds and holds the `VoxelWorld` and hands out `Arena::solids(movers)` and
   `Arena::is_solid(p)`, which every sweep, the spawn checks and the script's placement checks use.
-  The particle system (`fx`) still asks the BSP alone: its hit tests are cosmetic and budgeted per tick.
+  The particle system (`fx`) asks `Arena::fx_world()` (`fx/world.rs`): the BSP, then the volumes if the
+  point is in one's box. A voxel test costs `VOXEL_TEST_COST` (16) of the tick's 512 BSP-test units and a
+  bounce whose step touches a volume `VOXEL_SWEEP_COST` (128) more, with 8 bisections instead of 20; a level
+  with no volumes costs what it did. A bounce's normal is the nearest voxel triangle's
+  (`VoxelWorld::surface_normal`) when within 0.2 of the contact, else the six axis probes. The camera shake
+  of a blast is tested against the volumes too. Measured with `fx_sim_bench`: in the cave a voxel test costs
+  about 10 µs, a tick of 1365 Die particles all inside the box 420 µs (BSP alone 17 µs), so the budget lets
+  about 32 tests through a tick and the rest of a crowd passes through (Die) or dies (Bounce).
 - The triangles are the full-detail mesh with buried ones already dropped, so what is drawn is what is hit.
   `crates/mscent-collide/src/voxel.rs` does the sweep. Triangles are **one-sided**, like the faces of a
   cell: only the side the winding points to stops a sphere, and only while it moves against the normal.
@@ -673,7 +680,8 @@ Known limits:
 - A chunk new in a stroke or a shot, with no old cell to inherit from, is lit by lamps with no shadows until the next bake.
 - Light does not newly pour through a shot hole, and brush shadows do not change, as designed.
 - `check_frame_cost.py` has no voxel scene.
-- The reference machine (i3-7100U) is unmeasured for all of this.
+- Particles in a volume's box are limited to about 32 point tests and 4 bounces a tick, so a crowd of sparks in
+  a cave is thinned: Die particles over the limit pass through rock for that tick, Bounce particles die.- The reference machine (i3-7100U) is unmeasured for all of this.
 
 ## Alternatives rejected
 

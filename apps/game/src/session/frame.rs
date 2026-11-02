@@ -57,7 +57,11 @@ impl GameSession {
         self.kick = if self.menu.screen() == Screen::Paused {
             ViewKick::default()
         } else {
-            self.fx.view_kick(self.renderer.scene(), self.eye())
+            self.fx.view_kick_in(
+                self.renderer.scene(),
+                self.eye(),
+                self.game.arena.fx_world(),
+            )
         };
         let view = self.view();
         let alpha = self.stepper.alpha();
