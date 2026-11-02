@@ -265,7 +265,12 @@ fn fill_plain(
         None
     };
     let light = grad.plane3(over_z(c, |k| k.light));
-    let dir = grad.plane3(over_z(c, |k| k.dir));
+    // Most far triangles have no use for it, and a plane is most of a triangle's cost.
+    let dir = if normals.is_some() || table.is_some() {
+        grad.plane3(over_z(c, |k| k.dir))
+    } else {
+        Plane3::default()
+    };
     let base = Parts {
         tex,
         origin,
