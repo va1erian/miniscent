@@ -176,6 +176,11 @@ impl EditorState {
                 self.place_entity(k, at);
                 true
             }
+            Tool::Kit(k) => {
+                let at = self.entity_position(p.view, p.pos);
+                self.place_kit(k, at);
+                true
+            }
             Tool::Slice => self.slice_down(p, snapped),
             Tool::Vertex => self.vertex_down(p),
             Tool::Select | Tool::Face | Tool::Voxel => {
@@ -318,10 +323,7 @@ impl EditorState {
             Some(Drag::Move { before, .. }) => match before {
                 Original::Brush(orig) => match self.doc.brush(orig.id).cloned() {
                     Some(after) if after != orig => {
-                        self.history.record(Command::EditBrush {
-                            before: orig,
-                            after,
-                        });
+                        self.record_brush_edit(orig, after);
                         self.message = "Moved brush".into();
                         true
                     }
@@ -341,7 +343,7 @@ impl EditorState {
             },
             Some(Drag::Resize { before, .. }) => match self.doc.brush(before.id).cloned() {
                 Some(after) if after != before => {
-                    self.history.record(Command::EditBrush { before, after });
+                    self.record_brush_edit(before, after);
                     self.message = "Resized brush".into();
                     true
                 }
@@ -354,7 +356,7 @@ impl EditorState {
             }),
             Some(Drag::Vertex { before, .. }) => match self.doc.brush(before.id).cloned() {
                 Some(after) if after != before => {
-                    self.history.record(Command::EditBrush { before, after });
+                    self.record_brush_edit(before, after);
                     self.message = "Moved corner".into();
                     true
                 }

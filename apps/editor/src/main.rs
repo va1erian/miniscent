@@ -8,11 +8,13 @@
 //!   play 120 frames, return, edit, snapshot) and exits 0 on success.
 //! * `--bake-texture <recipe.mst> <dir>` writes a recipe's maps as PNG files, and
 //!   adds the material to `<dir>/materials.txt` if there is one.
+//! * `--ui-timing [dir]` prints what the UI thread's everyday work costs.
 
 mod build;
 mod files;
 mod materials;
 mod model;
+mod script;
 mod selftest;
 mod studio;
 mod texbake;
@@ -41,6 +43,12 @@ fn main() -> xui::backend::Result<()> {
             std::process::exit(1);
         }
         return Ok(());
+    }
+    if let Some(i) = args.iter().position(|a| a == "--ui-timing") {
+        let dir = args
+            .get(i + 1)
+            .map_or("target/shots/timing", String::as_str);
+        std::process::exit(selftest::ui_timing(std::path::Path::new(dir)));
     }
     // Hidden: make every frame take this many ms longer, to see that a slow
     // game does not slow the UI. MSCENT_SLOW_PLAY_MS does the same.

@@ -440,14 +440,30 @@ times a second. On a change it compiles, then restarts the level on the new scri
 State is not preserved, so a reload behaves exactly like a fresh start. Geometry is untouched, so there
 is no re-bake.
 
-**Editor.** The script path is per level. Errors appear in the existing log panel. Brushes get a "make
-mover" command and things get name and tag fields. There is no script editor: the file is text, and any
-real editor does it better.
+**Editor.** The script path is per level. Brushes get a "make mover" command and things get name and tag
+fields. The script pane (F6) edits the file with `xui-code-editor`: colours, completion that knows the
+level's names and what a receiver understands, and a problem list checked against the level as you type,
+the way `--check` does. F5 saves the script and plays it. The file is still plain text, and a change made in
+another program is followed, or offered as a choice if there are edits in the way. This replaces the earlier
+decision to have no script editor: placing a door and then leaving the program to wire it was the weak
+step in the loop.
+
+The pane sits under the views or in a window of its own, and only its widgets differ: a widget cannot move between windows, so each place has its own over one model, and moving starts the code editor's undo over. Play closes the window until it ends, since the game takes the keyboard and pointer through the main window. The guide is one code editor showing text: as separate widgets a page cost 100 ms on every re-flow, on a window whose labels ask for one whenever their text changes.
+
+**Basic entities.** Script > Add entity places a door, lift, wave and so on. Each is ordinary level content
+(named brushes, zones and markers) and a few lines added to the script, mostly calls into
+`assets/scripts/lib/kit.st`. So the rule above holds: the level file gains no logic and no new kind of
+entity, and what a door does stays readable and changeable where all the logic is. The editor does treat a mover and the zone named after it, `door_1_area`, as one thing: the name is the only link, and the zone follows when the mover is edited.
+
+**Samples and guide.** Script > Open sample writes a fresh copy of a level from `assets/samples` to the user's
+settings directory, so it plays at once and the shipped one stays as it is. The guide (F7) is
+`assets/guide/scripting.txt` and a reference page made from the API table. Tests compile every example in it
+and compare the table with the game's own, so neither can drift.
 
 ## Not covered
 
 - Save games. The VM state could be saved, but levels have no saves today.
 - Scripted enemy AI per step, and scripted weapons. Both stay Rust.
 - Movers casting baked shadows, switchable lights.
-- Syntax colouring or a debugger for the language.
+- A debugger for the language.
 - Anything measured on the i3-7100U or LazyOS.

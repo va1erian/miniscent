@@ -65,6 +65,14 @@ fn library_dir(level: &Path) -> PathBuf {
     }
 }
 
+/// The library a level at `level` would load, as names and text, for a host that
+/// wants to look at it. With no level yet, the one in the source tree. A file
+/// that cannot be read is left out: the level's own load will report it.
+pub fn library_files(level: Option<&Path>) -> Vec<(String, String)> {
+    let dir = level.map_or_else(|| library_dir(Path::new("")), library_dir);
+    library(&dir).iter().filter_map(|p| read(p).ok()).collect()
+}
+
 fn read_all(paths: &[PathBuf]) -> Result<ScriptFiles, String> {
     let files = paths.iter().map(|p| read(p)).collect::<Result<_, _>>()?;
     Ok(ScriptFiles { files })

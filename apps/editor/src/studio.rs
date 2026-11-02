@@ -167,6 +167,12 @@ impl Studio {
         self.built_doc.as_ref() == Some(doc)
     }
 
+    /// The script file was just written: the picture and whether it plays are out
+    /// of date, whatever a job on its way says, so it must build again.
+    pub fn script_changed(&mut self) {
+        self.refresh = true;
+    }
+
     /// Whether Play can start on what is up right now. After a live edit it needs
     /// one more preview, as a game collides with what that compiles.
     pub fn playable_now(&self, doc: &Document) -> bool {

@@ -2,6 +2,7 @@
 
 mod app;
 mod commands;
+mod discard_dialog;
 pub mod facepanel;
 mod faces;
 mod icons;
@@ -11,7 +12,12 @@ mod level_dialog;
 mod material_list;
 mod messages;
 mod paint2d;
+mod playing;
 pub mod props;
+mod script_actions;
+mod script_lexer;
+pub mod script_pane;
+mod script_widgets;
 pub mod texstudio;
 mod toolbar;
 mod view3d;

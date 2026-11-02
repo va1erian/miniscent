@@ -59,13 +59,23 @@ pub fn load(path: &Path) -> Result<Document, String> {
     Ok(doc)
 }
 
-/// Where the last used path is remembered.
-fn recent_file() -> Option<PathBuf> {
+/// The editor's own place in the user's settings.
+fn config_dir() -> Option<PathBuf> {
     let base = std::env::var_os("APPDATA")
         .or_else(|| std::env::var_os("XDG_CONFIG_HOME"))
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("miniscent").join("editor-recent.txt"))
+    Some(base.join("miniscent"))
+}
+
+/// Where the last used path is remembered.
+fn recent_file() -> Option<PathBuf> {
+    Some(config_dir()?.join("editor-recent.txt"))
+}
+
+/// Where copies of the samples go to be played with.
+pub fn samples_base() -> PathBuf {
+    config_dir().unwrap_or_else(|| std::env::temp_dir().join("miniscent"))
 }
 
 /// The last level opened or saved, if it still exists.

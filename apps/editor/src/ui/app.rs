@@ -11,11 +11,14 @@ use mscent_world::Op;
 use xui::prelude::*;
 use xui::widget::{FileDialog, HasText};
 
+pub use super::commands::cmd;
 use super::commands::menus;
 use super::keys::{OPS, TOOLS, key_name, shortcut};
 use super::layouts::{self, Arrangement, Disposition};
-pub use super::messages::{Msg, cmd};
+pub use super::messages::Msg;
 use super::props::{Panel, apply};
+use super::script_actions::replaces_script;
+use super::script_pane::{ScriptMsg, ScriptPane};
 use super::texstudio::Workspace;
 use super::toolbar::IconButton;
 use super::view3d::View3d;
@@ -40,6 +43,7 @@ pub struct Editor {
     pub(super) quad: Arrangement,
     pub(super) disposition: Disposition,
     pub(super) play: Handle<View3d<Msg>>,
+    pub(super) script: ScriptPane,
     pub(super) menu: Handle<Menu<Msg>>,
     pub(super) status: Handle<StatusBar<Msg>>,
     tools: [Handle<IconButton<Msg>>; TOOLS.len()],
@@ -101,6 +105,7 @@ impl Editor {
             quad: Arrangement::default(),
             disposition: Disposition::Quad,
             play: Handle::new(),
+            script: ScriptPane::new(state.clone()),
             menu: Handle::new(),
             status: Handle::new(),
             tools: Default::default(),
@@ -190,7 +195,17 @@ impl Editor {
                 menu_bar(menus).on_select(Msg::Menu).bind(&app.menu),
                 stack()
                     .children((
-                        panel(work).plain().bind(&app.work_host),
+                        panel(
+                            column().children((split(
+                                column().children((work.fill(1),)),
+                                app.script.layout(),
+                            )
+                            .stacked()
+                            .bind(&app.script.split)
+                            .fill(1),)),
+                        )
+                        .plain()
+                        .bind(&app.work_host),
                         app.tex.layout(),
                         build(View3d::new).bind(&app.play),
                     ))
@@ -199,11 +214,18 @@ impl Editor {
             )),
         )?;
         ui.on_key(shortcut);
+        ui.on_close(|| Some(Msg::CloseRequested));
         ui.every(16, Msg::Tick);
         app.play.get().set_visible(false);
         app.tex.set_visible(false);
         app.set_disposition(Disposition::Quad);
         app.log_view.get().set_enabled(false);
+        app.script.start(ui);
+        app.state.borrow_mut().open_script();
+        app.sync_script();
+        if !app.state.borrow().script.text().is_empty() {
+            app.script.set_open(true);
+        }
         app.refresh();
         app.show_prompt();
         Ok(app)
@@ -258,7 +280,10 @@ impl Editor {
     /// text there and not shortcuts.
     fn text_has_focus(&self, ui: &Ui<Msg>) -> bool {
         ui.focus_holder().is_some_and(|id| {
-            self.panel.owns(id) || self.tex.owns(id) || id == self.log_view.get().id()
+            self.panel.owns(id)
+                || self.tex.owns(id)
+                || self.script.owns(id)
+                || id == self.log_view.get().id()
         })
     }
 
@@ -297,52 +322,6 @@ F5 plays it.
         self.status.get().set_text(0, text);
     }
 
-    /// Says on the status bar how far the picture has caught up.
-    fn show_preview(&self, preview: Preview) {
-        if self.preview.replace(preview) != preview {
-            self.status.get().set_text(3, preview.label());
-        }
-    }
-
-    /// Opens the Instant Play layer over the whole work area.
-    pub(super) fn begin_play(&mut self) {
-        match self.studio.enter_play() {
-            Ok(()) => {
-                // Play covers the work area, and with the workspace up behind it
-                // its shortcuts and its lit tab would go on.
-                if self.tex.is_open() {
-                    self.tex_close();
-                }
-                let play = self.play.get();
-                play.set_visible(true);
-                self.pane3d().set_grab(false);
-                play.set_grab(true);
-                play.focus();
-                // Focus changes from the editor are not the player's input.
-                play.take_events();
-                let text = "Playing: Esc = back, WASD (ZQSD on AZERTY) move, Space fire, Q/E roll";
-                self.state.borrow_mut().message = text.into();
-                self.set_status(text);
-            }
-            Err(e) => {
-                self.state.borrow_mut().message = e.clone();
-                self.set_status(&e);
-            }
-        }
-    }
-
-    /// Back to the editor; the document is exactly as it was.
-    pub(super) fn end_play(&mut self, message: Option<&str>) {
-        self.studio.leave_play();
-        self.play.get().set_grab(false);
-        self.play.get().set_visible(false);
-        self.pane3d().focus();
-        if let Some(m) = message {
-            self.state.borrow_mut().message = m.into();
-        }
-        self.refresh();
-    }
-
     pub(super) fn refit(&self) {
         for v in self.all_viewports() {
             v.get().refit();
@@ -367,6 +346,10 @@ impl App for Editor {
     type Msg = Msg;
 
     fn update(&mut self, msg: Msg, ui: &mut Ui<Msg>) {
+        if replaces_script(&msg) && !self.script_may_go(ui) {
+            self.script.reset_sample_list();
+            return;
+        }
         match msg {
             Msg::Tex(m) => {
                 self.tex_message(m, ui);
@@ -375,6 +358,12 @@ impl App for Editor {
             Msg::Menu(cmd::TEX_OPEN) if self.studio.mode == Mode::Edit => self.tex_open(),
             Msg::Menu(id) if self.tex.is_open() => self.tex_menu(id, ui),
             Msg::Menu(cmd::LEVEL_SETTINGS) => self.level_settings(ui),
+            Msg::CloseRequested => {
+                if self.script_may_go(ui) {
+                    ui.quit();
+                }
+                return;
+            }
             Msg::Menu(id) => self.menu_command(id),
             Msg::Tool(i) => self
                 .state
@@ -385,6 +374,12 @@ impl App for Editor {
             }
             Msg::Grid(i) => self.state.borrow_mut().grid = GRIDS[i.min(GRIDS.len() - 1)],
             Msg::Face(m) => self.face_message(m),
+            // No refresh: nothing in the level changed, and this is every key.
+            Msg::Script(ScriptMsg::Edited) => {
+                self.script_message(ScriptMsg::Edited);
+                return;
+            }
+            Msg::Script(m) => self.script_message(m),
             Msg::Prop(p) => {
                 apply(&mut self.state.borrow_mut(), p);
             }
@@ -434,6 +429,7 @@ impl App for Editor {
                     drop(st);
                     self.refresh();
                 }
+                self.drop_picked_kit();
                 return;
             }
             Msg::OpenPath(p) => self.open_path(&p),

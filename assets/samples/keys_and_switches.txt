@@ -1,0 +1,19 @@
+miniscent-level 1
+# Sample: shoot the switches to open the first door, find the keycard to open
+# the second, and hack the terminal for a repair. Logic is in keys_and_switches.st.
+box subtract 0 3  -14 -8 -4  34 8 4
+box add 1 2  0 -8 -4  1 8 4
+box add 2 0  17 -8 -4  18 8 4
+player -10 0 0 -1.5708
+light -7 0 3  1 0.9 0.75  18 1.3
+light 9 0 3  0.8 0.9 1  18 1.3
+light 26 0 3  1 0.7 0.6  18 1.3
+marker -3 -5 -1 0  name vault_switch_1
+marker -3 5 -1 0  name vault_switch_2
+marker 9 -6 -3 0  name vault_key
+marker 9 6 -3 0  name console
+marker 12 0 -3 0  name medkit
+zone 17.5 0 0  4 7.5 3.5  name red_door_area
+zone 30 0 0  3 7.5 3.5  name finish
+mover vault brushes 1
+mover red_door brushes 2
