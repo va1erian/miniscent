@@ -15,6 +15,7 @@ use super::class::Blend;
 use super::class::MAX_TOTAL_CAPACITY;
 use super::collect::{self, FogView};
 use super::decal::{Decal, Decals, FaceOutline, MAX_DECALS};
+use super::layer::{Gate, Screen};
 use super::lights::{LightSpec, Lights};
 use super::recipes;
 use super::{Effect, EffectArgs, Fx};
@@ -99,6 +100,7 @@ pub struct CombatFx {
     limits: Limits,
     keep: Keep,
     tags: Tags,
+    layer: Gate,
 }
 
 impl Default for CombatFx {
@@ -118,6 +120,7 @@ impl CombatFx {
             limits: Limits::of(Quality::High),
             keep: Keep::default(),
             tags: Tags::with_capacity(MAX_DRAWS),
+            layer: Gate::default(),
         }
     }
 
@@ -135,6 +138,17 @@ impl CombatFx {
         self.bolts = [None; MAX_BOLTS];
         self.decals.clear();
         self.keep = Keep::default();
+        self.layer.reset();
+    }
+
+    /// Allow or forbid the half-res layer, whatever the quality says.
+    pub fn set_layer(&mut self, on: bool) {
+        self.limits.layer = on;
+    }
+
+    /// The current cut, for tests and stats.
+    pub fn keep(&self) -> Keep {
+        self.keep
     }
 
     /// Live particles, for tests and stats.
@@ -281,10 +295,22 @@ impl CombatFx {
             draw_bolt(bolt, cam, &fog, &mut sink);
         }
         self.decals.collect(cam, &fog, &mut sink);
-        let tally = Tally::of(out, &self.tags, depth, w, h);
-        self.keep.follow(tally.fit(self.limits.screens * w * h));
+        let mut tally = Tally::of(out, &self.tags, depth, w, h);
+        let budget = self.limits.screens * w * h;
+        let over = tally.over_budget(budget);
+        let screen = Screen {
+            depth,
+            width: w,
+            height: h,
+        };
+        let lists = (&mut *out, &mut self.tags);
+        if self.layer.apply((self.limits.layer, over), lists, &screen) {
+            tally = Tally::of(out, &self.tags, depth, w, h);
+        }
+        self.keep.follow(tally.fit(budget));
         budget::thin(out, &self.tags, self.keep);
         collect::sort_back_to_front(&mut out.over);
+        collect::sort_back_to_front(&mut out.layer_over);
     }
 }
 

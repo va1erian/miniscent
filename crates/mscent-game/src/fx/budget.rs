@@ -10,9 +10,10 @@ use mscent_render::shade::mul_rgb;
 use mscent_render::{Framebuffer, Quality};
 
 use super::class::{Blend, Tier};
+use super::layer::layer_region;
 
 /// 0.68 ns against 0.55 ns per pixel.
-const OVER_WEIGHT: f32 = 1.25;
+pub(super) const OVER_WEIGHT: f32 = 1.25;
 /// About 35 ns per sprite and 20 ns per row, which is what small sprites cost.
 const SPRITE_SETUP: f32 = 64.0;
 const ROW_SETUP: f32 = 36.0;
@@ -26,10 +27,24 @@ const DECAL_WEIGHT: f32 = 7.5;
 const DECAL_SETUP: f32 = 550.0;
 /// A hidden pixel costs its depth test: 0.08 ns against 0.55 ns.
 const OCCLUDED_WEIGHT: f32 = 0.15;
+/// The half-res layer fills a quarter of a sprite's pixels, in half the rows.
+pub(super) const LAYER_FILL: f32 = 0.25;
+pub(super) const LAYER_ROWS: f32 = 0.5;
+/// What the layer adds per pixel of the region it covers (the union of its
+/// sprites' boxes), from `fx_bench`: the depth downsample and the upscale over
+/// the frame, about 0.2 ns where a full-size additive pixel takes 0.47, so 0.42
+/// of one. It is paid once however many sprites overlap there; without it a
+/// layered sprite would look four times cheaper than it measures.
+pub(super) const LAYER_BLEND: f32 = 0.42;
+/// The layer's fixed cost: a hidden 66 px sprite takes about 0.6 us more
+/// through the layer than at full size (the scratch, the clip and the loops
+/// over an empty region), 1100 units at 0.55 ns. Charged once, before the cut
+/// is computed, whenever any sprite is in the layer.
+pub(super) const LAYER_OVERHEAD: f32 = 1100.0;
 /// Sprites wider than this are worth five depth probes.
 const PROBE_DIAMETER: f32 = 32.0;
 /// Matches the renderer's cap on a drawn sprite.
-const MAX_RADIUS: f32 = 512.0;
+pub(super) const MAX_RADIUS: f32 = 512.0;
 /// Keys 0..=255, as `LiveParticle::key` holds.
 const KEYS: usize = 256;
 /// Keys over which a particle fades out as the cut comes down on it.
@@ -50,19 +65,22 @@ pub struct Limits {
     pub density: f32,
     /// Dynamic lights alive at once.
     pub lights: usize,
+    /// Whether big sprites may be drawn through the half-res layer.
+    pub layer: bool,
 }
 
 impl Limits {
     pub fn of(quality: Quality) -> Self {
-        let (screens, density, lights) = match quality {
-            Quality::High => (5.0, 1.0, 4),
-            Quality::Medium => (3.0, 0.7, 2),
-            Quality::Low => (1.5, 0.4, 1),
+        let (screens, density, lights, layer) = match quality {
+            Quality::High => (5.0, 1.0, 4, true),
+            Quality::Medium => (3.0, 0.7, 2, true),
+            Quality::Low => (1.5, 0.4, 1, false),
         };
         Self {
             screens,
             density,
             lights,
+            layer,
         }
     }
 }
@@ -85,8 +103,10 @@ impl Tag {
 /// capacity from frame to frame.
 #[derive(Debug, Default)]
 pub struct Tags {
-    over: Vec<Tag>,
-    add: Vec<Tag>,
+    pub(super) over: Vec<Tag>,
+    pub(super) add: Vec<Tag>,
+    pub(super) layer_over: Vec<Tag>,
+    pub(super) layer_add: Vec<Tag>,
     streaks: Vec<Tag>,
 }
 
@@ -131,6 +151,8 @@ impl Tags {
         Self {
             over: Vec::with_capacity(n),
             add: Vec::with_capacity(n),
+            layer_over: Vec::with_capacity(n),
+            layer_add: Vec::with_capacity(n),
             streaks: Vec::with_capacity(n),
         }
     }
@@ -138,6 +160,8 @@ impl Tags {
     pub fn clear(&mut self) {
         self.over.clear();
         self.add.clear();
+        self.layer_over.clear();
+        self.layer_add.clear();
         self.streaks.clear();
     }
 }
@@ -205,11 +229,25 @@ impl Tally {
         for (s, tag) in draws.add.iter().zip(&tags.add) {
             t.add(*tag, sprite_cost(s, 1.0, depth, w, h));
         }
+        // A moved draw stays what it was in the tally, with the layer's price.
+        for (s, tag) in draws.layer_over.iter().zip(&tags.layer_over) {
+            t.add(*tag, layer_cost(s, OVER_WEIGHT, depth, w, h));
+        }
+        for (s, tag) in draws.layer_add.iter().zip(&tags.layer_add) {
+            t.add(*tag, layer_cost(s, 1.0, depth, w, h));
+        }
         for (s, tag) in draws.streaks.iter().zip(&tags.streaks) {
             t.add(*tag, streak_cost(s, w, h));
         }
         t.add(Tag::ESSENTIAL, decals_cost(draws, w, h));
+        t.add(Tag::ESSENTIAL, layer_region(draws, w, h).cost());
         t
+    }
+
+    /// Whether what can be thinned (Normal and Cosmetic) does not fit `budget`.
+    pub fn over_budget(&self, budget: f32) -> bool {
+        let optional: f32 = self.normal.iter().chain(&self.cosmetic).sum();
+        optional > budget - self.essential
     }
 
     fn add(&mut self, tag: Tag, cost: f32) {
@@ -263,6 +301,12 @@ pub fn thin(draws: &mut ParticleDraws, tags: &Tags, keep: Keep) {
     retain_tagged(&mut draws.add, &tags.add, keep, |s, k| {
         s.tint = mul_rgb(s.tint, u32::from(k));
     });
+    retain_tagged(&mut draws.layer_over, &tags.layer_over, keep, |s, k| {
+        s.tint = scale_argb(s.tint, k);
+    });
+    retain_tagged(&mut draws.layer_add, &tags.layer_add, keep, |s, k| {
+        s.tint = mul_rgb(s.tint, u32::from(k));
+    });
     retain_tagged(&mut draws.streaks, &tags.streaks, keep, |s, k| {
         s.tint = mul_rgb(s.tint, u32::from(k));
     });
@@ -305,6 +349,17 @@ pub fn cost_of(draws: &ParticleDraws, depth: Option<&Framebuffer>, w: f32, h: f3
         .sum::<f32>()
         + add.map(|s| sprite_cost(s, 1.0, depth, w, h)).sum::<f32>()
         + draws
+            .layer_over
+            .iter()
+            .map(|s| layer_cost(s, OVER_WEIGHT, depth, w, h))
+            .sum::<f32>()
+        + draws
+            .layer_add
+            .iter()
+            .map(|s| layer_cost(s, 1.0, depth, w, h))
+            .sum::<f32>()
+        + layer_region(draws, w, h).cost()
+        + draws
             .streaks
             .iter()
             .map(|s| streak_cost(s, w, h))
@@ -330,7 +385,7 @@ fn clipped_box(s: &SpriteDraw, w: f32, h: f32) -> (f32, f32) {
 /// Pixels of a sprite on the screen; NaN and negative sizes come out as 0. The
 /// check comes first because `min` and `max` would quietly drop a NaN and
 /// charge a sprite the renderer refuses as if it filled the screen.
-fn clipped_area(s: &SpriteDraw, w: f32, h: f32) -> f32 {
+pub(super) fn clipped_area(s: &SpriteDraw, w: f32, h: f32) -> f32 {
     if !(s.x.is_finite() && s.y.is_finite() && s.radius.is_finite()) {
         return 0.0;
     }
@@ -342,14 +397,49 @@ fn clipped_area(s: &SpriteDraw, w: f32, h: f32) -> f32 {
     }
 }
 
-fn sprite_cost(s: &SpriteDraw, weight: f32, depth: Option<&Framebuffer>, w: f32, h: f32) -> f32 {
+pub(super) fn sprite_cost(
+    s: &SpriteDraw,
+    weight: f32,
+    depth: Option<&Framebuffer>,
+    w: f32,
+    h: f32,
+) -> f32 {
+    shaped_cost(s, (weight, 1.0), depth, w, h)
+}
+
+/// The fill of a sprite drawn through the half-res layer instead: a quarter of
+/// the pixels, in half the rows. What the layer itself costs is a
+/// [`super::layer::Region`]'s.
+pub(super) fn layer_cost(
+    s: &SpriteDraw,
+    weight: f32,
+    depth: Option<&Framebuffer>,
+    w: f32,
+    h: f32,
+) -> f32 {
+    shaped_cost(s, (LAYER_FILL * weight, LAYER_ROWS), depth, w, h)
+}
+
+/// `per_pixel` is the weight of a visible pixel of the box, `rows_scale` how
+/// much of the per-row setup is paid.
+fn shaped_cost(
+    s: &SpriteDraw,
+    (per_pixel, rows_scale): (f32, f32),
+    depth: Option<&Framebuffer>,
+    w: f32,
+    h: f32,
+) -> f32 {
     let area = clipped_area(s, w, h);
     if area <= 0.0 {
         return 0.0;
     }
-    let seen = depth.map_or(1.0, |fb| visible_fraction(s, fb));
-    let pixels = area * weight * (OCCLUDED_WEIGHT + (1.0 - OCCLUDED_WEIGHT) * seen);
-    SPRITE_SETUP + ROW_SETUP * clipped_box(s, w, h).1 + pixels
+    let pixels = area * per_pixel * (OCCLUDED_WEIGHT + (1.0 - OCCLUDED_WEIGHT) * seen(s, depth));
+    SPRITE_SETUP + ROW_SETUP * rows_scale * clipped_box(s, w, h).1 + pixels
+}
+
+/// The visible fraction of a sprite, for the depth the last frame left.
+pub(super) fn seen(s: &SpriteDraw, depth: Option<&Framebuffer>) -> f32 {
+    depth.map_or(1.0, |fb| visible_fraction(s, fb))
 }
 
 /// How much of a large sprite is in front of the scene, from five probes.

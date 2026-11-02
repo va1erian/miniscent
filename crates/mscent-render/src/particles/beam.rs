@@ -190,7 +190,7 @@ fn plot(fb: &mut Framebuffer, x: i64, y: i64, inv_z: f32, cover: u8, tint: u32) 
         && inv_z > 0.0
         && inv_z >= z
     {
-        *c = add_px(*c, u32::from(cover), tint);
+        *c = add_px::<false>(*c, u32::from(cover), tint);
     }
 }
 

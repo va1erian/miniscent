@@ -20,7 +20,13 @@ fn sprite(x: f32, y: f32, radius: f32) -> SpriteDraw {
 }
 
 fn draw(fb: &mut Framebuffer, s: &SpriteDraw, blend: Blend) {
-    draw_sprite(Level::best(), fb, s, blend, &SpriteBank::new());
+    draw_sprite(
+        Level::best(),
+        fb,
+        s,
+        (blend, Dest::Frame),
+        &SpriteBank::new(),
+    );
 }
 
 fn changed(fb: &Framebuffer) -> Vec<(i32, i32)> {
