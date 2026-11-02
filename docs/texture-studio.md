@@ -25,6 +25,10 @@ the tool, follow the [tutorial](texture-studio-tutorial.md).
   masks, which closes M5.7. Detail finer than a texel raised shimmer past its limit
   until recipes stopped their octaves where the old generator did: at 128 px, a
   frequency doubled past 64 adds only aliasing.
+- **Alpha (M13.9).** `out-alpha` is a fourth map, `Maps.alpha`, for cutout materials
+  such as the sky ones: the preview draws the albedo over a checker, and `bake`
+  bleeds the colour under clear texels from the nearest opaque one so mips do not
+  fringe. A recipe without it bakes as before, and an alpha of all 255 makes no plane.
 - **Save** writes the recipe and `materials.txt`, never PNGs, and
   `--bake-texture` writes PNGs to look at and adds a row when the directory it
   writes to has a manifest.
@@ -296,7 +300,7 @@ op 1 3 1 out-height normal_strength=5
 | Filters | `color` (gain may exceed 1, as `brick()` does), `range`, `invert`, `hscb`, `blur` | `sharpen`, `rotozoom`, `twirl`, `bulge`, `distort` |
 | Combine | `merge` (add, subtract, multiply, min, max, screen, blend), `mask` (three inputs: a, b, mask), `paste` | |
 | Height tools | | `bump` (bake light into albedo), `cavity`, `slope` (specular from height) |
-| Flow | `store`, `load`, `out-albedo`, `out-height`, `out-specular` | |
+| Flow | `store`, `load`, `out-albedo`, `out-height`, `out-specular`, `out-alpha` | |
 
 A block reads the blocks above it, so a position is a connection and there are no
 wires to show it. An operator whose input is optional (`rect`, `dots`, `paint` and
@@ -306,7 +310,8 @@ on its top edge, and the parameter panel says how many and from which blocks, so
 shape placed under another block is seen to read it.
 
 A recipe needs `out-albedo`. Without `out-height` the normal map is flat, and
-without `out-specular` the mask is full. Height and specular read channel R.
+without `out-specular` the mask is full, and without `out-alpha` the material is opaque.
+Height, specular and alpha read channel R.
 All five stock recipes need only the first set.
 
 ## Engine changes

@@ -310,7 +310,10 @@ fn bad_fields_are_refused() {
     let bad = Err(FormatError::BadVolume);
     assert_eq!(with(0, 1, [0; 3], [1, 1, 1]), Ok(()));
     assert_eq!(with(2, 1, [0; 3], [1, 1, 1]), Err(FormatError::BadOp(2)));
-    assert_eq!(with(0, 4, [0; 3], [1, 1, 1]), bad);
+    // Cell codes 4 and 5 are the coarse cells; 6 is none.
+    assert_eq!(with(0, 4, [0; 3], [1, 1, 1]), Ok(()));
+    assert_eq!(with(0, 5, [0; 3], [1, 1, 1]), Ok(()));
+    assert_eq!(with(0, 6, [0; 3], [1, 1, 1]), bad);
     assert_eq!(with(0, 1, [0; 3], [0, 1, 1]), bad);
     assert_eq!(with(0, 1, [0; 3], [17, 1, 1]), bad);
     assert_eq!(with(0, 1, [i32::MAX; 3], [1, 1, 1]), bad);

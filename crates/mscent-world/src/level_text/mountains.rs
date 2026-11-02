@@ -6,10 +6,10 @@
 //! ```
 //!
 //! The line is a recipe, not data: reading it runs [`mountains`], and the volume
-//! is stored in the binary level like any other. `cell` is 0.125, 0.25, 0.5 or 1
-//! (a distant range wants 1). Dumping a level cannot turn a volume back into this
-//! line, since a sculpted range no longer is one, so `--dump-level` refuses a level
-//! with volumes rather than drop them.
+//! is stored in the binary level like any other. `cell` is 0.125, 0.25, 0.5, 1, 2 or
+//! 4 (a far range wants the coarse ones: its cells are a pixel or less). Dumping a
+//! level cannot turn a volume back into this line, since a sculpted range no longer
+//! is one, so `--dump-level` refuses a level with volumes rather than drop them.
 
 use mscent_math::Vec3d;
 
@@ -23,10 +23,12 @@ fn cell_of(units: f64) -> Res<CellSize> {
         CellSize::Quarter,
         CellSize::Half,
         CellSize::One,
+        CellSize::Two,
+        CellSize::Four,
     ]
     .into_iter()
     .find(|c| c.units() == units)
-    .ok_or_else(|| "the cell must be 0.125, 0.25, 0.5 or 1".to_string())
+    .ok_or_else(|| "the cell must be 0.125, 0.25, 0.5, 1, 2 or 4".to_string())
 }
 
 fn chunks_in(volumes: &[Volume]) -> usize {

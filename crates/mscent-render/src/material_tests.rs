@@ -20,6 +20,11 @@ fn stock_texture<'a>(table: &'a MaterialTable, name: &str) -> &'a Texture {
     &table.get(table.find(name).unwrap()).unwrap().texture
 }
 
+/// The four sky materials, which are self-lit cutouts and make no height or normals.
+fn is_sky(name: &str) -> bool {
+    name.starts_with("sky-")
+}
+
 fn solid(name: &str) -> Material {
     Material {
         name: name.to_string(),
@@ -54,15 +59,28 @@ fn assets_load_and_texels_read_back() {
 
     for name in names {
         let (tex, maps) = (stock_texture(&table, name), baked(name));
-        assert_eq!((tex.width(), tex.height()), (128, 128), "{name}");
-        assert_eq!((tex.width(), tex.height()), (maps.width, maps.height));
-        let heights = maps.heights.as_ref().unwrap();
+        let (w, h) = (maps.width, maps.height);
+        assert_eq!((tex.width(), tex.height()), (w, h), "{name}");
+        // The sky materials are self-lit and have no relief to read back.
+        assert_eq!(tex.has_heights(), !is_sky(name), "{name}");
         // Corners, an interior texel and a texel on the other side of a tile.
-        for (x, y) in [(0, 0), (5, 7), (127, 127), (64, 3), (3, 64)] {
-            let i = y as usize * 128 + x as usize;
+        for (x, y) in [(0, 0), (5, 7), (w - 1, h - 1), (64, 3), (3, 64)] {
+            let i = (y * w + x) as usize;
+            let (x, y) = (x as i32, y as i32);
             assert_eq!(tex.texel(x, y), maps.albedo[i], "{name} albedo {x},{y}");
-            assert_eq!(tex.height_at(x, y), Some(heights[i]), "{name} height");
+            let height = maps.heights.as_ref().map(|heights| heights[i]);
+            assert_eq!(tex.height_at(x, y), height, "{name} height");
         }
+    }
+    // Cutouts keep their alpha, and the opaque ones keep no plane.
+    for (name, masked) in [
+        ("sky-stars", false),
+        ("sky-clouds", true),
+        ("sky-ridge", true),
+        ("sky-planet", true),
+        ("brick", false),
+    ] {
+        assert_eq!(stock_texture(&table, name).is_masked(), masked, "{name}");
     }
     // The recipes differ, so reading the wrong file would show.
     assert_ne!(
@@ -76,6 +94,10 @@ fn normal_maps_decode_to_unit_vectors() {
     let table = MaterialTable::load_dir(&textures_dir()).unwrap();
     for (_, m) in table.iter() {
         let tex = &m.texture;
+        if is_sky(&m.name) {
+            assert!(!tex.has_normals() && !tex.has_heights(), "{}", m.name);
+            continue;
+        }
         assert!(tex.has_normals() && tex.has_heights(), "{}", m.name);
         let mut tilted = false;
         for y in 0..128 {
@@ -126,6 +148,10 @@ fn only_metal_and_floor_have_a_mask() {
     for (_, m) in table.iter() {
         let expected = matches!(m.name.as_str(), "metal" | "floor");
         let masked = m.texture.spec_mean() < 1.0;
+        if is_sky(&m.name) {
+            assert!(!masked, "{} has no mask", m.name);
+            continue;
+        }
         assert_eq!(
             masked,
             expected,

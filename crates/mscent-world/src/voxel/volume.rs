@@ -11,13 +11,17 @@ use crate::materials::NO_DRAW;
 use crate::polytope::MAX_COORD;
 
 /// Edge length of a cell. Each is a multiple of the brush snap grid, so a
-/// volume's box is always a valid snapped brush.
+/// volume's box is always a valid snapped brush. The coarse two are for ranges that
+/// are seen far off, where a cell of a unit is finer than a pixel and only costs
+/// chunks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CellSize {
     Eighth,
     Quarter,
     Half,
     One,
+    Two,
+    Four,
 }
 
 impl CellSize {
@@ -28,6 +32,8 @@ impl CellSize {
             CellSize::Quarter => 0.25,
             CellSize::Half => 0.5,
             CellSize::One => 1.0,
+            CellSize::Two => 2.0,
+            CellSize::Four => 4.0,
         }
     }
 
@@ -38,6 +44,8 @@ impl CellSize {
             CellSize::Quarter => 1,
             CellSize::Half => 2,
             CellSize::One => 3,
+            CellSize::Two => 4,
+            CellSize::Four => 5,
         }
     }
 
@@ -47,6 +55,8 @@ impl CellSize {
             1 => Some(CellSize::Quarter),
             2 => Some(CellSize::Half),
             3 => Some(CellSize::One),
+            4 => Some(CellSize::Two),
+            5 => Some(CellSize::Four),
             _ => None,
         }
     }

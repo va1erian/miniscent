@@ -1,0 +1,44 @@
+miniscent-recipe 1
+size 256 256
+gloss 0
+# An Earth-like world, one disc well inside the tile (it does not tile, and the
+# corners are clear). Land and sea, polar ice and bands of cloud are painted flat,
+# a bulge squeezes them towards the limb as a sphere would, and the light falls off
+# to a blue haze at the edge.
+# Land: a mask from low-frequency noise, over two colourings.
+op 2 0 1 noise freq_x=4 freq_y=4 octaves=4 persistence=0.55 seed=61
+op 0 1 1 noise freq_x=5 freq_y=5 octaves=3 persistence=0.5 seed=63 color0=0.02,0.09,0.36 color1=0.1,0.34,0.64
+op 1 1 1 noise freq_x=6 freq_y=6 octaves=4 persistence=0.55 seed=62 color0=0.2,0.36,0.1 color1=0.64,0.54,0.32
+op 2 1 1 range in_low=0.45 in_high=0.53
+op 0 2 3 mask
+op 0 3 1 store name=surface
+# Ice: near the poles, ragged.
+op 4 0 1 gradient cycles_x=0 cycles_y=1
+op 5 0 1 noise freq_x=6 freq_y=6 octaves=3 seed=64
+op 4 1 1 range in_low=0.3 in_high=0.62 out_low=1 out_high=0
+op 5 1 1 range out_high=0.4
+op 4 2 2 merge mode=add
+op 4 3 1 range in_low=0.55 in_high=0.8
+op 4 4 1 store name=ice
+# Cloud: bands along the latitudes.
+op 7 0 1 noise freq_x=3 freq_y=9 octaves=4 persistence=0.55 seed=65
+op 7 1 1 range in_low=0.6 in_high=0.8 out_high=0.85
+op 7 2 1 store name=cloud
+# Put them together.
+op 0 4 1 load name=surface
+op 1 4 1 flat color=0.95,0.97,1
+op 2 4 1 load name=ice
+op 0 5 3 mask
+op 0 6 1 store name=iced
+op 1 6 1 flat color=1,1,1
+op 2 6 1 load name=cloud
+op 0 7 3 mask
+op 0 8 1 bulge strength=0.5 radius=0.5
+op 1 8 1 glow radius=0.45 power=2 inner=1,1,1 outer=0.18,0.18,0.2
+op 2 9 1 glow radius=0.45 power=8 inner=0,0,0 outer=0.15,0.3,0.7
+op 0 9 2 merge mode=multiply
+op 0 10 3 merge mode=screen
+op 0 11 1 out-albedo
+# The disc.
+op 10 0 1 ellipse w=0.9 h=0.9 color=1,1,1 background=0,0,0
+op 10 1 1 out-alpha

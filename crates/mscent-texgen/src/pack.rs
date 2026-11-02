@@ -1,5 +1,5 @@
 //! Finished maps as the renderer stores them: `0xAARRGGBB` albedo, a tangent-space
-//! normal map derived from the height, and 8-bit height and specular.
+//! normal map derived from the height, and 8-bit height, specular and alpha.
 
 use crate::error::TexError;
 use crate::graph::{self, Graph, Outcome, RunOptions};
@@ -24,6 +24,9 @@ pub struct Maps {
     pub normals: Option<Vec<u32>>,
     pub heights: Option<Vec<u8>>,
     pub specular: Option<Vec<u8>>,
+    /// Coverage per texel; `None` when the recipe has no `out-alpha`. The colour
+    /// under a clear texel is already bled (see [`bleed`]).
+    pub alpha: Option<Vec<u8>>,
 }
 
 /// A stored channel as the renderer's 8 bits.
@@ -47,6 +50,38 @@ fn packed_albedo(image: &Image) -> Vec<u32> {
 
 fn first_channel(image: &Image) -> Vec<u8> {
     image.pixels().iter().map(|p| byte(p[0])).collect()
+}
+
+/// Gives every clear texel (alpha 0) the colour of the nearest texel that is not,
+/// so that mips and bilinear taps at a cutout's edge blend the colour of the shape
+/// and not whatever the recipe left underneath, which would fringe. Done here and
+/// not as an operator because it needs the albedo and the alpha together, a
+/// recipe that forgot it would fringe silently, and it is wanted every time. The
+/// spread is breadth-first over wrapped 4-neighbours in a fixed order, so it is
+/// linear in the texels and the same on every machine. A map with nothing opaque
+/// is left as it is.
+fn bleed(albedo: &mut [u32], alpha: &[u8], size: Size) {
+    let (w, h) = (size.width() as usize, size.height() as usize);
+    let mut done: Vec<bool> = alpha.iter().map(|&a| a > 0).collect();
+    let mut queue: Vec<usize> = (0..done.len()).filter(|&i| done[i]).collect();
+    let mut head = 0;
+    while let Some(&i) = queue.get(head) {
+        head += 1;
+        let (x, y) = (i % w, i / w);
+        let around = [
+            y * w + (x + 1) % w,
+            y * w + (x + w - 1) % w,
+            (y + 1) % h * w + x,
+            (y + h - 1) % h * w + x,
+        ];
+        for n in around {
+            if !done[n] {
+                done[n] = true;
+                albedo[n] = albedo[i];
+                queue.push(n);
+            }
+        }
+    }
 }
 
 #[inline]
@@ -102,18 +137,25 @@ pub fn pack(recipe: &Recipe, graph: &Graph, outcome: &Outcome) -> Result<Maps, T
     let size = albedo.size();
     let height = map(Channel::Height);
     let specular = map(Channel::Specular);
+    let alpha = map(Channel::Alpha);
     let normals = match height {
         Some((block, image)) => Some(normals_from_height(image, normal_strength(recipe, block))),
         // A specular mask is stored in the normal map, so it needs one.
         None => specular.map(|_| vec![0xff80_80ff; size.texels()]),
     };
+    let mut texels = packed_albedo(albedo);
+    let alpha = alpha.map(|a| first_channel(a.1));
+    if let Some(alpha) = &alpha {
+        bleed(&mut texels, alpha, size);
+    }
     Ok(Maps {
         width: size.width(),
         height: size.height(),
-        albedo: packed_albedo(albedo),
+        albedo: texels,
         normals,
         heights: height.map(|h| first_channel(h.1)),
         specular: specular.map(|s| first_channel(s.1)),
+        alpha,
     })
 }
 
@@ -130,10 +172,12 @@ pub fn bake(recipe: &Recipe, size: Size) -> Result<Maps, TexError> {
 pub fn bake_cost(recipe: &Recipe, size: Size) -> Result<u64, TexError> {
     let graph = graph::compile(recipe)?;
     graph::plan::check(recipe, &graph, size, &[])?;
+    // The alpha map counts for two: its own, and the bleed over the albedo.
     let maps = [Channel::Albedo, Channel::Height, Channel::Specular]
         .into_iter()
         .filter(|c| graph.output(*c).is_some())
-        .count() as u64;
+        .count() as u64
+        + 2 * u64::from(graph.output(Channel::Alpha).is_some());
     let packing = maps * PACK_NS_PER_TEXEL * size.texels() as u64;
     Ok(graph::page_cost(recipe, &graph, size).saturating_add(packing))
 }
@@ -219,13 +263,93 @@ mod tests {
     }
 
     #[test]
+    fn the_alpha_map_is_the_red_of_its_page_and_other_pages_have_none() {
+        let r = recipe(
+            "op 0 0 1 flat color=1,0,0
+op 0 1 1 out-albedo
+op 1 0 1 flat color=0.5,0,0
+op 1 1 1 out-alpha
+",
+        );
+        let maps = bake(&r, size(4)).expect("bakes");
+        assert_eq!(maps.alpha, Some(vec![128; 16]));
+        let plain = recipe(
+            "op 0 0 1 flat
+op 0 1 1 out-albedo
+",
+        );
+        assert_eq!(bake(&plain, size(4)).expect("bakes").alpha, None);
+    }
+
+    #[test]
+    fn colour_under_clear_texels_is_bled_from_the_nearest_and_across_the_seam() {
+        // A red dot at the left edge on blue: the clear texels read red or blue as
+        // they are near, and the one beyond the seam takes the dot's colour.
+        let r = recipe(
+            "op 0 0 1 rect x=0 y=0.5 w=0.25 h=0.25 color=1,0,0 background=0,0,1
+op 0 1 1 out-albedo
+op 1 0 1 rect x=0 y=0.5 w=0.25 h=0.25
+op 1 1 1 out-alpha
+",
+        );
+        let maps = bake(&r, size(16)).expect("bakes");
+        let alpha = maps.alpha.expect("alpha");
+        let at = |x: usize, y: usize| y * 16 + x;
+        assert_eq!(alpha[at(0, 8)], 255);
+        assert_eq!(alpha[at(8, 2)], 0);
+        // Every texel is red now: the blue under the clear ones is gone.
+        assert!(
+            maps.albedo.iter().all(|&t| t == 0xffff_0000),
+            "{:x?}",
+            maps.albedo
+        );
+    }
+
+    #[test]
+    fn a_map_with_nothing_opaque_is_left_as_it_is() {
+        let r = recipe(
+            "op 0 0 1 flat color=0,1,0
+op 0 1 1 out-albedo
+op 1 0 1 flat color=0,0,0
+op 1 1 1 out-alpha
+",
+        );
+        let maps = bake(&r, size(4)).expect("bakes");
+        assert_eq!(maps.albedo, vec![0xff00_ff00; 16]);
+        assert_eq!(maps.alpha, Some(vec![0; 16]));
+    }
+
+    #[test]
+    fn an_alpha_output_is_charged_for_its_map_and_its_bleed() {
+        let plain = recipe(
+            "op 0 0 1 flat
+op 0 1 1 out-albedo
+",
+        );
+        let masked = recipe(
+            "op 0 0 1 flat
+op 0 1 1 out-albedo
+op 1 0 1 flat
+op 1 1 1 out-alpha
+",
+        );
+        let n = size(64);
+        let (a, b) = (
+            bake_cost(&plain, n).expect("cost"),
+            bake_cost(&masked, n).expect("cost"),
+        );
+        // A flat is 3 ns a texel, and the alpha is charged as two maps: its own and the bleed.
+        assert_eq!(b - a, (3 + 2 * PACK_NS_PER_TEXEL) * n.texels() as u64);
+    }
+
+    #[test]
     fn a_page_with_only_albedo_has_only_albedo() {
         let r = recipe("op 0 0 1 flat color=1,0,0\nop 0 1 1 out-albedo\n");
         let maps = bake(&r, size(4)).expect("bakes");
         assert_eq!(maps.albedo, vec![0xffff_0000; 16]);
         assert_eq!(
-            (maps.normals, maps.heights, maps.specular),
-            (None, None, None)
+            (maps.normals, maps.heights, maps.specular, maps.alpha),
+            (None, None, None, None)
         );
     }
 

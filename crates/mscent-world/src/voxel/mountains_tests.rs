@@ -90,3 +90,56 @@ fn hostile_ranges_are_errors_not_panics() {
         Err(MountainError::BadBounds | MountainError::Volume(_))
     ));
 }
+
+/// Shares of a 256-unit range's columns above `t` of the peak.
+fn share_above(seed: u32, t: f64) -> f64 {
+    let r = Range {
+        min: Vec3d::new(0.0, 0.0, -3.0),
+        max: Vec3d::new(256.0, 256.0, 205.0),
+        cell: CellSize::Four,
+        peak: 200.0,
+        seed,
+        ..range()
+    };
+    let h = Heights::new(&mountains(&r).unwrap(), &r);
+    let above = h.z.iter().filter(|&&z| (z + 3.0) / 200.0 > t).count();
+    above as f64 / h.z.len() as f64
+}
+
+#[test]
+fn a_range_is_massifs_with_foothills_and_a_few_peaks_not_a_field_of_spikes() {
+    for seed in [1, 2, 3, 13] {
+        // Few peaks near the top, a broad body above a third of it, and lower
+        // ground between the two and the lowlands: a third of the range at least.
+        assert!(
+            share_above(seed, 0.85) < 0.06,
+            "seed {seed}: too many peaks"
+        );
+        let body = share_above(seed, 0.4);
+        assert!((0.1..0.5).contains(&body), "seed {seed}: body {body}");
+        let foothills = share_above(seed, 0.1) - body;
+        assert!(foothills > 0.2, "seed {seed}: foothills {foothills}");
+    }
+}
+
+#[test]
+fn coarse_cells_still_close_the_surface_and_reach_the_peak() {
+    for cell in [CellSize::Two, CellSize::Four] {
+        let r = Range {
+            cell,
+            max: Vec3d::new(256.0, 256.0, 215.0),
+            peak: 200.0,
+            ..range()
+        };
+        let v = mountains(&r).unwrap();
+        let meshes = mesh_all(&v, &[]);
+        assert!(
+            open_edges(&meshes).is_empty(),
+            "{cell:?}: a hole in the surface"
+        );
+        let top = (meshes.iter())
+            .flat_map(|(_, m)| m.vertices.iter().map(|v| v.pos.z))
+            .fold(f32::MIN, f32::max);
+        assert!(top >= 200.0 - cell.units() as f32 * 2.0, "{cell:?}: {top}");
+    }
+}

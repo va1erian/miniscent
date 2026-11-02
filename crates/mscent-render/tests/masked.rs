@@ -399,7 +399,9 @@ fn a_small_rgba_file_loads_masked_and_an_all_clear_one_still_loads() {
 #[test]
 fn a_truncated_or_forged_rgba_file_never_panics() {
     let s = Scratch::new("hostile");
-    let good = std::fs::read(dir().join("sky-planet.png")).expect("stock file");
+    // A real cutout picture: a ramp of alpha, 4 KB, so cuts and forgeries land
+    // in its header, its data and its checksum.
+    let good = rgba_png(32, 32, &rows(32, |x, y| ((x * 8 + y * 3) % 256) as u8));
     let mut rng = Rng::new(7);
     for cut in [0, 8, 33, 40, 1000, good.len() / 2] {
         assert!(s.load(&good[..cut]).is_err(), "cut at {cut}");

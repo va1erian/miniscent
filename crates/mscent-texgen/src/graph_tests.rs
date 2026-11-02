@@ -63,6 +63,7 @@ fn wide_blocks_feed_every_block_under_them() {
     assert_eq!(g.output(Channel::Albedo), Some(4));
     assert_eq!(g.output(Channel::Height), Some(6));
     assert_eq!(g.output(Channel::Specular), None);
+    assert_eq!(g.output(Channel::Alpha), None);
 }
 
 #[test]

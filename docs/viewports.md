@@ -41,7 +41,7 @@ Not in scope:
 | `FAR` is 400 and `MAX_FOG_DEPTH` is 1000 | level/mod.rs, [entity.rs](../crates/mscent-world/src/entity.rs) | A view needs its own far plane and fog limit |
 | Luxels default to 0.125 units, the atlas is at most 1024x8192 (8.4 M), and an overfull atlas coarsens the **whole level** | `BakeConfig` in [lightmap/mod.rs](../crates/mscent-world/src/lightmap/mod.rs) | One 400-unit box wants 61 M luxels. A big view would blur the play space. This is the largest trap here |
 | `lamp_light` and mesh lighting use every lamp, without shadows | [compiled.rs](../crates/mscent-render/src/level/compiled.rs), `mesh_lighting` | A huge lamp in a view would light enemies in the play space |
-| Mips and bilinear sampling force alpha to 255, and the generator writes RGB at 128x128 | [mips.rs](../crates/mscent-render/src/mips.rs), `texture.rs:368`, [gen_textures.py](../tools/gen_textures.py) | Cutout textures need an alpha path and a generator change |
+| Mips and bilinear sampling force alpha to 255, and the recipes made RGB at 128x128 | [mips.rs](../crates/mscent-render/src/mips.rs), `texture.rs:368`, the recipe `Maps` in [pack.rs](../crates/mscent-texgen/src/pack.rs) | Cutout textures need an alpha path and a recipe output |
 | `lightpanel` is the only emissive material, chosen by id | `face_shader` in [fill.rs](../crates/mscent-render/src/level/fill.rs) | Self-lit sky materials follow that precedent, without a lightmap |
 | Materials are per face in the editor and in level text | `TexInfo`, [level_text.rs](../crates/mscent-world/src/level_text.rs) | Painting a viewport needs only new entries in the lists |
 
@@ -252,24 +252,33 @@ care around lightmaps and actors, and nothing asks for that.
 
 ## Sky textures
 
-Four new stock materials, each one job, designed to stack. They are self-lit, tile
-as noted, and come from `gen_textures.py` with the existing noise helpers. The
-generator gets an RGBA `save` and a size argument, with colour bled under transparent
-texels so mips do not fringe. `_h` and `_n` stay flat so the loader's rules hold.
+Four new stock materials, each one job, designed to stack. They are self-lit, tile as
+noted, and ship as recipes like the other ten (`assets/textures/sky-*.mst`, made at
+load): there are no PNGs. They use the existing operators, plus one new output,
+`out-alpha`, which gives the texture its alpha plane (`Maps.alpha`; the studio draws
+the albedo over a checker where it is clear). `bake` bleeds the colour under clear
+texels from the nearest opaque one, so mips do not fringe. They have no `out-height`
+or `out-specular`, so there is no `_h` or `_n`, and gloss is 0.
 
-| Id | Name | Size | Alpha | Tiles | Use on a brush |
-|---|---|---|---|---|---|
-| 10 | `sky-stars` | 512 | Opaque | Both | The inside of the room: the backdrop. Faint nebula noise, stars at least 2 texels so bilinear does not make them flicker |
-| 11 | `sky-clouds` | 512 | Soft | Both | A ceiling plane or big plate in a later layer, panned. Fractal noise thresholded to alpha |
-| 12 | `sky-ridge` | 512x256 | Hard top edge | U | A ring of thin brushes round the room: a mountain line, opaque below a fractal ridge. Fit V once with `TexInfo` |
-| 13 | `sky-planet` | 256 | Hard disc | No | One face of a plate, fit once: Facing Worlds' Earth. Limb darkening, cloud bands |
+| Id | Name | Size | Alpha | Tiles | Use on a brush | How it is made |
+|---|---|---|---|---|---|---|
+| 10 | `sky-stars` | 512 | Opaque | Both | The inside of the room: the backdrop. Faint nebula noise, stars at least 2 texels so bilinear does not make them flicker | `noise`, then four `dots` layers of different count, size and colour |
+| 11 | `sky-clouds` | 512 | Soft, at most 0.9 | Both | A ceiling plane or big plate in a later layer, panned. Fractal noise thresholded to alpha, thin enough to let the stars and the planet through | `noise`, `range` for alpha; a second `noise` breaks up the colour |
+| 12 | `sky-ridge` | 512x256 | Hard top edge | U | A ring of thin brushes round the room: a mountain line, opaque below a fractal ridge. Fit V once with `TexInfo` | A 1-D `noise` (`freq_y=0`) moves a hard `stripes` edge through `distort`, twice, far and near |
+| 13 | `sky-planet` | 256 | Hard disc | No | One face of a plate, fit once: Facing Worlds' Earth. Limb darkening, land and cloud bands | Land, ice and cloud masks over two colourings, a `bulge` to squeeze them towards the limb, `glow` for the limb and haze, an `ellipse` for alpha |
+
+The ridge needed no new operator. A noise with no cells along an axis does not vary along
+it, so it is a height line that repeats at the seam; `distort` reads its map as a
+shift, so it carries a straight anti-aliased edge up and down with it. The shift
+wraps at the top and bottom, so two more edges put the clear sky and the solid ground
+back. The planet is one disc well inside its tile, since it does not tile.
 
 Each gets one line in `materials.txt`, at the end, so no id moves. Names use a hyphen:
 the manifest allows no `_` in a name, which keeps a name from reading as a companion
 file (`_n`, `_h`, `_s`). The constants in `materials.rs` stay `SKY_STARS` and so on.
-The loader takes 512x256 as it is. Each texture comes with a flat `_h` and `_n`, and
-the generator draws them from their own random stream, so the older textures are
-byte for byte as they were.
+The loader takes 512x256 as it is. Making the four at load takes about 175 ms in
+`texgen_bench` on the dev machine, against 41 ms for the ten older ones; the game binary
+is a few tens of KB larger for `out-alpha`, the cutout path and the faster `dots`.
 
 Cutouts draw only through the rasterizer's polygon path. A voxel face with a cutout
 texture draws its colour and ignores the alpha.
@@ -324,15 +333,21 @@ coarse levels by itself: at scale 16 a range 100 units off is 1600 away. Budgets
 layer's list may submit `LAYER_VOXEL_TRIS` (12 000) before the rest take the lowest
 level, all layers together `VISTA_VOXEL_TRIS` (24 000), and the main scene keeps its
 own `MAX_VOXEL_TRIS`. The lowest level still has a cost (cells on a chunk's border never
-merge), so a frame can pass these; the demo submits 70 253 triangles to its layers at
-the gate and 33 400 looking up. `SceneStats::vista_triangles` reports it.
+merge), so a frame can pass these; the first demo, with one-unit cells, submitted 70 253
+triangles to its layers at the gate. It now has 13 168 at the gate, and no pose of a sweep
+over its platform passes 17 200. `SceneStats::vista_triangles` reports it.
 
 `mountains` in `mscent-world` (`voxel/mountains.rs`) fills an add volume from a ridged
-heightfield: crests where noise crosses zero, a broad mask for foothills, an envelope
-that takes the surface to the ground at the box's edges, solid below. It is pure, built
+heightfield: low foothills everywhere, broad swells of noise that rise to massifs with
+ridged crests on them (squared, so few reach the peak), an envelope that takes the
+surface to the ground at the box's edges, solid below. It is pure, built
 from integer-hash noise and IEEE arithmetic only, so the same `MountainRange` always
 gives the same bytes. The box grows to whole chunks; at most 16 chunks a side, so 256
-units at one-unit cells, which is the cell to choose for a distant range. Bad input is
+units at one-unit cells and 1024 at cells of 4. A range seen far off wants the coarse
+cells (`CellSize::Two` and `Four`): the demo's plain is seen at scale 16, where a cell of
+4 is a pixel or two. With one-unit cells its three ranges were 7 900 chunks, 70 253 triangles at
+the gate and a 4.8 MB level; with cells of 4 they are 272 chunks, 13 168 triangles and 380 KB.
+Bad input is
 a `MountainError`. Level text has a line for it, expanded at parse into a `Volume`:
 
 ```

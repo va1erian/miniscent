@@ -229,6 +229,7 @@ op 4 1 1 out-specular
 | Flow | `out-albedo` | This image is the colour |
 | Flow | `out-height` | This image is the height; the normal map comes from it |
 | Flow | `out-specular` | This image says where the highlight goes |
+| Flow | `out-alpha` | This image says where the material is there at all; the rest is clear |
 
 A recipe needs `out-albedo`. Without `out-height` the material is flat, and without
-`out-specular` the highlight falls evenly.
+`out-specular` the highlight falls evenly. Without `out-alpha` the material is opaque.

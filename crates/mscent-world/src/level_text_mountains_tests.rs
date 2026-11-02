@@ -27,6 +27,16 @@ fn a_mountains_line_builds_a_volume_that_packs_and_reloads() {
 }
 
 #[test]
+fn the_coarse_cells_read_pack_and_reload() {
+    for (cell, size) in [("2", voxel::CellSize::Two), ("4", voxel::CellSize::Four)] {
+        let line = LINE.replace("  1 40", &format!("  {cell} 40"));
+        let level = from_text(&text(&[&line])).unwrap();
+        assert_eq!(level.volumes[0].cell(), size);
+        assert_eq!(format::read(&format::write(&level)).unwrap(), level);
+    }
+}
+
+#[test]
 fn text_writing_leaves_volumes_out_so_dumping_must_refuse_them() {
     let level = from_text(&text(&[LINE])).unwrap();
     assert!(!to_text(&level).contains("mountains"));
@@ -39,6 +49,7 @@ fn hostile_mountains_lines_are_errors_with_their_line() {
         "mountains 3 4  0 0 0  nan 100 60  1 40 7",
         "mountains 3 4  0 0 0  128 128 60  0 40 7",
         "mountains 3 4  0 0 0  128 128 60  3 40 7",
+        "mountains 3 4  0 0 0  128 128 60  8 40 7",
         "mountains 3 4  0 0 0  128 128 60  1 inf 7",
         "mountains 3 4  0 0 0  128 128 60  1 -4 7",
         "mountains 3 4  0 0 0  9000 128 60  1 40 7",

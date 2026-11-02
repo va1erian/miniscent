@@ -37,6 +37,11 @@ pub fn texture_from_maps(maps: Maps) -> Result<Texture, TextureError> {
     if let Some(specular) = maps.specular {
         texture = texture.with_specular(&specular)?;
     }
+    // A plane of all 255 comes out opaque, so a recipe that ends up solid pays
+    // nothing for having an `out-alpha`.
+    if let Some(alpha) = maps.alpha {
+        texture = texture.with_alpha(alpha)?;
+    }
     Ok(texture)
 }
 
@@ -195,6 +200,54 @@ op 2 1 1 out-specular
         let _ = std::fs::remove_dir_all(d);
     }
 
+    const MASKED: &str = "miniscent-recipe 1
+size 16 16
+op 0 0 1 flat color=1,0,0
+op 0 1 1 out-albedo
+op 1 0 1 rect x=0.5 y=0.5 w=0.5 h=1
+op 1 1 1 out-alpha
+";
+
+    #[test]
+    fn an_out_alpha_makes_a_cutout_texture_and_a_solid_one_makes_none() {
+        let d = dir("alpha");
+        let path = d.join("a.mst");
+        std::fs::write(&path, MASKED).expect("write");
+        let t = load_recipe(&path).expect("loads");
+        assert!(t.is_masked());
+        assert_eq!((t.alpha_at(8, 8), t.alpha_at(0, 8)), (255, 0));
+        // The red under the clear texels is the colour of the shape: no fringe.
+        assert_eq!(t.texel(0, 8), 0xffff_0000);
+        let solid = MASKED.replace("w=0.5 h=1", "w=1 h=1");
+        std::fs::write(&path, solid).expect("write");
+        let t = load_recipe(&path).expect("loads");
+        assert!(!t.is_masked());
+        assert_eq!(t.alpha_at(0, 0), 255);
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn alpha_of_the_wrong_size_is_an_error_not_a_panic() {
+        let maps = |alpha: Vec<u8>| Maps {
+            width: 4,
+            height: 4,
+            albedo: vec![0xff00_0000; 16],
+            normals: None,
+            heights: None,
+            specular: None,
+            alpha: Some(alpha),
+        };
+        assert!(matches!(
+            texture_from_maps(maps(vec![0; 15])),
+            Err(TextureError::SizeMismatch)
+        ));
+        assert!(matches!(
+            texture_from_maps(maps(Vec::new())),
+            Err(TextureError::SizeMismatch)
+        ));
+        assert!(texture_from_maps(maps(vec![255; 16])).is_ok_and(|t| !t.is_masked()));
+    }
+
     #[test]
     fn hostile_recipes_are_errors() {
         let d = dir("hostile");
@@ -204,6 +257,19 @@ op 2 1 1 out-specular
             "miniscent-recipe 1\nsize 16 16\n".to_string(),
             "miniscent-recipe 1\nsize 16 16\nop 0 0 1 blur\nop 0 1 1 out-albedo\n".to_string(),
             " ".repeat(MAX_FILE + 2),
+            // Two alpha outputs, and one out of nothing.
+            format!(
+                "{MASKED}op 2 0 1 flat
+op 2 1 1 out-alpha
+"
+            ),
+            "miniscent-recipe 1
+size 16 16
+op 0 0 1 flat
+op 0 1 1 out-albedo
+op 5 5 1 out-alpha
+"
+            .to_string(),
         ] {
             std::fs::write(&path, bad).expect("write");
             assert!(matches!(load_recipe(&path), Err(TextureError::Recipe(_))));

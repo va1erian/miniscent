@@ -34,8 +34,8 @@ brush add 11 11  6  -1 0 0 -7168 11 0 1 0 0 0 -1 0 0 0.5 0.5 0 0  1 0 0 9216 11 
 vista 8192 0 0  0 0 -4  0 1 0  0 0 0  12 4  0 100000 0
 
 # Layer 2: the plain, at scale 16 (x16): 1024 units here read as 16384. The floor meets the platform's.
-box subtract 12 65520  15872 -512 -8  16896 512 248
-box add 13 4  15872 -512 -8  16896 512 0
+box subtract 12 65520  15872 -512 -8  16896 704 248
+box add 13 4  15872 -512 -8  16896 704 0
 box add 14 0  16308 48 0  16320 60 48
 box add 15 0  16448 48 0  16460 60 48
 box add 16 3  16295 96 0  16310 111 74
@@ -50,11 +50,13 @@ box add 23 0  16488 288 0  16512 312 152
 box add 24 0  16344 380 0  16364 404 190
 box add 25 0  16404 380 0  16424 404 190
 box add 26 3  16336 374 190  16432 410 220
-# Ranges of ridged-noise voxels (cell 1, material 4 is rock): one on each flank of the
-# avenue of towers, which stays clear, and one behind the gate.
-mountains 28 4  15970 0 -3  16226 256 205  1 200 11
-mountains 29 4  16542 0 -3  16798 256 205  1 200 13
-mountains 30 4  16256 416 -3  16512 512 205  1 200 15
+# Ranges of noise voxels (material 4 is rock): one on each flank of the avenue of towers,
+# which stays clear, and a wide one behind the gate. The plain is seen at scale 16, so a
+# cell of 4 units reads as 64 and is a pixel or two: coarse cells keep each range to a few
+# dozen chunks, and the level to a few hundred KB.
+mountains 28 4  15970 0 -3  16226 256 205  4 200 11
+mountains 29 4  16542 0 -3  16798 256 205  4 200 13
+mountains 30 4  16100 416 -3  16668 672 205  4 200 15
 # A low sun from the west, for the ridges' relief and their shadows.
 light 15930 -380 230  1 0.85 0.62  1100 2.2
 light 16294 60 160  1 0.9 0.75  560 120

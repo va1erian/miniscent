@@ -36,6 +36,7 @@ fn cuboid(min: Vec3d, max: Vec3d, op: Op, order: u32, material: u16) -> Brush {
 fn config() -> BuildConfig {
     BuildConfig {
         luxel_size: 8.0,
+        ambient: Vec3::new(0.4, 0.4, 0.45),
         shadow_samples: 1,
         sky_top: SKY,
         sky_bottom: SKY,
@@ -189,6 +190,23 @@ fn differing(a: &Framebuffer, b: &Framebuffer) -> Vec<usize> {
         .collect()
 }
 
+/// How far two pictures are from each other: the summed difference of every colour
+/// channel. A count of differing pixels says too little here: on a textured rock,
+/// any sub-pixel shift changes most of the texels it touches, so a small shift and a
+/// large one count alike, while the size of the change still follows the shift.
+fn moved(a: &Framebuffer, b: &Framebuffer) -> u64 {
+    let channel = |p: u32, shift: u32| i64::from((p >> shift) & 0xff);
+    let pairs = a.pixels().iter().zip(b.pixels());
+    pairs
+        .map(|(&p, &q)| {
+            [0, 8, 16]
+                .into_iter()
+                .map(|s| channel(p, s).abs_diff(channel(q, s)))
+                .sum::<u64>()
+        })
+        .sum()
+}
+
 #[test]
 fn a_range_in_a_layer_draws_and_a_brush_in_front_of_the_hole_keeps_its_pixels() {
     let at = Vec3::ZERO;
@@ -333,9 +351,12 @@ fn a_mountain_shifts_by_scale_as_the_layers_eye_follows_the_player() {
         !differing(&still, &near).is_empty(),
         "walking moves the range"
     );
+    // A textured rock texel that moves by any sub-pixel step changes, so the change
+    // from the large walk saturates sooner than the small one's: the ratio is well
+    // under the 16 of the walks, and 3 still tells a sixteenth from the whole.
     assert!(
-        differing(&still, &small).len() * 4 < differing(&still, &near).len(),
-        "a sixteenth of the walk shifts far fewer pixels"
+        moved(&still, &small) * 3 < moved(&still, &near),
+        "a sixteenth of the walk moves far less of the picture"
     );
 }
 

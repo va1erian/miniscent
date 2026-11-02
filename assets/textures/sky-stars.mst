@@ -1,0 +1,13 @@
+miniscent-recipe 1
+size 512 512
+gloss 0
+# Backdrop: a dim purple and blue nebula from one noise, then four layers of stars.
+# Each star is at least two texels wide so that bilinear sampling does not make it
+# flicker.
+op 0 0 1 noise freq_x=2 freq_y=3 octaves=5 persistence=0.6 seed=31 color0=0,0.02,0.1 color1=0.34,0.12,0.46
+op 0 1 1 range in_low=0.2 out_high=0.55 gamma=1.7
+op 0 2 1 dots count_x=28 count_y=28 radius=0.09 softness=0.2 jitter=1 seed=3 color=0.45,0.5,0.75
+op 0 3 1 dots count_x=19 count_y=19 radius=0.09 softness=0.2 jitter=1 seed=4 color=0.85,0.74,0.58
+op 0 4 1 dots count_x=11 count_y=11 radius=0.06 softness=0.2 jitter=1 seed=5 color=1,1,1
+op 0 5 1 dots count_x=4 count_y=4 radius=0.03 softness=0.12 jitter=1 seed=6 color=0.85,0.92,1
+op 0 6 1 out-albedo

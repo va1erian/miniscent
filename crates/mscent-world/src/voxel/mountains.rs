@@ -5,12 +5,13 @@
 //! bit: it uses seeded integer-hash noise and only IEEE arithmetic (no `powf`,
 //! `sin`, or anything a platform's libm could round differently).
 //!
-//! The surface is `ground + peak * shape` above the box's floor. `shape` is ridged
-//! noise (sharp crests where the noise crosses zero, each octave weighted by the
-//! one before so crests carry the detail and valleys stay smooth), scaled down by
-//! a broad mask so some of the range is foothills, and by an envelope that takes
-//! it to nothing at the box's edges, so no cliff shows there. It is divided by its
-//! own highest point, so the tallest peak is exactly `peak`.
+//! The surface is `ground + peak * shape` above the box's floor. `shape` blends two
+//! forms by a broad swell of noise: low foothills, and massifs that rise to half
+//! the peak with ridged crests (sharp where the noise crosses zero, each octave
+//! weighted by the one before so crests carry the detail and valleys stay smooth)
+//! riding on them, squared so that few reach the top. An envelope takes it to nothing
+//! at the box's edges, so no cliff shows there. It is divided by its own highest
+//! point, so the tallest peak is exactly `peak`.
 //!
 //! The field handed to [`fill`] is the height above the surface over the slope's
 //! length, which keeps its value near a true distance so the mesher places steep
@@ -35,8 +36,20 @@ const OCTAVES: u32 = 5;
 const FALLOFF: f64 = 0.3;
 /// Wavelengths across the longer side, of the first octave.
 const RIDGES_ACROSS: f64 = 2.5;
-/// Lowest the foothill mask goes, as a share of full height.
-const FOOTHILL_FLOOR: f64 = 0.3;
+/// Height of the lowlands, and the relief the crests add to them, as shares of
+/// the peak.
+const LOWLAND: f64 = 0.08;
+const FOOTHILL_RELIEF: f64 = 0.14;
+/// The ridged sum between which a crest goes from none to all.
+const CREST_LOW: f64 = 0.35;
+const CREST_HIGH: f64 = 0.8;
+/// Height a massif rises to before its crests, as a share of the peak.
+const MASSIF_BASE: f64 = 0.5;
+/// Swells per first-octave wavelength, and the broad noise values between which a
+/// swell goes from nothing to all of a massif.
+const SWELL_FREQ: f64 = 0.5;
+const SWELL_LOW: f64 = 0.35;
+const SWELL_HIGH: f64 = 0.62;
 
 /// What to build. Boxes are in world units; the volume starts at `min` rounded
 /// down to a cell and grows to a whole number of chunks (16 cells) from there.
@@ -220,9 +233,10 @@ fn envelope(t: f64) -> f64 {
     s * s * (3.0 - 2.0 * s)
 }
 
-/// Ridged multifractal at `q` (in first-octave wavelengths), roughly `0..=1`:
-/// crests sharpened, cut down by a broad mask so there are foothills.
-fn range_shape(seed: u32, q: Vec3d) -> f64 {
+/// Ridged multifractal at `q` (in first-octave wavelengths), `0..=1`: crests
+/// sharpened, each octave weighted by the ridge of the one before, so crests carry
+/// the detail and valleys stay smooth.
+fn crest_at(seed: u32, q: Vec3d) -> f64 {
     let (mut sum, mut norm) = (0.0, 0.0);
     let (mut amp, mut freq, mut weight) = (1.0, 1.0, 1.0);
     for o in 0..OCTAVES {
@@ -236,11 +250,31 @@ fn range_shape(seed: u32, q: Vec3d) -> f64 {
         amp *= 0.5;
         freq *= 2.07;
     }
-    let crest = sum / norm;
-    let broad = noise3(seed ^ 0x5bd1_e995, Vec3d::new(q.x * 0.6, q.y * 0.6, 3.1)) * 0.5 + 0.5;
-    let mask = FOOTHILL_FLOOR + (1.0 - FOOTHILL_FLOOR) * broad * broad;
-    // Cubed: low ridges flatten into foothills while crests stay.
-    crest * crest * crest * mask
+    sum / norm
+}
+
+/// How much of a massif `q` is on, `0..=1`: two octaves of broad noise passed
+/// through a smoothstep, so the swells have wide shoulders and the lowlands between
+/// them stay low.
+fn swell_at(seed: u32, q: Vec3d) -> f64 {
+    let p = Vec3d::new(q.x * SWELL_FREQ, q.y * SWELL_FREQ, 3.1);
+    let n = noise3(seed ^ 0x5bd1_e995, p) + 0.5 * noise3(seed ^ 0x2545_f491, p * 2.3);
+    let t = ((n / 1.5) * 0.5 + 0.5 - SWELL_LOW) / (SWELL_HIGH - SWELL_LOW);
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// The surface's shape at `q`, `0..=1` before it is scaled to the peak. The
+/// lowlands are foothills with a little relief; where a swell rises, the rock
+/// climbs to half the peak and crests ride on it, squared so that few of them reach
+/// the top: a massif with a few peaks, not a field of spikes.
+fn range_shape(seed: u32, q: Vec3d) -> f64 {
+    // The ridged sum sits between about 0.3 and 0.85: spread it over 0..1.
+    let crest = ((crest_at(seed, q) - CREST_LOW) / (CREST_HIGH - CREST_LOW)).clamp(0.0, 1.0);
+    let swell = swell_at(seed, q);
+    let foothills = LOWLAND + FOOTHILL_RELIEF * crest;
+    let massif = MASSIF_BASE + (1.0 - MASSIF_BASE) * crest * crest;
+    foothills + (massif - foothills) * swell
 }
 
 #[cfg(test)]
