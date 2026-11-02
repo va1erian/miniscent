@@ -188,6 +188,7 @@ trace channel instead of printed markers, and paths from `libs/fhs`.
 ## Open questions
 
 - Should voxel volumes join the requirements? Design proposed in [voxels.md](voxels.md).
+- Should levels see out into a larger world? Viewport surfaces and layered skies are proposed in [viewports.md](viewports.md).
 - Is a weapon in scope? Enemies need some way to be handled; work item M6.5
   assumes a single primary-fire weapon and nothing else.
 - Does "point" in the game-element list mean point lights, as assumed here?

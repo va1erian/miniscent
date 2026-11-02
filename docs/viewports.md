@@ -1,0 +1,323 @@
+# Viewport surfaces: plan
+
+Status: draft, nothing here is implemented. Time and size figures are targets
+to measure, not results. The work items below move to
+[work-items.md](work-items.md) as M13 once this is accepted.
+
+## Goal
+
+Let a level look out into something far larger than itself: the planet behind
+UT's Facing Worlds, the layered skies of the original Unreal, a canyon past the
+courtyard wall. A mapper paints a brush face with a **viewport material**, builds
+the view in a sealed room with the ordinary brush tools, and drops one entity in
+that room. Nothing else is needed.
+
+More general than a Half-Life skybox, because what is seen is real level geometry
+with its own lighting, motion and parallax. Much less than a portal system,
+because the view never recurses and nothing passes through.
+
+Not in scope:
+
+- Recursion, mirrors, or a view from a viewport into another viewport.
+- Travel, shots or sight through a viewport. It is a wall to the game.
+- Render to texture, monitors and security cameras.
+- Actors, movers, particles or voxels inside a view (see "Later").
+- Light coming in from the sky (see "Later").
+- A hardware path, or prebaked cubemaps.
+
+## What exists today
+
+| Fact | Where | What it means here |
+|---|---|---|
+| There is no sky. Levels are sealed rooms, and the gradient only shows where something failed | `clear_sky` in [framebuffer.rs](../crates/mscent-render/src/framebuffer.rs); pinhole tests set `sky_top: HOLE` | The feature starts from nothing, and the pinhole tests must keep their meaning |
+| The world starts solid, and rooms are subtractions | [plan.md](plan.md#csg-and-bsp) | A sealed room far from the play space is already possible, and no portal joins it to the rest |
+| The flood starts at the eye's leaf and takes a screen rectangle | `visible_leaves` in [visible.rs](../crates/mscent-render/src/scene/visible.rs) | It can start from the view's leaf with a narrower window. An eye in solid marks **every** leaf visible, which a view must not do |
+| A frame lists once and fills per band: clear, movers, voxels, faces, actors, particles | `render_with_effects` in [level/mod.rs](../crates/mscent-render/src/level/mod.rs) | The new work slots in without touching existing passes. That file is at 488 lines, so it goes in a new module |
+| Depth is `1/z`, 0.0 means nothing drawn, and the test is `iz > depth` | `span_pixels` in [raster.rs](../crates/mscent-render/src/raster.rs) | Setting depth to infinity blocks a pixel with no rasterizer change |
+| Colour alpha is kept at 255 by every shader | `mul_rgb`, `lerp_rgb` in [shade.rs](../crates/mscent-render/src/shade.rs) | Alpha 0 is free to mark a pixel for the length of a pass |
+| `FaceShader` is a `match` per pixel | [level/shader.rs](../crates/mscent-render/src/level/shader.rs) | A new variant would touch the hot path, so viewport faces get their own list |
+| `NO_DRAW = 0xFFFF` is a material that is not a texture | [materials.rs](../crates/mscent-world/src/materials.rs) | Reserved ids work, and need no new face data |
+| A shot with no face under it has no impact and no scorch | `surface_at`, `face_at` in [shots.rs](../apps/game/src/session/shots.rs) | Keeping viewport faces out of `Scene::faces` gives the right behaviour for free |
+| `FAR` is 400 and `MAX_FOG_DEPTH` is 1000 | level/mod.rs, [entity.rs](../crates/mscent-world/src/entity.rs) | A view needs its own far plane and fog limit |
+| Luxels default to 0.125 units, the atlas is at most 1024x8192 (8.4 M), and an overfull atlas coarsens the **whole level** | `BakeConfig` in [lightmap/mod.rs](../crates/mscent-world/src/lightmap/mod.rs) | One 400-unit box wants 61 M luxels. A big view would blur the play space. This is the largest trap here |
+| `lamp_light` and mesh lighting use every lamp, without shadows | [compiled.rs](../crates/mscent-render/src/level/compiled.rs), `mesh_lighting` | A huge lamp in a view would light enemies in the play space |
+| Mips and bilinear sampling force alpha to 255, and the generator writes RGB at 128x128 | [mips.rs](../crates/mscent-render/src/mips.rs), `texture.rs:368`, [gen_textures.py](../tools/gen_textures.py) | Cutout textures need an alpha path and a generator change |
+| `lightpanel` is the only emissive material, chosen by id | `face_shader` in [fill.rs](../crates/mscent-render/src/level/fill.rs) | Self-lit sky materials follow that precedent, without a lightmap |
+| Materials are per face in the editor and in level text | `TexInfo`, [level_text.rs](../crates/mscent-world/src/level_text.rs) | Painting a viewport needs only new entries in the lists |
+
+## The model
+
+Three ideas, none of which adds a new kind of geometry:
+
+- **Viewport face.** A face whose material is `VIEW_FIRST + slot`
+  (`0xFFF0..=0xFFF7`, so 8 slots). It collides like any wall. On screen it is a
+  hole showing that slot's vista.
+- **Vista.** What a slot shows: up to 4 layers, drawn far to near.
+- **Layer.** One new entity, placed in a sealed room:
+
+```
+Entity::VistaLayer {
+    pos,         // the layer's eye when the player stands at `centre`
+    centre,      // the point of the play space that maps to `pos`
+    slot, layer, // which vista, and the order inside it (0 is farthest)
+    parallax,    // 0..=1: how far the eye moves per unit the player moves
+    spin,        // axis times radians per second, turns the layer's camera
+    pan,         // texels per second, on self-lit faces only
+    fog_start, fog_end, fog_color,
+}
+```
+
+The eye of a layer follows one line:
+
+```
+eye = pos + (player - centre) * parallax
+orientation = spin_rotation(time) * player_orientation
+```
+
+`parallax` is the only scale control, and it covers each style:
+
+| `parallax` | Reads as | Reference |
+|---|---|---|
+| 0 | Infinitely far: turns with the head, never shifts | Unreal 1 sky zone, Half-Life sky |
+| 1/16 | A miniature that looks 16 times its size, and shifts as you fly | Source's 3D skybox |
+| 1 | A window on a same-size place (no sense of scale, rarely wanted) | |
+
+A room 100 units wide at 1/16 reads as 1600 units across. That is how
+monumentality fits the lightmap, the coordinates and the bake time. The same line
+makes a miniature continue the real floor exactly: a plane at height `z` in the
+play space lines up with `pos.z + (z - centre.z) * parallax` in the view.
+
+A level with no viewport face does no new work and draws the same pixels.
+
+## Why this and not the alternatives
+
+| Option | Verdict |
+|---|---|
+| Hardcoded sky cube (Half-Life) | No geometry, no parallax, no layers. It is what a one-room vista with `parallax` 0 already gives |
+| Prerendered cubemap | Static, no parallax, at least six large textures, a new sampler per pixel |
+| Render the view to a texture | Pays for a whole screen, then resamples it. Worse in every way on a software renderer |
+| Real portals with clip planes | Needs per-span clipping and recursion rules, for effects this feature does not want |
+| Vista first, main scene over it | Simple, but shades every vista pixel the level then hides, which breaks the frame budget |
+
+## Frame order
+
+Main scene first, so the view shades only the pixels that show. The rasterizer does
+not change.
+
+```
+list main faces, with viewport faces going to their own list
+if that list is empty: frame exactly as today
+for each slot seen, each layer: list its faces with its camera, flood window = hole bounds
+
+per band:
+  clear_sky, movers, voxels, faces, actors       unchanged
+  fill viewport faces: true depth, colour 0      closer pixels already won the z-test
+  for each slot with a hole in the band:
+    resolve: this slot's mark -> gradient colour, view depth 0
+             anything else    -> view depth infinity
+    swap depth planes
+    for each layer: fill, then reset view depth that is not infinity
+    swap depth planes back
+  particles                                      test against the main depth
+```
+
+- **The hole writes true depth.** The flood is conservative, so faces beyond a
+  viewport wall can be listed. They must stay hidden.
+- **Infinity is the mask.** Every covered pixel fails `iz > depth`, so it costs a
+  compare and shades nothing. The view's own overdraw is bounded by its z-test.
+- **The second depth plane** is made once per band, and only in a level with
+  viewports. Particles and the composited depth still see the main scene.
+- **Uncovered hole pixels show the gradient,** so an unbound slot fails visibly, and
+  a closed backdrop can be tested for pinholes the way voxels are.
+- **Alpha returns to 255 before the pass ends.** Nothing outside this module
+  ever sees the mark.
+- **Several slots in one frame** need telling apart, so the mark is alpha 0 with
+  the slot in the low colour bits, and each slot resolves in turn.
+
+A layer is drawn with lightmap and texture only. No bump, no specular and no dynamic
+lights: it is far away, and lamps in the play space cannot reach it.
+
+### A viewport face inside a layer
+
+The walk skips it, so it is **see-through to the layers behind**. This rules out
+recursion by construction, and it is what makes layers easy: paint an arena room's
+walls and ceiling with any `view:` material and the star layer shows above its
+towers. No special "clear" texture is needed.
+
+## Islands
+
+An island is a set of empty leaves joined by portals, computed once per build with
+a flood over `Portals`. Each layer belongs to the island around `pos`.
+
+- The layer's flood stays in its island. If the eye has moved out of it (small
+  rooms, high parallax) every leaf **of the island** counts as visible, and frustum
+  and back-face culling do the rest. The whole-level fallback is not used.
+- Lamps in another island than the player start leave `mesh_lighting` and
+  `lamp_light`. The bake needs no change for correct results, since solid stops the
+  rays. Skip those lamps per luxel only if bake time shows it matters.
+- A face in a layer's island bakes at a coarser luxel: `luxel_size * 32` as the
+  starting point (4 units), which `LightFace` carries. The input key hashes it only
+  when it differs from 1, so existing caches stay valid. The play space keeps its
+  density whatever the view's size.
+
+Editor and `--check` warnings, not errors: the view shares an island with the player
+start (a leak), a layer in solid, a viewport face on a slot with no layer, a mover
+with a viewport face, voxels in a layer's island (not drawn).
+
+## Self-lit and cutout materials
+
+**Self-lit.** `materials::is_self_lit(id)`, a table of the game's own materials like
+`is_destructible`. These faces draw through `FlatShader` and get **no luxels**, so a
+starfield room of any size costs no atlas and no rays. It is also the cheapest pixel
+the renderer has. `lightpanel` stays as it is, to keep existing pixels.
+
+**Cutout.** A texture whose PNG has any alpha below 255 is masked, found at load.
+Its alpha lives in a separate plane with its own mips, so opaque textures keep today's
+memory and sampler. `draw_row` picks a second span loop per span:
+
+| Texel alpha | Result | Depth |
+|---|---|---|
+| 0 | Skipped | Unwritten |
+| 255 | Written | Written |
+| Between | Blended over the colour there | Unwritten |
+
+That gives clean silhouettes, soft cloud edges and no depth sorting. The cost of one
+branch per span is small, and `check_frame_cost.py` confirms it. Within one layer,
+drawing is front to back, so a soft edge over something drawn later loses to it.
+Anything that must blend over a thing goes in a later layer.
+
+Cutouts are only guaranteed in layers. In the play space they would need the same
+care around lightmaps and actors, and nothing asks for that.
+
+## Sky textures
+
+Four new stock materials, each one job, designed to stack. They are self-lit, tile
+as noted, and come from `gen_textures.py` with the existing noise helpers. The
+generator gets an RGBA `save` and a size argument, with colour bled under transparent
+texels so mips do not fringe. `_h` and `_n` stay flat so the loader's rules hold.
+
+| Id | Name | Size | Alpha | Tiles | Use on a brush |
+|---|---|---|---|---|---|
+| 10 | `sky_stars` | 512 | Opaque | Both | The inside of the room: the backdrop. Faint nebula noise, stars at least 2 texels so bilinear does not make them flicker |
+| 11 | `sky_clouds` | 512 | Soft | Both | A ceiling plane or big plate in a later layer, panned. Fractal noise thresholded to alpha |
+| 12 | `sky_ridge` | 512x256 | Hard top edge | U | A ring of thin brushes round the room: a mountain line, opaque below a fractal ridge. Fit V once with `TexInfo` |
+| 13 | `sky_planet` | 256 | Hard disc | No | One face of a plate, fit once: Facing Worlds' Earth. Limb darkening, cloud bands |
+
+Each gets one line in `materials.txt`, at the end, so no id moves. Non-square textures
+are assumed; M13.4 confirms the loader takes 512x256 or else makes it 512x512.
+
+## Building one with the existing tools
+
+No new brush tool. New: one entity, four textures, and the viewport entries in the
+material lists.
+
+**Facing Worlds: a planet behind a floating platform.**
+
+1. Subtract a big box far from the level, and paint it `sky_stars`.
+2. Add a thin plate near one wall, and paint its face `sky_planet` with Fit.
+3. Place a Vista Layer in the box: slot 0, layer 0, `parallax` 0, a slow `spin`.
+4. In the play space, select the room's walls and ceiling, and pick **View 0** in
+   the face panel. Add the platform brushes in rock as usual.
+
+**Monument: a huge arena past a low wall.** Do 1 to 3 above for the sky, then:
+
+1. Subtract a second room, 100 units wide. Paint the walls and ceiling **View 0**.
+   They become see-through to the stars.
+2. Add a floor, towers and arches with the ordinary tools, then a ring of plates in
+   `sky_ridge`, and lamps.
+3. Place a Vista Layer in it: slot 0, layer 1, `parallax` 1/16, with fog at the far
+   end for depth.
+
+**Original Unreal: clouds over a horizon.** Add a third room with one big plate in
+`sky_clouds`, layer 2, a `pan`, walls painted **View 0**. It costs no lightmap.
+
+An editor command, **New Vista**, does the first recipe in one step: a stock room
+beyond the level bounds, the entity, and `centre` set to the bounds' centre. It goes
+through the normal commands, so undo covers it. Then the mapper only paints faces.
+
+## Costs and budget
+
+The reference machine still holds 60 fps with every feature on. Targets to measure at
+640x360, one worker:
+
+| Step | Target |
+|---|---|
+| No viewport face in view | Adds one empty-list check. `frame_bench` unchanged |
+| Filling viewport faces plus resolve | Under 0.3 ms at full-screen hole (`simd.rs` if needed) |
+| Flood and listing, per layer | Under 0.3 ms for a room of 64 brushes |
+| Layer pixels | No dearer than a flat-shaded wall for self-lit, than a Low wall for lit |
+| Lightmap | A 100-unit lit room under 5 % of the atlas (at 0.125 it would take 46 %) |
+
+Hole pixels replace main-scene pixels, so a mostly sky view has fewer brush pixels to
+pay for. `SceneStats` gains `vista_pixels` and `vista_faces`, shown beside the existing
+figures. A voxel-style governor is not planned; 4 layers and the 64-brush guidance
+are the budget until a level shows otherwise.
+
+`tests/frame_alloc.rs` keeps its count on levels without viewports. With them, polygon
+lists and the second depth plane are made once; a test holds the per-frame count to
+the flood's existing vectors per layer.
+
+## Risks
+
+- **Far geometry at a distance.** Thin brushes alias at 640x360 and shimmer as the
+  player moves. Check `crawl` and `stability` on the demo level, and prefer plates with
+  cutouts over thin real geometry.
+- **Depth range.** Layer far is 100 000. `1/z` in `f32` holds this well because the
+  precision grows toward zero, and depth is cleared per layer, but M13.2 checks for
+  z-fighting at range.
+- **Box corners on a sky.** A flat-lit `sky_stars` box can show its corners. Stars hide
+  them, and a dome built with `hull_planes` (64 planes at most) is available if not.
+- **The main fog does not touch the hole.** A wall fogged in the play space can stand
+  against a clear sky. Authors match the layer's fog colour. Revisit only if it reads
+  badly in the demo.
+- **Spin and replay.** Time reaches the renderer through `Effects`, read-only, and only
+  moves cameras. `Game::step` never sees it, so replays stay bit-exact. Screenshots
+  with time 0 are stable.
+
+## Tests
+
+Pixel reads through the renderer, as everywhere else:
+
+- Levels with no viewport face: byte-identical pictures, depth and lightmap keys.
+- Same pixels and depth at 1 and N workers, and across band sizes.
+- `parallax` 0: a landmark holds its screen position while the eye translates, and moves
+  when it turns. `parallax` 1/16: it moves exactly 1/16 as far as at `parallax` 1.
+- An actor, door or voxel in front of a hole keeps its pixels, and a face listed beyond
+  a viewport wall shows none. A particle blends over a hole and is hidden behind a wall.
+- Layers: a cutout texel shows the layer behind, a `view:` face in a layer shows the
+  layer behind, a soft alpha reads between the two colours.
+- Eye outside its island: no pixel from any other island, over 1000 random poses.
+- Closed backdrop, 1000 poses at several sizes: no gradient pixel.
+- A huge lamp in a view: no change to a play-space lightmap or to an actor's light.
+- Adding a large view leaves the play space's luxel size unchanged.
+- A shot at a viewport face: no scorch, no impact, the same collision.
+- Format: round trip, versions 1 to 4 still load, tag 7 in an old version rejected, bit
+  flips and out-of-range fields never panic. A slot above 7 or a NaN `parallax` is an
+  `Err`. A duplicate slot and layer: the first counts, like `Entity::World`.
+
+## Work items
+
+| ID | Item | Deps | Size | Done when |
+|---|---|---|---|---|
+| M13.1 | World: `VIEW_FIRST`, `Entity::VistaLayer` as tag 7, format version 5, level text, islands | M2.6 | M | Round trip; hostile files return errors; v1 to v4 load; islands agree with a flood on generated levels |
+| M13.2 | Renderer: viewport face list, resolve, second depth plane, single-layer vista of lit faces, camera line, island flood | M13.1 | L | The tests above on occlusion, parallax, workers and islands; no-viewport levels identical; `check_frame_cost.py` before and after |
+| M13.3 | Bake: coarse luxels by island, lamps split by island, self-lit faces without luxels | M13.1 | M | The lamp and luxel-size tests; old caches still load; the atlas figure recorded |
+| M13.4 | Masked textures: alpha plane and mips, second span loop, RGBA generator, the four materials | M13.2 | M | Alpha tests; opaque textures use unchanged code and pixels; a texture sheet committed; frame cost compared |
+| M13.5 | Layers, `spin`, `pan`, per-layer fog, `Effects` time, stats | M13.2, M13.4 | M | Layer tests; a replay trace unchanged; screenshots stable at time 0 |
+| M13.6 | Editor: entity tool and panel, View entries in the material lists, warnings, New Vista, 3D view shows the sky | M13.3, M13.5 | M | `--selftest` builds a vista, paints a wall, plays it, reads a sky pixel, and undoes to the same picture |
+| M13.7 | `assets/levels/facing.txt` demo with the Monument recipe, flythrough script, measurements in `docs/perf/` | M13.6 | S | Holds budget on the dev machine; `crawl` and `stability` checked; screenshots in the PR |
+
+M13.2, M13.3 and M13.4 can run side by side. M13.2 alone already gives a working
+single-layer view, usable from level text.
+
+## Later
+
+Each stands on its own and none is needed for the goal:
+
+- **Sky light.** Viewport faces lighting a room during the bake. Until then, a far lamp
+  with a large radius plays the sun.
+- **Actors and movers in a view:** a passing ship, a turning wheel, driven by script.
+- **Voxels in a view,** through a `VoxelList` per layer.
+- **Script control:** switch a slot's layers, or change `spin`, for a day that turns to
+  night.
+- **Custom self-lit materials,** from a manifest flag, with the Texture Studio.
