@@ -121,7 +121,7 @@ without volumes draw exactly the same pixels.
 |---|---|---|---|---|
 | M11.1 | `mscent-world::voxel`: chunks, copy on write, resolve, dabs, surface nets, LOD, connectivity; `voxel_bench` example | M2.3 | L | Closed-mesh test over chunk borders; `fold` sign agrees with `Bsp::is_solid`; benchmark reports the field and meshing numbers in the design |
 | M11.2 | Level format version 3, section 4 | M11.1, M2.6 | M | Round trip; versions 1 and 2 load; bit flips and forged RLE never panic or exceed the allocation cap |
-| M11.3 | Volumes in compile: shell brush, no-draw faces, chunks on leaves, node bounds | M11.1 | M | Seeded `Subtract` volume leaves a room looking the same; a volume with only shell faces still renders |
+| M11.3 | Volumes in compile: shell brush, no-draw faces, chunks on leaves, node bounds | M11.1 | M | Seeded `Subtract` volume leaves a room looking the same; a volume with only shell faces still renders; a carved wall shows the material of the brush it came from; a tunnel across two touching volumes has no wall |
 | M11.4 | Triangle path, flood, governor, projection and shading | M11.3, M5.5 | L | Pinhole test over 1000 poses; `frame_alloc` unchanged; frame budget met in `check_frame_cost.py`; voxel pixel cost at High compared with a brush pixel |
 | M11.5 | Light: occluders, cell records, cache, seam blending | M11.4, M5.8 | L | Voxels shadow brushes and the reverse (pixel tests); `crawl` on a voxel shadow edge; stale and forged caches ignored; painting does not re-bake |
 | M11.6 | Collision through `Solids`, contact model, fuzz | M11.3, M4.4 | M | Extended fuzz passes; no lip on a brush to voxel slide; replay stays bit-exact |

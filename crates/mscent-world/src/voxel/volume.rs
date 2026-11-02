@@ -151,6 +151,13 @@ impl Volume {
         self.lattice.order
     }
 
+    /// The same volume at another place in the CSG order.
+    #[must_use]
+    pub fn with_order(mut self, order: u32) -> Self {
+        self.lattice.order = order;
+        self
+    }
+
     pub fn cell(&self) -> CellSize {
         self.lattice.cell
     }

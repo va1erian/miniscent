@@ -96,7 +96,7 @@ fn volumes_round_trip_exactly_and_mesh_the_same() {
 
 #[test]
 fn noise_is_stored_plain_and_comes_back() {
-    let mut v = Volume::new(Op::Add, 0, CellSize::Quarter, [0; 3], [1, 1, 1]).expect("valid");
+    let mut v = Volume::new(Op::Add, 1, CellSize::Quarter, [0; 3], [1, 1, 1]).expect("valid");
     let mut ctx = Context::new(&v, &[]);
     let mut rng = Rng::new(3);
     let noise: Vec<f64> = (0..CHUNK_SAMPLES)
@@ -340,4 +340,27 @@ fn a_detail_chunk_of_one_value_loads_as_a_uniform_one() {
             material: 2
         })
     );
+}
+
+#[test]
+fn a_volume_sharing_an_order_with_a_brush_is_refused() {
+    let level_at = |order: u32| Level {
+        brushes: vec![
+            Brush::cuboid(
+                Vec3d::new(0.0, 0.0, 0.0),
+                Vec3d::new(8.0, 8.0, 8.0),
+                Op::Add,
+                3,
+            )
+            .expect("valid"),
+        ],
+        entities: Vec::new(),
+        volumes: vec![
+            Volume::new(Op::Add, order, CellSize::Quarter, [0; 3], [1, 1, 1]).expect("valid"),
+        ],
+    };
+    let tied = format::write(&level_at(3));
+    assert_eq!(format::read(&tied), Err(FormatError::BadVolume));
+    let apart = level_at(4);
+    assert_eq!(format::read(&format::write(&apart)), Ok(apart));
 }

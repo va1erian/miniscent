@@ -3,12 +3,30 @@
 //! Brushes keep their CSG order as their position in the list, so reordering is
 //! a list move. Entities are the game's own [`Entity`] values plus an id.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use mscent_math::{DPlane, Vec3d};
 use mscent_world::voxel::Volume;
 use mscent_world::{Brush, BrushError, Entity, Level, Op, TexInfo};
 
 /// A stable identity that survives reordering, deletion and undo.
 pub type Id = u32;
+
+/// A volume and how many brushes of the loaded order come before it.
+#[derive(Clone, Debug, PartialEq)]
+struct PlacedVolume {
+    volume: Volume,
+    rank: usize,
+}
+
+/// The CSG order of a whole document, from [`Document::csg_orders`].
+pub struct CsgOrders {
+    /// The order of each brush, by list position.
+    pub brushes: Vec<u32>,
+    /// The volumes, each with its order set.
+    pub volumes: Vec<Volume>,
+}
 
 /// The geometry of one brush.
 #[derive(Clone, Debug, PartialEq)]
@@ -195,7 +213,9 @@ pub struct Document {
     entities: Vec<EntityDef>,
     /// Kept so loading and saving a level does not lose them; nothing edits
     /// them yet.
-    volumes: Vec<Volume>,
+    volumes: Vec<PlacedVolume>,
+    /// Brush ids in loaded order, which is what a volume's rank counts.
+    loaded: Arc<[Id]>,
     next_id: Id,
 }
 
@@ -207,9 +227,9 @@ impl Document {
     /// Imports a level (brush order is list order).
     pub fn from_level(level: &Level) -> Document {
         let mut doc = Document::new();
-        let mut brushes: Vec<&Brush> = level.brushes.iter().collect();
-        brushes.sort_by_key(|b| b.order());
-        for b in brushes {
+        let mut brushes_in_order: Vec<&Brush> = level.brushes.iter().collect();
+        brushes_in_order.sort_by_key(|b| b.order());
+        for b in &brushes_in_order {
             let id = doc.alloc_id();
             doc.brushes.push(BrushDef::from_brush(id, b));
         }
@@ -217,28 +237,89 @@ impl Document {
             let id = doc.alloc_id();
             doc.entities.push(EntityDef { id, entity: *e });
         }
-        doc.volumes = level.volumes.clone();
+        if !level.volumes.is_empty() {
+            let orders: Vec<u32> = brushes_in_order.iter().map(|b| b.order()).collect();
+            doc.volumes = level
+                .volumes
+                .iter()
+                .map(|v| PlacedVolume {
+                    volume: v.clone(),
+                    rank: orders.partition_point(|&o| o < v.order()),
+                })
+                .collect();
+            doc.loaded = doc.brushes.iter().map(|b| b.id).collect();
+        }
         doc
     }
 
     /// Exports to the game's level type; fails on the first invalid brush.
     pub fn to_level(&self) -> Result<Level, BrushError> {
+        let orders = self.csg_orders();
         let brushes = self
             .brushes
             .iter()
-            .enumerate()
-            .map(|(i, b)| b.to_brush(i as u32))
+            .zip(&orders.brushes)
+            .map(|(b, &order)| b.to_brush(order))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Level {
             brushes,
             entities: self.entities.iter().map(|e| e.entity).collect(),
-            volumes: self.volumes.clone(),
+            volumes: orders.volumes,
         })
     }
 
-    /// Whether `other` has the same shapes, operations and entities, in the
-    /// same order; only materials and texture mappings may differ. The
-    /// lightmap depends on nothing else.
+    /// Numbers brushes and volumes as one sequence. Each volume comes right after
+    /// the last surviving brush that preceded it when loaded. This depends only
+    /// on the list, so deleting a brush and undoing that restores it exactly.
+    /// With no volumes a brush's order is its list position.
+    pub fn csg_orders(&self) -> CsgOrders {
+        let mut placed = self.volume_places();
+        placed.sort_by_key(|&(place, v)| (place, v.volume.order()));
+        let mut next = placed.iter().map(|&(place, _)| place).peekable();
+        let mut passed = 0u32;
+        let brushes = (0..self.brushes.len())
+            .map(|i| {
+                while next.next_if(|&place| place <= i).is_some() {
+                    passed += 1;
+                }
+                i as u32 + passed
+            })
+            .collect();
+        let volumes = placed
+            .iter()
+            .enumerate()
+            .map(|(j, &(place, v))| v.volume.clone().with_order((place + j) as u32))
+            .collect();
+        CsgOrders { brushes, volumes }
+    }
+
+    /// How many brushes of the current list come before each volume.
+    fn volume_places(&self) -> Vec<(usize, &PlacedVolume)> {
+        if self.volumes.is_empty() {
+            return Vec::new();
+        }
+        let index: HashMap<Id, usize> = self
+            .brushes
+            .iter()
+            .zip(0..)
+            .map(|(b, i)| (b.id, i))
+            .collect();
+        // places[k] is one past the last current position among the first k loaded.
+        let mut places = vec![0usize; self.loaded.len() + 1];
+        for (k, id) in self.loaded.iter().enumerate() {
+            let here = index.get(id).map_or(0, |&i| i + 1);
+            places[k + 1] = places[k].max(here);
+        }
+        self.volumes
+            .iter()
+            .map(|v| (places.get(v.rank).copied().unwrap_or(0), v))
+            .collect()
+    }
+
+    /// Whether `other` has the same shapes, operations, entities and volumes, in
+    /// the same order; only brush materials and texture mappings may differ. The
+    /// lightmap depends on nothing else. A volume compares whole, materials too,
+    /// until the bake reads volumes (M11.5).
     pub fn same_geometry(&self, other: &Document) -> bool {
         self.entities == other.entities
             && self.volumes == other.volumes
@@ -261,10 +342,6 @@ impl Document {
 
     pub fn entities(&self) -> &[EntityDef] {
         &self.entities
-    }
-
-    pub fn volumes(&self) -> &[Volume] {
-        &self.volumes
     }
 
     pub fn brush(&self, id: Id) -> Option<&BrushDef> {

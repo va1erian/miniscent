@@ -73,7 +73,18 @@ This gives the behaviour a level designer expects, with no special cases:
 - Move a `Subtract` volume: its sculpting moves with it and its walls re-form from what lies there.
 
 Volumes may touch but not overlap. A move or growth that would overlap is refused, like a Vertex
-move that loses a corner. Touching volumes read each other's resolved samples across the border.
+move that loses a corner. Touching volumes must read each other's resolved samples across the border.
+**Not yet:** today a volume's ring sees only brushes, so a tunnel across a shared face is sealed by a
+wall on each side. M11.3 does this before volumes can be seen in a level.
+
+A volume may not share an order with a brush, because it would then be neither before nor after it.
+The loader refuses that. Until a volume is a `BrushDef` (M11.7), the editor keeps each one right after
+the last surviving brush that preceded it when loaded, and renumbers brushes and volumes as one
+sequence on save.
+
+**Materials of untouched rock.** `base` gives a sample's density only, so a chunk nobody painted says
+material 0. Carving into a `Subtract` volume therefore shows material 0 instead of the brush's, until
+M11.3 takes the material of the brush that decided the sample.
 
 ### Where a Subtract volume meets the BSP
 
@@ -156,7 +167,7 @@ A hostile file is the main threat, and RLE is a decompression bomb by design, so
 - Each plane must decode to exactly 4096 samples; an empty run or a run past that is an error.
 - `MAX_DETAIL_CHUNKS` is charged before each is allocated. Uniform chunks allocate nothing.
 - A volume's table is built only once the bytes left could fill it.
-- Delta ranges are checked, and overlapping volumes are rejected.
+- Delta ranges are checked, and overlapping volumes are rejected, as is a volume tied with a brush's order.
 - A material id not in the table draws with the existing grey fallback.
 
 `voxel/wire_tests.rs` covers bit flips and truncation (whatever loads is also meshed), forged runs and

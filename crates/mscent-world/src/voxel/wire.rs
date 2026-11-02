@@ -19,7 +19,7 @@ use std::sync::Arc;
 use super::chunk::{Chunk, ChunkData};
 use super::volume::{CellSize, Volume};
 use super::{CHUNK_SAMPLES, MAX_CHUNKS_PER_AXIS, MAX_DELTA};
-use crate::brush::Op;
+use crate::brush::{Brush, Op};
 use crate::format::FormatError;
 use crate::format_wire::{Cursor, len_u32, put_u16, put_u32};
 
@@ -101,6 +101,18 @@ fn encode_runs(samples: &[u8; CHUNK_SAMPLES]) -> Vec<u8> {
 
 pub(crate) fn read_volumes(body: &[u8]) -> Result<Vec<Volume>, FormatError> {
     read_with_budget(body, MAX_DETAIL_CHUNKS)
+}
+
+/// A volume sharing an order with a brush would be neither before nor after it,
+/// so the field and the BSP could disagree about that brush.
+pub(crate) fn check_orders(volumes: &[Volume], brushes: &[Brush]) -> Result<(), FormatError> {
+    let mut orders: Vec<u32> = brushes.iter().map(Brush::order).collect();
+    orders.sort_unstable();
+    let tied = |v: &Volume| orders.binary_search(&v.order()).is_ok();
+    if volumes.iter().any(tied) {
+        return Err(FormatError::BadVolume);
+    }
+    Ok(())
 }
 
 fn read_with_budget(body: &[u8], mut budget: usize) -> Result<Vec<Volume>, FormatError> {

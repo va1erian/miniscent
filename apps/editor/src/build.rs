@@ -124,10 +124,11 @@ pub fn validate(doc: &Document) -> Result<Level, String> {
     if doc.brushes().is_empty() {
         return Err("nothing to build: the level has no brushes".into());
     }
+    let orders = doc.csg_orders();
     let mut brushes = Vec::with_capacity(doc.brushes().len());
     for (i, def) in doc.brushes().iter().enumerate() {
         let brush = def
-            .to_brush(i as u32)
+            .to_brush(orders.brushes[i])
             .map_err(|e| format!("brush {} (id {}) is invalid: {e:?}", i + 1, def.id))?;
         brushes.push(brush);
     }
@@ -138,7 +139,7 @@ pub fn validate(doc: &Document) -> Result<Level, String> {
     Ok(Level {
         brushes,
         entities,
-        volumes: doc.volumes().to_vec(),
+        volumes: orders.volumes,
     })
 }
 

@@ -16,6 +16,15 @@ use super::{CHUNK_EDGE, MAX_SAMPLE, edited, quantize};
 const BAND_CELLS: f64 = 2.0;
 /// Samples averaged when smoothing: one and its six neighbours.
 const NEIGHBOURS: i32 = 7;
+/// The six samples beside one.
+const SIDES: [[i32; 3]; 6] = [
+    [-1, 0, 0],
+    [1, 0, 0],
+    [0, -1, 0],
+    [0, 1, 0],
+    [0, 0, -1],
+    [0, 0, 1],
+];
 /// How fast a smoothing dab reaches full strength going in from its edge,
 /// against the diagonal of its bounds.
 const CORE_SHARPNESS: f64 = 4.0;
@@ -221,11 +230,15 @@ fn smooth(volume: &mut Volume, ctx: &mut Context, prim: &Prim, span: Span) -> Ve
         let target = f64::from(reader.average(g));
         let moved = f64::from(value) + (target - f64::from(value)) * weight;
         let limit = f64::from(MAX_SAMPLE);
-        (moved.round().clamp(-limit, limit) as i8, old)
+        let new = moved.round().clamp(-limit, limit) as i8;
+        // An air sample's material is whatever it last held, never seen until now.
+        let grew = value < 0 && new >= 0;
+        let material = grew.then(|| reader.solid_material(g)).flatten();
+        (new, material.unwrap_or(old))
     })
 }
 
-fn collect_edited(volume: &Volume, ctx: &mut Context, span: Span, out: &mut Vec<i8>) {
+fn collect_edited(volume: &Volume, ctx: &mut Context, span: Span, out: &mut Vec<(i8, u8)>) {
     let edge = CHUNK_EDGE as i32;
     let lattice = volume.lattice;
     for z in span.first[2]..span.end[2] {
@@ -237,40 +250,48 @@ fn collect_edited(volume: &Volume, ctx: &mut Context, span: Span, out: &mut Vec<
                 let value = lattice.chunk_index(coord).and_then(|index| {
                     ctx.ensure_base(index, coord);
                     let base = ctx.cached_base(index)?.get(i);
-                    Some(edited(base, volume.table.get(index)?.sample(i).0))
+                    let (delta, material) = volume.table.get(index)?.sample(i);
+                    Some((edited(base, delta), material))
                 });
-                out.push(value.unwrap_or(-MAX_SAMPLE));
+                out.push(value.unwrap_or((-MAX_SAMPLE, 0)));
             }
         }
     }
 }
 
-/// `edited` values of a span, for reading neighbours.
+/// `edited` values and materials of a span, for reading neighbours.
 struct Reader<'a> {
     span: Span,
-    values: &'a [i8],
+    values: &'a [(i8, u8)],
 }
 
 impl Reader<'_> {
-    fn get(&self, g: [i32; 3]) -> i32 {
+    fn get(&self, g: [i32; 3]) -> (i8, u8) {
         let at = [0, 1, 2].map(|a| {
             (g[a].clamp(self.span.first[a], self.span.end[a] - 1) - self.span.first[a]) as usize
         });
         let size = [0, 1, 2].map(|a| (self.span.end[a] - self.span.first[a]) as usize);
         let i = at[0] + at[1] * size[0] + at[2] * size[0] * size[1];
-        self.values.get(i).map_or(0, |&v| i32::from(v))
+        self.values.get(i).copied().unwrap_or((-MAX_SAMPLE, 0))
+    }
+
+    fn beside(&self, g: [i32; 3], side: [i32; 3]) -> (i8, u8) {
+        self.get([g[0] + side[0], g[1] + side[1], g[2] + side[2]])
     }
 
     fn average(&self, g: [i32; 3]) -> i32 {
-        let [x, y, z] = g;
-        let sum = self.get(g)
-            + self.get([x - 1, y, z])
-            + self.get([x + 1, y, z])
-            + self.get([x, y - 1, z])
-            + self.get([x, y + 1, z])
-            + self.get([x, y, z - 1])
-            + self.get([x, y, z + 1]);
+        let sides = SIDES.iter().map(|&s| i32::from(self.beside(g, s).0));
+        let sum = i32::from(self.get(g).0) + sides.sum::<i32>();
         (sum + NEIGHBOURS / 2).div_euclid(NEIGHBOURS)
+    }
+
+    /// The material of the first solid sample beside `g`.
+    fn solid_material(&self, g: [i32; 3]) -> Option<u8> {
+        SIDES
+            .iter()
+            .map(|&s| self.beside(g, s))
+            .find(|&(value, _)| value >= 0)
+            .map(|(_, material)| material)
     }
 }
 

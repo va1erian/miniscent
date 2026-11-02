@@ -160,9 +160,15 @@ fn hostile_shapes_are_refused_or_clipped() {
     assert!(Prim::cuboid(ok, ok).is_none());
     let mut v = volume([1, 1, 1]);
     let mut ctx = Context::new(&v, &[]);
-    let huge = Prim::sphere(ok, 1.0e300).expect("finite");
+    // Past the range of brushes a distance could overflow to infinity and NaN.
+    let past = Vec3d::new(1.0e300, 0.0, 0.0);
+    assert!(Prim::sphere(ok, 1.0e308).is_none());
+    assert!(Prim::sphere(past, 1.0).is_none());
+    assert!(Prim::round_cone(ok, past, 1.0, 1.0).is_none());
+    assert!(Prim::cuboid(ok, past).is_none());
+    let huge = Prim::sphere(ok, 30_000.0).expect("in range");
     assert_eq!(apply_dab(&mut v, &mut ctx, &huge, ADD), vec![[0, 0, 0]]);
-    let far = Prim::sphere(Vec3d::new(1.0e300, -1.0e300, 0.0), 1.0e299).expect("finite");
+    let far = Prim::sphere(Vec3d::new(30_000.0, -30_000.0, 0.0), 10.0).expect("in range");
     assert!(apply_dab(&mut v, &mut ctx, &far, DabOp::Carve).is_empty());
 }
 
@@ -215,4 +221,31 @@ fn a_carve_of_brush_rock_is_stored_over_the_base() {
         .filter(|&z| z < 1.9)
         .fold(f32::MAX, f32::min);
     assert!((deepest - 0.5).abs() < 0.13, "pit floor at {deepest}");
+}
+
+#[test]
+fn smoothing_gives_new_solid_the_material_of_the_rock_beside_it() {
+    let mut v = volume([1, 1, 1]);
+    let mut ctx = Context::new(&v, &[]);
+    // A slit thinner than a cell: its samples are air that was never painted,
+    // with solid close on both sides, so smoothing closes it.
+    let boxes = [
+        ([1.0, 1.0, 1.0], [2.2, 3.0, 3.0]),
+        ([2.3, 1.0, 1.0], [3.5, 3.0, 3.0]),
+    ];
+    for (lo, hi) in boxes {
+        let lo = Vec3d::new(lo[0], lo[1], lo[2]);
+        let prim = Prim::cuboid(lo, Vec3d::new(hi[0], hi[1], hi[2])).expect("valid");
+        apply_dab(&mut v, &mut ctx, &prim, ADD);
+    }
+    let sharp = mesh_all(&v, &[]);
+    apply_dab(
+        &mut v,
+        &mut ctx,
+        &sphere(2.25, 2.0, 2.0, 0.9),
+        DabOp::Smooth,
+    );
+    let smooth = mesh_all(&v, &[]);
+    assert_ne!(sharp[0].1.triangles, smooth[0].1.triangles);
+    assert!(smooth[0].1.materials.iter().all(|&m| m == 1));
 }

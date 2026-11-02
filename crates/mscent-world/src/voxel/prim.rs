@@ -2,6 +2,8 @@
 
 use mscent_math::Vec3d;
 
+use crate::polytope::MAX_COORD;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Shape {
     Sphere {
@@ -20,22 +22,27 @@ enum Shape {
     },
 }
 
-/// A validated shape: finite, with positive sizes.
+/// A validated shape: in the range brushes use, with positive sizes. The range
+/// matters because a larger shape's distances overflow to infinity and then NaN.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Prim(Shape);
 
 fn positive(v: f64) -> bool {
-    v.is_finite() && v > 0.0
+    v > 0.0 && v <= MAX_COORD
+}
+
+fn in_range(p: Vec3d) -> bool {
+    [p.x, p.y, p.z].iter().all(|v| v.abs() <= MAX_COORD)
 }
 
 impl Prim {
     pub fn sphere(centre: Vec3d, radius: f64) -> Option<Self> {
-        (centre.is_finite() && positive(radius)).then_some(Self(Shape::Sphere { centre, radius }))
+        (in_range(centre) && positive(radius)).then_some(Self(Shape::Sphere { centre, radius }))
     }
 
     /// A tapered capsule from `a` to `b`. With equal radii it is a capsule.
     pub fn round_cone(a: Vec3d, b: Vec3d, radius_a: f64, radius_b: f64) -> Option<Self> {
-        let ok = a.is_finite() && b.is_finite() && positive(radius_a) && positive(radius_b);
+        let ok = in_range(a) && in_range(b) && positive(radius_a) && positive(radius_b);
         ok.then_some(Self(Shape::RoundCone {
             a,
             b,
@@ -45,11 +52,7 @@ impl Prim {
     }
 
     pub fn cuboid(min: Vec3d, max: Vec3d) -> Option<Self> {
-        let ok = min.is_finite()
-            && max.is_finite()
-            && positive(max.x - min.x)
-            && positive(max.y - min.y)
-            && positive(max.z - min.z);
+        let ok = in_range(min) && in_range(max) && max.x > min.x && max.y > min.y && max.z > min.z;
         ok.then_some(Self(Shape::Cuboid { min, max }))
     }
 

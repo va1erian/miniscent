@@ -27,7 +27,7 @@ use crate::format_wire::{
     Cursor, TEXINFO_BYTES, len_u32, put_f32, put_f64, put_texinfo, put_u16, put_u32, put_vec3,
 };
 use crate::texinfo::TexInfo;
-use crate::voxel::wire::{read_volumes, write_volumes};
+use crate::voxel::wire::{check_orders, read_volumes, write_volumes};
 use mscent_math::{DPlane, Vec3d};
 
 pub const MAGIC: [u8; 4] = *b"MSLV";
@@ -195,10 +195,13 @@ pub fn read(data: &[u8]) -> Result<Level, FormatError> {
     if c.remaining() != 0 {
         return Err(FormatError::Trailing);
     }
+    let brushes = brushes.ok_or(FormatError::MissingSection(SEC_BRUSHES))?;
+    let volumes = volumes.unwrap_or_default();
+    check_orders(&volumes, &brushes)?;
     Ok(Level {
-        brushes: brushes.ok_or(FormatError::MissingSection(SEC_BRUSHES))?,
+        brushes,
         entities: entities.ok_or(FormatError::MissingSection(SEC_ENTITIES))?,
-        volumes: volumes.unwrap_or_default(),
+        volumes,
     })
 }
 
