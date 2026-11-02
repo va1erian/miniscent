@@ -34,7 +34,7 @@ node graphs, animated textures, and custom emissive materials (see "Lit view").
 | xui at the pinned rev has `Tabs`, `Slider`, `ColorPicker`, `ComboBox`, `TreeView`, `Split` and context menus; the editor already has custom-painted nodes and hideable `stack`s | [app.rs](../apps/editor/src/ui/app.rs), [view3d.rs](../apps/editor/src/ui/view3d.rs) | No xui changes or new dependencies expected |
 | Normal texels are `0xAARRGGBB`, and decoding ignores alpha | `Texture::normal`, `NormalView` in texture.rs, [bump.rs](../crates/mscent-render/src/bump.rs) | The specular mask can live there; see "Engine changes" |
 | `encode_png` writes 8-bit RGB with stored (uncompressed) deflate | [png_encode.rs](../crates/mscent-render/src/png_encode.rs) | It loads correctly, but a 128 px map becomes about 49 KB (today 305 bytes to 29 KB) and a 1024 px map about 3 MB |
-| The game binary has a 1.6 MB budget | [check_size.py](../tools/check_size.py) | The game links the generator only if that is measured and worth it |
+| The game binary has a 2.2 MB budget | [check_size.py](../tools/check_size.py) | The game links the generator only if that is measured and worth it |
 
 ## What to take from kkrieger
 
