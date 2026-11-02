@@ -159,3 +159,19 @@ fn a_ramp_and_fog_never_put_a_particle_behind_the_eye_in_the_list() {
     behind.collect(&cam, None, None, &mut draws);
     assert_eq!(draws.add.len(), 0);
 }
+
+#[test]
+fn a_cleared_session_replays_the_same_particles() {
+    let snapshot = |fx: &CombatFx| {
+        let mut out = Vec::new();
+        fx.fx.for_each(|p| out.push((p.pos.x.to_bits(), p.key)));
+        out
+    };
+    let mut fx = CombatFx::new();
+    fx.drone_explosion(v(1.0, 2.0, 3.0), DRONE_TINT);
+    let first = snapshot(&fx);
+    fx.clear();
+    fx.drone_explosion(v(1.0, 2.0, 3.0), DRONE_TINT);
+    assert!(!first.is_empty());
+    assert_eq!(snapshot(&fx), first);
+}

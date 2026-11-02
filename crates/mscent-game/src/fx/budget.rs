@@ -111,6 +111,14 @@ impl Sink<'_> {
 }
 
 impl Tags {
+    pub fn with_capacity(n: usize) -> Self {
+        Self {
+            over: Vec::with_capacity(n),
+            add: Vec::with_capacity(n),
+            streaks: Vec::with_capacity(n),
+        }
+    }
+
     pub fn clear(&mut self) {
         self.over.clear();
         self.add.clear();

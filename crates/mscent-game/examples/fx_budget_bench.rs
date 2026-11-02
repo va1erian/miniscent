@@ -1,5 +1,5 @@
 //! What the budget buys on a crowded frame: 40 drone explosions before the
-//! camera, one thread, baseline kernels' machine choice.
+//! camera, on one thread with the best kernels this CPU has.
 //!
 //! Run: `cargo run --release -p mscent-game --example fx_budget_bench`
 //!

@@ -179,7 +179,7 @@ impl GameSession {
             kill: 0,
             feedback: Feedback::default(),
             fx,
-            draws: ParticleDraws::default(),
+            draws: CombatFx::new_draws(),
             bank: SpriteBank::new(),
         }
     }

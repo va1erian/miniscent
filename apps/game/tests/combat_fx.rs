@@ -6,11 +6,11 @@ use std::time::Duration;
 use miniscent_game::app::{RunOptions, run};
 use miniscent_game::{GameSession, SessionConfig, assets, levels};
 use mscent_game::fx::budget::cost_of;
-use mscent_game::fx::combat::{CombatFx, DRONE_TINT, Impact, ShotFx};
+use mscent_game::fx::combat::{CombatFx, DRONE_TINT, Impact, ShotFx, enemy_muzzle};
 use mscent_math::{Vec3, Vec3d};
 use mscent_platform::{HeadlessPlatform, Script};
 use mscent_render::particles::{ParticleDraws, SpriteBank};
-use mscent_render::{BuildConfig, Framebuffer, LevelRenderer, Quality, View};
+use mscent_render::{Actor, ActorKind, BuildConfig, Framebuffer, LevelRenderer, Quality, View};
 use mscent_world::materials::{BRICK, METAL};
 use mscent_world::{Brush, Entity, Level, Op};
 
@@ -63,25 +63,32 @@ fn view() -> View {
     View::from_angles(v(-4.0, 0.0, 0.0), -core::f32::consts::FRAC_PI_2, 0.0, 0.0)
 }
 
-fn frame(r: &LevelRenderer, fx: Option<&mut CombatFx>) -> Framebuffer {
-    let mut fb = Framebuffer::new(W, H).expect("a target");
-    let view = view();
+fn draws_of(r: &LevelRenderer, fx: Option<&mut CombatFx>) -> ParticleDraws {
     let mut draws = ParticleDraws::default();
     if let Some(fx) = fx {
-        let cam = r.camera(&view, W, H).expect("a camera");
+        let cam = r.camera(&view(), W, H).expect("a camera");
         fx.collect(&cam, r.fog(), None, &mut draws);
     }
+    draws
+}
+
+fn drawn(r: &LevelRenderer, actors: &[Actor], draws: &ParticleDraws) -> Framebuffer {
+    let mut fb = Framebuffer::new(W, H).expect("a target");
     let bank = SpriteBank::new();
     r.render_with_particles(
         &mut fb,
-        &view,
+        &view(),
         Quality::Low,
-        &[],
+        actors,
         None,
-        Some((&draws, &bank)),
+        Some((draws, &bank)),
     )
     .expect("a frame");
     fb
+}
+
+fn frame(r: &LevelRenderer, fx: Option<&mut CombatFx>) -> Framebuffer {
+    drawn(r, &[], &draws_of(r, fx))
 }
 
 fn changed(a: &Framebuffer, b: &Framebuffer) -> usize {
@@ -89,8 +96,8 @@ fn changed(a: &Framebuffer, b: &Framebuffer) -> usize {
     same.filter(|(x, y)| x != y).count()
 }
 
-/// Everything on the far side of the divider: a bolt across it from x = 3 to
-/// x = 12, an explosion, and particles from the bolt's impact.
+/// Everything on the far side of the divider: an explosion, and a bolt still
+/// on its way from x = 3 to x = 12.
 fn far_side_fx(r: &LevelRenderer) -> CombatFx {
     let mut fx = CombatFx::new();
     fx.drone_explosion(v(5.0, 0.0, 0.0), DRONE_TINT);
@@ -120,6 +127,62 @@ fn a_shot_behind_a_wall_draws_no_pixels_and_in_the_open_it_does() {
     let mut fx = far_side_fx(&open);
     let seen = changed(&frame(&open, None), &frame(&open, Some(&mut fx)));
     assert!(seen > 100, "the same effects in the open: {seen} pixels");
+}
+
+#[test]
+fn a_bolt_alone_shows_in_the_open_and_not_behind_a_wall() {
+    let bolt_pixels = |r: &LevelRenderer| {
+        let mut fx = CombatFx::new();
+        fx.shot(&ShotFx {
+            by_player: false,
+            muzzle: v(3.0, -1.0, 0.0),
+            end: v(12.0, -1.0, 0.0),
+            normal: v(-1.0, 0.0, 0.0),
+            impact: Impact::None,
+        });
+        let mut draws = draws_of(r, Some(&mut fx));
+        // Only the streaks: the muzzle flash and the head's glow are sprites.
+        assert_eq!(draws.streaks.len(), 2, "core and edge");
+        draws.over.clear();
+        draws.add.clear();
+        changed(&frame(r, None), &drawn(r, &[], &draws))
+    };
+    assert_eq!(bolt_pixels(&renderer(true)), 0);
+    assert!(bolt_pixels(&renderer(false)) > 10);
+}
+
+#[test]
+fn an_enemy_muzzle_flash_shows_in_front_of_its_own_hull() {
+    let r = renderer(false);
+    let at = v(5.0, 0.0, 0.0);
+    let enemy = [Actor {
+        kind: ActorKind::Enemy,
+        pos: at,
+        yaw: 0.0,
+    }];
+    let flash = |muzzle| {
+        let mut fx = CombatFx::new();
+        fx.shot(&ShotFx {
+            by_player: false,
+            muzzle,
+            end: muzzle,
+            normal: v(-1.0, 0.0, 0.0),
+            impact: Impact::None,
+        });
+        let draws = draws_of(&r, Some(&mut fx));
+        changed(
+            &drawn(&r, &enemy, &draws_of(&r, None)),
+            &drawn(&r, &enemy, &draws),
+        )
+    };
+    // Firing back along -X toward the eye at x = -4.
+    let outside = flash(enemy_muzzle(at, v(-4.0, 0.0, 0.0)));
+    let inside = flash(at);
+    assert!(outside > 50, "{outside} pixels");
+    assert!(
+        outside > inside * 2,
+        "{outside} against {inside} inside the hull"
+    );
 }
 
 #[test]
@@ -205,9 +268,14 @@ fn session_frame(script: &str, frames: u64) -> Vec<u32> {
 #[test]
 fn a_scripted_shot_shows_and_is_pixel_identical_twice() {
     const FIRE: &str = "at 0.1s fire for 0.5s\n";
-    let shooting = session_frame(FIRE, 30);
-    assert_eq!(shooting, session_frame(FIRE, 30), "effects replay exactly");
-    let idle = session_frame("", 30);
-    let differ = shooting.iter().zip(&idle).filter(|(a, b)| a != b).count();
-    assert!(differ > 0, "the shot draws something");
+    // Two frames after the first shot, with its flash and bolt on screen.
+    const IN_FLIGHT: u64 = 8;
+    let shooting = session_frame(FIRE, IN_FLIGHT);
+    assert_eq!(shooting, session_frame(FIRE, IN_FLIGHT), "effects replay");
+    let idle = session_frame("", IN_FLIGHT);
+    // Above the HUD, whose ammo count changes with a shot anyway.
+    let world = 160 * 60;
+    let same = shooting[..world].iter().zip(&idle[..world]);
+    let differ = same.filter(|(a, b)| a != b).count();
+    assert!(differ > 5, "the bolt draws: {differ} pixels");
 }

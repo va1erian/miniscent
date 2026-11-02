@@ -8,7 +8,7 @@
 
 use super::class::Collide;
 use mscent_math::Vec3;
-use mscent_math::epsilon::{PARTICLE_NORMAL_PROBE, PLANE_EPSILON_F32};
+use mscent_math::epsilon::{PARTICLE_NORMAL_PROBE, PARTICLE_REST_SPEED, PLANE_EPSILON_F32};
 use mscent_world::Bsp;
 
 /// `is_solid` calls per tick, over all classes.
@@ -91,6 +91,16 @@ fn bounce(bsp: &Bsp, budget: &mut Budget, prev: Vec3, pos: Vec3, vel: Vec3, keep
     }
     if !bsp.is_solid(pos.to_f64()) {
         return Outcome::Free;
+    }
+    if vel.length() < PARTICLE_REST_SPEED {
+        return if bsp.is_solid(prev.to_f64()) {
+            Outcome::Dead
+        } else {
+            Outcome::Bounced {
+                pos: prev,
+                vel: Vec3::ZERO,
+            }
+        };
     }
     if !budget.take_sweep() {
         return Outcome::Dead;

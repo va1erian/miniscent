@@ -1,7 +1,7 @@
 //! A shot as the game reported it, turned into an effect: where the bolt
 //! starts and what it does where it ends.
 
-use mscent_game::fx::combat::{Impact, ShotFx};
+use mscent_game::fx::combat::{Impact, ShotFx, enemy_muzzle};
 use mscent_game::{Shooter, Struck};
 use mscent_math::Vec3;
 
@@ -24,7 +24,7 @@ impl GameSession {
         let muzzle = if by_player {
             origin + self.game.player.orientation.rotate(GUN_OFFSET)
         } else {
-            origin
+            enemy_muzzle(origin, end)
         };
         let impact = match struck {
             // A hit on the player would burst inside the camera.

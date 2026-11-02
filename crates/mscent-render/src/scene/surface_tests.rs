@@ -1,6 +1,6 @@
 use super::*;
 use crate::texture::{Material, MaterialTable};
-use mscent_world::{GenParams, compile, extract_faces, generate};
+use mscent_world::{Brush, GenParams, Op, compile, extract_faces, generate};
 
 const COLOURS: [u32; 5] = [
     0xffc0_8060,
@@ -15,6 +15,10 @@ fn scene() -> Scene {
     let bsp = compile(&brushes).expect("compiles");
     let faces = extract_faces(&bsp, &brushes);
     let portals = mscent_world::Portals::build(&bsp);
+    Scene::new(bsp, faces, portals, table())
+}
+
+fn table() -> MaterialTable {
     let mut table = MaterialTable::new();
     for (i, c) in COLOURS.into_iter().enumerate() {
         table.add(Material {
@@ -23,7 +27,7 @@ fn scene() -> Scene {
             texture: Texture::solid(c),
         });
     }
-    Scene::new(bsp, faces, portals, table)
+    table
 }
 
 fn centre(face: &Face) -> Vec3 {
@@ -69,4 +73,28 @@ fn the_mean_of_a_filtered_texture_matches_its_texels() {
     let filtered = mean_tint(&plain.filtered());
     let channel = (filtered >> 8) & 0xff;
     assert!((0x7e..=0x80).contains(&channel), "{filtered:#x}");
+}
+
+#[test]
+fn coplanar_faces_in_one_leaf_are_told_apart_by_the_point() {
+    let d = Vec3d::new;
+    let cuboid = |a, b, op, order| Brush::cuboid(a, b, op, order).expect("a brush");
+    let brushes = vec![
+        cuboid(d(-9.0, -9.0, -9.0), d(9.0, 9.0, 9.0), Op::Subtract, 0),
+        // Two slabs side by side, their tops on one plane in one open room.
+        cuboid(d(-9.0, -9.0, -9.0), d(0.0, 9.0, -5.0), Op::Add, 1).with_material(1),
+        cuboid(d(0.0, -9.0, -9.0), d(9.0, 9.0, -5.0), Op::Add, 2).with_material(2),
+    ];
+    let bsp = compile(&brushes).expect("compiles");
+    let faces = extract_faces(&bsp, &brushes);
+    let portals = mscent_world::Portals::build(&bsp);
+    let scene = Scene::new(bsp, faces, portals, table());
+    let up = Vec3::new(0.0, 0.0, 1.0);
+    let at = |x| {
+        scene
+            .surface_at(Vec3::new(x, 0.0, -5.0), up)
+            .map(|s| s.material)
+    };
+    assert_eq!(at(-4.0), Some(1));
+    assert_eq!(at(4.0), Some(2));
 }

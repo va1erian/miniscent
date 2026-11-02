@@ -78,6 +78,15 @@ pub struct ParticleDraws {
 }
 
 impl ParticleDraws {
+    /// Lists that hold `n` draws each before they would grow.
+    pub fn with_capacity(n: usize) -> Self {
+        Self {
+            over: Vec::with_capacity(n),
+            add: Vec::with_capacity(n),
+            streaks: Vec::with_capacity(n),
+        }
+    }
+
     /// Empty every list, keeping their capacity.
     pub fn clear(&mut self) {
         self.over.clear();

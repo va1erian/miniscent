@@ -113,8 +113,9 @@ pub(super) fn draw_streak(fb: &mut Framebuffer, st: &StreakDraw) {
     // coordinates, not from the clipped parameters, keeps a screen-crossing
     // line of 1e30 length whole: its parameters are too close together to
     // tell the cells apart in `f64`. The walk is at most one screen side long.
-    let first = m0.min(m1).floor().max(major_box.0);
-    let last = (m0.max(m1).ceil().max(first + 1.0)).min(major_box.1);
+    let first = m0.min(m1).floor();
+    let last = m0.max(m1).ceil().max(first + 1.0).min(major_box.1);
+    let first = first.max(major_box.0);
     // Both are within the screen extent now, so the casts cannot overflow.
     let (first, last) = (first as i64, last as i64);
     let steps = StepAlong {

@@ -107,6 +107,7 @@ pub struct Fx {
     /// collision limits are spent where they matter most.
     order: Vec<u8>,
     rng: Rng,
+    seed: u64,
     clock: Clock,
     queue: emit::Queue,
     budget: Budget,
@@ -133,6 +134,7 @@ impl Fx {
             pools,
             order: collision_order(classes),
             rng: Rng::new(seed),
+            seed,
             clock: Clock::default(),
             queue: emit::Queue::default(),
             budget: Budget::default(),
@@ -176,8 +178,10 @@ impl Fx {
         self.clock.alpha()
     }
 
-    /// Removes every particle and waiting emitter and restarts the clock.
+    /// Removes every particle and waiting emitter and restarts the clock and
+    /// the seed, so a restarted run replays its effects as it does its gameplay.
     pub fn clear(&mut self) {
+        self.rng = Rng::new(self.seed);
         self.pools.iter_mut().for_each(Pool::clear);
         self.queue.clear();
         self.clock = Clock::default();

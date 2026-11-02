@@ -11,6 +11,7 @@ use mscent_world::Bsp;
 
 use super::budget::{self, Keep, Limits, Sink, Tag, Tags, Tally};
 use super::class::Blend;
+use super::class::MAX_TOTAL_CAPACITY;
 use super::collect::{self, FogView};
 use super::recipes;
 use super::{Effect, EffectArgs, Fx};
@@ -22,6 +23,11 @@ const BOLT_SPEED: f32 = 400.0;
 const MAX_FLIGHT: f32 = 0.08;
 const BOLT_TAIL: f32 = 4.0;
 const MAX_BOLTS: usize = 32;
+/// Every particle, plus the two streaks and a glow of every bolt.
+const MAX_DRAWS: usize = MAX_TOTAL_CAPACITY + 3 * MAX_BOLTS;
+/// Past the front of a drone, which measures 1.0 from its centre on real depth,
+/// so its flash is not drawn behind its own body.
+const ENEMY_MUZZLE_REACH: f32 = 1.3;
 const GLOW_RADIUS: f32 = 0.22;
 const PLAYER_EDGE: u32 = 0xff20_90b0;
 const ENEMY_EDGE: u32 = 0xffc0_5010;
@@ -96,7 +102,7 @@ impl CombatFx {
             bolts: [None; MAX_BOLTS],
             limits: Limits::of(Quality::High),
             keep: Keep::default(),
-            tags: Tags::default(),
+            tags: Tags::with_capacity(MAX_DRAWS),
         }
     }
 
@@ -180,6 +186,12 @@ impl CombatFx {
         self.fx.spawn(recipes::DRONE_EXPLOSION, &args);
     }
 
+    /// Draw lists that already hold the fullest possible frame, so play never
+    /// grows them.
+    pub fn new_draws() -> ParticleDraws {
+        ParticleDraws::with_capacity(MAX_DRAWS)
+    }
+
     /// Replaces `out` with this frame's draws, fitted to the budget. `depth` is
     /// the last frame, if there is one, for judging what the scene hides. No
     /// allocation once the lists have grown to a frame's size.
@@ -209,6 +221,13 @@ impl CombatFx {
         budget::thin(out, &self.tags, self.keep);
         collect::sort_back_to_front(&mut out.over);
     }
+}
+
+/// Where an enemy at `origin` firing toward `end` shows its muzzle.
+pub fn enemy_muzzle(origin: Vec3, end: Vec3) -> Vec3 {
+    let to = end - origin;
+    let reach = ENEMY_MUZZLE_REACH.min(to.length());
+    origin + to.normalized().unwrap_or(Vec3::ZERO) * reach
 }
 
 fn args_at(pos: Vec3, dir: Vec3) -> EffectArgs {
@@ -248,8 +267,8 @@ fn arrival_of(s: &ShotFx) -> Option<(Effect, EffectArgs)> {
     }
 }
 
-/// The drone's dark hull, for its chips.
-pub const DRONE_TINT: u32 = 0x0060_6878;
+/// The drone's red hull, for its chips.
+pub const DRONE_TINT: u32 = 0x00c0_2828;
 
 fn draw_bolt(b: &Bolt, cam: &Camera, fog: &FogView, out: &mut Sink) {
     let (head, tail) = b.span();

@@ -231,3 +231,20 @@ fn non_finite_streak_draws_nothing() {
     }
     assert!(lit(&fb).is_empty());
 }
+
+#[test]
+fn a_streak_ending_on_a_band_edge_draws_nothing_in_the_next_band() {
+    let s = streak(pt(50.5, 23.2, 0.5), pt(50.5, 24.0, 0.5), 1);
+    let mut below = Framebuffer::new_band(W, 24, 24, H).unwrap();
+    let before = below.pixels().to_vec();
+    draw_streak(&mut below, &s);
+    assert_eq!(
+        below.pixels(),
+        &before[..],
+        "the whole frame walks row 23 only"
+    );
+    let mut above = Framebuffer::new_band(W, 0, 24, H).unwrap();
+    let before = above.pixels().to_vec();
+    draw_streak(&mut above, &s);
+    assert_ne!(above.pixels(), &before[..]);
+}

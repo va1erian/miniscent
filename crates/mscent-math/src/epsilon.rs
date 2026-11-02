@@ -47,3 +47,8 @@ pub const UNIT_NORM_TOLERANCE: f32 = 1.0e-4;
 /// for solid when estimating a surface normal. Larger than the bisection
 /// error of a bounce, smaller than any wall the editor snaps to.
 pub const PARTICLE_NORMAL_PROBE: f32 = 5.0e-2;
+
+/// A bouncing particle meeting a wall slower than this, in units/s, stops
+/// instead of bouncing. Well above a tick of gravity (0.15 at 9 units/s^2), so
+/// one lying on a floor does not spend a surface query on every tick.
+pub const PARTICLE_REST_SPEED: f32 = 0.5;

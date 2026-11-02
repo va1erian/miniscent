@@ -160,3 +160,21 @@ fn bounce_particles_get_the_test_budget_before_die_particles() {
     assert_eq!(fx.pools[2].len(), 400, "no bounce particle may be starved");
     assert_eq!(fx.last_tick_collision().solid_tests, MAX_SOLID_TESTS);
 }
+
+#[test]
+fn particles_lying_on_a_floor_spend_no_queries_and_all_survive() {
+    static FALLING: [ParticleClass; 1] = [ParticleClass {
+        gravity: 9.0,
+        ..class(Collide::Bounce { keep: 0.35 }, 200, Tier::Normal)
+    }];
+    static DROP: [Emitter; 1] = [emitter(0, 200, Shape::Sphere(0.5), 0.0, 100.0)];
+    let bsp = room_bsp();
+    let mut fx = Fx::new(&FALLING, 1);
+    fx.spawn(&DROP, &args_at(v(0.0, 0.0, -19.0)));
+    for _ in 0..240 {
+        fx.tick(&bsp);
+    }
+    assert_eq!(fx.live(), 200, "more than the 32 queries a tick allows");
+    assert_eq!(fx.last_tick_collision().sweeps, 0, "all at rest");
+    assert!(positions(&fx, 0).iter().all(|&p| !solid(&bsp, p)));
+}

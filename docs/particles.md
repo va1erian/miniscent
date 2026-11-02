@@ -192,11 +192,19 @@ Where the code differs from the design:
 - **`Enemy::step` clears `last_shot` before its alive check.** The old `fired` flag stayed set on an
   enemy killed the step after it fired, so it reported `EnemyFired` on every later step.
 
+The pre-PR review of this work found these, now fixed: an enemy's flash was drawn inside its own hull
+and never showed; a landed chip spent a surface query each tick until the limit killed its neighbours
+(it now rests, `PARTICLE_REST_SPEED`); the draw lists grew during play, so they now start at the size
+of the fullest frame; debris was blue-grey on a red drone; a streak could draw one extra row at a
+band edge; `clear` kept the generator's state, so a restart did not replay its effects; and three
+tests could pass without the bolt, the particles or `contains` doing their work.
+
 Evidence: `particles/*_tests.rs`, `fx_tests.rs`, `fx_collide_tests.rs`, `fx_combat_tests.rs`,
 `surface_tests.rs`, `tests/fx_alloc.rs`, `tests/fx_collect_alloc.rs` and `apps/game/tests/combat_fx.rs`,
 which draws through a real baked level: a shot behind a wall changes no pixels (the same effects in
-the open change more than 100), metal and brick give different pictures, and a scripted shot is
-pixel-identical twice. Screenshots of a kill and a close wall hit were looked at during development.
+the open change more than 100), a bolt alone does the same, metal and brick give different pictures,
+an enemy's flash shows in front of its hull, and a scripted shot is pixel-identical twice while its
+bolt is on screen. Screenshots of a kill and a close wall hit were looked at during development.
 Not tested: a real window, the i3-7100U, or whether the recipes look right to a person who plays it.
 
 ## What was built (M9.4)
