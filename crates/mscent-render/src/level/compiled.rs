@@ -15,11 +15,12 @@ use mscent_world::lightmap::{
     BakeConfig, CellRecord, CellSites, LightFace, Lightmap, LightmapError, Occluders, PointLight,
     bake_in, shape_key,
 };
-use mscent_world::materials::NO_DRAW;
+use mscent_world::materials::{NO_DRAW, view_slot};
 use mscent_world::voxel::{ChunkMesh, VoxelWorld};
 use mscent_world::{Bsp, Face, Level, Portals, brush_faces, compile, extract_faces};
 
 use super::setup::{actors_of, lights_of, with_level_fog};
+use super::vista::Vistas;
 use super::{
     Actor, BakeCache, BakedLight, BuildConfig, BuildError, LevelRenderer, check_materials,
 };
@@ -44,11 +45,26 @@ fn append_mover_faces(level: &Level, faces: &mut Vec<Face>) -> Vec<Range<usize>>
     ranges
 }
 
+/// Moves the viewport faces out of `faces`, before any light is laid out for them.
+fn take_viewport_faces(faces: &mut Vec<Face>) -> Vec<(Face, u8)> {
+    let (holes, rest): (Vec<Face>, Vec<Face>) = core::mem::take(faces)
+        .into_iter()
+        .partition(|f| view_slot(f.material).is_some());
+    *faces = rest;
+    holes
+        .into_iter()
+        .filter_map(|f| view_slot(f.material).map(|slot| (f, slot)))
+        .collect()
+}
+
 /// What the renderer keeps of a compiled level.
 pub(super) struct Parts {
     pub bsp: Bsp,
     /// The world's faces, then each mover's.
     pub faces: Vec<Face>,
+    /// Viewport faces with their slots, kept apart: no luxels, no texture.
+    pub holes: Vec<(Face, u8)>,
+    pub vistas: Vistas,
     /// For each mover, which of `faces` are its own.
     pub mover_ranges: Vec<Range<usize>>,
     pub portals: Portals,
@@ -148,9 +164,11 @@ impl Compiled {
         let mut faces = extract_faces(&bsp, &brushes);
         // The voxel surface closes in front of a shell, before any light is laid out for it.
         faces.retain(|f| f.material != NO_DRAW);
+        let holes = take_viewport_faces(&mut faces);
         let voxels = VoxelWorld::build(level, &level.static_brushes(), &bsp);
         let mover_ranges = append_mover_faces(level, &mut faces);
         let portals = Portals::build(&bsp);
+        let vistas = Vistas::new(level, &bsp, &portals);
         let light_faces = faces.iter().map(LightFace::from).collect();
         let bake_cfg = BakeConfig {
             luxel_size: cfg.luxel_size,
@@ -165,6 +183,8 @@ impl Compiled {
         let parts = Parts {
             bsp,
             faces,
+            holes,
+            vistas,
             mover_ranges,
             portals,
             lights: lights_of(level, cfg.light_gain),

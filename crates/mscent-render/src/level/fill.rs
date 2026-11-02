@@ -13,7 +13,7 @@ use crate::dynlight::{DynLight, MAX_DYN_LIGHTS};
 use crate::framebuffer::Framebuffer;
 use crate::lighting_shader::{FaceLight, LightingShader};
 use crate::raster::{DrawStats, PolyList};
-use crate::shade::FlatShader;
+use crate::shade::{FlatShader, Fog};
 
 /// Adds the lights of the frame that reach `face` to its shader.
 fn add_lights<const SPEC: bool>(
@@ -64,7 +64,7 @@ impl LevelRenderer {
         lights: &[DynLight],
     ) -> DrawStats {
         self.scene.fill_frame(fb, list, None, &mut |i, face| {
-            self.face_shader(i, face, eye, quality, lights)
+            self.face_shader(i, face, eye, quality, lights, self.fog())
         })
     }
 
@@ -77,8 +77,8 @@ impl LevelRenderer {
         eye: Vec3,
         quality: Quality,
         lights: &[DynLight],
+        fog: Option<Fog>,
     ) -> FaceShader<'_> {
-        let fog = self.fog();
         let flat = |light| FaceShader::Flat(FlatShader::new(light, fog));
         if face.material == LIGHTPANEL {
             return flat(EMISSIVE);

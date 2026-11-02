@@ -211,6 +211,18 @@ impl PolyList {
         }
     }
 
+    /// Screen bounds `[x0, y0, x1, y1]` of the polygons tagged `tag`.
+    pub(crate) fn bounds_of(&self, tag: u32) -> Option<[f32; 4]> {
+        let mut bounds = None;
+        for poly in self.polys.iter().filter(|p| p.tag == tag) {
+            for p in self.pts.get(poly.start..poly.end).unwrap_or(&[]) {
+                let [x0, y0, x1, y1] = bounds.unwrap_or([p.x, p.y, p.x, p.y]);
+                bounds = Some([x0.min(p.x), y0.min(p.y), x1.max(p.x), y1.max(p.y)]);
+            }
+        }
+        bounds
+    }
+
     /// The polygons touching rows `lo..hi`, in the order they were pushed.
     pub(crate) fn in_rows(&self, (lo, hi): (i32, i32)) -> impl Iterator<Item = ListedPoly> + '_ {
         self.polys
