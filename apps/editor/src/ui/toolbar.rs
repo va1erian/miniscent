@@ -35,22 +35,32 @@ pub struct IconButton<M: 'static> {
 }
 
 impl<M: Clone + 'static> IconButton<M> {
-    pub fn new(ui: &Ui<M>, glyph: Glyph, tip: &str, msg: M) -> Result<IconButton<M>> {
-        Self::make(ui, Content::Glyph(glyph), tip, msg, SIDE)
+    /// `tips` is the window-level handle the tooltip is created through: made
+    /// through `ui` it would be a child of the button's panel and clipped to it.
+    pub fn new(ui: &Ui<M>, tips: &Ui<M>, glyph: Glyph, tip: &str, msg: M) -> Result<IconButton<M>> {
+        Self::make(ui, tips, Content::Glyph(glyph), tip, msg, SIDE)
     }
 
     /// A button showing `image`, `side` dip wide (a material preview).
     pub fn picture(
         ui: &Ui<M>,
+        tips: &Ui<M>,
         image: Image,
         tip: &str,
         msg: M,
         side: i32,
     ) -> Result<IconButton<M>> {
-        Self::make(ui, Content::Picture(image), tip, msg, side)
+        Self::make(ui, tips, Content::Picture(image), tip, msg, side)
     }
 
-    fn make(ui: &Ui<M>, content: Content, tip: &str, msg: M, side: i32) -> Result<IconButton<M>> {
+    fn make(
+        ui: &Ui<M>,
+        tips: &Ui<M>,
+        content: Content,
+        tip: &str,
+        msg: M,
+        side: i32,
+    ) -> Result<IconButton<M>> {
         let spec = NodeSpec::new(NodeKind::Custom, Rect::new(0, 0, side, side)).tab_stop();
         let control = Control::new(ui, &spec)?;
         let checked = Rc::new(Cell::new(false));
@@ -146,7 +156,7 @@ impl<M: Clone + 'static> IconButton<M> {
                 }
             });
         }
-        let _tip = Tooltip::attach(ui, control.id(), tip)?;
+        let _tip = Tooltip::attach(tips, control.id(), tip)?;
         Ok(IconButton {
             control,
             checked,
