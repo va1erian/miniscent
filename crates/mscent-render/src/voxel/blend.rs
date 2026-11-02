@@ -64,7 +64,7 @@ impl Frame {
 
     /// `v` in the frame the normal maps are authored in, on a surface facing `n`.
     #[inline]
-    fn to_tangent(&self, v: Vec3, n: Vec3) -> Vec3 {
+    fn to_tangent(self, v: Vec3, n: Vec3) -> Vec3 {
         Vec3::new(v.dot(self.u), -v.dot(self.v), v.dot(n))
     }
 }
@@ -128,7 +128,6 @@ pub(super) fn fill_blended(
     c: &[Corner; 3],
     grad: &Gradient,
     looks: [(u8, u8); 3],
-    full: bool,
     ctx: &FillContext,
     stats: &mut DrawStats,
 ) {
@@ -143,10 +142,8 @@ pub(super) fn fill_blended(
         Look {
             lod: tex.lod_sampler(level_of(tex, rate)),
             smooth: tex.is_filtered(),
-            normals: tex
-                .normal_view()
-                .filter(|_| ctx.bump && full && scale > 0.0),
-            spec: table.filter(|t| ctx.specular && full && t.is_visible()),
+            normals: tex.normal_view().filter(|_| ctx.bump && scale > 0.0),
+            spec: table.filter(|t| ctx.specular && t.is_visible()),
         }
     });
     let (iz0, izx, izy) = grad.plane([c[0].iz, c[1].iz, c[2].iz]);

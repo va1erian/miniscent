@@ -86,7 +86,6 @@ fn fill_chunk(
             data,
             index: [ia, ib, ic],
             lights: listed.lights,
-            full: lod == 0,
         };
         fill_tri(fb, &tri, [a, b, d].map(|s| (s.x, s.y, s.iz)), ctx, stats);
     }
@@ -98,8 +97,6 @@ struct Tri<'a> {
     data: &'a LodData,
     index: [usize; 3],
     lights: u8,
-    /// Full detail: beyond it shading is Gouraud plus albedo only.
-    full: bool,
 }
 
 fn fill_tri(
@@ -189,7 +186,7 @@ fn draw_corners(
     }
     let grad = Gradient::new(c, det);
     match plain_look(tri) {
-        Some((axis, material)) => fill_plain(fb, tri, c, &grad, axis, material, ctx, stats),
+        Some((axis, material)) => fill_plain(fb, c, &grad, axis, material, ctx, stats),
         None => {
             let corners = tri.index.map(|i| {
                 (
@@ -197,7 +194,7 @@ fn draw_corners(
                     tri.data.material.get(i).copied().unwrap_or(0),
                 )
             });
-            fill_blended(fb, c, &grad, corners, tri.full, ctx, stats);
+            fill_blended(fb, c, &grad, corners, ctx, stats);
         }
     }
 }
@@ -210,7 +207,6 @@ fn over_z(c: &[Corner; 3], value: impl Fn(&Corner) -> Vec3) -> [Vec3; 3] {
 #[allow(clippy::too_many_arguments)]
 fn fill_plain(
     fb: &mut Framebuffer,
-    tri: &Tri,
     c: &[Corner; 3],
     grad: &Gradient,
     axis: u8,
@@ -257,8 +253,8 @@ fn fill_plain(
         origin.advance(gx, cx).advance(gy, cy)
     };
     let (level, rate) = mip_level(tex, centre, gx, Some(gy));
-    let normals = tex.normal_view().filter(|_| ctx.bump && tri.full);
-    let table = if ctx.specular && tri.full {
+    let normals = tex.normal_view().filter(|_| ctx.bump);
+    let table = if ctx.specular {
         ctx.spec
             .get(usize::from(id))
             .or(ctx.spec.last())

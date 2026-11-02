@@ -35,9 +35,18 @@ fn voxel_frame(
     texture: &crate::Texture,
     spec: &[crate::SpecTable],
 ) -> Framebuffer {
+    let at = Vec3::new(0.0, -3.0, 4.0);
+    voxel_frame_from(scene, texture, spec, at)
+}
+
+fn voxel_frame_from(
+    scene: &crate::voxel::VoxelScene,
+    texture: &crate::Texture,
+    spec: &[crate::SpecTable],
+    eye: Vec3,
+) -> Framebuffer {
     use crate::voxel::fill::{FillContext, fill_voxels};
     use crate::voxel::list::VoxelList;
-    let eye = Vec3::new(0.0, -3.0, 4.0);
     let cam = crate::Camera::look_at(
         eye,
         Vec3::new(0.0, 0.0, 0.5),
@@ -240,4 +249,61 @@ fn a_pattern_on_a_curved_surface_stays_clean_where_projections_meet() {
     // Dithering across the triangles gave 304 here. A few are left where a seam
     // crosses the checker's own corners.
     assert!(n < 60, "{n} speckled pixels");
+}
+
+/// A chunk at a lower level of detail must keep its bump mapping, or the border
+/// with a nearer chunk shows as a hard line between textured and flat rock.
+#[test]
+fn a_far_chunk_keeps_its_bump_mapping() {
+    use crate::voxel::{VertexLight, VoxelScene};
+    use mscent_world::voxel::VoxelWorld;
+    let brushes = vec![
+        Brush::cuboid(v(-40.0, -40.0, 0.0), v(40.0, 40.0, 40.0), Op::Subtract, 0).expect("valid"),
+    ];
+    let mut volume =
+        Volume::new(Op::Add, 1, CellSize::Quarter, [-16, -16, -16], [2, 2, 2]).expect("valid");
+    let shape = volume.clone();
+    let mut ctx = Context::new(&shape, &brushes);
+    let top = Prim::cuboid(v(-3.9, -3.9, -1.0), v(3.9, 3.9, 0.6)).expect("valid");
+    apply_dab(&mut volume, &mut ctx, &top, DabOp::Add { material: 0 });
+    let level = Level {
+        brushes,
+        volumes: vec![volume],
+        ..Default::default()
+    };
+    let bsp = mscent_world::compile(&level.csg_brushes()).expect("compiles");
+    let world = VoxelWorld::build(&level, &level.static_brushes(), &bsp);
+    let scene = VoxelScene::new(world, bsp.leaves().len(), |_, m| {
+        let lit = VertexLight {
+            color: Vec3::new(150.0, 150.0, 150.0),
+            dir: Vec3::new(0.5, -0.3, 0.8),
+        };
+        vec![lit; m.vertices.len()]
+    });
+    // Past where full detail ends, near enough that the bump has not faded.
+    let eye = Vec3::new(0.0, -13.0, 9.0);
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures");
+    let bumpy = crate::load_texture(&dir, "rock").expect("rock").filtered();
+    let pixels: Vec<u32> = (0..128 * 128).map(|_| 0xff80_8080).collect();
+    let spec = [crate::SpecTable::new(0)];
+    let flat_map = crate::Texture::new(128, 128, pixels.clone()).expect("flat");
+    let mut with_map = flat_map.clone();
+    let normals: Vec<u32> = (0..bumpy.height() as i32)
+        .flat_map(|y| {
+            let b = &bumpy;
+            (0..b.width() as i32).map(move |x| b.normal_texel(x, y).unwrap_or(0xff80_80ff))
+        })
+        .collect();
+    with_map = with_map.with_normals(normals).expect("normals");
+    let (a, b) = (
+        voxel_frame_from(&scene, &with_map, &spec, eye),
+        voxel_frame_from(&scene, &flat_map, &spec, eye),
+    );
+    let differing = a
+        .pixels()
+        .iter()
+        .zip(b.pixels())
+        .filter(|(x, y)| x != y)
+        .count();
+    assert!(differing > 500, "only {differing} pixels show the bump");
 }

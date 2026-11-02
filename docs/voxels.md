@@ -248,15 +248,18 @@ overloaded view therefore loses distant detail first, and frame time stays bound
 - **Projection:** each triangle picks its dominant axis and maps world coordinates through it, with
   the material's scale. UVs depend only on world position, so **textures do not swim when the surface
   is edited**. Triplanar blending would cost three texture fetches a pixel, which the budget cannot pay.
-- **Seams and material borders:** a triangle whose vertices disagree on axis or material takes a
-  blending shader variant that picks either side per pixel through a 4x4 ordered dither. It is stable
-  on screen, cheap, and only those triangles pay. It is the one mechanism for both cases.
+- **Seams and material borders:** a triangle whose vertices disagree on axis chooses the axis per pixel
+  from the interpolated normal, so two projections meet along the line where the surface really turns.
+  Two materials meet at the middle of the triangle, with a narrow 4x4 ordered dither to take off the stair-step.
+  Only those triangles pay. A dither across the whole triangle was tried first: it turned spots on a cap to
+  noise, and drew squares around anything round, because it followed the voxel grid.
 - **Light:** colour and dominant direction interpolate perspective-correctly from the vertices. The
   values are attached to world points, so this cannot return the screen-space span crawl that the
   per-pixel lightmap work removed. `examples/crawl.rs` is extended to prove it.
 - **Bump and specular:** the tangent axes are the two world axes of the projection, so moving the
-  world direction into tangent space is a swizzle, and the existing bump and specular code applies.
-  Beyond LOD0, shading is Gouraud plus albedo only.
+  world direction into tangent space is a swizzle, and the existing bump and specular code applies, at
+  every level of detail: bump fades with distance by itself, and cutting it off at a chunk border drew a
+  hard line between textured and flat rock.
 
 ## Lighting
 
