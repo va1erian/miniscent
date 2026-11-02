@@ -4,6 +4,8 @@
 
 use super::class::{Blend, ClassId, Collide, ParticleClass, Prim, PuffShape, Tier};
 use super::emit::{Effect, Emitter, Shape, TintSource};
+use super::lights::LightRecipe;
+use mscent_math::Vec3;
 use mscent_world::materials::{BRICK, FLOOR, LIGHTPANEL, METAL, ROCK};
 
 pub const HOT_SPARK: ClassId = ClassId(0);
@@ -316,3 +318,28 @@ pub static DRONE_EXPLOSION: Effect = &[
         em(SMOKE, (12, 12), Shape::Sphere(0.8), (0.1, 0.5), (1.2, 1.8)),
     ),
 ];
+
+/// The flash of a drone blowing up, lighting the room it is in.
+pub const EXPLOSION_LIGHT: LightRecipe = LightRecipe {
+    radius: 12.0,
+    life: 0.25,
+    color: Vec3::new(3.0, 1.8, 0.9),
+    lift: 0.0,
+};
+
+/// A bolt striking a wall: a small warm flash on the wall and what is near.
+pub const SURFACE_LIGHT: LightRecipe = LightRecipe {
+    radius: 4.0,
+    life: 0.1,
+    color: Vec3::new(1.0, 0.8, 0.5),
+    lift: 0.6,
+};
+
+/// A bolt striking a drone, which it lights by itself since the mesh has no
+/// lightmap to take the flash.
+pub const DRONE_HIT_LIGHT: LightRecipe = LightRecipe {
+    radius: 4.0,
+    life: 0.1,
+    color: Vec3::new(0.6, 0.95, 1.1),
+    lift: 0.5,
+};

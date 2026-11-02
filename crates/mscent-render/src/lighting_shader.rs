@@ -14,6 +14,7 @@ use mscent_math::Vec3;
 use mscent_world::lightmap::{FaceProjection, Lightmap};
 
 use crate::bump::{FLAT_NORMAL, bump_gain, view_normal};
+use crate::face_points::FacePoints;
 use crate::light_sampler::{Cell, FaceSampler, Plan};
 use crate::lightmap_mips::{LightMips, Rgbx};
 use crate::raster::SPAN_LEN;
@@ -106,6 +107,8 @@ pub struct LightingShader<'a, const SPEC: bool> {
     normals: Option<NormalView<'a>>,
     proj: FaceProjection,
     spec: Option<SpecInput<'a>>,
+    /// Short-lived lights on this face; empty for nearly every face.
+    points: FacePoints,
     // Per-span state: the light of each pixel, colour in 256 = full-light
     // units and directions in the texture frame.
     col: [Rgbx; MAX_PX],
@@ -156,6 +159,7 @@ impl<'a, const SPEC: bool> LightingShader<'a, SPEC> {
             normals: face.texture.normal_view().filter(|_| face.bump),
             proj,
             spec,
+            points: FacePoints::NONE,
             col: [[0.0; 4]; MAX_PX],
             segs: [EMPTY_SEG; MAX_SEGS],
             shift: MAX_SEG_SHIFT,
@@ -167,6 +171,14 @@ impl<'a, const SPEC: bool> LightingShader<'a, SPEC> {
             fog0: 0.0,
             fog_step: 0.0,
         })
+    }
+
+    /// Adds a short-lived point light (world `pos`, `color` where 1.0 is a
+    /// plain texture colour at point-blank range) to this face. It joins the
+    /// baked light before the albedo and fog, so a dark wall lights up. False
+    /// if four lights are already on the face or a value is not usable.
+    pub fn add_point(&mut self, pos: Vec3, radius: f32, color: Vec3) -> bool {
+        self.points.add(&self.proj, pos, radius, color)
     }
 
     /// Whether anything downstream reads the baked light direction.
@@ -202,6 +214,10 @@ impl<'a, const SPEC: bool> LightingShader<'a, SPEC> {
             &mut self.cells,
             &mut self.col[..n],
         );
+        if !self.points.is_empty() {
+            self.points
+                .add_span(&mut self.col[..n], (ax, ay), (bx, by), len);
+        }
         if self.wants_dir() {
             self.begin_dirs(len, (ax, ay), (bx, by));
         }

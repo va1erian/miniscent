@@ -171,4 +171,6 @@ fn a_quality_spends_what_its_row_says() {
     assert_eq!(Limits::of(Quality::High).screens, 5.0);
     assert_eq!(Limits::of(Quality::Medium).density, 0.7);
     assert_eq!(Limits::of(Quality::Low).screens, 1.5);
+    let lights = [Quality::High, Quality::Medium, Quality::Low].map(|q| Limits::of(q).lights);
+    assert_eq!(lights, [4, 2, 1]);
 }

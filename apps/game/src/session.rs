@@ -17,7 +17,7 @@ use mscent_math::{Quat, Vec3};
 use mscent_platform::{Event, Key, MouseButton};
 use mscent_render::particles::{ParticleDraws, SpriteBank};
 use mscent_render::{
-    Actor, ActorKind, BakeCache, BuildConfig, BuildError, Framebuffer, LevelRenderer,
+    Actor, ActorKind, BakeCache, BuildConfig, BuildError, Effects, Framebuffer, LevelRenderer,
     MaterialTable, Quality, View,
 };
 use mscent_world::Level;
@@ -422,13 +422,17 @@ impl GameSession {
             }
             None => self.draws.clear(),
         }
-        let drawn = self.renderer.render_with_particles(
+        let effects = Effects {
+            particles: Some((&self.draws, &self.bank)),
+            lights: self.fx.lights(self.renderer.scene()),
+        };
+        let drawn = self.renderer.render_with_effects(
             &mut fb,
             &view,
             self.quality,
             &actors,
             None,
-            Some((&self.draws, &self.bank)),
+            &effects,
         );
         if drawn.is_some() {
             let fov = self.renderer.config().fov_y;

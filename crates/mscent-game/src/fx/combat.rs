@@ -5,8 +5,9 @@
 use mscent_math::Vec3;
 use mscent_math::epsilon::SURFACE_PROBE;
 use mscent_render::particles::{Mask, ParticleDraws, SpriteDraw, streak_from_world};
+use mscent_render::scene::Scene;
 use mscent_render::shade::mul_rgb;
-use mscent_render::{Camera, Fog, Framebuffer, Quality};
+use mscent_render::{Camera, DynLight, Fog, Framebuffer, Quality};
 use mscent_world::Bsp;
 
 use super::budget::{self, Keep, Limits, Sink, Tag, Tags, Tally};
@@ -14,6 +15,7 @@ use super::class::Blend;
 use super::class::MAX_TOTAL_CAPACITY;
 use super::collect::{self, FogView};
 use super::decal::{Decal, Decals, FaceOutline, MAX_DECALS};
+use super::lights::{LightSpec, Lights};
 use super::recipes;
 use super::{Effect, EffectArgs, Fx};
 
@@ -71,6 +73,7 @@ struct Bolt {
     arrival: Option<(Effect, EffectArgs)>,
     /// The scorch, which appears with the impact.
     mark: Option<Decal>,
+    glow: Option<LightSpec>,
 }
 
 impl Bolt {
@@ -86,6 +89,7 @@ impl Bolt {
 /// Particles and bolts of one play session.
 pub struct CombatFx {
     fx: Fx,
+    lights: Lights,
     bolts: [Option<Bolt>; MAX_BOLTS],
     decals: Decals,
     limits: Limits,
@@ -103,6 +107,7 @@ impl CombatFx {
     pub fn new() -> Self {
         Self {
             fx: Fx::new(&recipes::CLASSES, SEED),
+            lights: Lights::new(),
             bolts: [None; MAX_BOLTS],
             decals: Decals::new(),
             limits: Limits::of(Quality::High),
@@ -115,10 +120,12 @@ impl CombatFx {
     pub fn set_quality(&mut self, quality: Quality) {
         self.limits = Limits::of(quality);
         self.fx.set_density(self.limits.density);
+        self.lights.set_limit(self.limits.lights);
     }
 
     pub fn clear(&mut self) {
         self.fx.clear();
+        self.lights.clear();
         self.bolts = [None; MAX_BOLTS];
         self.decals.clear();
         self.keep = Keep::default();
@@ -139,6 +146,22 @@ impl CombatFx {
         self.bolts.iter().flatten().count()
     }
 
+    /// A light of its own, for effects that are not a recipe here.
+    pub fn light(&mut self, spec: LightSpec) {
+        self.lights.add(spec, None);
+    }
+
+    /// The lights for this frame, to hand to the renderer. A new light is
+    /// placed in `scene` first, which floods the portals once for it.
+    pub fn lights(&mut self, scene: &Scene) -> &[DynLight] {
+        self.lights.active(scene)
+    }
+
+    /// Lights alive, for tests and stats.
+    pub fn live_lights(&self) -> usize {
+        self.lights.live()
+    }
+
     /// Runs the particle clock and the bolts forward by `elapsed_ns`.
     pub fn advance(&mut self, elapsed_ns: u64, bsp: &Bsp) {
         for slot in &mut self.bolts {
@@ -151,10 +174,14 @@ impl CombatFx {
                 if let Some(mark) = bolt.mark {
                     self.decals.push(mark);
                 }
+                if let Some(glow) = bolt.glow {
+                    self.lights.add(glow, Some(bsp));
+                }
                 *slot = None;
             }
         }
         self.fx.advance(elapsed_ns, bsp);
+        self.lights.advance(elapsed_ns);
     }
 
     /// A muzzle flash now, a bolt, and the impact when the bolt arrives. With
@@ -187,6 +214,7 @@ impl CombatFx {
             flight_ns: ((flight * NS_PER_SEC) as u64).max(1),
             arrival,
             mark: mark_of(s, face),
+            glow: glow_of(s),
         };
         match self.bolts.iter_mut().find(|b| b.is_none()) {
             Some(slot) => *slot = Some(bolt),
@@ -196,6 +224,9 @@ impl CombatFx {
                 }
                 if let Some(mark) = bolt.mark {
                     self.decals.push(mark);
+                }
+                if let Some(glow) = bolt.glow {
+                    self.lights.add(glow, None);
                 }
             }
         }
@@ -208,6 +239,8 @@ impl CombatFx {
             ..args_at(pos, Vec3::ZERO)
         };
         self.fx.spawn(recipes::DRONE_EXPLOSION, &args);
+        let glow = recipes::EXPLOSION_LIGHT.at(pos, Vec3::ZERO);
+        self.lights.add(glow, None);
     }
 
     /// Draw lists that already hold the fullest possible frame, so play never
@@ -302,6 +335,16 @@ fn arrival_of(s: &ShotFx) -> Option<(Effect, EffectArgs)> {
 
 /// The drone's red hull, for its chips.
 pub const DRONE_TINT: u32 = 0x00c0_2828;
+
+/// The flash of a bolt's arrival, if it lands on something that shows it.
+fn glow_of(s: &ShotFx) -> Option<LightSpec> {
+    let at = s.end + s.normal * SURFACE_PROBE;
+    match s.impact {
+        Impact::None => None,
+        Impact::Surface { .. } => Some(recipes::SURFACE_LIGHT.at(at, s.normal)),
+        Impact::Drone => Some(recipes::DRONE_HIT_LIGHT.at(at, s.normal)),
+    }
+}
 
 fn draw_bolt(b: &Bolt, cam: &Camera, fog: &FogView, out: &mut Sink) {
     let (head, tail) = b.span();

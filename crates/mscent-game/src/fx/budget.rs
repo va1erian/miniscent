@@ -48,16 +48,22 @@ pub struct Limits {
     pub screens: f32,
     /// Fraction of Normal and Cosmetic particles spawned at all.
     pub density: f32,
+    /// Dynamic lights alive at once.
+    pub lights: usize,
 }
 
 impl Limits {
     pub fn of(quality: Quality) -> Self {
-        let (screens, density) = match quality {
-            Quality::High => (5.0, 1.0),
-            Quality::Medium => (3.0, 0.7),
-            Quality::Low => (1.5, 0.4),
+        let (screens, density, lights) = match quality {
+            Quality::High => (5.0, 1.0, 4),
+            Quality::Medium => (3.0, 0.7, 2),
+            Quality::Low => (1.5, 0.4, 1),
         };
-        Self { screens, density }
+        Self {
+            screens,
+            density,
+            lights,
+        }
     }
 }
 

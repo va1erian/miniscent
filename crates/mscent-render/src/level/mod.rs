@@ -11,6 +11,8 @@
 
 mod cache;
 mod compiled;
+mod effects;
+mod fill;
 mod overlay;
 mod shader;
 pub mod view;
@@ -20,25 +22,26 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use mscent_math::Vec3;
 use mscent_world::lightmap::{Lightmap, LightmapError, PointLight};
-use mscent_world::materials::{self, LIGHTPANEL};
+use mscent_world::materials;
 use mscent_world::{CsgError, Entity, Level};
 
 use crate::camera::Camera;
+use crate::dynlight::MAX_DYN_LIGHTS;
 use crate::framebuffer::Framebuffer;
-use crate::lighting_shader::{FaceLight, LightingShader, UvToLuxel};
+use crate::lighting_shader::UvToLuxel;
 use crate::lightmap_mips::LightMips;
 use crate::mesh::{MeshLighting, PointLight as MeshLight};
 use crate::particles::{ParticleDraws, SpriteBank, draw_particles};
-use crate::raster::{DrawStats, PolyList};
+use crate::raster::PolyList;
 use crate::scene::{Scene, SceneStats, eye_of};
-use crate::shade::{FlatShader, Fog};
+use crate::shade::Fog;
 use crate::specular::SpecTable;
 use crate::texture::{MaterialId, MaterialTable};
 use crate::tiles::TileRenderer;
-use shader::FaceShader;
 
 pub use cache::{BakeCache, BakeReport, BakedLight, Source};
 pub use compiled::Compiled;
+pub use effects::Effects;
 pub use overlay::{Actor, ActorKind, Overlay};
 pub use view::View;
 
@@ -137,6 +140,9 @@ struct FrameState {
     tiles: TileRenderer,
     faces: PolyList,
     actors: PolyList,
+    /// The level's mesh lighting plus this frame's dynamic lights, made on
+    /// the first frame that has one and reused after it.
+    lit: Option<MeshLighting>,
 }
 
 fn check_materials(table: &MaterialTable) -> Result<(), BuildError> {
@@ -345,7 +351,7 @@ impl LevelRenderer {
         actors: &[Actor],
         hud: Option<&Overlay>,
     ) -> Option<SceneStats> {
-        self.render_with_particles(fb, view, quality, actors, hud, None)
+        self.render_with_effects(fb, view, quality, actors, hud, &Effects::default())
     }
 
     /// [`Self::render`] with particles over the finished scene. They are part
@@ -359,20 +365,39 @@ impl LevelRenderer {
         hud: Option<&Overlay>,
         particles: Option<(&ParticleDraws, &SpriteBank)>,
     ) -> Option<SceneStats> {
+        let effects = Effects {
+            particles,
+            lights: &[],
+        };
+        self.render_with_effects(fb, view, quality, actors, hud, &effects)
+    }
+
+    /// [`Self::render`] with `effects` in the same pass: particles over the
+    /// finished scene, and dynamic lights on the walls and actors they reach.
+    /// Of the lights only the first [`MAX_DYN_LIGHTS`] count.
+    pub fn render_with_effects(
+        &self,
+        fb: &mut Framebuffer,
+        view: &View,
+        quality: Quality,
+        actors: &[Actor],
+        hud: Option<&Overlay>,
+        effects: &Effects,
+    ) -> Option<SceneStats> {
+        let lights = &effects.lights[..effects.lights.len().min(MAX_DYN_LIGHTS)];
         let cam = self.camera(view, fb.width(), fb.height())?;
         let mut slot = self.frame.lock().unwrap_or_else(PoisonError::into_inner);
         let frame = self.frame_for(&mut slot, fb.width(), fb.height())?;
         let mut stats = self.scene.list_frame(&cam, None, &mut frame.faces);
-        self.meshes
-            .list(&cam, actors, &self.lighting, &mut frame.actors);
+        self.list_actors(&cam, actors, lights, frame);
         let (faces, meshes) = (&frame.faces, &frame.actors);
         let (pixels, spans) = (AtomicU32::new(0), AtomicU32::new(0));
         let eye = eye_of(&cam);
         frame.tiles.pass(&|band: &mut Framebuffer| {
             band.clear_sky(self.cfg.sky_top, self.cfg.sky_bottom);
-            let st = self.fill_level(band, faces, quality, eye);
+            let st = self.fill_level(band, faces, quality, eye, lights);
             self.meshes.fill(band, meshes, self.fog());
-            if let Some((draws, bank)) = particles {
+            if let Some((draws, bank)) = effects.particles {
                 draw_particles(band, draws, bank);
             }
             pixels.fetch_add(st.pixels, Ordering::Relaxed);
@@ -401,6 +426,7 @@ impl LevelRenderer {
                 tiles: TileRenderer::new(width, height, self.tiling.0, self.tiling.1)?,
                 faces: PolyList::default(),
                 actors: PolyList::default(),
+                lit: None,
             });
         }
         let frame = slot.as_mut()?;
@@ -408,48 +434,6 @@ impl LevelRenderer {
             frame.tiles.resize(width, height)?;
         }
         Some(frame)
-    }
-
-    fn fill_level(
-        &self,
-        fb: &mut Framebuffer,
-        list: &PolyList,
-        quality: Quality,
-        eye: Vec3,
-    ) -> DrawStats {
-        let fog = self.fog();
-        let bump = quality != Quality::Low;
-        let specular = quality == Quality::High;
-        let flat = |light| FaceShader::Flat(FlatShader::new(light, fog));
-        self.scene.fill_frame(fb, list, None, &mut |i, face| {
-            if face.material == LIGHTPANEL {
-                return flat(EMISSIVE);
-            }
-            let map = self.uv_maps.get(i).copied().flatten();
-            let Some(map) = map else {
-                return flat(UNLIT);
-            };
-            let fl = FaceLight {
-                lightmap: &self.lightmap,
-                mips: &self.light_mips,
-                face: i,
-                map,
-                texture: self.scene.texture_of(face.material),
-                fog,
-                bump,
-            };
-            let table = self
-                .spec
-                .get(usize::from(face.material))
-                .or(self.spec.last());
-            let spec = table
-                .filter(|t| specular && t.is_visible())
-                .and_then(|t| LightingShader::with_specular(fl, eye, t));
-            if let Some(s) = spec {
-                return FaceShader::Spec(s);
-            }
-            LightingShader::new(fl).map_or_else(|| flat(UNLIT), FaceShader::Lit)
-        })
     }
 }
 
