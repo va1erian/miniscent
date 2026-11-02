@@ -139,35 +139,43 @@ fn bump_and_specular_are_clearly_visible_not_just_nonzero() {
 
 #[test]
 fn distance_fog_pulls_far_walls_toward_the_fog_colour() {
-    let r = renderer();
-    let cfg = r.config();
-    // Looking down the long A-B corridor: the far wall is 45 units away.
+    let build = |cfg: &BuildConfig| {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures");
+        let materials = MaterialTable::load_dir(&dir).expect("textures");
+        LevelRenderer::from_level(&showcase_level(), materials, cfg).expect("showcase builds")
+    };
+    let foggy = build(&BuildConfig::default());
+    // Fog that starts far past every wall draws the unfogged picture. The same
+    // view in both makes the fog the only difference, whatever material the
+    // wall is made of.
+    let clear = build(&BuildConfig {
+        fog_start: 9000.0,
+        fog_end: 10000.0,
+        ..BuildConfig::default()
+    });
+    // Looking down the long A-B corridor: the far wall is 45 units away, past
+    // the end of the default fog.
     let view = View::from_angles(
         Vec3::new(3.0, 10.0, 2.0),
         -core::f32::consts::FRAC_PI_2,
         0.0,
         0.0,
     );
-    let px = frame(&r, &view, Quality::High);
-    let centre: Vec<u32> = (70..90).map(|x| px[45 * 160 + x]).collect();
-    let fog = cfg.sky_bottom;
+    let row = |r: &LevelRenderer| -> Vec<u32> {
+        let px = frame(r, &view, Quality::High);
+        (70..90).map(|x| px[45 * 160 + x]).collect()
+    };
+    let fog = foggy.config().sky_bottom;
     let dist = |c: &[u32]| -> f32 {
         let m = mean_rgb(c);
         (0..3)
             .map(|k| (m[k] - ((fog >> (16 - 8 * k)) & 0xff) as f32).abs())
             .sum()
     };
-    let near_view = View::from_angles(
-        Vec3::new(40.0, 10.0, 2.0),
-        -core::f32::consts::FRAC_PI_2,
-        0.0,
-        0.0,
-    );
-    let near = frame(&r, &near_view, Quality::High);
-    let near_row: Vec<u32> = (70..90).map(|x| near[45 * 160 + x]).collect();
+    let (with, without) = (dist(&row(&foggy)), dist(&row(&clear)));
     assert!(
-        dist(&centre) < dist(&near_row),
-        "far row is not closer to the fog colour"
+        with + 10.0 < without,
+        "fog moved the far row to {with} from the fog colour, unfogged it is {without}"
     );
 }
 

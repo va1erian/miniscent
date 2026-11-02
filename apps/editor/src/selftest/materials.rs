@@ -2,7 +2,6 @@
 //! and the panels follow with nothing but a new generation in the store.
 
 use mscent_render::{Material, MaterialTable, Texture};
-use mscent_world::materials::NAMES;
 use xui::xui_canvas::snapshot::Stage;
 
 use super::{Run, pump, wait_for_preview};
@@ -11,10 +10,13 @@ use crate::ui::{Msg, Probe};
 
 const PAINT: u32 = 0xff20_c040;
 
-/// The stock names in one flat colour, and one material past the stock ids.
-fn painted() -> Result<MaterialTable, String> {
+/// The running table's names in one flat colour, and one material past its ids.
+fn painted(probe: &Probe) -> Result<MaterialTable, String> {
+    let (_, current) = probe.materials().current();
+    let current = current?;
+    let names: Vec<&str> = current.iter().map(|(_, m)| m.name.as_str()).collect();
     let mut table = MaterialTable::new();
-    for name in NAMES.into_iter().chain(["painted"]) {
+    for name in names.into_iter().chain(["painted"]) {
         let texture = Texture::new(128, 128, vec![PAINT; 128 * 128]).map_err(|e| e.to_string())?;
         table.add(Material {
             name: name.into(),
@@ -26,7 +28,7 @@ fn painted() -> Result<MaterialTable, String> {
 }
 
 pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
-    let table = match painted() {
+    let table = match painted(probe) {
         Ok(table) => table,
         Err(why) => return run.check(false, &format!("a table to install: {why}")),
     };

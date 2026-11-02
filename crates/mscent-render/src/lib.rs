@@ -26,11 +26,13 @@ pub mod particles;
 pub mod png;
 pub mod png_encode;
 pub mod raster;
+pub mod recipe_texture;
 pub mod resolution;
 pub mod scene;
 pub mod shade;
 pub mod simd;
 pub mod specular;
+pub mod texel_light;
 pub mod texture;
 pub mod tiles;
 pub mod uv_luxel;
@@ -43,7 +45,7 @@ pub use framebuffer::Framebuffer;
 pub use jobs::JobPool;
 pub use level::{
     Actor, ActorKind, BakeCache, BakeReport, BakedLight, BuildConfig, BuildError, Compiled,
-    Effects, LevelRenderer, MoverPose, Overlay, Quality, Source, View, VoxelChange,
+    EMISSIVE, Effects, LevelRenderer, MoverPose, Overlay, Quality, Source, View, VoxelChange,
 };
 pub use lighting_shader::{FaceLight, LightingShader, UvToLuxel};
 pub use lightmap_mips::LightMips;

@@ -30,6 +30,8 @@ pub enum TextureError {
     SpecularWithoutNormals,
     /// `materials.txt` is not acceptable.
     Manifest(ManifestError),
+    /// A recipe could not be read or run.
+    Recipe(String),
 }
 
 impl fmt::Display for TextureError {
@@ -386,10 +388,15 @@ fn mean_byte(bytes: impl ExactSizeIterator<Item = u8>) -> u8 {
     u8::try_from(sum / n).unwrap_or(u8::MAX)
 }
 
-/// Load `dir/name.png` plus `name_n.png`, `name_h.png` and `name_s.png` when
-/// they exist. The alpha of a normal map file means nothing and is dropped, so
-/// only `name_s.png` can mask a highlight.
+/// Make the recipe `dir/name.mst` if there is one. Otherwise load `dir/name.png`
+/// plus `name_n.png`, `name_h.png` and `name_s.png` when they exist. The alpha of
+/// a normal map file means nothing and is dropped, so only `name_s.png` can mask a
+/// highlight.
 pub fn load_texture(dir: &Path, name: &str) -> Result<Texture, TextureError> {
+    let recipe = dir.join(format!("{name}{}", crate::recipe_texture::EXTENSION));
+    if recipe.is_file() {
+        return crate::recipe_texture::load_recipe(&recipe);
+    }
     let base = read_png(&dir.join(format!("{name}.png")))?;
     let mut tex = Texture::new(base.width, base.height, base.to_argb())?;
     let companion = |suffix: &str| -> Result<Option<Image>, TextureError> {

@@ -1,0 +1,30 @@
+miniscent-recipe 1
+size 128 128
+gloss 30
+# Rose stone pitted with polyp cups in a close, even field.
+op 0 0 1 cells count=225 seed=81 mode=distance
+op 0 1 1 range in_low=0.07 in_high=0.26
+op 0 2 1 store name=solid
+op 0 3 1 cells count=225 seed=81 mode=edge
+op 0 4 1 range out_low=0.85
+op 0 5 1 store name=rim
+op 0 6 1 noise freq_x=4 freq_y=4 octaves=4 persistence=0.55 seed=82
+op 0 7 1 store name=mottle
+# Colour: mottled body, cups darkened, rims kept light.
+op 0 8 1 flat color=0.76,0.34,0.3
+op 1 8 1 flat color=0.96,0.62,0.5
+op 2 8 1 load name=mottle
+op 0 9 3 mask
+op 3 9 1 load name=solid
+op 3 10 1 range out_low=0.5
+op 4 10 1 load name=rim
+op 0 10 3 store name=body
+op 0 11 5 merge mode=multiply
+op 0 12 1 out-albedo
+# Height: cups sunk into the surface, a little mottle on top.
+op 0 13 1 load name=solid
+op 0 14 1 range out_low=0.15 out_high=0.75
+op 1 13 1 load name=mottle
+op 1 14 1 range out_high=0.1
+op 0 15 2 merge mode=add
+op 0 16 1 out-height normal_strength=4

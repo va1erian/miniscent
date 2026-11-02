@@ -6,6 +6,8 @@
 //! * `XUI_SNAPSHOT=<dir>` renders the window headlessly to PNGs.
 //! * `--selftest <dir>` runs a scripted session (load the showcase, snapshot,
 //!   play 120 frames, return, edit, snapshot) and exits 0 on success.
+//! * `--bake-texture <recipe.mst> <dir>` writes a recipe's maps as PNG files, and
+//!   adds the material to `<dir>/materials.txt` if there is one.
 //! * `--ui-timing [dir]` prints what the UI thread's everyday work costs.
 
 mod build;
@@ -15,6 +17,8 @@ mod model;
 mod script;
 mod selftest;
 mod studio;
+mod texbake;
+mod texstudio;
 mod ui;
 
 use model::Document;
@@ -28,6 +32,17 @@ fn main() -> xui::backend::Result<()> {
             std::process::exit(2);
         };
         std::process::exit(selftest::run(std::path::Path::new(dir)));
+    }
+    if let Some(i) = args.iter().position(|a| a == "--bake-texture") {
+        let (Some(recipe), Some(dir)) = (args.get(i + 1), args.get(i + 2)) else {
+            eprintln!("--bake-texture needs a recipe and an output directory");
+            std::process::exit(2);
+        };
+        if let Err(e) = texbake::run(std::path::Path::new(recipe), std::path::Path::new(dir)) {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+        return Ok(());
     }
     if let Some(i) = args.iter().position(|a| a == "--ui-timing") {
         let dir = args

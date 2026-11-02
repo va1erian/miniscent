@@ -1791,6 +1791,7 @@ dependencies = [
  "mscent-platform",
  "mscent-render",
  "mscent-script",
+ "mscent-texgen",
  "mscent-world",
  "xui",
  "xui-blitz",
@@ -1825,12 +1826,20 @@ name = "mscent-render"
 version = "0.1.0"
 dependencies = [
  "mscent-math",
+ "mscent-texgen",
  "mscent-world",
 ]
 
 [[package]]
 name = "mscent-script"
 version = "0.1.0"
+
+[[package]]
+name = "mscent-texgen"
+version = "0.1.0"
+dependencies = [
+ "mscent-math",
+]
 
 [[package]]
 name = "mscent-world"

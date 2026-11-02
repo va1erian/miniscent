@@ -57,6 +57,11 @@ impl Editor {
     pub(super) fn begin_play(&mut self) {
         match self.studio.enter_play() {
             Ok(()) => {
+                // Play covers the work area, and with the workspace up behind it
+                // its shortcuts and its lit tab would go on.
+                if self.tex.is_open() {
+                    self.tex_close();
+                }
                 // First: the main window must hold the focus to take the pointer.
                 self.script.suspend();
                 self.close_fog_window();
