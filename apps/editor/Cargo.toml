@@ -18,6 +18,9 @@ mscent-platform = { workspace = true }
 miniscent-game = { path = "../game", default-features = false }
 xui = { git = "https://github.com/va1erian/xui", rev = "0b1b7efd29035cf6e6ac0cbcbea1c58e2e4faa91" }
 xui-code-editor = { git = "https://github.com/va1erian/xui", rev = "0b1b7efd29035cf6e6ac0cbcbea1c58e2e4faa91" }
+# The guide is an HTML page: it replaces a pile of text widgets (docs/scripting.md). Retired upstream
+# in favour of xui-blitz, which needs Stylo; litehtml is the small one, a C++17 compile and no libclang.
+xui-litehtml = { git = "https://github.com/va1erian/xui", rev = "0b1b7efd29035cf6e6ac0cbcbea1c58e2e4faa91" }
 
 [lints]
 workspace = true

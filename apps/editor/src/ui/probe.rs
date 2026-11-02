@@ -75,6 +75,11 @@ impl Probe {
         self.script.problems().cell_text(0, 0).unwrap_or_default()
     }
 
+    /// Whether the guide's page on show has been laid out and is drawn.
+    pub fn guide_ready(&self) -> bool {
+        self.script.guide_ready()
+    }
+
     /// Whether the script pane is on show.
     pub fn script_open(&self) -> bool {
         self.script.is_open()

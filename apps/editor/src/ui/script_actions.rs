@@ -52,8 +52,9 @@ impl Editor {
         match msg {
             ScriptMsg::Edited => self.script_edited(),
             ScriptMsg::Problem(row) => self.go_to_problem(row),
-            ScriptMsg::InsertExample => self.insert_example(),
-            ScriptMsg::GuideEdited => self.script.restore_guide(),
+            ScriptMsg::Example(n) => self.insert_example(n),
+            ScriptMsg::GuideFrame => self.script.guide_frame(),
+            ScriptMsg::Copy(text) => self.script.copy(&text),
             ScriptMsg::Reload => self.reload_script(),
             ScriptMsg::Save => self.save_command(),
             ScriptMsg::Play => self.play_command(),
@@ -135,9 +136,9 @@ impl Editor {
         self.script.reset_sample_list();
     }
 
-    fn insert_example(&mut self) {
-        let Some(example) = self.script.example_here() else {
-            self.state.borrow_mut().message = "This page has no examples".into();
+    fn insert_example(&mut self, n: usize) {
+        let Some(example) = self.script.example(n) else {
+            self.state.borrow_mut().message = "That example is not on this page".into();
             return;
         };
         self.script.show_script();

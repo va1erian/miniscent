@@ -1,6 +1,6 @@
 # Start here
 
-A level's logic is one script, a text file beside the level: foo.st beside foo.msl. It reads top to bottom. Nothing in the level says what a door does or when enemies appear. The level holds places and things with names, and the script says what happens to them.
+A level's logic is one script, a text file beside the level: `foo.st` beside `foo.msl`. It reads top to bottom. Nothing in the level says what a door does or when enemies appear. The level holds places and things with names, and the script says what happens to them.
 
 ## The loop
 
@@ -16,9 +16,9 @@ Open one from the Samples list on the Script tab. Each is a small level you can 
 
 ## Keys
 
-- F6 shows or hides this pane. F7 opens this guide.
+- **F6** shows or hides this pane. **F7** opens this guide.
 - The Own window button moves the pane to a window of its own, and Dock brings it back. Script, Script in its own window does the same. Moving it starts the script's undo over.
-- To use an example from this guide, click on it and press Insert example in script.
+- To use an example from this guide, click Insert in script under it.
 - Ctrl+Space offers completions. Enter or Tab accepts one.
 - Ctrl+S saves the level and its script. F5 plays.
 
@@ -57,7 +57,7 @@ A word with a colon takes a value. Several of them make one message. The thing o
     door := mover: 'gate'.
     door moveTo: 'open' in: 1.5.
 
-Arithmetic runs strictly from left to right: 2 + 3 * 4 is 20. Use brackets when you mean otherwise.
+Arithmetic runs strictly from left to right: `2 + 3 * 4` is 20. Use brackets when you mean otherwise.
 
     y := 2 + (3 * 4).
 
@@ -95,7 +95,7 @@ A mover is a group of brushes with named poses. It starts in the pose 'closed', 
     (zone: 'gate_area') onEnter: [gate moveTo: 'open' in: 0.6].
     (zone: 'gate_area') onExit: [gate moveTo: 'closed' in: 0.8].
 
-That pattern has a name in the library, and a key of nil means anyone can use the door. It listens to the zone named after the door and _area, here gate_area. A door from Add entity brings that zone along when you move or resize it. Move the zone yourself to open the door from elsewhere, and the Problems list tells you if a zone does not reach its door.
+That pattern has a name in the library, and a key of `nil` means anyone can use the door. It listens to the zone named after the door and _area, here gate_area. A door from Add entity brings that zone along when you move or resize it. Move the zone yourself to open the door from elsewhere, and the Problems list tells you if a zone does not reach its door.
 
     autoDoor: 'gate' travel: (x: 0 y: 0 z: 4) key: nil.
 

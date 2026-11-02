@@ -22,6 +22,7 @@ use crate::studio::Preview;
 use crate::ui::{Editor, Msg, Probe, cmd};
 
 mod faces;
+mod guide;
 mod keys;
 mod materials;
 mod script_pane;
