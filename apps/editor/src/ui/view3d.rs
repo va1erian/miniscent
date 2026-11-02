@@ -45,6 +45,15 @@ pub fn platform_key(k: Key) -> Option<PKey> {
     })
 }
 
+/// Whether `k` moves the fly camera (WASD and R/F by position, Q/E roll).
+/// The tool hotkeys must not fire for these while looking around.
+pub fn is_fly_key(k: Key) -> bool {
+    matches!(
+        platform_key(k),
+        Some(PKey::Char('W' | 'A' | 'S' | 'D' | 'R' | 'F' | 'Q' | 'E'))
+    )
+}
+
 /// A mouse press on the picture, for picking: where on the picture it fell
 /// (`0..=1` from the top left) and which keys were held.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -72,6 +81,8 @@ struct Shared {
     delta_seen: Cell<bool>,
     /// The backend ended a grab the pane asked for (Esc or focus loss).
     lock_lost: Cell<bool>,
+    /// The right button is held for a mouse look.
+    looking: Cell<bool>,
 }
 
 /// A pane that draws a frame and collects input.
@@ -204,6 +215,12 @@ impl<M: 'static> View3d<M> {
         self.control.set_visible(visible);
     }
 
+    /// Whether `key` currently flies the camera rather than picking a tool:
+    /// the right button is held to look around and it is a movement letter.
+    pub fn flies(&self, key: Key) -> bool {
+        self.shared.looking.get() && is_fly_key(key)
+    }
+
     pub fn focus(&self) {
         self.control.focus();
     }
@@ -266,6 +283,7 @@ fn handle<M: 'static>(
                 MouseButton::Right => {
                     ui.set_capture(id);
                     look.set(Some((x, y)));
+                    shared.looking.set(true);
                     if !shared.grab.get() {
                         shared.delta_seen.set(false);
                     }
@@ -290,6 +308,7 @@ fn handle<M: 'static>(
         Event::MouseUp { button, .. } => match button {
             MouseButton::Right => {
                 look.set(None);
+                shared.looking.set(false);
                 ui.release_capture();
                 if !shared.grab.get() {
                     ui.set_pointer_lock(id, false);
@@ -320,6 +339,7 @@ fn handle<M: 'static>(
             });
         }
         Event::PointerLockLost => {
+            shared.looking.set(false);
             if look.take().is_some() {
                 ui.release_capture();
             }
@@ -345,6 +365,7 @@ fn handle<M: 'static>(
         }
         Event::KillFocus | Event::CaptureChanged => {
             look.set(None);
+            shared.looking.set(false);
             if !shared.grab.get() {
                 ui.set_pointer_lock(id, false);
             }
@@ -383,6 +404,7 @@ mod tests {
         // Which position W maps to depends on the active layout.
         assert!(matches!(platform_key(Key::W), Some(PKey::Char(_))));
         assert_eq!(platform_key(Key::from_code(0x35)), Some(PKey::Char('5')));
+        assert!(!is_fly_key(Key::B));
         assert_eq!(platform_key(Key::ESCAPE), Some(PKey::Escape));
         assert_eq!(platform_key(Key::F5), Some(PKey::F(5)));
         assert_eq!(platform_key(Key::LEFT), Some(PKey::Left));

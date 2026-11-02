@@ -476,6 +476,11 @@ impl App for Editor {
                 if self.studio.mode == Mode::Play || self.text_has_focus(ui) {
                     return;
                 }
+                if let Msg::Tool(i) = *inner
+                    && self.pane3d().flies(TOOLS[i.min(TOOLS.len() - 1)].1)
+                {
+                    return;
+                }
                 self.update(*inner, ui);
                 return;
             }
