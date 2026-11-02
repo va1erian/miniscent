@@ -9,16 +9,19 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
+use mscent_math::Vec3;
 use mscent_world::lightmap::store::input_key;
 use mscent_world::lightmap::{BakeConfig, LightFace, Lightmap, PointLight, bake, bake_cancellable};
 use mscent_world::materials::NO_DRAW;
+use mscent_world::voxel::{ChunkMesh, VoxelWorld};
 use mscent_world::{Bsp, Face, Level, Portals, brush_faces, compile, extract_faces};
 
+use super::setup::{actors_of, lights_of, with_level_fog};
 use super::{
-    Actor, BakeCache, BakedLight, BuildConfig, BuildError, LevelRenderer, actors_of,
-    check_materials, lights_of, with_level_fog,
+    Actor, BakeCache, BakedLight, BuildConfig, BuildError, LevelRenderer, check_materials,
 };
 use crate::texture::MaterialTable;
+use crate::voxel::{VertexLight, VoxelScene};
 
 /// Draft luxel size; the baker coarsens it further if the atlas asks for that.
 const DRAFT_LUXEL: f32 = 1.0;
@@ -49,6 +52,47 @@ pub(super) struct Parts {
     pub lights: Vec<PointLight>,
     pub actors: Vec<Actor>,
     pub cfg: BuildConfig,
+    pub voxels: VoxelWorld,
+}
+
+/// Unshadowed light at a vertex: lamps and ambient, standing in until voxel
+/// surfaces are baked.
+fn vertex_light(mesh: &ChunkMesh, lights: &[PointLight], ambient: Vec3) -> Vec<VertexLight> {
+    mesh.vertices
+        .iter()
+        .map(|v| {
+            let mut color = ambient;
+            let mut dir = Vec3::ZERO;
+            for l in lights {
+                let to = l.position - v.pos;
+                let d = to.length();
+                if d <= 0.0 || d >= l.radius {
+                    continue;
+                }
+                let fall = 1.0 - d / l.radius;
+                let lambert = (v.normal.dot(to) / d).max(0.0);
+                let got = l.color * (fall * fall * lambert);
+                color = color + got;
+                dir = dir + to * (1.0 / d) * (got.x + got.y + got.z);
+            }
+            VertexLight {
+                color: color * 256.0,
+                dir: dir.normalized().unwrap_or(v.normal),
+            }
+        })
+        .collect()
+}
+
+/// The voxel surfaces of a level with their light.
+pub(super) fn lit_voxels(
+    world: VoxelWorld,
+    leaves: usize,
+    lights: &[PointLight],
+    ambient: Vec3,
+) -> VoxelScene {
+    VoxelScene::new(world, leaves, |_, _, mesh| {
+        vertex_light(mesh, lights, ambient)
+    })
 }
 
 /// A compiled level waiting for its lightmap.
@@ -66,6 +110,7 @@ impl Compiled {
         let mut faces = extract_faces(&bsp, &brushes);
         // The voxel surface closes in front of a shell, before any light is laid out for it.
         faces.retain(|f| f.material != NO_DRAW);
+        let voxels = VoxelWorld::build(level, &level.static_brushes(), &bsp);
         let mover_ranges = append_mover_faces(level, &mut faces);
         let portals = Portals::build(&bsp);
         let light_faces = faces.iter().map(LightFace::from).collect();
@@ -85,6 +130,7 @@ impl Compiled {
             lights: lights_of(level, cfg.light_gain),
             actors: actors_of(level),
             cfg: with_level_fog(cfg, level),
+            voxels,
         };
         Ok(Self {
             parts,

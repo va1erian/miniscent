@@ -13,9 +13,12 @@ use super::context::Context;
 use super::lod::Lod;
 use super::surface::{ChunkMesh, Mesher, VoxelVertex};
 use super::volume::Volume;
-use crate::brush::Brush;
+use crate::brush::{Brush, Op};
 use crate::bsp::{Bsp, Child, LeafId, LeafKind};
 use crate::entity::Level;
+
+/// Cells past its box a volume's surface can reach: the two rows of its ring.
+const RING_REACH_CELLS: f64 = 3.0;
 
 /// Marks a chunk of a volume's table that has no surface.
 pub const NO_CHUNK: u32 = u32::MAX;
@@ -88,12 +91,13 @@ impl VoxelWorld {
         let [cx, cy, cz] = volume.chunks();
         let count = usize::from(cx) * usize::from(cy) * usize::from(cz);
         let (mut air, mut table) = (Vec::with_capacity(count), Vec::with_capacity(count));
+        let margin = buried_margin(volume);
         for z in 0..cz {
             for y in 0..cy {
                 for x in 0..cx {
                     let mesh = mesher.mesh(volume, ctx, [x, y, z]);
                     air.push(mesh.as_ref().map_or(AirMask::NONE, |m| m.air));
-                    table.push(mesh.map_or(NO_CHUNK, |m| self.add_chunk(m, bsp)));
+                    table.push(mesh.map_or(NO_CHUNK, |m| self.add_chunk(m, bsp, margin)));
                 }
             }
         }
@@ -107,9 +111,9 @@ impl VoxelWorld {
         }
     }
 
-    fn add_chunk(&mut self, mesh: ChunkMesh, bsp: &Bsp) -> u32 {
+    fn add_chunk(&mut self, mesh: ChunkMesh, bsp: &Bsp, margin: f64) -> u32 {
         let mut leaves = Vec::new();
-        let full = without_buried(&mesh, bsp, &mut leaves);
+        let full = without_buried(&mesh, bsp, margin, &mut leaves);
         if full.triangles.is_empty() {
             return NO_CHUNK;
         }
@@ -126,9 +130,19 @@ impl VoxelWorld {
     }
 }
 
+/// How far from an empty leaf a triangle of `volume` still counts as seen from it.
+/// A cave's surface may close just past its box, in what the BSP calls solid, with
+/// its air side in the box: only an add volume's triangles are really buried there.
+fn buried_margin(volume: &Volume) -> f64 {
+    match volume.op() {
+        Op::Add => VOXEL_BURIED_MARGIN,
+        Op::Subtract => RING_REACH_CELLS * volume.cell().units(),
+    }
+}
+
 /// `mesh` with only the triangles air can see, and only their vertices. Adds the
 /// empty leaves those triangles touch to `leaves`.
-fn without_buried(mesh: &ChunkMesh, bsp: &Bsp, leaves: &mut Vec<LeafId>) -> ChunkMesh {
+fn without_buried(mesh: &ChunkMesh, bsp: &Bsp, margin: f64, leaves: &mut Vec<LeafId>) -> ChunkMesh {
     const UNUSED: u16 = u16::MAX;
     let mut remap = vec![UNUSED; mesh.vertices.len()];
     let mut vertices: Vec<VoxelVertex> = Vec::with_capacity(mesh.vertices.len());
@@ -136,7 +150,7 @@ fn without_buried(mesh: &ChunkMesh, bsp: &Bsp, leaves: &mut Vec<LeafId>) -> Chun
     let mut materials = Vec::with_capacity(mesh.materials.len());
     for (t, &material) in mesh.triangles.iter().zip(&mesh.materials) {
         let corners = t.map(|i| mesh.vertices[usize::from(i)].pos);
-        if !touch_air(bsp, bsp.root(), &corners, leaves) {
+        if !touch_air(bsp, bsp.root(), &corners, margin, leaves) {
             continue;
         }
         triangles.push(t.map(|i| {
@@ -163,7 +177,13 @@ fn without_buried(mesh: &ChunkMesh, bsp: &Bsp, leaves: &mut Vec<LeafId>) -> Chun
 /// Whether a triangle reaches an empty leaf below `child`, adding each it reaches
 /// to `leaves`. Conservative: a triangle crossing a plane goes down both sides
 /// unclipped, so it can claim a leaf it misses, which is only a little more work.
-fn touch_air(bsp: &Bsp, child: Child, corners: &[Vec3; 3], leaves: &mut Vec<LeafId>) -> bool {
+fn touch_air(
+    bsp: &Bsp,
+    child: Child,
+    corners: &[Vec3; 3],
+    margin: f64,
+    leaves: &mut Vec<LeafId>,
+) -> bool {
     match child {
         Child::Leaf(id) => {
             let air = bsp.leaf_kind(id) == LeafKind::Empty;
@@ -179,11 +199,11 @@ fn touch_air(bsp: &Bsp, child: Child, corners: &[Vec3; 3], leaves: &mut Vec<Leaf
             let side = corners.map(|c| node.plane.signed_distance(c.to_f64()));
             let mut air = false;
             // Depth is bounded by `Bsp::from_parts`, so recursion is shallow.
-            if side.iter().any(|&d| d >= -VOXEL_BURIED_MARGIN) {
-                air |= touch_air(bsp, node.front, corners, leaves);
+            if side.iter().any(|&d| d >= -margin) {
+                air |= touch_air(bsp, node.front, corners, margin, leaves);
             }
-            if side.iter().any(|&d| d <= VOXEL_BURIED_MARGIN) {
-                air |= touch_air(bsp, node.back, corners, leaves);
+            if side.iter().any(|&d| d <= margin) {
+                air |= touch_air(bsp, node.back, corners, margin, leaves);
             }
             air
         }

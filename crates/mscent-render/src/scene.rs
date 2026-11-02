@@ -33,6 +33,7 @@ use crate::framebuffer::Framebuffer;
 use crate::raster::{DrawStats, PolyList, Vertex};
 use crate::shade::{FlatShader, Fog, SpanShader};
 use crate::texture::{MaterialId, MaterialTable, Texture};
+use crate::voxel::VoxelScene;
 
 /// How far behind a portal plane the eye may be and still look through it,
 /// in world units. Absorbs the `f32` rounding of the camera position.
@@ -54,6 +55,8 @@ pub struct SceneStats {
     pub nodes_culled: u32,
     pub pixels: u32,
     pub spans: u32,
+    /// Voxel triangles submitted.
+    pub voxel_triangles: u32,
 }
 
 /// A compiled level ready to draw.
@@ -67,12 +70,26 @@ pub struct Scene {
     leaf_faces: Vec<Vec<u32>>,
     node_bounds: Vec<Aabb>,
     portal_info: Vec<PortalInfo>,
+    voxels: VoxelScene,
 }
 
 impl Scene {
     /// Prepare a level for drawing. Faces whose material id is not in
     /// `materials` use a grey fallback texture.
     pub fn new(bsp: Bsp, faces: Vec<Face>, portals: Portals, materials: MaterialTable) -> Self {
+        Self::with_voxels(bsp, faces, portals, materials, VoxelScene::default())
+    }
+
+    /// [`Self::new`] with voxel surfaces. Their chunks count towards the bounds
+    /// of the leaves that see them: a volume's leaf has no faces of its own, and
+    /// the walk would cull it, voxels and all.
+    pub fn with_voxels(
+        bsp: Bsp,
+        faces: Vec<Face>,
+        portals: Portals,
+        materials: MaterialTable,
+        voxels: VoxelScene,
+    ) -> Self {
         let polys: Vec<Vec<Vertex>> = faces
             .iter()
             .map(|f| {
@@ -83,7 +100,15 @@ impl Scene {
             })
             .collect();
         let leaf_faces = prep::leaf_faces(bsp.leaves().len(), &faces);
-        let boxes = prep::leaf_boxes(&leaf_faces, &polys);
+        let mut boxes = prep::leaf_boxes(&leaf_faces, &polys);
+        for (slot, list) in boxes.iter_mut().zip(&voxels.leaf_chunks) {
+            for chunk in list
+                .iter()
+                .filter_map(|&c| voxels.world.chunks.get(c as usize))
+            {
+                *slot = slot.union(chunk.lods[0].bounds);
+            }
+        }
         let node_bounds = prep::node_bounds(&bsp, &boxes);
         let portal_info = portals
             .portals()
@@ -108,7 +133,12 @@ impl Scene {
             leaf_faces,
             node_bounds,
             portal_info,
+            voxels,
         }
+    }
+
+    pub fn voxels(&self) -> &VoxelScene {
+        &self.voxels
     }
 
     pub fn bsp(&self) -> &Bsp {
@@ -168,7 +198,20 @@ impl Scene {
         texture: Option<&Texture>,
         list: &mut PolyList,
     ) -> SceneStats {
+        self.list_frame_voxels(cam, texture, list, &mut Vec::new())
+    }
+
+    /// [`Self::list_frame`], replacing `chunks` with the voxel chunks of the
+    /// visible leaves, nearest first.
+    pub(crate) fn list_frame_voxels(
+        &self,
+        cam: &Camera,
+        texture: Option<&Texture>,
+        list: &mut PolyList,
+        chunks: &mut Vec<u32>,
+    ) -> SceneStats {
         list.clear();
+        chunks.clear();
         let eye = eye_of(cam);
         let leaf = self.bsp.leaf_at_f32(eye);
         let visible = if self.bsp.leaf_kind(leaf) == LeafKind::Empty {
@@ -176,7 +219,7 @@ impl Scene {
         } else {
             vec![true; self.bsp.leaves().len()]
         };
-        let mut w = walk::Walk::new(self, list, cam, eye, visible, texture);
+        let mut w = walk::Walk::new(self, list, chunks, cam, eye, visible, texture);
         w.visit(self.bsp.root());
         w.finish()
     }

@@ -15,6 +15,7 @@ mod effects;
 mod fill;
 mod movers;
 mod overlay;
+mod setup;
 mod shader;
 pub mod view;
 
@@ -22,16 +23,16 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use mscent_math::Vec3;
-use mscent_world::lightmap::{Lightmap, LightmapError, PointLight};
+use mscent_world::lightmap::{Lightmap, LightmapError};
 use mscent_world::materials;
-use mscent_world::{CsgError, Entity, Level};
+use mscent_world::{CsgError, Level};
 
 use crate::camera::Camera;
 use crate::dynlight::MAX_DYN_LIGHTS;
 use crate::framebuffer::Framebuffer;
 use crate::lighting_shader::UvToLuxel;
 use crate::lightmap_mips::LightMips;
-use crate::mesh::{MeshLighting, PointLight as MeshLight};
+use crate::mesh::MeshLighting;
 use crate::particles::{ParticleDraws, SpriteBank, draw_particles};
 use crate::raster::PolyList;
 use crate::scene::{Scene, SceneStats, eye_of};
@@ -39,12 +40,15 @@ use crate::shade::Fog;
 use crate::specular::SpecTable;
 use crate::texture::{MaterialId, MaterialTable};
 use crate::tiles::TileRenderer;
+use crate::voxel::fill::{FillContext, fill_voxels};
+use crate::voxel::list::VoxelList;
 
 pub use cache::{BakeCache, BakeReport, BakedLight, Source};
 pub use compiled::Compiled;
 pub use effects::Effects;
 pub use movers::MoverPose;
 pub use overlay::{Actor, ActorKind, Overlay};
+use setup::{mesh_lighting, spec_tables};
 pub use view::View;
 
 /// Light scale of emissive surfaces (256 is the plain texture colour).
@@ -147,6 +151,7 @@ struct FrameState {
     /// the first frame that has one and reused after it.
     lit: Option<MeshLighting>,
     movers: movers::MoverList,
+    voxels: VoxelList,
 }
 
 fn check_materials(table: &MaterialTable) -> Result<(), BuildError> {
@@ -158,92 +163,12 @@ fn check_materials(table: &MaterialTable) -> Result<(), BuildError> {
     Ok(())
 }
 
-fn lights_of(level: &Level, gain: f32) -> Vec<PointLight> {
-    level
-        .entities
-        .iter()
-        .filter_map(|e| match *e {
-            Entity::Light {
-                pos,
-                color,
-                radius,
-                intensity,
-            } => Some(PointLight {
-                position: pos,
-                color: color * (intensity * gain),
-                radius,
-            }),
-            _ => None,
-        })
-        .collect()
-}
-
-/// `cfg` with the fog of the level's world entity, if it has one. Fog does
-/// not affect the bake.
-fn with_level_fog(cfg: &BuildConfig, level: &Level) -> BuildConfig {
-    match level.fog() {
-        Some((fog_start, fog_end)) => BuildConfig {
-            fog_start,
-            fog_end,
-            ..*cfg
-        },
-        None => *cfg,
-    }
-}
-
-fn actors_of(level: &Level) -> Vec<Actor> {
-    let actor = |kind, pos| Actor {
-        kind,
-        pos,
-        yaw: 0.0,
-    };
-    level
-        .entities
-        .iter()
-        .filter_map(|e| match *e {
-            Entity::Enemy { pos, .. } => Some(actor(ActorKind::Enemy, pos)),
-            Entity::Goal { pos, .. } => Some(actor(ActorKind::Goal, pos)),
-            _ => None,
-        })
-        .collect()
-}
-
-/// Entities cannot sample the lightmap (it is per face), so they are lit by
-/// the same point lights without shadows plus a little ambient.
-fn mesh_lighting(lights: &[PointLight], ambient: Vec3) -> MeshLighting {
-    MeshLighting {
-        ambient: 0.08 + (ambient.x + ambient.y + ambient.z) / 3.0,
-        sun_dir: Vec3::new(0.3, -0.4, 0.85)
-            .normalized()
-            .unwrap_or(Vec3::ZERO),
-        sun: 0.25,
-        points: lights
-            .iter()
-            .map(|l| MeshLight {
-                pos: l.position,
-                radius: l.radius,
-                intensity: (l.color.x + l.color.y + l.color.z) / 3.0,
-            })
-            .collect(),
-    }
-}
-
 /// Workers of a new renderer: every hardware thread, and at least
 /// [`MIN_WORKERS`].
 fn default_workers() -> usize {
     std::thread::available_parallelism()
         .map_or(MIN_WORKERS, usize::from)
         .max(MIN_WORKERS)
-}
-
-/// One specular table per material id, plus a last one for unknown ids.
-fn spec_tables(table: &MaterialTable) -> Vec<SpecTable> {
-    let mut tables: Vec<SpecTable> = (0u16..)
-        .take(table.len())
-        .map(|i| SpecTable::new(table.get(MaterialId(i)).map_or(40, |m| m.gloss)))
-        .collect();
-    tables.push(SpecTable::new(40));
-    tables
 }
 
 impl LevelRenderer {
@@ -283,11 +208,13 @@ impl LevelRenderer {
             lights,
             actors,
             cfg,
+            voxels,
         } = parts;
         let spec = spec_tables(&materials);
         // The game path pays for smooth texture sampling; the raw
         // rasterizer benchmark does not.
-        let scene = Scene::new(bsp, faces, portals, materials.filtered());
+        let voxels = compiled::lit_voxels(voxels, bsp.leaves().len(), &lights, cfg.ambient);
+        let scene = Scene::with_voxels(bsp, faces, portals, materials.filtered(), voxels);
         let uv_maps = (0..scene.faces().len())
             .map(|i| {
                 let proj = lightmap.projections().get(i)?;
@@ -425,23 +352,56 @@ impl LevelRenderer {
         let cam = self.camera(view, fb.width(), fb.height())?;
         let mut slot = self.frame.lock().unwrap_or_else(PoisonError::into_inner);
         let frame = self.frame_for(&mut slot, fb.width(), fb.height())?;
-        let mut stats = self.scene.list_frame(&cam, None, &mut frame.faces);
+        let mut stats = self.scene.list_frame_voxels(
+            &cam,
+            None,
+            &mut frame.faces,
+            &mut frame.voxels.candidates,
+        );
+        frame
+            .voxels
+            .prepare(self.scene.voxels(), &cam, eye_of(&cam), |leaf| {
+                let lit = lights.iter().enumerate();
+                lit.fold(0u8, |m, (i, l)| {
+                    if l.is_lit() && l.reaches_leaf(leaf) {
+                        m | (1 << i)
+                    } else {
+                        m
+                    }
+                })
+            });
+        stats.voxel_triangles = frame.voxels.triangles;
         self.list_movers(&cam, effects.poses, &mut frame.movers);
         self.list_actors(&cam, actors, lights, frame);
         let (faces, meshes, movers) = (&frame.faces, &frame.actors, &frame.movers);
+        let voxels = &frame.voxels;
         let (pixels, spans) = (AtomicU32::new(0), AtomicU32::new(0));
         let eye = eye_of(&cam);
+        let texture_of = |id: u16| self.scene.texture_of(id);
+        let voxel_fill = FillContext {
+            scene: self.scene.voxels(),
+            cam: &cam,
+            eye,
+            fog: self.fog(),
+            bump: quality != Quality::Low,
+            specular: quality == Quality::High,
+            lights,
+            spec: &self.spec,
+            texture_of: &texture_of,
+        };
         frame.tiles.pass(&|band: &mut Framebuffer| {
             band.clear_sky(self.cfg.sky_top, self.cfg.sky_bottom);
             // First, so the z-buffer saves shading whatever a door covers.
             let moved = self.fill_movers(band, movers, quality);
+            // Next, for the same reason: a voxel pixel costs less than a wall's.
+            let vox = fill_voxels(band, voxels, &voxel_fill);
             let st = self.fill_level(band, faces, quality, eye, lights);
             self.meshes.fill(band, meshes, self.fog());
             if let Some((draws, bank)) = effects.particles {
                 draw_particles(band, draws, bank);
             }
-            pixels.fetch_add(moved.pixels + st.pixels, Ordering::Relaxed);
-            spans.fetch_add(moved.spans + st.spans, Ordering::Relaxed);
+            pixels.fetch_add(moved.pixels + vox.pixels + st.pixels, Ordering::Relaxed);
+            spans.fetch_add(moved.spans + vox.spans + st.spans, Ordering::Relaxed);
         });
         frame.tiles.composite(fb).ok()?;
         drop(slot);
@@ -468,6 +428,7 @@ impl LevelRenderer {
                 actors: PolyList::default(),
                 lit: None,
                 movers: movers::MoverList::default(),
+                voxels: VoxelList::default(),
             });
         }
         let frame = slot.as_mut()?;
