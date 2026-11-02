@@ -4,7 +4,7 @@
 use crate::ast::{Expr, Msg};
 use crate::builtin::{BUILTINS, INLINE_SELECTORS, VM_SELECTORS};
 use crate::compile::Compiler;
-use crate::error::shorten;
+use crate::error::{MAX_LOAD_ERRORS, shorten};
 use std::collections::{HashMap, HashSet};
 
 pub(crate) struct MethodMeta {
@@ -12,6 +12,11 @@ pub(crate) struct MethodMeta {
     pub file: u16,
     pub line: u32,
 }
+
+/// Most keyword parts a selector is split at for the missing-period hint. Far
+/// more than any real pair of messages, and each split copies the selector, so
+/// a hostile one of a million bytes must not get here.
+const MAX_SPLIT_PARTS: usize = 16;
 
 /// Every selector a script may send: natives, the language's own and the
 /// script's `define`s.
@@ -90,8 +95,12 @@ impl Compiler<'_> {
     pub(crate) fn check_send(&mut self, m: &Msg, has_recv: bool, bare: bool) -> bool {
         let sel = m.sel.as_str();
         if !self.known.knows(sel) {
-            let msg = self.unknown_message(m, bare);
-            self.soft_error(msg);
+            // Past the cap the message would be dropped, and working out its
+            // hint is the expensive part of a load full of errors.
+            if self.soft.len() < MAX_LOAD_ERRORS {
+                let msg = self.unknown_message(m, bare);
+                self.soft_error(msg);
+            }
             return false;
         }
         if let Some(meta) = self.known.methods.get(sel) {
@@ -114,7 +123,7 @@ impl Compiler<'_> {
         let Some(Expr::Str(name, _)) = m.args.first() else {
             return;
         };
-        if allowed.contains(&name.as_str()) {
+        if allowed.contains(&name.as_str()) || self.soft.len() >= MAX_LOAD_ERRORS {
             return;
         }
         let h = hint(closest(name, allowed.iter().copied()));
@@ -148,7 +157,7 @@ impl Compiler<'_> {
     /// is known on its own), a period is probably missing, so say where.
     fn missing_period(&self, m: &Msg) -> Option<String> {
         let parts: Vec<&str> = m.sel.split_inclusive(':').collect();
-        if parts.len() < 2 {
+        if !(2..=MAX_SPLIT_PARTS).contains(&parts.len()) {
             return None;
         }
         let split = (1..parts.len()).find(|&k| {

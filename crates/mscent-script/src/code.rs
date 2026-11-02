@@ -34,6 +34,8 @@ pub(crate) enum Op {
     Ret,
     /// `^`: return from the method this block was written in.
     RetHome,
+    /// `^` outside any method: this handler or top-level body is finished.
+    EndTask,
 }
 
 #[derive(Debug)]

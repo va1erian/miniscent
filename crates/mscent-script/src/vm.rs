@@ -75,6 +75,7 @@ pub struct Vm<H> {
     pub(crate) errors: Vec<ScriptError>,
     pub(crate) ops: u64,
     gc_at: usize,
+    live_after_gc: usize,
 }
 
 // Not derived: that would demand `H: Clone`, and `H` only appears in fn pointers.
@@ -92,6 +93,7 @@ impl<H> Clone for Vm<H> {
             errors: self.errors.clone(),
             ops: self.ops,
             gc_at: self.gc_at,
+            live_after_gc: self.live_after_gc,
         }
     }
 }
@@ -110,6 +112,7 @@ impl<H> Vm<H> {
             errors: Vec::new(),
             ops: 0,
             gc_at: MIN_GC_BYTES,
+            live_after_gc: 0,
         }
     }
 
@@ -234,15 +237,19 @@ impl<H> Vm<H> {
             }
             host.roots(visit);
         });
+        self.live_after_gc = self.heap.bytes();
         self.gc_at = self
-            .heap
-            .bytes()
+            .live_after_gc
             .saturating_mul(2)
             .clamp(MIN_GC_BYTES, crate::heap::MAX_HEAP_BYTES / 2);
     }
 
+    /// Past the threshold, and only if something was allocated since the last
+    /// collection. A mostly live heap is over the threshold for good, and must
+    /// not be walked on every step with nothing to find.
     pub(crate) fn maybe_collect(&mut self, host: &impl Host) {
-        if self.heap.bytes() >= self.gc_at {
+        let bytes = self.heap.bytes();
+        if bytes >= self.gc_at && bytes > self.live_after_gc {
             self.collect(host);
         }
     }

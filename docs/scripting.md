@@ -291,7 +291,7 @@ Values are nil, true, false, numbers (`f32`), strings, arrays, blocks and game h
 unary, then binary, then keyword. There are no classes, modules, exceptions, maps or inheritance.
 Functions and messages share one flat namespace, and new ones come from `define`. A name defined twice, or one that clashes with a game function or a language message, is a load error. A function defined with a receiver (`define arr first`) must be sent to one, and a plain function (`define autoDoor: ...`) must not be.
 
-`^` returns from the method it was written in. A block that outlives that method, such as a handler written at the top level, has nothing to return from, so `^` there is a script error, not an early exit.
+`^` returns from the `define` it was written in. Outside any `define`, as in a handler written at the top level, it ends that handler, so it works as an early exit. A block that outlives its `define` has nothing to return to, so `^` there is a runtime error.
 
 **The rule that keeps it small:** no new syntax or language feature unless a level cannot be written
 without it. A missing capability is usually a new game function.
@@ -355,7 +355,7 @@ among hostiles, with sight checks staggered across steps so the cost stays flat.
 - **Replay holds.** No clock is exposed, one seeded generator sits behind `randomFrom:to:`, and budgets
   count operations. A test runs a level twice and compares traces byte for byte.
 - **Scripts are untrusted**, since they ship with levels. The language has no file, network or clock
-  access to remove. Limits: a 1 MiB file cap, nesting depth 64, call depth 128, a 16 MiB heap counted in bytes (32 bytes
+  access to remove. Limits: a 1 MiB file cap, nesting depth 64, call depth 128, a 4 MiB heap counted in bytes (32 bytes
   of overhead an object), strings and arrays of at most 4,096, 128 live tasks, 65,535 constants, selectors and
   functions, 1,024 variables in one scope, and a cap of 1024 spawned things. `cargo fuzz` feeds hostile text through
   compile and run.

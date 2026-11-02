@@ -59,6 +59,8 @@ pub(crate) struct Compiler<'a> {
     pub soft: Vec<Diag>,
     pub warnings: Vec<Diag>,
     pub method_code: HashMap<String, u16>,
+    /// Inside a `define`, where `^` has a method to return from.
+    pub in_method: bool,
     pub entries: Vec<u16>,
     pub top_slots: usize,
 }
@@ -83,6 +85,7 @@ impl<'a> Compiler<'a> {
             soft: Vec::new(),
             warnings: Vec::new(),
             method_code: HashMap::new(),
+            in_method: false,
             entries: Vec::new(),
             top_slots: 0,
         }
@@ -146,6 +149,13 @@ impl<'a> Compiler<'a> {
     }
 
     fn method(&mut self, d: &Define) -> R {
+        self.in_method = true;
+        let compiled = self.method_body(d);
+        self.in_method = false;
+        compiled
+    }
+
+    fn method_body(&mut self, d: &Define) -> R {
         self.line = d.line;
         self.enter_scope();
         for n in d.recv.iter().chain(d.params.iter()) {

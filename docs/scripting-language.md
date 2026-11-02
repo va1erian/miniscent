@@ -150,7 +150,7 @@ All were reproduced in the prototype. The first group is fixed in M9.4, each wit
 |---|---|
 | A typo in an assignment declares a new variable: `timerRuning := true` loads without complaint | Fixed: the load result carries a warning for a variable that is assigned and never read, for `--check` to print |
 | `fork:` in a loop left 2,857 tasks alive; only the op budget stopped it | Fixed: 128 live tasks, an error at the cap |
-| Up to 200,000 objects of up to 4 KB could reach about 800 MB | Fixed: a 16 MiB heap counted in bytes with a per-object overhead |
+| Up to 200,000 objects of up to 4 KB could reach about 800 MB | Fixed: a 4 MiB heap counted in bytes with a per-object overhead |
 | A missing period gives `nothing understands 'say:say:'` | Fixed: if the unknown selector splits into known messages, the error names the missing `.` and its line |
 | Errors say `level:1` or `f::1`, not always file and line | Fixed: every error, at load and at run time, gives its source file and line |
 

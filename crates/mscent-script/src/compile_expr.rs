@@ -61,7 +61,11 @@ impl Compiler<'_> {
             Expr::Return(value, line) => {
                 self.expr(value)?;
                 self.line = *line;
-                self.emit(Op::RetHome);
+                self.emit(if self.in_method {
+                    Op::RetHome
+                } else {
+                    Op::EndTask
+                });
             }
             Expr::Msg(m) => self.msg_expr(m)?,
         }

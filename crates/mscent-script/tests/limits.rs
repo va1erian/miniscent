@@ -288,7 +288,7 @@ fn firing_a_handler_at_the_cap_is_an_error_not_a_new_task() {
 
 #[test]
 fn the_heap_limit_counts_bytes_not_objects() {
-    // 500 strings of 2 KB per inner array is 1 MB, and the limit is 16 MiB:
+    // 500 strings of 2 KB per inner array is 1 MB, and the limit is 4 MiB:
     // the old count of 200,000 objects would allow 400 MB of this.
     let src = "s := 'x'. 11 timesRepeat: [s := s , s]. outer := {}.
         [true] whileTrue: [inner := {}. 500 timesRepeat: [inner add: s , 'y']. outer add: inner. wait: 0.01].";
@@ -297,9 +297,7 @@ fn the_heap_limit_counts_bytes_not_objects() {
     let errors = vm.take_errors();
     assert_eq!(errors.len(), 1, "{errors:?}");
     assert!(
-        errors[0]
-            .msg
-            .contains("out of script memory (limit 16 MiB)"),
+        errors[0].msg.contains("out of script memory (limit 4 MiB)"),
         "{errors:?}"
     );
     assert!(

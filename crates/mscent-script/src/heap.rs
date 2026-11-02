@@ -7,9 +7,10 @@
 /// whole budget (16 runs of 20,000 operations) before anything is freed. A
 /// legitimate step allocates a few kilobytes of environments and strings. The
 /// worst hostile loop, `s := s , s`, allocates about 1.4 KB per operation and
-/// would reach 450 MB in a step if nothing stopped it; this limit stops it at
-/// 16 MiB, about a thirtieth of that and small beside the 12 MB lightmap.
-pub const MAX_HEAP_BYTES: usize = 16 << 20;
+/// would reach 450 MB in a step if nothing stopped it. This limit stops it at
+/// 4 MiB, far above any real level and small enough that collecting a full
+/// heap of small objects costs about a millisecond.
+pub const MAX_HEAP_BYTES: usize = 4 << 20;
 /// Longest string a script can build, in bytes.
 pub const MAX_STR_LEN: usize = 4096;
 /// Most items an array can hold.

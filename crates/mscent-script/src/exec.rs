@@ -96,6 +96,7 @@ impl<H> Vm<H> {
             }
             Op::Ret => return Ok(ret(t)),
             Op::RetHome => return ret_home(t, home),
+            Op::EndTask => return Ok(Next::Done),
             Op::Send(sel, argc) => return self.send(program, t, sel, usize::from(argc), host),
         }
         Ok(Next::Continue)
