@@ -13,7 +13,9 @@ import os
 import subprocess
 import sys
 
-BUDGET_BYTES = 1_600_000
+# Raised from 1.6 MB for the texture generator, which replaced 757 KB of PNGs in
+# the assets with 7.5 KB of recipes: about 143 KB more binary, 600 KB less to ship.
+BUDGET_BYTES = 1_800_000
 WARN_FRACTION = 0.8
 
 
