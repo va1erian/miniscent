@@ -10,7 +10,7 @@ const SIZE: u32 = 64;
 const WHITE: u32 = 0xffff_ffff;
 
 /// 64x64 target, 90 degree fov, camera at the origin looking down -Z.
-fn setup() -> (Framebuffer, Camera) {
+pub(super) fn setup() -> (Framebuffer, Camera) {
     let cam = Camera::look_at(
         Vec3::ZERO,
         Vec3::new(0.0, 0.0, -1.0),
@@ -27,7 +27,7 @@ fn setup() -> (Framebuffer, Camera) {
 
 /// A 4x4 wall at z = -2 facing the camera. Its screen footprint is exactly
 /// the framebuffer, and one texture repeat spans the whole wall.
-fn wall() -> [Vertex; 4] {
+pub(super) fn wall() -> [Vertex; 4] {
     let p = |x: f32, y: f32, u: f32, v: f32| Vertex::new(Vec3::new(x, y, -2.0), u, v);
     [
         p(-2.0, 2.0, 0.0, 0.0),
@@ -39,7 +39,7 @@ fn wall() -> [Vertex; 4] {
 
 /// Bake the wall lit by a lamp near its left edge: the right half is beyond
 /// the lamp's radius and stays black (no ambient, no bounce).
-fn baked() -> Lightmap {
+pub(super) fn baked() -> Lightmap {
     // Space is solid by default; the room is carved out in front of the wall.
     let room = Brush::cuboid(
         mscent_math::Vec3d::new(-3.0, -3.0, -2.0),
@@ -68,7 +68,7 @@ fn baked() -> Lightmap {
     bake(&bsp, &[face], &[lamp], &cfg).unwrap()
 }
 
-fn pack(n: Vec3) -> u32 {
+pub(super) fn pack(n: Vec3) -> u32 {
     let c = |x: f32| ((x * 0.5 + 0.5) * 255.0).round() as u32;
     0xff00_0000 | c(n.x) << 16 | c(n.y) << 8 | c(n.z)
 }
@@ -96,7 +96,7 @@ fn dir_at_pixel(lm: &Lightmap, tex: &Texture, x: u32, y: u32) -> Vec3 {
     map.to_texture_frame(lm.face_luxel(0, lx as u32, ly as u32).unwrap().dir)
 }
 
-fn face<'a>(lm: &'a Lightmap, tex: &'a Texture, bump: bool) -> FaceLight<'a> {
+pub(super) fn face<'a>(lm: &'a Lightmap, tex: &'a Texture, bump: bool) -> FaceLight<'a> {
     let map = UvToLuxel::from_vertices(&lm.projections()[0], &wall(), tex).unwrap();
     FaceLight {
         lightmap: lm,
@@ -110,17 +110,17 @@ fn face<'a>(lm: &'a Lightmap, tex: &'a Texture, bump: bool) -> FaceLight<'a> {
     }
 }
 
-fn render<S: SpanShader>(tex: &Texture, shader: &mut S) -> Vec<u32> {
+pub(super) fn render<S: SpanShader>(tex: &Texture, shader: &mut S) -> Vec<u32> {
     let (mut fb, cam) = setup();
     draw_polygon(&mut fb, &cam, &wall(), tex, shader);
     fb.pixels().to_vec()
 }
 
-fn px(img: &[u32], x: u32, y: u32) -> u32 {
+pub(super) fn px(img: &[u32], x: u32, y: u32) -> u32 {
     img[(y * SIZE + x) as usize]
 }
 
-fn red(c: u32) -> u32 {
+pub(super) fn red(c: u32) -> u32 {
     (c >> 16) & 0xff
 }
 

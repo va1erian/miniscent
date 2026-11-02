@@ -1,14 +1,17 @@
-//! Textures and the material table.
+//! Textures.
 //!
 //! A texture is a power-of-two square or rectangle of `0xAARRGGBB` texels so
 //! the rasterizer can wrap coordinates with a mask. Optional companions: a
-//! tangent-space normal map (`name_n.png`) and a height map (`name_h.png`).
+//! tangent-space normal map (`name_n.png`), a height map (`name_h.png`) and a
+//! specular map (`name_s.png`), which is kept in the alpha of the normal texels
+//! because the specular path fetches those anyway.
 
 use core::fmt;
 use std::path::Path;
 
 use mscent_math::Vec3;
 
+use crate::manifest::ManifestError;
 use crate::mips;
 use crate::png::{self, Image, PngError};
 
@@ -23,6 +26,10 @@ pub enum TextureError {
     Io(String),
     /// The PNG could not be decoded.
     Png(PngError),
+    /// A specular map came with no normal map, whose alpha is where it lives.
+    SpecularWithoutNormals,
+    /// `materials.txt` is not acceptable.
+    Manifest(ManifestError),
 }
 
 impl fmt::Display for TextureError {
@@ -48,8 +55,11 @@ pub struct Texture {
     /// Half-size, quarter-size... copies of `albedo` (see [`crate::mips`]).
     mips: Vec<Vec<u32>>,
     filtered: bool,
+    /// Packed normals, with the specular mask in their alpha.
     normals: Option<Vec<u32>>,
     heights: Option<Vec<u8>>,
+    /// Mean of the specular mask, 0 to 255, for where it is not fetched.
+    spec_mean: u8,
 }
 
 impl Texture {
@@ -68,6 +78,7 @@ impl Texture {
             albedo,
             normals: None,
             heights: None,
+            spec_mean: u8::MAX,
         })
     }
 
@@ -81,14 +92,18 @@ impl Texture {
             filtered: false,
             normals: None,
             heights: None,
+            spec_mean: u8::MAX,
         }
     }
 
     /// Turn on smooth sampling: bilinear magnification and a mip chain for
     /// minification. Plain textures sample the nearest texel, which keeps
     /// exact-texel tests and pixel-art uses simple; loaded materials are
-    /// filtered.
+    /// filtered. A texture that is already filtered keeps its chain.
     pub fn filtered(mut self) -> Self {
+        if self.filtered {
+            return self;
+        }
         self.mips = mips::build(self.width, self.height, &self.albedo);
         self.filtered = true;
         self
@@ -99,13 +114,38 @@ impl Texture {
         self.filtered
     }
 
-    /// Attach a normal map (`0xAARRGGBB`, xyz packed as `n * 0.5 + 0.5`).
+    /// Attach a normal map (`0xAARRGGBB`, xyz packed as `n * 0.5 + 0.5`). The
+    /// alpha is the specular mask, so a map with no mask must have alpha 255.
     pub fn with_normals(mut self, normals: Vec<u32>) -> Result<Self, TextureError> {
         if normals.len() != self.albedo.len() {
             return Err(TextureError::SizeMismatch);
         }
+        self.spec_mean = mean_byte(normals.iter().map(|&n| (n >> 24) as u8));
         self.normals = Some(normals);
         Ok(self)
+    }
+
+    /// Attach a specular mask, one byte per texel, 255 for the full highlight.
+    /// It needs a normal map to live in: a made-up flat one would not be quite
+    /// flat at 8 bits, and would cost the diffuse path a normal fetch per pixel.
+    pub fn with_specular(mut self, mask: &[u8]) -> Result<Self, TextureError> {
+        if mask.len() != self.albedo.len() {
+            return Err(TextureError::SizeMismatch);
+        }
+        let Some(normals) = &mut self.normals else {
+            return Err(TextureError::SpecularWithoutNormals);
+        };
+        for (n, &m) in normals.iter_mut().zip(mask) {
+            *n = (*n & 0x00ff_ffff) | u32::from(m) << 24;
+        }
+        self.spec_mean = mean_byte(mask.iter().copied());
+        Ok(self)
+    }
+
+    /// Mean of the specular mask, 0.0 to 1.0, rounded down: exactly 1.0 only for
+    /// a texture with no mask or a full one, whose highlight must not change.
+    pub fn spec_mean(&self) -> f32 {
+        f32::from(self.spec_mean) / 255.0
     }
 
     /// Attach an 8-bit height map.
@@ -334,130 +374,49 @@ fn read_png(path: &Path) -> Result<Image, TextureError> {
     Ok(png::decode(&bytes)?)
 }
 
-/// Load `dir/name.png` plus `name_n.png` and `name_h.png` when they exist.
+/// Mean of `bytes`, rounded down, so it is 255 only if every byte is; 255 when
+/// there are none.
+fn mean_byte(bytes: impl ExactSizeIterator<Item = u8>) -> u8 {
+    let n = bytes.len() as u64;
+    if n == 0 {
+        return u8::MAX;
+    }
+    // Under 2^56 even for 2^48 bytes, far beyond any texture.
+    let sum: u64 = bytes.map(u64::from).sum();
+    u8::try_from(sum / n).unwrap_or(u8::MAX)
+}
+
+/// Load `dir/name.png` plus `name_n.png`, `name_h.png` and `name_s.png` when
+/// they exist. The alpha of a normal map file means nothing and is dropped, so
+/// only `name_s.png` can mask a highlight.
 pub fn load_texture(dir: &Path, name: &str) -> Result<Texture, TextureError> {
     let base = read_png(&dir.join(format!("{name}.png")))?;
     let mut tex = Texture::new(base.width, base.height, base.to_argb())?;
-    let same_size = |i: &Image| (i.width, i.height) == (base.width, base.height);
-    let normal_path = dir.join(format!("{name}_n.png"));
-    if normal_path.is_file() {
-        let n = read_png(&normal_path)?;
-        if !same_size(&n) {
+    let companion = |suffix: &str| -> Result<Option<Image>, TextureError> {
+        let path = dir.join(format!("{name}_{suffix}.png"));
+        if !path.is_file() {
+            return Ok(None);
+        }
+        let image = read_png(&path)?;
+        if (image.width, image.height) != (base.width, base.height) {
             return Err(TextureError::SizeMismatch);
         }
-        tex = tex.with_normals(n.to_argb())?;
+        Ok(Some(image))
+    };
+    if let Some(n) = companion("n")? {
+        let mut texels = n.to_argb();
+        for t in &mut texels {
+            *t |= 0xff00_0000;
+        }
+        tex = tex.with_normals(texels)?;
     }
-    let height_path = dir.join(format!("{name}_h.png"));
-    if height_path.is_file() {
-        let h = read_png(&height_path)?;
-        if !same_size(&h) {
-            return Err(TextureError::SizeMismatch);
-        }
+    if let Some(h) = companion("h")? {
         tex = tex.with_heights(h.first_channel())?;
     }
+    if let Some(s) = companion("s")? {
+        tex = tex.with_specular(&s.first_channel())?;
+    }
     Ok(tex)
-}
-
-/// Index of a material in a [`MaterialTable`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct MaterialId(pub u16);
-
-/// A named surface: its textures and how shiny it is.
-#[derive(Clone, Debug)]
-pub struct Material {
-    pub name: String,
-    /// Specular power input, 0 (matte) to 255 (mirror-like).
-    pub gloss: u8,
-    pub texture: Texture,
-}
-
-/// Default gloss per generated material; unknown names are mildly glossy.
-pub fn default_gloss(name: &str) -> u8 {
-    match name {
-        "metal" => 200,
-        "lightpanel" => 120,
-        "floor" => 90,
-        "brick" => 25,
-        "rock" => 10,
-        _ => 40,
-    }
-}
-
-/// All materials of a level, addressed by [`MaterialId`].
-#[derive(Clone, Debug, Default)]
-pub struct MaterialTable {
-    materials: Vec<Material>,
-}
-
-impl MaterialTable {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Add a material; `None` when the table is full (65536 entries).
-    pub fn add(&mut self, material: Material) -> Option<MaterialId> {
-        let id = u16::try_from(self.materials.len()).ok()?;
-        self.materials.push(material);
-        Some(MaterialId(id))
-    }
-
-    pub fn get(&self, id: MaterialId) -> Option<&Material> {
-        self.materials.get(usize::from(id.0))
-    }
-
-    pub fn find(&self, name: &str) -> Option<MaterialId> {
-        let i = self.materials.iter().position(|m| m.name == name)?;
-        u16::try_from(i).ok().map(MaterialId)
-    }
-
-    /// The same materials with smooth sampling on (see
-    /// [`Texture::filtered`]). Costs memory for the mip chains and some
-    /// time per pixel, which is why it is a choice and not the default.
-    pub fn filtered(mut self) -> Self {
-        for m in &mut self.materials {
-            m.texture = std::mem::replace(&mut m.texture, Texture::solid(0)).filtered();
-        }
-        self
-    }
-
-    pub fn len(&self) -> usize {
-        self.materials.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.materials.is_empty()
-    }
-
-    /// Load every base texture in `dir`, sorted by name so ids are stable.
-    /// Files starting with `_` and the `_n`/`_h`/`_s` companions are skipped.
-    pub fn load_dir(dir: &Path) -> Result<Self, TextureError> {
-        let io = |e: std::io::Error| TextureError::Io(format!("{}: {e}", dir.display()));
-        let mut names = Vec::new();
-        for entry in std::fs::read_dir(dir).map_err(io)? {
-            let file = entry.map_err(io)?.file_name();
-            let file = file.to_string_lossy();
-            if let Some(stem) = file.strip_suffix(".png") {
-                let companion = ["_n", "_h", "_s"].iter().any(|s| stem.ends_with(s));
-                if !stem.starts_with('_') && !companion {
-                    names.push(stem.to_string());
-                }
-            }
-        }
-        names.sort();
-        let mut table = Self::new();
-        for name in names {
-            let texture = load_texture(dir, &name)?;
-            let gloss = default_gloss(&name);
-            table
-                .add(Material {
-                    name,
-                    gloss,
-                    texture,
-                })
-                .ok_or(TextureError::BadSize)?;
-        }
-        Ok(table)
-    }
 }
 
 #[cfg(test)]

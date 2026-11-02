@@ -1,54 +1,4 @@
-use std::path::PathBuf;
-
 use super::*;
-
-fn textures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures")
-}
-
-fn rgb(r: u8, g: u8, b: u8) -> u32 {
-    u32::from_be_bytes([255, r, g, b])
-}
-
-#[test]
-fn assets_load_and_texels_read_back() {
-    let table = MaterialTable::load_dir(&textures_dir()).unwrap();
-    let names: Vec<&str> = table.materials.iter().map(|m| m.name.as_str()).collect();
-    assert_eq!(names, ["brick", "floor", "lightpanel", "metal", "rock"]);
-
-    // Expected values were read with an independent decoder (PIL).
-    let brick = &table.get(table.find("brick").unwrap()).unwrap().texture;
-    assert_eq!((brick.width(), brick.height()), (128, 128));
-    assert_eq!(brick.texel(0, 0), rgb(115, 110, 102));
-    assert_eq!(brick.texel(5, 7), rgb(186, 74, 49));
-    assert_eq!(brick.texel(127, 127), rgb(127, 51, 34));
-    assert_eq!(brick.texel(64, 3), rgb(116, 111, 103));
-    assert_eq!(brick.height_at(0, 0), Some(40));
-    assert_eq!(brick.height_at(5, 7), Some(216));
-    assert_eq!(brick.height_at(127, 127), Some(159));
-
-    let metal = &table.get(table.find("metal").unwrap()).unwrap().texture;
-    assert_eq!(metal.texel(5, 7), rgb(137, 145, 156));
-}
-
-#[test]
-fn normal_maps_decode_to_unit_vectors() {
-    let table = MaterialTable::load_dir(&textures_dir()).unwrap();
-    let brick = &table.get(table.find("brick").unwrap()).unwrap().texture;
-    assert!(brick.has_normals() && brick.has_heights());
-    // Raw (125,127,255) is a nearly flat normal pointing out of the surface.
-    let n = brick.normal(5, 7).unwrap();
-    assert!(n.z > 0.99 && n.x.abs() < 0.02 && (n.length() - 1.0).abs() < 1e-4);
-}
-
-#[test]
-fn gloss_comes_from_the_material_table() {
-    let table = MaterialTable::load_dir(&textures_dir()).unwrap();
-    let gloss = |n: &str| table.get(table.find(n).unwrap()).unwrap().gloss;
-    assert!(gloss("metal") > gloss("floor"));
-    assert!(gloss("floor") > gloss("rock"));
-    assert_eq!(table.find("nope"), None);
-}
 
 #[test]
 fn wrap_addressing_handles_negative_and_large_coordinates() {
@@ -68,15 +18,6 @@ fn construction_validates_sizes() {
     let t = Texture::new(2, 2, vec![0; 4]).unwrap();
     assert!(t.clone().with_normals(vec![0; 3]).is_err());
     assert!(t.with_heights(vec![0; 5]).is_err());
-}
-
-#[test]
-fn missing_directory_is_an_error_not_a_panic() {
-    let missing = textures_dir().join("does_not_exist");
-    assert!(matches!(
-        MaterialTable::load_dir(&missing),
-        Err(TextureError::Io(_))
-    ));
 }
 
 fn stripes() -> Texture {
@@ -113,4 +54,69 @@ fn bilinear_returns_texel_centres_and_blends_between_them() {
     // Wraps around the edge instead of reading out of bounds.
     let _ = f.sample_bilinear(-1, -1);
     let _ = f.sample_bilinear(i32::MAX, i32::MIN);
+}
+
+#[test]
+fn filtering_twice_keeps_the_same_chain() {
+    let once = stripes().filtered();
+    let twice = once.clone().filtered();
+    assert_eq!(once.mip_count(), twice.mip_count());
+    assert_eq!(once.texel_lod(1, 1, 1), twice.texel_lod(1, 1, 1));
+}
+
+#[test]
+fn a_mask_needs_one_byte_per_texel_and_defaults_to_full() {
+    let t = Texture::new(2, 2, vec![0; 4]).unwrap();
+    assert_eq!(t.spec_mean(), 1.0, "no mask at all is exactly full");
+    let full = t.clone().with_normals(vec![0xff80_80ff; 4]).unwrap();
+    assert_eq!(full.spec_mean(), 1.0);
+    assert!(matches!(
+        full.clone().with_specular(&[0; 3]),
+        Err(TextureError::SizeMismatch)
+    ));
+    assert!(matches!(
+        full.clone().with_specular(&[0; 5]),
+        Err(TextureError::SizeMismatch)
+    ));
+}
+
+#[test]
+fn a_mask_goes_into_the_normal_alpha_and_leaves_the_normal_alone() {
+    let normals = vec![0xff12_3456, 0xff65_4321, 0xff00_0000, 0xffff_ffff];
+    let t = Texture::new(2, 2, vec![0; 4])
+        .unwrap()
+        .with_normals(normals.clone())
+        .unwrap()
+        .with_specular(&[0, 100, 200, 255])
+        .unwrap();
+    assert_eq!(t.normal_texel(0, 0), Some(0x0012_3456));
+    assert_eq!(t.normal_texel(1, 0), Some(0x6465_4321));
+    assert_eq!(t.normal_texel(0, 1), Some(0xc800_0000));
+    assert_eq!(t.normal_texel(1, 1), Some(0xffff_ffff));
+    // (0 + 100 + 200 + 255) / 4 = 138.75, rounded down so that only an all-full
+    // mask has a mean of 255.
+    assert_eq!(t.spec_mean(), 138.0 / 255.0);
+    let nearly = Texture::new(16, 16, vec![0; 256]).unwrap();
+    let nearly = nearly.with_normals(vec![0xff80_80ff; 256]).unwrap();
+    let mut mask = [255; 256];
+    mask[7] = 0;
+    assert!(nearly.with_specular(&mask).unwrap().spec_mean() < 1.0);
+    let plain = Texture::new(2, 2, vec![0; 4]).unwrap();
+    let plain = plain.with_normals(normals).unwrap();
+    for (x, y) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+        assert_eq!(
+            t.normal(x, y),
+            plain.normal(x, y),
+            "alpha is not the normal"
+        );
+    }
+}
+
+#[test]
+fn a_mask_with_no_normal_map_is_an_error() {
+    let t = Texture::new(2, 2, vec![0; 4]).unwrap();
+    assert!(matches!(
+        t.with_specular(&[0; 4]),
+        Err(TextureError::SpecularWithoutNormals)
+    ));
 }

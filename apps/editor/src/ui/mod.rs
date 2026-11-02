@@ -8,6 +8,7 @@ mod icons;
 mod keys;
 mod layouts;
 mod level_dialog;
+mod material_list;
 mod paint2d;
 pub mod props;
 mod toolbar;

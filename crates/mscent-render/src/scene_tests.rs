@@ -1,6 +1,6 @@
 use super::*;
+use crate::material::Material;
 use crate::raster::draw_polygon;
-use crate::texture::Material;
 use mscent_math::rng::Rng;
 use mscent_world::{GenParams, compile, extract_faces, generate, room_centers};
 

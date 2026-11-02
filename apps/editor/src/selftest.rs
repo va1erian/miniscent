@@ -23,6 +23,7 @@ use crate::ui::{Editor, Msg, Probe, cmd};
 
 mod faces;
 mod keys;
+mod materials;
 mod scripting;
 
 /// Ticks the UI `n` times, 16 ms apart, so the render thread's frames arrive
@@ -188,6 +189,7 @@ fn wide_script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     pump(stage, 30);
     run.shot(stage, "wide-02-face.png");
     faces::wide_edit(run, stage, probe);
+    materials::script(run, stage, probe);
 }
 
 fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {

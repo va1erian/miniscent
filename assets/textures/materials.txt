@@ -1,0 +1,12 @@
+# Material ids. Levels store these numbers, so they never change.
+#
+#   id name gloss     gloss: specular power input, 0 (matte) to 255
+#   id retired        the material is gone; levels using it draw grey
+#
+# Add new materials at the end. Never delete a line or reuse an id: to remove a
+# material, turn its line into `id retired`.
+0 brick 25
+1 floor 90
+2 lightpanel 120
+3 metal 200
+4 rock 10
