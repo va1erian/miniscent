@@ -6,8 +6,9 @@ use xui::xui_canvas::snapshot::Stage;
 
 use super::{Run, pump, wait_for_preview};
 use crate::model::Tool;
+use crate::model::generators::Kind;
 use crate::studio::Preview;
-use crate::ui::{Click, Msg, PaneDrag, Probe, cmd};
+use crate::ui::{Click, Msg, PaneDrag, Probe, Prop, VoxelProp, cmd};
 
 const LEVEL: &str = "miniscent-level 1
 box subtract 0 4  -10 -10 0  10 10 6
@@ -107,4 +108,39 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     pump(stage, 20);
     stage.emit(Msg::Escape);
     pump(stage, 2);
+    generator(run, stage, probe);
+}
+
+/// A generator click holds its result, and the panel's Commit keeps it as one
+/// undo step.
+fn generator(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
+    let state = probe.state();
+    {
+        let mut st = state.borrow_mut();
+        st.tool = Tool::Voxel;
+        st.voxel.generator = Some(Kind::Mushrooms);
+    }
+    let steps = probe.state().borrow().history.depth();
+    let pane = probe.view_pane();
+    pane.push_click(click(0.5, 0.5));
+    pump(stage, 2);
+    pane.push_drag(drag(0.5, 0.5, true));
+    pump(stage, 12);
+    let held = probe.state().borrow().pending();
+    run.check(
+        held,
+        &format!("a generator click holds its result: {}", probe.message()),
+    );
+    run.check(
+        probe.state().borrow().history.depth() == steps,
+        "nothing is recorded before Commit",
+    );
+    run.shot(stage, "voxel-04-held.png");
+    stage.emit(Msg::Prop(Prop::Voxel(VoxelProp::Commit)));
+    pump(stage, 4);
+    let st = state.borrow();
+    run.check(
+        !st.pending() && st.history.depth() == steps + 1,
+        "Commit records one undo step",
+    );
 }

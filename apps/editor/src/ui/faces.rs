@@ -63,7 +63,12 @@ impl Editor {
     /// The wheel over the 3D picture sets the Voxel tool's radius.
     pub(super) fn pane_wheel(&mut self, notches: i32) {
         let mut st = self.state.borrow_mut();
-        if st.tool == Tool::Voxel && notches != 0 {
+        if st.pending() && notches != 0 {
+            // A held generation: the wheel rolls another seed.
+            let seed = st.voxel.seed.wrapping_add_signed(notches.signum());
+            st.reroll_to(seed);
+            st.message = format!("Seed {}", st.voxel.seed);
+        } else if st.tool == Tool::Voxel && notches != 0 {
             let r = st.voxel.radius * WHEEL_STEP.powi(notches);
             st.voxel.radius = r.clamp(MIN_RADIUS, MAX_RADIUS);
             st.message = format!("Radius {:.2}", st.voxel.radius);
@@ -86,6 +91,7 @@ impl Editor {
                     StrokeKeys {
                         swap: click.ctrl,
                         build_up: click.alt,
+                        ..Default::default()
                     },
                 );
             }

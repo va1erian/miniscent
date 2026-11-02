@@ -1,6 +1,6 @@
 # Voxel volumes: design
 
-Status: M11.1, M11.2 and M11.6 are done (field, dabs, meshing, level of detail, connectivity, level file, collision); the game collides with volumes but does not draw them, and the editor loads and keeps them but does not draw or edit them yet. Work items are [M11](work-items.md#m11-voxel-volumes).
+Status: M11.1, M11.2, M11.6 and M11.9 are done (field, dabs, meshing, level of detail, connectivity, level file, collision, and the generators with Flatten, Roughen, Tunnel, Fill, Copy and Stamp); the game collides with volumes but does not draw them. Work items are [M11](work-items.md#m11-voxel-volumes).
 
 Brushes are good at architecture and bad at anything that grows. This design adds a second kind of
 geometry for hives, coral, mushrooms, trees, cave systems, stalactites and alien interiors, painted
@@ -378,13 +378,13 @@ The tool is **Voxel (X)**. There is no need to place a box: dabbing is enough.
 |---|---|
 | Add / Carve | Sphere, box or capsule dab with a falloff; hold Ctrl while painting to swap |
 | Smooth | Blur toward the local average: the CE2 tool that makes everything look natural |
-| Flatten | Toward the plane set by the stroke's first hit |
-| Roughen | Displace by seeded 3D noise, for weathering |
+| Flatten | Toward the plane set by the stroke's first hit (that point and the surface normal there), fully at the dab's core. New solid takes the tool's material |
+| Roughen | Displace by seeded value noise (`voxel::noise3`), bumps three cells apart. A dab moves the surface a fraction of a cell and dabs overlap, so scrubbing deepens the same bumps rather than adding new ones |
 | Paint | Material only; no shape change, no re-bake |
-| Tunnel | Click a path; carves round cones with radius per point |
+| Tunnel | Click a path: the first click carves the mouth, each next click carves a round cone from the last point, with the radius the tool has at that click (set with the wheel). Esc ends the path. One undo step per click |
 | Growth | Generators, below |
-| Fill | Fills the box from a warped gyroid or noise field, for alien interiors |
-| Copy / Stamp | Captures a region and pastes it as a dab |
+| Fill | "Fill selected volume" in the panel replaces every sample of the selected volume from a warped gyroid or ridged noise field (`generators/field.rs`), as one undo step. It replaces the whole volume, sculpting included |
+| Copy / Stamp | Copy captures a ball (the tool's radius, up to 48 cells) of the volume under the click as samples (`voxel::capture`). Stamp replaces the same ball at the click (`voxel::stamp`), creating an add volume where there is none. The cell size must match |
 
 Radius with the wheel, strength with Ctrl+wheel; hold Shift to lock the stroke to one plane.
 Right button remains fly-look, and only the 3D view paints. The 2D views show the box, an outline of
@@ -398,15 +398,29 @@ through the same dab code, so undo, light and limits need no generator logic.
 
 | Generator | Method |
 |---|---|
-| Stalactites | Rays up and down from the brushed area find rock; tapered round cones with drip noise |
-| Mushrooms | Stem round cone, ellipsoid cap, radial carves for gills, clustered placement |
-| Coral | Branching growth with a random bias, then smooth union and Roughen |
-| Trees | Space colonization: attractors in a crown, branches grown toward them, thickness from the pipe model, flare into the ground |
-| Hive | Hexagonal comb on a surface: carved prisms that leave wax walls, on a curved base |
+| Stalactites | Tapered round cones with a flared root, scattered over a disc and growing along the surface normal, so the one generator hangs from a ceiling and rises from a floor. Drips shorten toward the edge |
+| Mushrooms | A cluster of leaning stems (round cones) with spheroid caps hollowed beneath and twelve radial gill carves |
+| Coral | Branching growth with a random bias: each branch forks twice, four levels deep, thinning as it goes, from three or four colonies |
+| Trees | Space colonization: 140 attractors in a crown, nodes grown toward the nearest ones until reached, thickness from the pipe model (exponent 3), buttress roots flaring into the ground |
+| Hive | A wax lens bulging out of the surface (so the comb is curved) with hexagonal prisms carved into it in a packed grid at random depths. The walls are what the carving leaves, never under two cells thick |
 
-**Ghost preview:** a generator runs on a background thread and shows the primitives in wireframe in
-the 3D view. Wheel re-rolls the seed; click commits one undo step. Radii are clamped to at least one
-cell, because thinner than that aliases into broken beads.
+A plan holds at most 4096 primitives (`generators::MAX_PIECES`): sphere, round cone, spheroid (an
+ellipsoid of revolution) or hexagonal prism, each added or carved. `Prim` gained the spheroid and the
+prism for this; the prism is there because a comb of round holes reads as a sponge. `Plan` widens every
+radius to at least one cell, because thinner than that aliases into broken beads. A site is a point, a
+normal, a size (the tool's radius) and a cell. The normal comes from three parallel rays through the pick
+code a stroke uses (`generators::surface_normal`), so it works on brushes and on voxel surfaces alike.
+Not done: a generator does not snap each drip or stem to the surface with a ray of its own, so on a
+strongly curved surface a root can float or sink. Roots are sunk a little and flared to hide that.
+
+**Held result instead of a ghost.** The design asked for a wireframe of the primitives in the 3D view.
+The highlight overlay (`studio/highlight.rs`) fills and outlines polygons with the frame's depth test
+and has no wire primitive, so a wireframe of a few hundred spheres and cones would have needed a second
+overlay path. What is built instead is the real result: with a generator chosen in the panel, a click
+runs it on the stroke thread, puts the result in the document without recording it, and holds it. The
+wheel, or the Seed field, re-rolls: the document goes back to before and the generator runs again with
+another seed. Commit records one undo step. Esc, a new click, undo or a tool change drops it. The volume
+grows the way a stroke's does, so the limits (detail chunks, neighbours, box size) apply unchanged.
 
 ### Stroke semantics
 
@@ -570,9 +584,10 @@ crates/mscent-world/src/lightmap/occluders.rs, cells.rs
 crates/mscent-collide/src/voxel.rs, solids.rs
 crates/mscent-render/src/voxel/  prepare, fill, flood, shader, governor
 crates/mscent-game/src/combat.rs (carve), destruct.rs (queue)
-apps/editor/src/model/voxel/     tool, stroke, grow, generators/*
+apps/editor/src/model/           stroke (thread), sculptor (what a stroke does), growth (generator and
+                                 Fill jobs), voxel (state), generators/* (one file per generator)
 apps/editor/src/studio/live.rs   mesher thread, batches
-apps/editor/src/ui/voxelpanel.rs
+apps/editor/src/ui/voxelpanel.rs dab, generator, seed, Commit, Fill
 apps/editor/src/selftest/voxel.rs
 ```
 

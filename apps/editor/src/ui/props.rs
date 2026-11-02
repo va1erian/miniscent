@@ -3,7 +3,6 @@
 // Several parallel per-axis arrays are indexed by the same axis number.
 #![allow(clippy::needless_range_loop)]
 
-use mscent_world::voxel::CellSize;
 use mscent_world::{Entity, Op, materials::NAMES};
 use xui::backend::WidgetId;
 use xui::prelude::*;
@@ -11,9 +10,8 @@ use xui::widget::{Edit, GroupBox, HasText};
 
 use super::Msg;
 use super::facepanel::FacePanel;
-use super::faces::{MAX_RADIUS, MIN_RADIUS};
+use super::voxelpanel::{VoxelPanel, VoxelProp, apply as apply_voxel};
 use crate::model::entity::{entity_name, params, pos, set_param, with_pos};
-use crate::model::stroke::VoxelOp;
 use crate::model::{EditorState, Shape, Tool};
 
 /// A field edit made in the panel.
@@ -31,21 +29,11 @@ pub enum Prop {
     TagsText(String),
     /// The Apply button: the name and tags become the selection's.
     ApplyNames,
-    VoxelOp(usize),
-    VoxelRadius(f64),
-    VoxelMaterial(usize),
-    VoxelCell(usize),
+    /// A change in the Voxel tool's section.
+    Voxel(VoxelProp),
 }
 
 const AXES: [&str; 3] = ["X", "Y", "Z"];
-const VOXEL_OPS: [&str; 4] = ["Add", "Carve", "Smooth", "Paint"];
-const VOXEL_CELLS: [&str; 4] = ["0.125", "0.25", "0.5", "1"];
-const CELLS: [CellSize; 4] = [
-    CellSize::Eighth,
-    CellSize::Quarter,
-    CellSize::Half,
-    CellSize::One,
-];
 /// Most kind-specific fields any entity has.
 const PARAMS: usize = 5;
 
@@ -67,11 +55,7 @@ pub struct Panel {
     name: Handle<Edit<Msg>>,
     tags: Handle<Edit<Msg>>,
     uses: Handle<Label<Msg>>,
-    voxel_group: Handle<GroupBox<Msg>>,
-    voxel_op: Handle<ComboBox<Msg>>,
-    voxel_radius: Handle<NumberField<Msg>>,
-    voxel_material: Handle<ComboBox<Msg>>,
-    voxel_cell: Handle<ComboBox<Msg>>,
+    pub voxel: VoxelPanel,
     /// What the name and tag fields last showed, so typing is not overwritten.
     shown_names: std::cell::RefCell<(String, String)>,
     pub face: FacePanel,
@@ -101,13 +85,9 @@ impl Panel {
             .flatten()
             .any(|h| h.get().id() == id);
         let names = self.name.get().id() == id || self.tags.get().id() == id;
-        let voxel = self.voxel_radius.get().id() == id
-            || self.voxel_op.get().id() == id
-            || self.voxel_material.get().id() == id
-            || self.voxel_cell.get().id() == id;
         numbers
             || names
-            || voxel
+            || self.voxel.owns(id)
             || self.face.owns(id)
             || self.op.get().id() == id
             || self.material.get().id() == id
@@ -188,59 +168,12 @@ impl Panel {
         ));
         scroll(column().padding(8).gap(8).children((
             label("Nothing selected").bind(&self.what),
-            group("Voxel tool", self.voxel_layout()).bind(&self.voxel_group),
+            group("Voxel tool", self.voxel.layout()).bind(&self.voxel.group),
             group("Script names", names).bind(&self.names_group),
             group("Brush", brush).bind(&self.brush_group),
             self.face.layout(self.ui.clone()),
             group("Entity", ent).bind(&self.entity_group),
         )))
-    }
-
-    fn voxel_layout(&self) -> Layout<Msg> {
-        grid([Track::Auto, Track::Fill(1)])
-            .gap(6)
-            .child(label("Dab"))
-            .child(
-                combo_box(&VOXEL_OPS)
-                    .on_select(|i| Msg::Prop(Prop::VoxelOp(i)))
-                    .bind(&self.voxel_op),
-            )
-            .child(label("Radius"))
-            .child(
-                number_field(MIN_RADIUS, MAX_RADIUS, 0.25)
-                    .then(|f| f.on_commit(|v| Some(Msg::Prop(Prop::VoxelRadius(v)))))
-                    .bind(&self.voxel_radius),
-            )
-            .child(label("Material"))
-            .child(
-                combo_box(&NAMES)
-                    .on_select(|i| Msg::Prop(Prop::VoxelMaterial(i)))
-                    .bind(&self.voxel_material),
-            )
-            .child(label("New cells"))
-            .child(
-                combo_box(&VOXEL_CELLS)
-                    .on_select(|i| Msg::Prop(Prop::VoxelCell(i)))
-                    .bind(&self.voxel_cell),
-            )
-    }
-
-    fn sync_voxel(&self, st: &EditorState) {
-        self.show(self.voxel_group.get().id(), st.tool == Tool::Voxel);
-        let tool = &st.voxel;
-        let op = match tool.op {
-            VoxelOp::Add => 0,
-            VoxelOp::Carve => 1,
-            VoxelOp::Smooth => 2,
-            VoxelOp::Paint => 3,
-        };
-        self.voxel_op.get().select(op);
-        self.voxel_radius.get().set_value(tool.radius);
-        self.voxel_material
-            .get()
-            .select(usize::from(tool.material).min(NAMES.len() - 1));
-        let cell = CELLS.iter().position(|&c| c == tool.cell).unwrap_or(1);
-        self.voxel_cell.get().select(cell);
     }
 
     /// The name and tag fields follow the selection, and leave typing alone.
@@ -263,7 +196,7 @@ impl Panel {
     /// Shows the selection in the fields and enables only the relevant ones.
     pub fn sync(&self, st: &mut EditorState) {
         self.sync_names(st);
-        self.sync_voxel(st);
+        self.voxel.sync(st, |id, visible| self.show(id, visible));
         let brush = st.selected_brush();
         let ent = st.selected_entity();
         let text = match (brush, ent) {
@@ -357,26 +290,6 @@ pub fn apply(st: &mut EditorState, prop: Prop) -> bool {
             false
         }
         Prop::ApplyNames => st.apply_draft(),
-        Prop::VoxelOp(i) => {
-            st.voxel.op = [
-                VoxelOp::Add,
-                VoxelOp::Carve,
-                VoxelOp::Smooth,
-                VoxelOp::Paint,
-            ][i.min(3)];
-            false
-        }
-        Prop::VoxelRadius(v) => {
-            st.voxel.radius = v.clamp(MIN_RADIUS, MAX_RADIUS);
-            false
-        }
-        Prop::VoxelMaterial(i) => {
-            st.voxel.material = u8::try_from(i).unwrap_or(0);
-            false
-        }
-        Prop::VoxelCell(i) => {
-            st.voxel.cell = CELLS[i.min(CELLS.len() - 1)];
-            false
-        }
+        Prop::Voxel(prop) => apply_voxel(st, prop),
     }
 }

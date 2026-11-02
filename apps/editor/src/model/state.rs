@@ -74,6 +74,8 @@ pub struct EditorState {
     /// The Voxel tool's settings.
     pub voxel: super::stroke::VoxelTool,
     pub(super) stroke: Option<super::voxel::Stroke>,
+    /// What Copy captured, for Stamp.
+    pub clip: Option<std::sync::Arc<mscent_world::voxel::Clip>>,
 }
 
 impl Default for EditorState {
@@ -106,12 +108,15 @@ impl EditorState {
             script: Default::default(),
             voxel: Default::default(),
             stroke: None,
+            clip: None,
         }
     }
 
     /// Replaces the document and clears history and selection.
     pub fn load(&mut self, doc: Document) {
         self.cancel_stroke();
+        self.voxel.path = None;
+        self.clip = None;
         self.doc = doc;
         self.history.clear();
         self.selection = None;
