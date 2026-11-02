@@ -233,6 +233,37 @@ fn a_shot_needs_a_plain_name_and_writes_a_png_where_it_was_told() {
 }
 
 #[test]
+fn a_door_that_moved_shows_in_the_next_shot() {
+    let dir = Temp::new("doorshot");
+    let level = make_level(&dir);
+    let shots = dir.path("pictures");
+    let test = dir.write(
+        "t.st",
+        "flyTo: (x: 0 y: 0 z: 0).
+        aimAt: (mover: 'vault_door').
+        wait: 0.05.
+        shot: 'shut.png'.
+        (mover: 'vault_door') moveTo: 'open' in: 0.1.
+        wait: 0.2.
+        shot: 'open.png'.",
+    );
+    let run = game(&[
+        "--level",
+        s(&level),
+        "--test",
+        s(&test),
+        "--shots-dir",
+        s(&shots),
+    ]);
+    assert!(run.status.success(), "{}", out(&run));
+    let (shut, open) = (
+        std::fs::read(shots.join("shut.png")).unwrap(),
+        std::fs::read(shots.join("open.png")).unwrap(),
+    );
+    assert_ne!(shut, open, "the door must show");
+}
+
+#[test]
 fn check_lists_names_warns_about_unused_ones_and_fails_on_errors() {
     let dir = Temp::new("check");
     let level = make_level(&dir);

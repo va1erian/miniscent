@@ -63,7 +63,7 @@ pub use brush::{Brush, BrushError, Op};
 pub use bsp::{Bsp, BspError, Child, Leaf, LeafId, LeafKind, Node, NodeId, Region};
 pub use csg::{CsgError, compile};
 pub use entity::{Entity, Level};
-pub use faces::{Face, extract_faces};
+pub use faces::{Face, brush_faces, extract_faces};
 pub use format::FormatError;
 pub use r#gen::{GenParams, generate, room_centers};
 pub use gen_level::generate_level;

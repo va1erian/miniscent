@@ -253,8 +253,8 @@ in the collision code fails the mover tests, so they can fail.
 
 ### Rendering and light
 
-- Mover faces come from `Brush::faces()`, drawn after `draw_level` and before the meshes. The z-buffer
-  resolves them against the world. Culling is frustum against bounds.
+- Mover faces come from `Brush::faces()`, drawn before the world, so the z-buffer saves shading whatever a
+  door covers. A mover wholly behind the eye is skipped; off-screen faces are left to the clipper.
 - Faces join the lightmap's `LightFace` list at the authored pose, so `input_key` covers them and the
   bake cache keeps working. Lighting a face uses face-space UVs, so only the polygon is transformed at
   draw time and the light rides with the door. Specular needs the eye in the mover's frame. Positions

@@ -62,6 +62,8 @@ struct Motion {
 pub struct Mover {
     poses: Vec<(String, Pose)>,
     current: Pose,
+    /// Where it was one step ago, for drawing between the two.
+    previous: Pose,
     at: Option<usize>,
     motion: Option<Motion>,
     when_blocked: WhenBlocked,
@@ -86,6 +88,7 @@ impl Mover {
         Self {
             poses: vec![(CLOSED.to_string(), Pose::IDENTITY)],
             current: Pose::IDENTITY,
+            previous: Pose::IDENTITY,
             at: Some(0),
             motion: None,
             when_blocked: WhenBlocked::Reverse,
@@ -112,6 +115,11 @@ impl Mover {
 
     pub fn pose(&self) -> &Pose {
         &self.current
+    }
+
+    /// Where to draw it, a fraction `alpha` of the way through the last step.
+    pub fn drawn_pose(&self, alpha: f32) -> Pose {
+        Pose::between(&self.previous, &self.current, alpha)
     }
 
     /// The next pose if it is moving.
@@ -221,6 +229,7 @@ impl Game {
 
     pub(crate) fn run_movers(&mut self) {
         for i in 0..self.movers.len() {
+            self.movers[i].previous = self.movers[i].current;
             let Some(pose) = self.movers[i].next() else {
                 continue;
             };
