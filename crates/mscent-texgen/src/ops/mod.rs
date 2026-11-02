@@ -21,6 +21,7 @@ use crate::image::{Frame, Image};
 mod bricks;
 mod cells;
 mod combine;
+mod cost;
 mod draw;
 mod filter;
 mod flow;
@@ -28,11 +29,16 @@ mod font;
 mod height;
 mod paint;
 mod pattern;
+mod stroke_work;
 mod text;
 mod util;
 mod warp;
 
-pub use paint::{MAX_POINTS, MAX_STROKES, STROKE_COORD, STROKE_RADIUS, stroke_fits};
+pub use cost::{Cost, Knobs, cost_ns};
+pub use stroke_work::{
+    MAX_POINTS, MAX_STROKE_WORK, MAX_STROKES, STROKE_COORD, STROKE_RADIUS, charge_stroke,
+    stroke_fits,
+};
 
 /// Longest text parameter, in bytes.
 pub const MAX_TEXT: usize = 64;
@@ -158,6 +164,8 @@ pub struct OpSpec {
     pub params: &'static [ParamSpec],
     pub role: Role,
     pub kernel: fn(&Ctx) -> Result<Image, TexError>,
+    /// What its kernel costs, for the limits on a page; see [`cost`].
+    pub cost: Cost,
 }
 
 impl PartialEq for OpSpec {
@@ -181,6 +189,20 @@ impl Params {
 
     pub fn values(&self) -> &[Value] {
         &self.values
+    }
+
+    /// The value of the parameter `spec` calls `name`.
+    pub(crate) fn named(&self, spec: &OpSpec, name: &str) -> Option<&Value> {
+        let index = spec.params.iter().position(|p| p.name == name);
+        debug_assert!(index.is_some(), "{}: no parameter {name}", spec.name);
+        self.values.get(index?)
+    }
+
+    /// The first strokes parameter, to add a stroke to it.
+    pub(crate) fn strokes_param(spec: &OpSpec) -> Option<usize> {
+        spec.params
+            .iter()
+            .position(|p| matches!(p.kind, ParamKind::Strokes))
     }
 
     /// The strokes of parameter `index`, to grow a stroke in place as the editor
@@ -224,9 +246,7 @@ pub struct Ctx<'a> {
 
 impl Ctx<'_> {
     fn value(&self, name: &str) -> Option<&Value> {
-        let index = self.spec.params.iter().position(|p| p.name == name);
-        debug_assert!(index.is_some(), "{}: no parameter {name}", self.spec.name);
-        self.params.values.get(index?)
+        self.params.named(self.spec, name)
     }
 
     pub fn float(&self, name: &str) -> f32 {
@@ -382,6 +402,10 @@ pub(crate) const fn exactly(n: u8) -> Inputs {
     Inputs { min: n, max: n }
 }
 
+#[cfg(test)]
+mod case_tests;
+#[cfg(test)]
+mod cost_tests;
 #[cfg(test)]
 mod draw_tests;
 #[cfg(test)]

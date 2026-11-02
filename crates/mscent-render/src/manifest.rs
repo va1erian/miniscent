@@ -6,10 +6,12 @@
 //! with `#` are skipped. Names become file names, and the file comes from disk,
 //! so all of this is checked and every failure is an error.
 //!
-//! A directory with no manifest (a test fixture, an `--assets` directory) gets
-//! ids from its file list, stock names first and the rest sorted, and, as before
-//! there were manifests, the stock gloss for a known name and [`DEFAULT_GLOSS`]
-//! for any other. A copy of the whole stock folder so keeps every id it has.
+//! A directory with no manifest (a test fixture, or an `--assets` directory that
+//! holds recipes or `brick.png`) gets ids from its file list, stock names first and
+//! the rest sorted, and, as before there were manifests, the stock gloss for a known
+//! name and [`DEFAULT_GLOSS`] for any other. So a copy of all ten stock materials
+//! keeps their ids. Materials past them get theirs by name, which a new file can
+//! move: a directory whose levels need them to stay needs a manifest.
 
 use std::collections::HashSet;
 use std::io::Read;
@@ -263,8 +265,11 @@ fn listed_gloss(name: &str) -> u8 {
 }
 
 /// The entries of a directory with no manifest: every base texture, the stock
-/// names in their places and the others after them by name. Files starting with `_` and the `_n`, `_h` and `_s` companions are not
-/// base textures.
+/// names in their places and the others after them by name. PNGs starting with `_`
+/// and the `_n`, `_h` and `_s` companions are not base textures, and neither is a
+/// recipe whose name a manifest would refuse: it would take an id and move the
+/// ones after it, for a file no manifest could list. More than [`MAX_MATERIALS`]
+/// is an error, as it is in a manifest.
 pub fn from_listing(dir: &Path) -> Result<Vec<Entry>, TextureError> {
     let io = |e: std::io::Error| TextureError::Io(format!("{}: {e}", dir.display()));
     let mut names = Vec::new();
@@ -276,13 +281,18 @@ pub fn from_listing(dir: &Path) -> Result<Vec<Entry>, TextureError> {
             if !stem.starts_with('_') && !companion {
                 names.push(stem.to_string());
             }
-        } else if let Some(stem) = file.strip_suffix(crate::recipe_texture::EXTENSION) {
+        } else if let Some(stem) = file.strip_suffix(crate::recipe_texture::EXTENSION)
+            && name_is_valid(stem)
+        {
             names.push(stem.to_string());
         }
     }
     let place = |name: &String| STOCK.iter().position(|n| n == name);
     names.sort_by_key(|name| (place(name).unwrap_or(usize::MAX), name.clone()));
     names.dedup();
+    if names.len() > MAX_MATERIALS {
+        return Err(TextureError::Manifest(ManifestError::TooMany));
+    }
     Ok(names
         .into_iter()
         .map(|name| Entry::Material {

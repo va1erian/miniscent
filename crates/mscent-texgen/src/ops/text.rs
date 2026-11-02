@@ -1,5 +1,6 @@
 //! The `text` operator: a line of the bitmap font, drawn hard-edged.
 
+use super::cost::Cost;
 use super::font::{GLYPH_H, GLYPH_W, glyph};
 use super::util::{BLACK, WHITE, canvas_at, over};
 use super::{Ctx, Inputs, MAX_TEXT, OpSpec, Role, color, float, text};
@@ -57,4 +58,5 @@ pub(super) const OPS: &[OpSpec] = &[OpSpec {
     ],
     role: Role::Kernel,
     kernel: text_op,
+    cost: Cost::Flat(19.0),
 }];

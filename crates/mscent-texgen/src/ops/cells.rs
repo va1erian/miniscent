@@ -3,6 +3,7 @@
 
 use mscent_math::rng::Rng;
 
+use super::cost::{Cost, Knobs};
 use super::util::{BLACK, WHITE, mix, unit_hash};
 use super::{Ctx, OpSpec, Role, choice, color, exactly, int};
 use crate::error::TexError;
@@ -116,6 +117,11 @@ fn wavelet(ctx: &Ctx) -> Result<Image, TexError> {
     }))
 }
 
+/// Nanoseconds per texel of `wavelet`: its fill, and each octave's four waves.
+fn wavelet_cost(k: &Knobs) -> f64 {
+    19.0 + 6.0 * f64::from(k.int("octaves"))
+}
+
 pub(super) const OPS: &[OpSpec] = &[
     OpSpec {
         name: "cells",
@@ -130,6 +136,7 @@ pub(super) const OPS: &[OpSpec] = &[
         ],
         role: Role::Kernel,
         kernel: cells,
+        cost: Cost::Flat(32.0),
     },
     OpSpec {
         name: "wavelet",
@@ -144,5 +151,6 @@ pub(super) const OPS: &[OpSpec] = &[
         ],
         role: Role::Kernel,
         kernel: wavelet,
+        cost: Cost::Worked(wavelet_cost),
     },
 ];

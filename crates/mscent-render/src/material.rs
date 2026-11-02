@@ -6,6 +6,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::manifest::{self, Entry};
+use crate::recipe_texture::check_directory_work;
 use crate::texture::{Texture, TextureError, load_texture};
 
 /// Index of a material in a [`MaterialTable`].
@@ -106,16 +107,19 @@ impl MaterialTable {
         self.materials.is_empty()
     }
 
-    /// Load the materials `dir/materials.txt` lists, with the ids it gives them.
-    /// PNGs it does not list are ignored, and a listed one that is missing is an
-    /// error: the manifest is the whole truth, so a stray file cannot shift an
-    /// id and a missing file cannot pass unnoticed. A directory with no manifest
-    /// is read as [`manifest::from_listing`] says.
+    /// Load the materials `dir/materials.txt` lists, with the ids it gives them,
+    /// each from its recipe or else its PNGs. Files it does not list are ignored,
+    /// and a listed material with no file is an error: the manifest is the whole
+    /// truth, so a stray file cannot shift an id and a missing file cannot pass
+    /// unnoticed. A directory with no manifest is read as
+    /// [`manifest::from_listing`] says. Recipes that would take too much work
+    /// together are refused first; see [`check_directory_work`].
     pub fn load_dir(dir: &Path) -> Result<Self, TextureError> {
         let entries = match manifest::read(&dir.join(manifest::FILE))? {
             Some(entries) => entries,
             None => manifest::from_listing(dir)?,
         };
+        check_directory_work(dir, &entries)?;
         let mut table = Self::new();
         for entry in entries {
             let added = match entry {

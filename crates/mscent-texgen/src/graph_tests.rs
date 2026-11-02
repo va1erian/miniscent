@@ -217,10 +217,100 @@ fn a_set_cancel_flag_stops_the_run() {
     );
 }
 
+/// 92 identical sources at 1024 px, 8 MiB each, which 13 merges cannot read until a
+/// source last in page order has run: 736 MiB. Ready blocks run in page order, so
+/// all the sources run first. A cache serves them with one image, and that used to
+/// pass where a bake, with none, failed, and stopped every material of a directory.
+fn held_open_page() -> Recipe {
+    let mut body = String::new();
+    let mut flats = 0;
+    for merge in 0..13 {
+        let y = merge * 2;
+        for x in 0..7 {
+            if flats < 92 {
+                body.push_str(&format!("op {x} {y} 1 flat\n"));
+                flats += 1;
+            }
+        }
+        body.push_str(&format!("op 7 {y} 1 load name=late\n"));
+        body.push_str(&format!("op 0 {} 8 merge\n", y + 1));
+    }
+    body.push_str("op 20 0 1 noise\nop 20 1 1 store name=late\n");
+    body.push_str("op 40 0 1 flat\nop 40 1 1 out-albedo\n");
+    read(format!("miniscent-recipe 1\nsize 1024 1024\n{body}").as_bytes()).expect("reads")
+}
+
 #[test]
-fn a_page_that_would_hold_too_much_is_an_error_before_allocating() {
-    // 256 sources at 1024 px, all kept until the end by one wide merge chain:
-    // 8 MB each, so past the limit partway.
+fn the_memory_plan_does_not_depend_on_a_cache() {
+    let r = held_open_page();
+    let g = compile(&r).expect("compiles");
+    assert!(peak_images(&r, &g, &[]) * r.size.bytes() > MAX_LIVE_BYTES);
+    let plain = run(&r, &g, r.size, RunOptions::default());
+    assert_eq!(plain.err(), Some(TexError::TooLarge));
+    let mut cache = Cache::new(1 << 30);
+    let with_cache = run(&r, &g, r.size, cached(&mut cache));
+    assert_eq!(with_cache.err(), Some(TexError::TooLarge));
+    assert!(cache.is_empty(), "refused before any kernel ran");
+    // A draft of the same page is small enough, and the same with or without.
+    let draft = Size::new(64, 64).expect("size");
+    assert!(run(&r, &g, draft, RunOptions::default()).is_ok());
+    assert!(run(&r, &g, draft, cached(&mut cache)).is_ok());
+}
+
+#[test]
+fn the_memory_plan_matches_what_a_run_holds() {
+    // A store holds the flat's image and makes none, and it keeps that image alive
+    // until the merge has read it, after the blur that also reads it. The merge is
+    // read by nothing and freed, and only then does the last flat run.
+    let page = "
+op 0 0 2 flat
+op 0 1 1 store name=a
+op 1 1 1 blur
+op 0 2 2 merge
+op 2 0 1 flat
+op 2 1 1 out-albedo
+";
+    let r = recipe(page);
+    let g = compile(&r).expect("compiles");
+    assert_eq!(peak_images(&r, &g, &[]), 3, "flat, blur, merge");
+    assert_eq!(
+        peak_images(&r, &g, &[0, 2, 3, 4]),
+        4,
+        "kept, and the last flat"
+    );
+    // Nothing is read here and nothing is kept: one image at a time.
+    let unread = recipe("op 0 0 1 flat\nop 1 0 1 flat\n");
+    let g = compile(&unread).expect("compiles");
+    assert_eq!(peak_images(&unread, &g, &[]), 1);
+}
+
+/// Time is checked like memory, before anything runs.
+#[test]
+fn a_page_past_the_work_limit_is_refused_at_its_size_only() {
+    let mut body = String::new();
+    for x in 0..64 {
+        for y in 0..4 {
+            body.push_str(&format!("op {x} {y} 1 noise octaves=8\n"));
+        }
+    }
+    let r = read(format!("miniscent-recipe 1\nsize 1024 1024\n{body}").as_bytes()).expect("reads");
+    let g = compile(&r).expect("compiles");
+    assert!(page_cost(&r, &g, r.size) > MAX_RECIPE_NS);
+    let mut cache = Cache::new(1 << 24);
+    assert_eq!(
+        run(&r, &g, r.size, cached(&mut cache)).err(),
+        Some(TexError::TooLarge)
+    );
+    assert!(cache.is_empty(), "refused before any kernel ran");
+    let draft = Size::new(16, 16).expect("size");
+    assert!(page_cost(&r, &g, draft) < MAX_RECIPE_NS);
+    assert!(run(&r, &g, draft, RunOptions::default()).is_ok());
+}
+
+#[test]
+fn a_page_kept_whole_that_would_hold_too_much_is_an_error_before_allocating() {
+    // 256 sources at 1024 px, nothing reads them, and the caller asks to keep them
+    // all: 8 MiB each, past the limit.
     let mut body = String::new();
     for x in 0..64 {
         for y in 0..4 {
@@ -282,15 +372,26 @@ fn problems_name_the_blocks_they_belong_to() {
 
 #[test]
 fn a_failed_kernel_is_named() {
-    // No graph compile gives can make a kernel fail on its inputs, so this is a
-    // graph from another page: it says the blur at block 1 has no input.
-    let graph = compile(&recipe("op 0 0 1 flat\nop 4 4 1 flat\n")).expect("compiles");
-    let page = recipe("op 0 0 1 flat\nop 4 4 1 blur\n");
-    let failed = Cell::new(None);
-    let options = RunOptions {
-        failed: Some(&failed),
-        ..Default::default()
-    };
-    assert!(run(&page, &graph, size(), options).is_err());
-    assert_eq!(failed.get(), Some(1));
+    // These compile, and fail only when they run: a count that cannot tile is a
+    // kernel's to find out.
+    for (body, why) in [
+        (
+            "op 0 0 1 flat\nop 4 4 1 checker cols=3\n",
+            TexError::NotTiling("checker counts must be even"),
+        ),
+        (
+            "op 0 0 1 flat\nop 4 4 1 bricks rows=3 offset=0.5\n",
+            TexError::NotTiling("odd brick rows cannot alternate"),
+        ),
+    ] {
+        let page = recipe(body);
+        let graph = compile(&page).expect("compiles");
+        let failed = Cell::new(None);
+        let options = RunOptions {
+            failed: Some(&failed),
+            ..Default::default()
+        };
+        assert_eq!(run(&page, &graph, size(), options).err(), Some(why));
+        assert_eq!(failed.get(), Some(1));
+    }
 }

@@ -1,5 +1,6 @@
 //! Running-bond brick walls: a mask, a grey per brick, or a bevelled height.
 
+use super::cost::Cost;
 use super::util::{grey, unit_hash};
 use super::{Ctx, OpSpec, Role, choice, exactly, float, int};
 use crate::error::TexError;
@@ -86,4 +87,5 @@ pub(super) const OPS: &[OpSpec] = &[OpSpec {
     ],
     role: Role::Kernel,
     kernel: bricks,
+    cost: Cost::Flat(9.0),
 }];

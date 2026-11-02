@@ -1,5 +1,6 @@
 //! Generators: operators that make a tile from nothing but their parameters.
 
+use super::cost::{Cost, Knobs};
 use super::util::{BLACK, WHITE, mix};
 use super::{Ctx, OpSpec, Role, choice, color, exactly, float, int};
 use crate::error::TexError;
@@ -44,6 +45,11 @@ fn noise(ctx: &Ctx) -> Result<Image, TexError> {
         let n = values.next().copied().unwrap_or(low);
         to_px(mix(a, b, (n - low) * scale))
     }))
+}
+
+/// Nanoseconds per texel of `noise`: its scaling pass, and each octave.
+fn noise_cost(k: &Knobs) -> f64 {
+    8.0 + 14.0 * f64::from(k.int("octaves"))
 }
 
 /// Alternating cells. Odd counts would put two like cells side by side at the
@@ -116,6 +122,7 @@ pub(super) const OPS: &[OpSpec] = &[
         params: &[color("color", WHITE)],
         role: Role::Kernel,
         kernel: flat,
+        cost: Cost::Flat(3.0),
     },
     OpSpec {
         name: "noise",
@@ -133,6 +140,7 @@ pub(super) const OPS: &[OpSpec] = &[
         ],
         role: Role::Kernel,
         kernel: noise,
+        cost: Cost::Worked(noise_cost),
     },
     OpSpec {
         name: "checker",
@@ -146,6 +154,7 @@ pub(super) const OPS: &[OpSpec] = &[
         ],
         role: Role::Kernel,
         kernel: checker,
+        cost: Cost::Flat(7.0),
     },
     OpSpec {
         name: "stripes",
@@ -160,6 +169,7 @@ pub(super) const OPS: &[OpSpec] = &[
         ],
         role: Role::Kernel,
         kernel: stripes,
+        cost: Cost::Flat(12.0),
     },
     OpSpec {
         name: "gradient",
@@ -173,6 +183,7 @@ pub(super) const OPS: &[OpSpec] = &[
         ],
         role: Role::Kernel,
         kernel: gradient,
+        cost: Cost::Flat(9.0),
     },
     OpSpec {
         name: "glow",
@@ -188,5 +199,6 @@ pub(super) const OPS: &[OpSpec] = &[
         ],
         role: Role::Kernel,
         kernel: glow,
+        cost: Cost::Flat(38.0),
     },
 ];

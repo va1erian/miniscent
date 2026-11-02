@@ -56,10 +56,41 @@ the tool, follow the [tutorial](texture-studio-tutorial.md).
   `MAX_STROKES` refuses a new one. While the pointer is down the worker runs the
   draft path, as for a slider, and the full picture comes on release. The brush
   (radius, hardness, colour) belongs to the workspace, so it is no undo step. The
-  recipe reader holds `stroke` lines to `mscent_texgen::ops::stroke_fits`, the same
-  predicate the kernel uses, so a file that loads also runs; the operator's work
-  limit is separate and shows as a failed page, not a failed load, for a page of
-  many thick strokes.
+  recipe reader holds `stroke` lines to `mscent_texgen::ops::charge_stroke`, the rule
+  the kernel applies, so a file that reads also runs, at any size.
+- **Limits on work.** The game makes recipes at startup on one thread with no way to
+  cancel, so a small file must not be able to stall it. Each operator has a cost
+  (`OpSpec::cost`, nanoseconds per texel on its worst parameters, or worked out from
+  octaves, inputs or strokes), measured by the `texgen_costs` example and rounded up.
+  `graph::run`, and so `bake` and `load_recipe`, refuse with `TooLarge` before any
+  pixel when a page's kernels at that size add up to more than `MAX_RECIPE_NS` (5 s).
+  `MaterialTable::load_dir` adds up its recipes, with their packing and reading, and
+  refuses past `MAX_DIRECTORY_NS` (30 s), also before any pixel; the stock directory
+  declares 47 ms. PNGs are not counted. Costs depend only on the recipe and the size,
+  never a clock, so a page gets the same answer on every machine; thirty `dots`, the
+  dearest ordinary block, still fit at 1024 px.
+- **Limit on strokes.** `paint`'s rule is one function, `ops::charge_stroke`: for each
+  segment `(length + 2r) * 2r` in tile units, with `r` the radius plus two texels of a
+  1024 px tile, plus 1/65536 per point, up to `MAX_STROKE_WORK` (360). It does not
+  know the tile's size, so strokes that work at 1024 px work at 128 px. At a brush of
+  radius 0.2 thinned as the editor thins it, 360 is 100 tiles of drawing. The
+  rasterizer walks each segment's rows and spans, not its bounding box, so a long
+  thin diagonal costs what the rule says; the pictures are the same to the bit.
+- **Limit on memory.** `graph::peak_images` plans the peak from the graph before any
+  kernel runs: the run's order and readers, with each kernel block counted as its own
+  image whatever a cache would share. Over `MAX_LIVE_BYTES` (512 MiB) is `TooLarge`, so
+  the answer is the same in the editor, with a cache, and in a bake, with none.
+- **Measured worst cases** (`texgen_costs` and `recipe_limits`, release profile, best
+  of three, 1024 px, dev machine with other work running). Before, 254 `paint` blocks
+  took 233.9 s, 254 full `scratches` 87.3 s and `dots` 33.7 s. Those pages are now
+  refused in under 0.3 ms, and the most of each that passes takes: 4 such `paint`s 2.9 s;
+  26 `scratches` 3.9 s; 31 `dots` 4.1 s; 39 `blur` 4.5 s; 34 `sharpen` 3.3 s; 39 `noise`
+  of 8 octaves 4.7 s; 33 `cavity` 3.8 s. No page of any operator passed at over about
+  5 s. One `paint` at the most the rule takes, on the costliest shape, takes 3 s.
+  Reading is linear, at most 5 ns a byte: a 4 MiB file takes 14 ms, not 12.6 s. A
+  directory at its limit, 6 rows of 33 `cavity` blocks, takes 28.1 s, and 7 rows are
+  refused in 5 ms. Running slower than this on another machine, or under load, is
+  possible: the limits are in estimated work, not seconds.
 - **A material with no recipe** (PNG files) opens on a new page of its size, and
   nothing replaces the files until it is saved, which asks first for a stock one.
 - **Bump fade at 512 px.** A tile's world size is `texture_size * scale`, so at the

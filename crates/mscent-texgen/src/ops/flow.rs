@@ -1,6 +1,7 @@
 //! Operators that move images around the page instead of making them: named
 //! store and load, and the outputs that say which image is which map.
 
+use super::cost::Cost;
 use super::{Channel, Ctx, OpSpec, Role, exactly, float, text};
 use crate::error::TexError;
 use crate::image::Image;
@@ -23,6 +24,7 @@ pub(super) const OPS: &[OpSpec] = &[
         params: &[text("name", "a")],
         role: Role::Store,
         kernel: pass_on,
+        cost: Cost::Flat(0.0),
     },
     OpSpec {
         name: "load",
@@ -31,6 +33,7 @@ pub(super) const OPS: &[OpSpec] = &[
         params: &[text("name", "a")],
         role: Role::Load,
         kernel: unresolved,
+        cost: Cost::Flat(0.0),
     },
     OpSpec {
         name: "out-albedo",
@@ -39,6 +42,7 @@ pub(super) const OPS: &[OpSpec] = &[
         params: &[],
         role: Role::Output(Channel::Albedo),
         kernel: pass_on,
+        cost: Cost::Flat(0.0),
     },
     OpSpec {
         name: "out-height",
@@ -47,6 +51,7 @@ pub(super) const OPS: &[OpSpec] = &[
         params: &[float("normal_strength", 0.0, 32.0, 4.0)],
         role: Role::Output(Channel::Height),
         kernel: pass_on,
+        cost: Cost::Flat(0.0),
     },
     OpSpec {
         name: "out-specular",
@@ -55,5 +60,6 @@ pub(super) const OPS: &[OpSpec] = &[
         params: &[],
         role: Role::Output(Channel::Specular),
         kernel: pass_on,
+        cost: Cost::Flat(0.0),
     },
 ];

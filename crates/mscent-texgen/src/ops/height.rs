@@ -5,6 +5,7 @@
 //! difference between neighbouring texels shrinks as the tile grows, so it is
 //! multiplied by `size / 128` and a recipe looks the same at every size.
 
+use super::cost::Cost;
 use super::filter::box_blur;
 use super::util::grey;
 use super::{Ctx, OpSpec, Role, exactly, float};
@@ -80,6 +81,7 @@ pub(super) const OPS: &[OpSpec] = &[
         ],
         role: Role::Kernel,
         kernel: bump,
+        cost: Cost::Flat(21.0),
     },
     OpSpec {
         name: "cavity",
@@ -91,6 +93,7 @@ pub(super) const OPS: &[OpSpec] = &[
         ],
         role: Role::Kernel,
         kernel: cavity,
+        cost: Cost::Flat(140.0),
     },
     OpSpec {
         name: "slope",
@@ -99,5 +102,6 @@ pub(super) const OPS: &[OpSpec] = &[
         params: &[float("strength", 0.0, 32.0, 4.0)],
         role: Role::Kernel,
         kernel: slope,
+        cost: Cost::Flat(27.0),
     },
 ];

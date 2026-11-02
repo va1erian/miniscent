@@ -18,7 +18,7 @@ pub enum TexError {
     Parse { line: usize, why: String },
     /// A page's blocks do not connect.
     Graph(String),
-    /// A page would hold more images at once than a run may.
+    /// A page would hold more images at once, or take more work, than a run may.
     TooLarge,
     /// The caller stopped the run.
     Cancelled,
@@ -34,7 +34,10 @@ impl fmt::Display for TexError {
             Self::BadInputs(op) => write!(f, "{op}: wrong inputs"),
             Self::Parse { line, why } => write!(f, "line {line}: {why}"),
             Self::Graph(why) => write!(f, "{why}"),
-            Self::TooLarge => write!(f, "the page holds too many images at once"),
+            Self::TooLarge => write!(
+                f,
+                "the page is too large: it holds too many images at once or takes too long to make"
+            ),
             Self::Cancelled => write!(f, "cancelled"),
         }
     }

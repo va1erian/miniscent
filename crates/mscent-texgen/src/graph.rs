@@ -17,10 +17,6 @@ use crate::recipe::{Block, MAX_BLOCKS, Recipe};
 pub const MAX_COLS: u16 = 64;
 pub const MAX_ROWS: u16 = 256;
 
-/// Most bytes of images one evaluation may hold at once. Inputs are freed as
-/// soon as their last reader has run, so only a hostile page gets near this.
-pub const MAX_LIVE_BYTES: usize = 512 * 1024 * 1024;
-
 /// A page, checked: every block's inputs, and an order to run them in.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Graph {
@@ -334,22 +330,16 @@ impl Outcome {
     }
 }
 
-/// The distinct images held, since passing a block on shares its input's.
-fn live_images(images: &[Option<Arc<Image>>]) -> usize {
-    let mut held: Vec<*const Image> = images.iter().flatten().map(Arc::as_ptr).collect();
-    held.sort_unstable();
-    held.dedup();
-    held.len()
-}
-
 /// Runs the page at `size`, which may differ from the recipe's own: a draft is
-/// the same recipe, smaller.
+/// the same recipe, smaller. A page over the limits of [`plan`] at that size is
+/// [`TexError::TooLarge`] before anything runs.
 pub fn run(
     recipe: &Recipe,
     graph: &Graph,
     size: Size,
     options: RunOptions,
 ) -> Result<Outcome, TexError> {
+    plan::check(recipe, graph, size, options.keep)?;
     let RunOptions {
         mut cache,
         cancel,
@@ -384,10 +374,6 @@ pub fn run(
                 match hit {
                     Some(image) => image,
                     None => {
-                        let live = live_images(&images).saturating_add(1);
-                        if live.saturating_mul(size.bytes()) > MAX_LIVE_BYTES {
-                            return Err(TexError::TooLarge);
-                        }
                         let refs: Vec<&Image> = held.iter().map(Arc::as_ref).collect();
                         let image = ops::eval(block.spec, &block.params, &refs, Frame::new(size))
                             .inspect_err(|_| {
@@ -420,6 +406,10 @@ pub fn run(
     }
     Ok(Outcome { images })
 }
+
+#[path = "graph_plan.rs"]
+pub mod plan;
+pub use plan::{MAX_LIVE_BYTES, MAX_RECIPE_NS, page_cost, peak_images};
 
 #[path = "graph_problems.rs"]
 mod problems;
