@@ -1005,6 +1005,13 @@ name = "mscent-script"
 version = "0.1.0"
 
 [[package]]
+name = "mscent-texgen"
+version = "0.1.0"
+dependencies = [
+ "mscent-math",
+]
+
+[[package]]
 name = "mscent-world"
 version = "0.1.0"
 dependencies = [
