@@ -100,16 +100,7 @@ impl Scene {
             })
             .collect();
         let leaf_faces = prep::leaf_faces(bsp.leaves().len(), &faces);
-        let mut boxes = prep::leaf_boxes(&leaf_faces, &polys);
-        for (slot, list) in boxes.iter_mut().zip(&voxels.leaf_chunks) {
-            for chunk in list
-                .iter()
-                .filter_map(|&c| voxels.world.chunks.get(c as usize))
-            {
-                *slot = slot.union(chunk.lods[0].bounds);
-            }
-        }
-        let node_bounds = prep::node_bounds(&bsp, &boxes);
+        let node_bounds = bounds_with_voxels(&bsp, &leaf_faces, &polys, &voxels);
         let portal_info = portals
             .portals()
             .iter()
@@ -139,6 +130,13 @@ impl Scene {
 
     pub fn voxels(&self) -> &VoxelScene {
         &self.voxels
+    }
+
+    /// Changes the voxel surfaces under a level whose brushes stay as they are.
+    pub(crate) fn update_voxels(&mut self, change: impl FnOnce(&mut VoxelScene)) {
+        change(&mut self.voxels);
+        self.node_bounds =
+            bounds_with_voxels(&self.bsp, &self.leaf_faces, &self.polys, &self.voxels);
     }
 
     pub fn bsp(&self) -> &Bsp {
@@ -257,6 +255,24 @@ impl Scene {
             .get(MaterialId(material))
             .map_or(&self.fallback, |m| &m.texture)
     }
+}
+
+fn bounds_with_voxels(
+    bsp: &Bsp,
+    leaf_faces: &[Vec<u32>],
+    polys: &[Vec<Vertex>],
+    voxels: &VoxelScene,
+) -> Vec<Aabb> {
+    let mut boxes = prep::leaf_boxes(leaf_faces, polys);
+    for (slot, list) in boxes.iter_mut().zip(&voxels.leaf_chunks) {
+        for chunk in list
+            .iter()
+            .filter_map(|&c| voxels.world.chunks.get(c as usize))
+        {
+            *slot = slot.union(chunk.lods[0].bounds);
+        }
+    }
+    prep::node_bounds(bsp, &boxes)
 }
 
 /// World position of the camera, recovered from its view transform

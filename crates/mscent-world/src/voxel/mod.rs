@@ -66,7 +66,7 @@ pub use prim::Prim;
 pub use surface::{ChunkMesh, Mesher, VoxelVertex};
 pub use volume::{CellSize, Volume, VolumeError};
 pub use wire::{MAX_DETAIL_CHUNKS, MAX_VOLUMES};
-pub use world::{NO_CHUNK, VolumeGeometry, VoxelChunk, VoxelWorld};
+pub use world::{NO_CHUNK, RemeshedChunk, VolumeGeometry, VoxelChunk, VoxelWorld};
 
 /// Samples along one edge of a chunk.
 pub const CHUNK_EDGE: usize = 16;

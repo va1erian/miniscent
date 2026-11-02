@@ -20,4 +20,4 @@ mod probe;
 pub use app::{Editor, Msg, cmd};
 pub use probe::Probe;
 pub use props::Prop;
-pub use view3d::Click;
+pub use view3d::{Click, PaneDrag};

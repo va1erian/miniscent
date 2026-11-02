@@ -5,7 +5,7 @@ use super::command::Command;
 use super::document::{BrushDef, Document, Id, Shape};
 use super::pick::Ray;
 use super::state::{EditorState, Selection};
-use super::stroke::{Sculpted, StrokeJob, StrokeKeys, VoxelOp};
+use super::stroke::{Sculpted, StrokeJob, StrokeKeys};
 
 /// A stroke in progress.
 #[derive(Debug)]
@@ -162,16 +162,6 @@ impl EditorState {
                     self.message = "Sculpted a new volume".into();
                 }
             }
-        }
-    }
-
-    /// The name of the dab the tool makes, for the status bar.
-    pub fn voxel_op_name(&self) -> &'static str {
-        match self.voxel.op {
-            VoxelOp::Add => "Add",
-            VoxelOp::Carve => "Carve",
-            VoxelOp::Smooth => "Smooth",
-            VoxelOp::Paint => "Paint",
         }
     }
 }

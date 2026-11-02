@@ -57,7 +57,11 @@ pub(super) struct Parts {
 
 /// Unshadowed light at a vertex: lamps and ambient, standing in until voxel
 /// surfaces are baked.
-fn vertex_light(mesh: &ChunkMesh, lights: &[PointLight], ambient: Vec3) -> Vec<VertexLight> {
+pub(super) fn vertex_light(
+    mesh: &ChunkMesh,
+    lights: &[PointLight],
+    ambient: Vec3,
+) -> Vec<VertexLight> {
     mesh.vertices
         .iter()
         .map(|v| {

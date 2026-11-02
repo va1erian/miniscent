@@ -224,6 +224,11 @@ impl GameSession {
         &self.renderer
     }
 
+    /// For changes under a level that stays the same, between frames.
+    pub fn renderer_mut(&mut self) -> &mut LevelRenderer {
+        &mut self.renderer
+    }
+
     pub fn set_quality(&mut self, quality: Quality) {
         self.quality = quality;
         self.fx.set_quality(quality);

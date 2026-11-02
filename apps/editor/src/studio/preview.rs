@@ -124,10 +124,17 @@ impl Studio {
             return;
         }
         self.empty = false;
+        self.poll_live(out);
         self.watch_script();
         let changed = self.wanted.as_ref() != Some(doc);
         if changed {
             self.changed_at = Instant::now();
+        }
+        if changed && self.mode == Mode::Edit && self.try_live(doc) {
+            return;
+        }
+        if self.live_job.is_some() {
+            return;
         }
         self.start_preview(doc, changed, out);
         self.start_bake(doc, out);
@@ -160,7 +167,7 @@ impl Studio {
     /// replaced: only a finished bake's lighting is fetched.
     fn start_preview(&mut self, doc: &Document, changed: bool, out: &mut Tick) {
         let wanted = (changed && self.mode == Mode::Edit) || self.refresh;
-        if self.preview_job.is_some() || !wanted {
+        if self.preview_job.is_some() || !wanted || self.stroking {
             return;
         }
         self.refresh = false;
@@ -176,6 +183,7 @@ impl Studio {
         let waiting = self.bake_job.is_some()
             || self.preview_job.is_some()
             || self.refresh
+            || self.stroking
             || self.worker.is_none()
             || self.light == Light::Full
             || self.failed_bake == Some(self.light_key)
@@ -223,6 +231,7 @@ impl Studio {
         self.error = None;
         self.light = built.light;
         self.light_key = built.light_key;
+        self.live_bsp = Some(std::sync::Arc::new(built.renderer().scene().bsp().clone()));
         let why = built.unplayable().map(str::to_string);
         self.script_watch.files = built.watch.clone();
         self.attach(Box::new(LevelScene::new(built)), made_for, why);

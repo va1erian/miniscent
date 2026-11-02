@@ -153,6 +153,11 @@ impl Volume {
         out
     }
 
+    /// Whether a surface in this volume reads samples of `other`.
+    pub fn touches(&self, other: &Volume) -> bool {
+        super::context::reaches(self, other)
+    }
+
     /// Whether `p` is in the box.
     pub fn holds(&self, p: Vec3d) -> bool {
         let (lo, hi) = self.bounds();

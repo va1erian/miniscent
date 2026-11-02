@@ -7,7 +7,7 @@
 
 use mscent_math::DPlane;
 use mscent_world::voxel::Volume;
-use mscent_world::{Brush, BrushError, Entity, EntityLabel, Level, MoverGroup, Op, TexInfo};
+use mscent_world::{BrushError, Entity, EntityLabel, Level, MoverGroup, Op, TexInfo};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 

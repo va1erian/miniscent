@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use miniscent_game::FrameStats;
 use mscent_platform::Event;
-use mscent_render::{Framebuffer, Quality, draw_text};
+use mscent_render::{Framebuffer, Quality, VoxelChange, draw_text};
 
 use super::highlight;
 use super::worker::{Request, Scene};
@@ -76,6 +76,10 @@ impl Scene for LevelScene {
             Some(session) => session.set_renderer(lit.into_renderer()),
             None => self.built = lit,
         }
+    }
+
+    fn apply_voxels(&mut self, change: VoxelChange) {
+        self.built.renderer_mut().apply_voxels(change);
     }
 
     fn render(&mut self, req: &Request) -> Option<&Framebuffer> {

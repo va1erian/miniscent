@@ -23,8 +23,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use mscent_math::Vec3;
-use mscent_world::lightmap::{Lightmap, LightmapError};
+use mscent_world::lightmap::{Lightmap, LightmapError, PointLight};
 use mscent_world::materials;
+use mscent_world::voxel::{RemeshedChunk, VoxelWorld};
 use mscent_world::{CsgError, Level};
 
 use crate::camera::Camera;
@@ -123,6 +124,14 @@ pub enum BuildError {
     Materials(u16),
 }
 
+/// A change to a level's voxel surfaces that needs no compile.
+pub enum VoxelChange {
+    /// The same boxes, with these chunks new.
+    Chunks(Vec<RemeshedChunk>),
+    /// Everything new: an add volume came, went or grew.
+    All(Box<VoxelWorld>),
+}
+
 /// A level compiled, lit and ready to draw.
 pub struct LevelRenderer {
     scene: Scene,
@@ -132,6 +141,8 @@ pub struct LevelRenderer {
     uv_maps: Vec<Option<UvToLuxel>>,
     spec: Vec<SpecTable>,
     lighting: MeshLighting,
+    /// The level's lamps, for voxel surfaces made after the build.
+    voxel_lights: Vec<PointLight>,
     actors: Vec<Actor>,
     meshes: overlay::ActorMeshes,
     mover_faces: Vec<movers::MoverFaces>,
@@ -238,6 +249,7 @@ impl LevelRenderer {
         Self {
             mover_faces,
             lighting: mesh_lighting(&lights, cfg.ambient),
+            voxel_lights: lights,
             actors,
             meshes: overlay::ActorMeshes::new(),
             scene,
@@ -253,6 +265,20 @@ impl LevelRenderer {
 
     pub fn scene(&self) -> &Scene {
         &self.scene
+    }
+
+    /// Changes voxel surfaces under the same brushes, between two frames.
+    pub fn apply_voxels(&mut self, change: VoxelChange) {
+        let (lights, ambient) = (&self.voxel_lights, self.cfg.ambient);
+        let leaves = self.scene.bsp().leaves().len();
+        self.scene.update_voxels(|voxels| match change {
+            VoxelChange::Chunks(list) => {
+                voxels.apply(list, |mesh| compiled::vertex_light(mesh, lights, ambient));
+            }
+            VoxelChange::All(world) => {
+                *voxels = compiled::lit_voxels(*world, leaves, lights, ambient);
+            }
+        });
     }
 
     pub fn lightmap(&self) -> &Lightmap {

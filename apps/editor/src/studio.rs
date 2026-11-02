@@ -19,6 +19,7 @@ use crate::build::{BakeJob, Built, Job, Light, SharedCache};
 use crate::model::{Document, FlyCam};
 
 mod highlight;
+mod live;
 mod preview;
 mod scene;
 pub mod worker;
@@ -95,6 +96,14 @@ pub struct Studio {
     highlights: Highlights,
     /// How previews and bakes light the level.
     settings: SessionConfig,
+    /// The voxel batch being meshed.
+    live_job: Option<live::LiveJob>,
+    /// The BSP of the picture, which live batches are meshed against.
+    live_bsp: Option<std::sync::Arc<mscent_world::Bsp>>,
+    /// A stroke is running.
+    stroking: bool,
+    /// Batches meshed so far.
+    live_count: usize,
 }
 
 /// The internal render size for a pane of `pane` pixels: the pane divided by
@@ -109,6 +118,10 @@ impl Studio {
     pub fn new(doc: &Document) -> Studio {
         Studio {
             preview_job: None,
+            live_job: None,
+            live_bsp: None,
+            stroking: false,
+            live_count: 0,
             bake_job: None,
             wanted: None,
             changed_at: Instant::now(),
@@ -159,6 +172,8 @@ impl Studio {
     fn forget_build(&mut self) {
         self.preview_job = None;
         self.bake_job = None;
+        self.live_job = None;
+        self.live_bsp = None;
         self.retire_worker();
         self.built_doc = None;
         self.wanted = None;
@@ -423,6 +438,8 @@ Q/E: roll   Shift: fast";
 mod cache_lock_tests;
 #[cfg(test)]
 mod large_level_tests;
+#[cfg(test)]
+mod live_tests;
 #[cfg(test)]
 mod preview_tests;
 #[cfg(test)]

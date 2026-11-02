@@ -21,7 +21,9 @@ use std::sync::Arc;
 
 use mscent_math::Vec3;
 use mscent_world::texinfo::DEFAULT_SCALE;
-use mscent_world::voxel::{ChunkMesh, VoxelChunk, VoxelVertex, VoxelWorld};
+use mscent_world::voxel::{
+    ChunkMesh, NO_CHUNK, RemeshedChunk, VoxelChunk, VoxelVertex, VoxelWorld,
+};
 
 /// Light at one vertex.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -56,6 +58,9 @@ const AXES: [(Vec3, Vec3); 3] = [
 pub(crate) fn axis_map(axis: u8) -> (Vec3, Vec3) {
     AXES[usize::from(axis.min(2))]
 }
+
+/// How far a new cell looks for light to inherit.
+const INHERIT_CELLS: i32 = 2;
 
 /// Texels per world unit of a voxel surface.
 pub(crate) const TEXELS_PER_UNIT: f32 = 1.0 / DEFAULT_SCALE;
@@ -113,6 +118,38 @@ impl LodData {
     }
 }
 
+/// A cell and the light it holds.
+type CellLight = ([i8; 3], VertexLight);
+
+/// Light for a remeshed chunk from what its cells held before.
+fn inherit(
+    mesh: &ChunkMesh,
+    old: &[CellLight],
+    fresh: &impl Fn(&ChunkMesh) -> Vec<VertexLight>,
+) -> Vec<VertexLight> {
+    let lit = fresh(mesh);
+    mesh.vertices
+        .iter()
+        .zip(lit)
+        .map(|(v, lit)| nearest_light(v.cell, old).unwrap_or(lit))
+        .collect()
+}
+
+/// The light of the nearest old cell within [`INHERIT_CELLS`].
+fn nearest_light(cell: [i8; 3], old: &[CellLight]) -> Option<VertexLight> {
+    let gap = |c: &[i8; 3]| {
+        (0..3)
+            .map(|a| (i32::from(c[a]) - i32::from(cell[a])).abs())
+            .max()
+            .unwrap_or(0)
+    };
+    old.iter()
+        .map(|(c, l)| (gap(c), *l))
+        .filter(|&(d, _)| d <= INHERIT_CELLS)
+        .min_by_key(|&(d, _)| d)
+        .map(|(_, l)| l)
+}
+
 /// A level's voxel surfaces as the renderer keeps them.
 #[derive(Clone, Debug, Default)]
 pub struct VoxelScene {
@@ -145,28 +182,86 @@ impl VoxelScene {
                 })
             })
             .collect();
-        let mut leaf_chunks = vec![Vec::new(); leaf_count];
-        for (c, chunk) in (0u32..).zip(&world.chunks) {
+        let mut scene = Self {
+            world,
+            lods,
+            leaf_chunks: vec![Vec::new(); leaf_count],
+            place: Vec::new(),
+        };
+        scene.index();
+        scene
+    }
+
+    /// Which leaf sees which chunk, and where each chunk is in its volume.
+    fn index(&mut self) {
+        self.leaf_chunks.iter_mut().for_each(Vec::clear);
+        for (c, chunk) in (0u32..).zip(&self.world.chunks) {
             for leaf in &chunk.leaves {
-                if let Some(list) = leaf_chunks.get_mut(leaf.0 as usize) {
+                if let Some(list) = self.leaf_chunks.get_mut(leaf.0 as usize) {
                     list.push(c);
                 }
             }
         }
-        let mut place = vec![(0, 0); world.chunks.len()];
-        for (v, volume) in (0u32..).zip(&world.volumes) {
+        self.place.clear();
+        self.place.resize(self.world.chunks.len(), (0, 0));
+        for (v, volume) in (0u32..).zip(&self.world.volumes) {
             for (i, &c) in (0u32..).zip(&volume.table) {
-                if let Some(slot) = place.get_mut(c as usize) {
+                if let Some(slot) = self.place.get_mut(c as usize) {
                     *slot = (v, i);
                 }
             }
         }
-        Self {
-            world,
-            lods,
-            leaf_chunks,
-            place,
+    }
+
+    /// Puts remeshed chunks in place. Light that a cell already has stays, a new
+    /// cell inherits from the nearest lit cell within two cells, and `fresh` lights
+    /// the rest. Nothing is traced here, so a stroke's light cannot flash.
+    pub fn apply(
+        &mut self,
+        list: Vec<RemeshedChunk>,
+        fresh: impl Fn(&ChunkMesh) -> Vec<VertexLight>,
+    ) {
+        // By chunk number, as those numbers stand before the change.
+        let mut kept: Vec<(u32, Vec<CellLight>)> = Vec::with_capacity(list.len());
+        for r in &list {
+            let Some(id) = self.chunk_at(r.volume, r.coord) else {
+                continue;
+            };
+            kept.push((id, self.cell_light(id as usize)));
         }
+        let changed = self.world.apply(list);
+        self.lods
+            .resize_with(self.world.chunks.len(), Default::default);
+        for c in changed {
+            let i = c as usize;
+            let old = kept
+                .iter()
+                .find(|(id, _)| *id == c)
+                .map(|(_, l)| l.as_slice());
+            let Some(chunk) = self.world.chunks.get(i) else {
+                continue;
+            };
+            self.lods[i] = [0, 1, 2].map(|level| {
+                let mesh = &chunk.lods[level];
+                LodData::new(mesh, inherit(mesh, old.unwrap_or(&[]), &fresh))
+            });
+        }
+        self.index();
+    }
+
+    fn chunk_at(&self, volume: usize, coord: [u16; 3]) -> Option<u32> {
+        let v = self.world.volumes.get(volume)?;
+        let i = v.index(coord.map(i32::from))?;
+        v.table.get(i).copied().filter(|&c| c != NO_CHUNK)
+    }
+
+    /// The light of a chunk's cells.
+    fn cell_light(&self, c: usize) -> Vec<CellLight> {
+        let (Some(chunk), Some(data)) = (self.world.chunks.get(c), self.lods.get(c)) else {
+            return Vec::new();
+        };
+        let cells = chunk.lods[0].vertices.iter().map(|v| v.cell);
+        cells.zip(data[0].light.iter().copied()).collect()
     }
 
     pub fn is_empty(&self) -> bool {

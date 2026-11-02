@@ -24,6 +24,7 @@ use crate::ui::{Editor, Msg, Probe, cmd};
 mod faces;
 mod keys;
 mod scripting;
+mod voxel;
 
 /// Ticks the UI `n` times, 16 ms apart, so the render thread's frames arrive
 /// and show before a snapshot.
@@ -82,7 +83,13 @@ pub fn run(dir: &Path) -> i32 {
         (2000.0, 1124.0),
         wide_script,
     );
-    light.max(dark).max(wide).max(scripted)
+    let voxels = run_theme(
+        &dir.join("voxel"),
+        Theme::light(),
+        (1280.0, 800.0),
+        voxel::script,
+    );
+    light.max(dark).max(wide).max(scripted).max(voxels)
 }
 
 fn run_theme(

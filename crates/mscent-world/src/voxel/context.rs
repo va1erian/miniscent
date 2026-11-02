@@ -376,7 +376,7 @@ pub(super) fn apply_cuts(cuts: &[&Reach], edited: i8, p: Vec3d, cell: f64) -> i8
 }
 
 /// Whether `other` holds samples of `volume`'s ring: its box within two cells.
-fn reaches(volume: &Volume, other: &Volume) -> bool {
+pub(super) fn reaches(volume: &Volume, other: &Volume) -> bool {
     let ring = 2.0 * volume.lattice.cell.units();
     let ((a0, a1), (b0, b1)) = (volume.bounds(), other.bounds());
     a0.x - ring < b1.x

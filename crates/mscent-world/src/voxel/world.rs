@@ -112,22 +112,124 @@ impl VoxelWorld {
     }
 
     fn add_chunk(&mut self, mesh: ChunkMesh, bsp: &Bsp, margin: f64) -> u32 {
-        let mut leaves = Vec::new();
-        let full = without_buried(&mesh, bsp, margin, &mut leaves);
-        if full.triangles.is_empty() {
+        let Some(chunk) = finish_chunk(&mesh, bsp, margin) else {
             return NO_CHUNK;
-        }
-        leaves.sort_unstable_by_key(|l: &LeafId| l.0);
-        leaves.dedup();
+        };
         let index = self.chunks.len() as u32;
-        let lods = [full.clustered(Lod::Half), full.clustered(Lod::Quarter)];
-        let [half, quarter] = lods;
-        self.chunks.push(Arc::new(VoxelChunk {
-            lods: [full, half, quarter],
-            leaves,
-        }));
+        self.chunks.push(Arc::new(chunk));
         index
     }
+
+    /// Meshes `chunks` of each listed volume of `level` again, off to the side.
+    /// The grids must be those of this world's level.
+    pub fn remesh(
+        level: &Level,
+        brushes: &[Brush],
+        bsp: &Bsp,
+        wanted: &[(usize, Vec<[u16; 3]>)],
+    ) -> Vec<RemeshedChunk> {
+        let mut mesher = Mesher::new();
+        let mut out = Vec::new();
+        for (v, chunks) in wanted {
+            let Some(volume) = level.volumes.get(*v) else {
+                continue;
+            };
+            let mut ctx = Context::in_level(volume, brushes, &level.volumes);
+            let margin = buried_margin(volume);
+            for &c in chunks {
+                let Some(mesh) = mesher.mesh(volume, &mut ctx, c) else {
+                    continue;
+                };
+                out.push(RemeshedChunk {
+                    volume: *v,
+                    coord: c,
+                    air: mesh.air,
+                    chunk: finish_chunk(&mesh, bsp, margin).map(Arc::new),
+                });
+            }
+        }
+        out
+    }
+
+    /// Puts remeshed chunks in place, all at once as far as a frame can tell, and
+    /// says which chunk numbers changed. A chunk that lost its surface keeps its
+    /// number with nothing in it, so the numbers of the others stand.
+    pub fn apply(&mut self, list: Vec<RemeshedChunk>) -> Vec<u32> {
+        let mut changed = Vec::with_capacity(list.len());
+        for r in list {
+            let Some(volume) = self.volumes.get_mut(r.volume) else {
+                continue;
+            };
+            let Some(i) = volume.index(r.coord.map(i32::from)) else {
+                continue;
+            };
+            if let Some(slot) = volume.air.get_mut(i) {
+                *slot = r.air;
+            }
+            let old = volume.table.get(i).copied().unwrap_or(NO_CHUNK);
+            let id = match (old, r.chunk) {
+                (NO_CHUNK, None) => continue,
+                (NO_CHUNK, Some(chunk)) => {
+                    let id = self.chunks.len() as u32;
+                    self.chunks.push(chunk);
+                    if let Some(slot) = volume.table.get_mut(i) {
+                        *slot = id;
+                    }
+                    id
+                }
+                (id, new) => {
+                    if let Some(slot) = self.chunks.get_mut(id as usize) {
+                        *slot = new.unwrap_or_else(|| Arc::new(empty_chunk()));
+                    }
+                    id
+                }
+            };
+            changed.push(id);
+        }
+        changed
+    }
+}
+
+/// One chunk's new surface, or `None` for a chunk with none left.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RemeshedChunk {
+    pub volume: usize,
+    pub coord: [u16; 3],
+    pub air: AirMask,
+    pub chunk: Option<Arc<VoxelChunk>>,
+}
+
+fn empty_mesh() -> ChunkMesh {
+    ChunkMesh {
+        vertices: Vec::new(),
+        triangles: Vec::new(),
+        materials: Vec::new(),
+        bounds: Aabb::empty(),
+        air: AirMask::ALL,
+    }
+}
+
+fn empty_chunk() -> VoxelChunk {
+    VoxelChunk {
+        lods: [empty_mesh(), empty_mesh(), empty_mesh()],
+        leaves: Vec::new(),
+    }
+}
+
+/// A chunk's levels of detail and leaves, or `None` when air can see none of it.
+fn finish_chunk(mesh: &ChunkMesh, bsp: &Bsp, margin: f64) -> Option<VoxelChunk> {
+    let mut leaves = Vec::new();
+    let full = without_buried(mesh, bsp, margin, &mut leaves);
+    if full.triangles.is_empty() {
+        return None;
+    }
+    leaves.sort_unstable_by_key(|l: &LeafId| l.0);
+    leaves.dedup();
+    let [half, quarter] = [full.clustered(Lod::Half), full.clustered(Lod::Quarter)];
+    Some(VoxelChunk {
+        lods: [full, half, quarter],
+        leaves,
+    })
 }
 
 /// How far from an empty leaf a triangle of `volume` still counts as seen from it.
