@@ -20,6 +20,7 @@ pub mod class;
 mod collect;
 pub mod collide;
 pub mod combat;
+pub mod decal;
 pub mod emit;
 mod pool;
 pub mod recipes;

@@ -52,3 +52,10 @@ pub const PARTICLE_NORMAL_PROBE: f32 = 5.0e-2;
 /// instead of bouncing. Well above a tick of gravity (0.15 at 9 units/s^2), so
 /// one lying on a floor does not spend a surface query on every tick.
 pub const PARTICLE_REST_SPEED: f32 = 0.5;
+
+/// How much nearer than the scene a scorch decal may be and still show: the
+/// decal's `1/z` times one plus this must reach the stored `1/z`. A decal lies
+/// in the plane of the wall it marks, so the two differ only by rounding in
+/// two interpolations; this is relative, so it holds from near to far. Far
+/// below the gap between a wall and anything in front of it.
+pub const DECAL_DEPTH_BIAS: f32 = 2.0e-3;

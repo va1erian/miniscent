@@ -13,6 +13,7 @@ use super::budget::{self, Keep, Limits, Sink, Tag, Tags, Tally};
 use super::class::Blend;
 use super::class::MAX_TOTAL_CAPACITY;
 use super::collect::{self, FogView};
+use super::decal::{Decal, Decals, FaceOutline, MAX_DECALS};
 use super::recipes;
 use super::{Effect, EffectArgs, Fx};
 
@@ -68,6 +69,8 @@ struct Bolt {
     age_ns: u64,
     flight_ns: u64,
     arrival: Option<(Effect, EffectArgs)>,
+    /// The scorch, which appears with the impact.
+    mark: Option<Decal>,
 }
 
 impl Bolt {
@@ -84,6 +87,7 @@ impl Bolt {
 pub struct CombatFx {
     fx: Fx,
     bolts: [Option<Bolt>; MAX_BOLTS],
+    decals: Decals,
     limits: Limits,
     keep: Keep,
     tags: Tags,
@@ -100,6 +104,7 @@ impl CombatFx {
         Self {
             fx: Fx::new(&recipes::CLASSES, SEED),
             bolts: [None; MAX_BOLTS],
+            decals: Decals::new(),
             limits: Limits::of(Quality::High),
             keep: Keep::default(),
             tags: Tags::with_capacity(MAX_DRAWS),
@@ -115,12 +120,18 @@ impl CombatFx {
     pub fn clear(&mut self) {
         self.fx.clear();
         self.bolts = [None; MAX_BOLTS];
+        self.decals.clear();
         self.keep = Keep::default();
     }
 
     /// Live particles, for tests and stats.
     pub fn live(&self) -> usize {
         self.fx.live()
+    }
+
+    /// Scorch marks on walls.
+    pub fn decals(&self) -> usize {
+        self.decals.len()
     }
 
     /// Bolts in flight.
@@ -137,6 +148,9 @@ impl CombatFx {
                 if let Some((effect, args)) = bolt.arrival {
                     self.fx.spawn(effect, &args);
                 }
+                if let Some(mark) = bolt.mark {
+                    self.decals.push(mark);
+                }
                 *slot = None;
             }
         }
@@ -146,6 +160,12 @@ impl CombatFx {
     /// A muzzle flash now, a bolt, and the impact when the bolt arrives. With
     /// every bolt slot taken the impact happens at once, without a bolt.
     pub fn shot(&mut self, s: &ShotFx) {
+        self.shot_on(s, None);
+    }
+
+    /// [`Self::shot`] for a wall hit whose face is known, so the scorch is cut
+    /// to the face.
+    pub fn shot_on(&mut self, s: &ShotFx, face: Option<&FaceOutline>) {
         let muzzle: Effect = if s.by_player {
             recipes::MUZZLE_PLAYER
         } else {
@@ -166,12 +186,16 @@ impl CombatFx {
             age_ns: 0,
             flight_ns: ((flight * NS_PER_SEC) as u64).max(1),
             arrival,
+            mark: mark_of(s, face),
         };
         match self.bolts.iter_mut().find(|b| b.is_none()) {
             Some(slot) => *slot = Some(bolt),
             None => {
                 if let Some((effect, args)) = arrival {
                     self.fx.spawn(effect, &args);
+                }
+                if let Some(mark) = bolt.mark {
+                    self.decals.push(mark);
                 }
             }
         }
@@ -189,7 +213,7 @@ impl CombatFx {
     /// Draw lists that already hold the fullest possible frame, so play never
     /// grows them.
     pub fn new_draws() -> ParticleDraws {
-        ParticleDraws::with_capacity(MAX_DRAWS)
+        ParticleDraws::with_capacity(MAX_DRAWS, MAX_DECALS)
     }
 
     /// Replaces `out` with this frame's draws, fitted to the budget. `depth` is
@@ -216,6 +240,7 @@ impl CombatFx {
         for bolt in self.bolts.iter().flatten() {
             draw_bolt(bolt, cam, &fog, &mut sink);
         }
+        self.decals.collect(cam, &fog, &mut sink);
         let tally = Tally::of(out, &self.tags, depth, w, h);
         self.keep.follow(tally.fit(self.limits.screens * w * h));
         budget::thin(out, &self.tags, self.keep);
@@ -239,6 +264,14 @@ fn args_at(pos: Vec3, dir: Vec3) -> EffectArgs {
         surface: 0,
         volume: None,
     }
+}
+
+/// The scorch a wall hit leaves; nothing for any other impact.
+fn mark_of(s: &ShotFx, face: Option<&FaceOutline>) -> Option<Decal> {
+    let Impact::Surface { material, .. } = s.impact else {
+        return None;
+    };
+    Decal::new(s.end, s.normal, recipes::surface_mark(material), face)
 }
 
 fn arrival_of(s: &ShotFx) -> Option<(Effect, EffectArgs)> {

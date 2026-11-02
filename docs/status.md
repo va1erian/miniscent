@@ -144,7 +144,7 @@ generated at runtime. Findings and changes:
 - `cargo test --workspace` passes (one run saw `bake_cache::concurrent_writers_in_one_process_leave_a_valid_file`
   fail under full-workspace load; it passed alone and on rerun, so it is timing sensitive).
 
-## Combat particles (M9.1 to M9.4, `docs/particles.md`)
+## Combat particles (M9.1 to M9.4 and M9.7, `docs/particles.md`)
 
 Shots are world-space now: a bolt with a muzzle flash, an impact chosen by the struck material
 (`Scene::surface_at`), sparks on a drone, and a drone explosion on a kill. They are depth tested, so
@@ -152,8 +152,15 @@ a shot behind a wall draws nothing (`apps/game/tests/combat_fx.rs`), and the scr
 the HUD muzzle rectangle are gone. `Game` emits `Event::Shot` and never reads the effects. A pixel
 budget per Quality thins Cosmetic and then Normal particles and never Essential ones, so fill is
 bounded and a script gives the same picture on any machine. Not there yet: the budget's adaptive
-multiplier; dynamic light (M9.5); `Blast` and the half-res layer (M9.6); decals (M9.7). Recipe values
-are starting points that no player has judged.
+multiplier; dynamic light (M9.5); `Blast` and the half-res layer (M9.6).
+
+A shot that hits a wall leaves a scorch mark when the bolt arrives (M9.7): a ring of 64 in
+`fx/decal.rs`, cut to the struck face, darkened by material (`recipes::surface_mark`), drawn
+multiplicatively before the sprites with a depth bias in `epsilon::DECAL_DEPTH_BIAS`, faded by fog
+and costed as Essential in the budget (about 4 ns per pixel on the dev machine). It stays on its
+face from every view tested and flickers in none (`apps/game/tests/decals.rs`). No hot glow on
+metal. Seen once in a screenshot, on brick at a glancing angle. Recipe values are starting points
+that no player has judged.
 
 ## Parallel frames by default (M9.0, the groundwork of `docs/particles.md`)
 

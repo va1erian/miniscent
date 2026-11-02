@@ -2,6 +2,7 @@
 //! starts and what it does where it ends.
 
 use mscent_game::fx::combat::{Impact, ShotFx, enemy_muzzle};
+use mscent_game::fx::decal::FaceOutline;
 use mscent_game::{Shooter, Struck};
 use mscent_math::Vec3;
 
@@ -40,12 +41,21 @@ impl GameSession {
                     })
             }
         };
-        self.fx.shot(&ShotFx {
-            by_player,
-            muzzle,
-            end,
-            normal,
-            impact,
-        });
+        // Only a wall has a face for the scorch to stay on.
+        let face = match struck {
+            Struck::Wall => self.renderer.scene().face_at(end, normal),
+            _ => None,
+        };
+        let outline = face.and_then(FaceOutline::of);
+        self.fx.shot_on(
+            &ShotFx {
+                by_player,
+                muzzle,
+                end,
+                normal,
+                impact,
+            },
+            outline.as_ref(),
+        );
     }
 }

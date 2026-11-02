@@ -12,11 +12,13 @@
 
 mod bank;
 mod beam;
+mod decal;
 mod kernels;
 mod sprite;
 
 pub use bank::SpriteBank;
 pub use beam::streak_from_world;
+pub use decal::{DecalDraw, DecalPoint, DecalVertex, MAX_DECAL_POINTS, decal_from_world};
 
 use crate::camera::ScreenPoint;
 use crate::framebuffer::Framebuffer;
@@ -70,6 +72,8 @@ pub struct StreakDraw {
 /// Everything to draw this frame, in the order it is drawn.
 #[derive(Clone, Debug, Default)]
 pub struct ParticleDraws {
+    /// Scorch marks, multiplied into the scene before any sprite.
+    pub decals: Vec<DecalDraw>,
     /// "Over" sprites, back to front as given.
     pub over: Vec<SpriteDraw>,
     /// Additive sprites, in any order.
@@ -78,9 +82,11 @@ pub struct ParticleDraws {
 }
 
 impl ParticleDraws {
-    /// Lists that hold `n` draws each before they would grow.
-    pub fn with_capacity(n: usize) -> Self {
+    /// Lists that hold `n` particle draws each, and `decals` decals, before
+    /// they would grow.
+    pub fn with_capacity(n: usize, decals: usize) -> Self {
         Self {
+            decals: Vec::with_capacity(decals),
             over: Vec::with_capacity(n),
             add: Vec::with_capacity(n),
             streaks: Vec::with_capacity(n),
@@ -89,18 +95,22 @@ impl ParticleDraws {
 
     /// Empty every list, keeping their capacity.
     pub fn clear(&mut self) {
+        self.decals.clear();
         self.over.clear();
         self.add.clear();
         self.streaks.clear();
     }
 
     pub fn is_empty(&self) -> bool {
-        self.over.is_empty() && self.add.is_empty() && self.streaks.is_empty()
+        self.decals.is_empty()
+            && self.over.is_empty()
+            && self.add.is_empty()
+            && self.streaks.is_empty()
     }
 }
 
-/// Draw the list into the rows `fb` holds: "over" sprites, then additive ones,
-/// then streaks. Uses the fastest kernels this CPU supports.
+/// Draw the list into the rows `fb` holds: decals, then "over" sprites, then
+/// additive ones, then streaks. Uses the fastest kernels this CPU supports.
 pub fn draw_particles(fb: &mut Framebuffer, draws: &ParticleDraws, bank: &SpriteBank) {
     draw_particles_with(Level::best(), fb, draws, bank);
 }
@@ -113,6 +123,9 @@ pub fn draw_particles_with(
     draws: &ParticleDraws,
     bank: &SpriteBank,
 ) {
+    for d in &draws.decals {
+        decal::draw_decal(fb, d, bank);
+    }
     for s in &draws.over {
         sprite::draw_sprite(level, fb, s, Blend::Over, bank);
     }

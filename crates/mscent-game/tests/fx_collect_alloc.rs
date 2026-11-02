@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use mscent_game::fx::combat::{CombatFx, DRONE_TINT, Impact, ShotFx};
 use mscent_math::{Vec3, Vec3d};
 use mscent_render::View;
+use mscent_world::materials::METAL;
 use mscent_world::{Brush, Op, compile};
 
 struct Counting;
@@ -69,5 +70,34 @@ fn collecting_a_busy_frame_allocates_nothing_from_the_first_one() {
     fx.collect(&cam, None, None, &mut draws);
     let calls = CALLS.load(Ordering::Relaxed) - before;
     assert!(!draws.is_empty());
+    assert_eq!(calls, 0);
+
+    // A wall covered in scorch marks, more than the ring holds: a frame with
+    // every mark in view still allocates nothing.
+    for i in 0..70 {
+        let end = Vec3::new(
+            (i % 10) as f32 * 3.0 - 15.0,
+            39.9,
+            (i / 10) as f32 * 3.0 - 10.0,
+        );
+        fx.shot(&ShotFx {
+            by_player: true,
+            muzzle: Vec3::ZERO,
+            end,
+            normal: Vec3::new(0.0, -1.0, 0.0),
+            impact: Impact::Surface {
+                material: METAL,
+                tint: 0xff80_8080,
+            },
+        });
+    }
+    for _ in 0..10 {
+        fx.advance(16_666_667, &bsp);
+    }
+    assert_eq!(fx.decals(), 64, "the ring is full");
+    let before = CALLS.load(Ordering::Relaxed);
+    fx.collect(&cam, None, None, &mut draws);
+    let calls = CALLS.load(Ordering::Relaxed) - before;
+    assert!(draws.decals.len() > 30, "{} in view", draws.decals.len());
     assert_eq!(calls, 0);
 }
