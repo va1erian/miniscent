@@ -397,6 +397,13 @@ impl App for Editor {
                 return;
             }
             Msg::Guarded(inner) => {
+                // Enter answers what the workspace has on top, from the name field too.
+                if matches!(*inner, Msg::Menu(cmd::SLICE))
+                    && self.tex.is_open()
+                    && self.tex_answer_key(true, ui)
+                {
+                    return;
+                }
                 if self.studio.mode == Mode::Play || self.text_has_focus(ui) {
                     return;
                 }
@@ -418,8 +425,9 @@ impl App for Editor {
                 if self.studio.mode == Mode::Play {
                     self.end_play(Some("Back in the editor"));
                 } else if self.tex.is_open() {
-                    // A drag of a block is cancelled first; the next Esc goes back.
-                    if !self.tex.cancel_drag() {
+                    // What is on top goes first: the question or the form, then a
+                    // drag of a block, and the next Esc goes back.
+                    if !self.tex_answer_key(false, ui) && !self.tex.cancel_drag() {
                         self.tex_close();
                     }
                 } else {

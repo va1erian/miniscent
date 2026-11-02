@@ -16,7 +16,7 @@ use mscent_world::texinfo::DEFAULT_SCALE;
 use xui::Image;
 use xui::backend::{Result as XuiResult, WidgetId};
 use xui::prelude::*;
-use xui::widget::{HasText, Menu};
+use xui::widget::{Dialog, HasText, Menu};
 
 use super::app::{Msg, cmd};
 use crate::materials::SharedMaterials;
@@ -87,6 +87,11 @@ pub struct Workspace {
     gloss_field: Handle<NumberField<Msg>>,
     /// The material and epoch the gloss widgets show.
     gloss_of: Option<(String, u64)>,
+    pub(super) new_button: Handle<Button<Msg>>,
+    pub(super) new_form: dialogs::NewForm,
+    /// Asked before a stock material is replaced, about the name beside it.
+    pub(super) overwrite: Option<Rc<Dialog<Msg>>>,
+    overwriting: Option<String>,
     /// The page's menu, which needs the window to overhang the workspace.
     menu: Option<Menu<Msg>>,
     /// The cell its last opening was over.
@@ -154,6 +159,10 @@ impl Workspace {
             gloss_slider: Handle::new(),
             gloss_field: Handle::new(),
             gloss_of: None,
+            new_button: Handle::new(),
+            new_form: dialogs::NewForm::default(),
+            overwrite: None,
+            overwriting: None,
             menu: None,
             menu_cell: Rc::new(std::cell::Cell::new((0, 0))),
             revealed: RefCell::new(None),
@@ -180,7 +189,12 @@ impl Workspace {
             .gap(6)
             .child(label("Materials").title())
             .child(panel(column()).plain().bind(&self.list_host).fill(1))
-            .child(button("New...").on_click(tex(TexMsg::AskNew)))
+            .child(
+                button("New...")
+                    .on_click(tex(TexMsg::AskNew))
+                    .bind(&self.new_button),
+            )
+            .child(self.new_form.layout())
             .child(label("").bind(&self.size_note[0]))
             .child(label("").bind(&self.size_note[1]))
             .child(label("Gloss"))
@@ -265,6 +279,7 @@ impl Workspace {
     pub fn attach(&mut self, ui: &Ui<Msg>) {
         self.params.attach(ui);
         self.menu = Some(page_menu(ui, self.menu_cell.clone()));
+        self.overwrite = dialogs::overwrite_dialog(ui).ok().map(Rc::new);
     }
 
     pub fn is_open(&self) -> bool {
@@ -277,6 +292,8 @@ impl Workspace {
     }
 
     pub fn set_visible(&self, visible: bool) {
+        // It is only up while asked for, and shows again only when asked again.
+        self.new_form.close();
         if let Some(host) = self.host.try_get() {
             host.set_visible(visible);
         }
@@ -284,7 +301,9 @@ impl Workspace {
 
     /// Whether `id` takes typed keys, so shortcuts leave it alone.
     pub fn owns(&self, id: WidgetId) -> bool {
-        self.params.owns(id) || self.gloss_field.try_get().is_some_and(|f| f.id() == id)
+        self.params.owns(id)
+            || self.new_form.owns(id)
+            || self.gloss_field.try_get().is_some_and(|f| f.id() == id)
     }
 
     fn sync_list(&mut self) -> XuiResult<()> {
@@ -422,6 +441,8 @@ impl Workspace {
     }
 }
 
+#[cfg(test)]
+mod dialogs_tests;
 #[cfg(test)]
 mod page_drag_tests;
 #[cfg(test)]

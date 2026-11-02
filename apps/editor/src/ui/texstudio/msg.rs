@@ -17,8 +17,14 @@ pub enum BrushEdit {
 pub enum TexMsg {
     /// A row of the material list.
     Open(String),
-    /// The New button: asks for a name and a size.
+    /// The New button: shows the form that asks for a name and a size.
     AskNew,
+    /// The form's Create button, or Enter in it.
+    NewSubmit,
+    NewCancel,
+    /// The answers to the question before a stock material is replaced.
+    ConfirmOverwrite,
+    CancelOverwrite,
     Create {
         name: String,
         side: u32,

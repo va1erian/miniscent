@@ -416,6 +416,7 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     stage.emit(Msg::Menu(cmd::TEX_OPEN));
     run.check(probe.tex().borrow().is_open(), "the workspace opens");
     texture_stock::script(run, stage, probe);
+    texture_stock::questions(run, stage, probe, &run.dir.join("texture-stock-assets"));
     build_recipe(run, stage, probe);
     check_tabs(run, stage, probe);
     check_pixels(run, stage, probe);

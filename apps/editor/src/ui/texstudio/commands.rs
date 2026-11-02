@@ -151,7 +151,7 @@ impl Editor {
                 self.tex.studio.borrow_mut().redo();
             }
             cmd::DELETE => self.tex_edit(TexMsg::Delete),
-            cmd::SAVE | cmd::TEX_SAVE => self.tex_save(ui),
+            cmd::SAVE | cmd::TEX_SAVE => self.tex_save(),
             cmd::TEX_APPLY => self.tex_edit(TexMsg::Apply),
             cmd::TEX_NEW => self.tex_ask_new(ui),
             cmd::TEX_CLOSE => {
@@ -164,27 +164,82 @@ impl Editor {
     }
 
     fn tex_ask_new(&mut self, ui: &Ui<Msg>) {
-        if let Some((name, side)) = dialogs::ask_new(ui) {
-            self.tex_edit(TexMsg::Create { name, side });
+        self.tex.new_form.open();
+        ui.invalidate_layout();
+    }
+
+    /// Makes the material the form describes. A name that cannot be used stays in
+    /// the form, with the reason beside it, so what was typed is not lost.
+    fn tex_new_submit(&mut self, ui: &Ui<Msg>) {
+        let Some((name, side)) = self.tex.new_form.answer() else {
+            return;
+        };
+        let created = self.tex.studio.borrow_mut().create(&name, side);
+        match created {
+            Ok(()) => self.tex_new_close(ui),
+            // The whole reason goes where long messages fit.
+            Err(why) => {
+                self.tex.new_form.say("That name cannot be used");
+                self.tex.studio.borrow_mut().say(why);
+            }
         }
     }
 
-    fn tex_save(&mut self, ui: &Ui<Msg>) {
+    fn tex_new_close(&mut self, ui: &Ui<Msg>) {
+        self.tex.new_form.close();
+        ui.invalidate_layout();
+    }
+
+    /// Saves, unless that needs the question first: its answer saves or not.
+    fn tex_save(&mut self) {
         let start = self.tex.studio.borrow_mut().save();
         if let SaveStart::NeedsConsent(name) = start
-            && dialogs::ask_overwrite(ui, &name)
+            && let Some(question) = &self.tex.overwrite
         {
+            question.set_message(&dialogs::overwrite_question(&name));
+            question.open();
+            self.tex.overwriting = Some(name);
+        }
+    }
+
+    fn tex_confirm_overwrite(&mut self) {
+        if let Some(name) = self.tex.overwriting.take() {
             let mut studio = self.tex.studio.borrow_mut();
             studio.consent(&name);
             studio.save();
         }
     }
 
+    /// Takes a key that the window's shortcuts would otherwise act on, for the
+    /// question or the form on top: Esc says no and Enter yes. Whether it did.
+    pub(in crate::ui) fn tex_answer_key(&mut self, enter: bool, ui: &Ui<Msg>) -> bool {
+        if let Some(question) = self.tex.overwrite.as_ref().filter(|q| q.is_open()) {
+            question.close();
+            match enter {
+                true => self.tex_confirm_overwrite(),
+                false => self.tex.overwriting = None,
+            }
+        } else if self.tex.new_form.is_open() {
+            match enter {
+                true => self.tex_new_submit(ui),
+                false => self.tex_new_close(ui),
+            }
+        } else {
+            return false;
+        }
+        self.tex_refresh();
+        true
+    }
+
     /// A message from the workspace.
     pub(in crate::ui) fn tex_message(&mut self, msg: TexMsg, ui: &Ui<Msg>) {
         match msg {
             TexMsg::AskNew => self.tex_ask_new(ui),
-            TexMsg::Save => self.tex_save(ui),
+            TexMsg::NewSubmit => self.tex_new_submit(ui),
+            TexMsg::NewCancel => self.tex_new_close(ui),
+            TexMsg::Save => self.tex_save(),
+            TexMsg::ConfirmOverwrite => self.tex_confirm_overwrite(),
+            TexMsg::CancelOverwrite => self.tex.overwriting = None,
             other => self.tex_edit(other),
         }
         self.tex_refresh();
@@ -315,7 +370,13 @@ impl Editor {
             TexMsg::Apply => {
                 studio.apply();
             }
-            TexMsg::AskNew | TexMsg::Save | TexMsg::PageMenu { .. } => {}
+            TexMsg::AskNew
+            | TexMsg::NewSubmit
+            | TexMsg::NewCancel
+            | TexMsg::Save
+            | TexMsg::ConfirmOverwrite
+            | TexMsg::CancelOverwrite
+            | TexMsg::PageMenu { .. } => {}
         }
     }
 }
