@@ -20,6 +20,11 @@ pub const EXTENSION: &str = ".mst";
 /// startup, on one thread, with no way to cancel.
 pub const MAX_DIRECTORY_NS: u64 = 30_000_000_000;
 
+/// Most texels a directory's recipes may make together: 64 tiles of 1024 px, about
+/// 600 MB of maps before mips. Cheap recipes pass the time limit however large they
+/// are, and a texture stays in memory for as long as the game runs.
+pub const MAX_DIRECTORY_TEXELS: u64 = 64 * 1024 * 1024;
+
 /// A texture from finished maps, not yet filtered.
 pub fn texture_from_maps(maps: Maps) -> Result<Texture, TextureError> {
     let mut texture = Texture::new(maps.width, maps.height, maps.albedo)?;
@@ -63,23 +68,47 @@ pub fn load_recipe(path: &Path) -> Result<Texture, TextureError> {
 /// read here and again when they are made, so reading is charged twice. PNGs have
 /// their own limits and are not operator work, so they are not counted.
 pub fn check_directory_work(dir: &Path, entries: &[Entry]) -> Result<(), TextureError> {
-    let mut total = 0u64;
+    check_directory_with(dir, entries, None)
+}
+
+/// A recipe about to be written, standing in for the file of its name.
+pub struct Pending<'a> {
+    pub name: &'a str,
+    pub recipe: &'a Recipe,
+    /// Length of the text it will be written as.
+    pub bytes: u64,
+}
+
+/// [`check_directory_work`] as the directory will be once `pending` is written, so
+/// a save cannot leave a directory that the game refuses as a whole.
+pub fn check_directory_with(
+    dir: &Path,
+    entries: &[Entry],
+    pending: Option<Pending>,
+) -> Result<(), TextureError> {
+    let (mut total, mut texels) = (0u64, 0u64);
     for entry in entries {
         let Entry::Material { name, .. } = entry else {
             continue;
         };
         let path = dir.join(format!("{name}{EXTENSION}"));
-        if !path.is_file() {
-            continue;
-        }
-        let (recipe, bytes) = read_recipe(&path)?;
-        let making = bake_cost(&recipe, recipe.size).map_err(|e| recipe_error(&path, e))?;
+        let read;
+        let (recipe, bytes) = match &pending {
+            Some(p) if p.name == name => (p.recipe, p.bytes),
+            _ if !path.is_file() => continue,
+            _ => {
+                read = read_recipe(&path)?;
+                (&read.0, read.1)
+            }
+        };
+        let making = bake_cost(recipe, recipe.size).map_err(|e| recipe_error(&path, e))?;
         total = total
             .saturating_add(2 * bytes * READ_NS_PER_BYTE)
             .saturating_add(making);
-        if total > MAX_DIRECTORY_NS {
+        texels = texels.saturating_add(recipe.size.texels() as u64);
+        if total > MAX_DIRECTORY_NS || texels > MAX_DIRECTORY_TEXELS {
             return Err(TextureError::Recipe(format!(
-                "{}: the recipes listed up to {name} take too much work together",
+                "{}: the recipes listed up to {name} take too much work or memory together",
                 dir.display()
             )));
         }
@@ -90,6 +119,50 @@ pub fn check_directory_work(dir: &Path, entries: &[Entry]) -> Result<(), Texture
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_directory_of_too_many_large_tiles_is_refused_before_any_pixel() {
+        let d = dir("texels");
+        let big = "miniscent-recipe 1\nsize 1024 1024\nop 0 0 1 flat\nop 0 1 1 out-albedo\n";
+        let entry = |i: usize| Entry::Material {
+            name: format!("big{i}"),
+            gloss: 1,
+        };
+        for i in 0..65 {
+            std::fs::write(d.join(format!("big{i}.mst")), big).expect("write");
+        }
+        let entries: Vec<Entry> = (0..65).map(entry).collect();
+        assert!(check_directory_work(&d, &entries[..64]).is_ok());
+        assert!(matches!(
+            check_directory_work(&d, &entries),
+            Err(TextureError::Recipe(_))
+        ));
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn a_pending_recipe_is_counted_in_place_of_its_file() {
+        let d = dir("pending");
+        let small = "miniscent-recipe 1\nsize 8 8\nop 0 0 1 flat\nop 0 1 1 out-albedo\n";
+        std::fs::write(d.join("a.mst"), small).expect("write");
+        let entries = [Entry::Material {
+            name: "a".to_string(),
+            gloss: 1,
+        }];
+        let mut text = String::from("miniscent-recipe 1\nsize 1024 1024\n");
+        for y in 0..100 {
+            text.push_str(&format!("op 0 {y} 1 noise octaves=8\n"));
+        }
+        let heavy = recipe::read(text.as_bytes()).expect("reads");
+        assert!(check_directory_work(&d, &entries).is_ok());
+        let pending = Pending {
+            name: "a",
+            recipe: &heavy,
+            bytes: text.len() as u64,
+        };
+        assert!(check_directory_with(&d, &entries, Some(pending)).is_err());
+        let _ = std::fs::remove_dir_all(d);
+    }
 
     fn dir(name: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!("mscent-recipe-{name}-{}", std::process::id()));

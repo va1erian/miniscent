@@ -48,6 +48,29 @@ fn listing(dir: &Path) -> Vec<String> {
 }
 
 #[test]
+fn a_page_that_would_push_the_directory_past_its_limit_is_refused_and_writes_nothing() {
+    let d = dir("limit");
+    let big = "miniscent-recipe 1\nsize 1024 1024\nop 0 0 1 flat\nop 0 1 1 out-albedo\n";
+    let mut text = MANIFEST.to_string();
+    let mut names = vec!["brick".to_string()];
+    for i in 1..=63 {
+        let name = format!("big{i}");
+        std::fs::write(d.join(format!("{name}.mst")), big).expect("recipe");
+        text.push_str(&format!("{i} {name} 40\n"));
+        names.push(name);
+    }
+    std::fs::write(d.join(manifest::FILE), &text).expect("manifest");
+    let table = table_of(&names.iter().map(String::as_str).collect::<Vec<_>>());
+    let page = read(big.as_bytes()).expect("reads");
+    let before = listing(&d);
+    let refused = save_material(&d, "onemore", &page, &table).expect_err("refused");
+    assert!(refused.contains("too much"), "{refused}");
+    assert_eq!(listing(&d), before);
+    let after = std::fs::read_to_string(d.join(manifest::FILE)).expect("reads");
+    assert_eq!(after, text);
+}
+
+#[test]
 fn a_new_material_loads_through_load_dir_with_the_next_id() {
     let d = dir("new");
     assert_eq!(save_material(&d, "concrete", &recipe(), &brick()), Ok(1));

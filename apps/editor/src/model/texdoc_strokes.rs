@@ -18,8 +18,7 @@ const POINT_CHARS: usize = 2 * 14 + 2;
 const LINE_HEAD: usize = 128;
 /// The most points a stroke holds. A stroke is one line of the recipe and the
 /// reader refuses a line past `MAX_LINE`, so this many always fit one, and a file
-/// the editor wrote always loads. Under the operator's `MAX_POINTS`, which no
-/// rounding of coordinates could fit in a line.
+/// the editor wrote always loads.
 pub const STROKE_POINTS: usize = {
     let fits = (MAX_LINE - LINE_HEAD) / POINT_CHARS;
     if fits < MAX_POINTS { fits } else { MAX_POINTS }

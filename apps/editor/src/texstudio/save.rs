@@ -7,7 +7,7 @@ use std::io::Write;
 use std::path::Path;
 
 use mscent_render::manifest::{self, Entry, name_is_valid};
-use mscent_render::recipe_texture::EXTENSION;
+use mscent_render::recipe_texture::{EXTENSION, Pending, check_directory_with};
 use mscent_render::{MaterialId, MaterialTable};
 use mscent_texgen::Recipe;
 use mscent_texgen::recipe;
@@ -121,6 +121,15 @@ pub fn save_material(
     let old_manifest = current_manifest(dir)?;
     let (manifest_text, id) = with_material(dir, &old_manifest, name, recipe.gloss)?;
     id_agrees(name, table, id)?;
+    // One page can be fine and still push the directory past what the game takes,
+    // and then the game loads no material at all.
+    let entries = manifest::parse(manifest_text.as_bytes()).map_err(|e| format!("{e:?}"))?;
+    let pending = Pending {
+        name,
+        recipe,
+        bytes: text.len() as u64,
+    };
+    check_directory_with(dir, &entries, Some(pending)).map_err(|e| format!("{e:?}"))?;
     let path = dir.join(format!("{name}{EXTENSION}"));
     // A file nothing lists is someone's: a new row would adopt it and the write
     // would replace it.

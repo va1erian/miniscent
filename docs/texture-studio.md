@@ -16,6 +16,10 @@ the tool, follow the [tutorial](texture-studio-tutorial.md).
 - **Measured (`texgen_bench`, size-optimized release, dev machine).** All ten stock
   recipes take 42.8 ms at 128 px, and one parameter change on brick at 256 px takes
   19 ms. The game binary grows by about 140 KB to 2.02 MB, 92% of its 2.2 MB budget.
+- **Directory limits.** Beyond each recipe's own limit, a directory's recipes may
+  together take about 30 s of estimated work and make 64 tiles of 1024 px, since a
+  texture stays in memory while the game runs. Save checks the directory as it will
+  be, because the game refuses a directory past these as a whole.
 - **Lookalikes.** Recipes reproduce the old pictures closely, not exactly, since
   numpy's FFT noise is not reproducible in Rust. Metal and floor gained specular
   masks, which closes M5.7. Detail finer than a texel raised shimmer past its limit
@@ -80,10 +84,8 @@ the tool, follow the [tutorial](texture-studio-tutorial.md).
   continues on the other side. A stroke is one undo step, and its points are thinned
   to a quarter of the brush radius apart (at least 1/1024 tile) so a long one stays
   small, and every point is rounded to 1/4096 of a tile as it is added. It stops
-  growing at `STROKE_POINTS` (2180) with a message, and a block past `MAX_STROKES`
-  refuses a new one. `STROKE_POINTS` is under the operator's `MAX_POINTS` (4096)
-  because a stroke is one line of the file and the reader refuses lines past 64 KB:
-  4096 points take up to 30 bytes each however they are rounded. The recipe's undo
+  growing at `MAX_POINTS` (4096) with a message, and a block past `MAX_STROKES`
+  refuses a new one. The recipe's undo
   history is kept to 256 steps and an estimated 64 MB, the oldest going first, since
   a stroke list is copied whole into each step. While the pointer is down the worker runs the
   draft path, as for a slider, and the full picture comes on release. The brush
