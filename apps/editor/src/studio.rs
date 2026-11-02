@@ -150,6 +150,12 @@ impl Studio {
         self.built_doc.as_ref() == Some(doc)
     }
 
+    /// The script file was just written: the picture and whether it plays are out
+    /// of date, whatever a job on its way says, so it must build again.
+    pub fn script_changed(&mut self) {
+        self.refresh = true;
+    }
+
     /// Render threads still running, including ones told to stop.
     #[cfg(test)]
     pub fn worker_threads(&self) -> usize {

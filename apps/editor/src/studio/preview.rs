@@ -245,7 +245,8 @@ impl Studio {
         let why = built.unplayable().map(str::to_string);
         self.script_watch.files = built.watch.clone();
         self.attach(Box::new(LevelScene::new(built)), made_for, why);
-        if self.play_pending && self.built_doc.as_ref() == Some(doc) {
+        // Not while another build is wanted: this one may have read an older script.
+        if self.play_pending && !self.refresh && self.built_doc.as_ref() == Some(doc) {
             self.play_pending = false;
             match &self.unplayable {
                 None => out.play_now = true,

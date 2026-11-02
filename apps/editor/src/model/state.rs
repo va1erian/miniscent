@@ -24,6 +24,8 @@ pub enum Tool {
     Slice,
     /// Drag the selected brush's corners.
     Vertex,
+    /// Click to place a basic entity, then back to Select.
+    Kit(crate::script::kit::KitKind),
 }
 
 /// The one selected item.
@@ -68,7 +70,10 @@ pub struct EditorState {
     pub message: String,
     /// The panel's name and tag fields while they are being typed in.
     pub draft: super::labels::LabelDraft,
-    pub(super) script: super::labels::ScriptText,
+    /// The level's script as being edited.
+    pub script: crate::script::buffer::ScriptBuffer,
+    /// A line of the script to show, once the pane has heard of it.
+    pub show_script_line: Option<usize>,
 }
 
 impl Default for EditorState {
@@ -99,6 +104,7 @@ impl EditorState {
             message: "Ready".into(),
             draft: Default::default(),
             script: Default::default(),
+            show_script_line: None,
         }
     }
 
@@ -113,8 +119,14 @@ impl EditorState {
         self.drag = None;
         self.cut = None;
         self.draft = Default::default();
-        self.script = Default::default();
-        self.poll_script();
+        self.open_script();
+        self.show_script_line = None;
+    }
+
+    /// Starts over on the script beside the document.
+    pub fn open_script(&mut self) {
+        let script = self.doc.level_path().map(|p| p.with_extension("st"));
+        self.script.open(script.as_deref());
     }
 
     pub fn snap(&self, v: f64) -> f64 {

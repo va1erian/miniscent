@@ -9,6 +9,8 @@ use super::view3d::View3d;
 use crate::materials::SharedMaterials;
 use crate::model::EditorState;
 use crate::studio::Preview;
+use xui::widget::ListView;
+use xui_code_editor::Editor as CodeEditor;
 
 /// What a scripted run reads and drives from outside the editor.
 pub struct Probe {
@@ -17,6 +19,9 @@ pub struct Probe {
     pub(super) play: Rc<View3d<Msg>>,
     pub(super) preview: Rc<Cell<Preview>>,
     pub(super) materials: SharedMaterials,
+    pub(super) code: Rc<CodeEditor<Msg>>,
+    pub(super) problems: Rc<ListView<Msg>>,
+    pub(super) script_open: Rc<Cell<bool>>,
 }
 
 impl Editor {
@@ -28,6 +33,9 @@ impl Editor {
             play: self.play.get(),
             preview: self.preview.clone(),
             materials: self.studio.materials().clone(),
+            code: self.script.code.get(),
+            problems: self.script.problems(),
+            script_open: self.script.open_flag(),
         }
     }
 }
@@ -60,6 +68,21 @@ impl Probe {
 }
 
 impl Probe {
+    /// The script pane's code editor.
+    pub fn code(&self) -> Rc<CodeEditor<Msg>> {
+        self.code.clone()
+    }
+
+    /// The first row of the problem list.
+    pub fn problem_row(&self) -> String {
+        self.problems.cell_text(0, 0).unwrap_or_default()
+    }
+
+    /// Whether the script pane is on show.
+    pub fn script_open(&self) -> bool {
+        self.script_open.get()
+    }
+
     /// The editor's 3D pane.
     pub fn view_pane(&self) -> Rc<View3d<Msg>> {
         self.view3d.clone()

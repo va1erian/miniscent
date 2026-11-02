@@ -440,14 +440,28 @@ times a second. On a change it compiles, then restarts the level on the new scri
 State is not preserved, so a reload behaves exactly like a fresh start. Geometry is untouched, so there
 is no re-bake.
 
-**Editor.** The script path is per level. Errors appear in the existing log panel. Brushes get a "make
-mover" command and things get name and tag fields. There is no script editor: the file is text, and any
-real editor does it better.
+**Editor.** The script path is per level. Brushes get a "make mover" command and things get name and tag
+fields. The script pane (F6) edits the file with `xui-code-editor`: colours, completion that knows the
+level's names and what a receiver understands, and a problem list checked against the level as you type,
+the way `--check` does. F5 saves the script and plays it. The file is still plain text, and a change made in
+another program is followed, or offered as a choice if there are edits in the way. This replaces the earlier
+decision to have no script editor: placing a door and then leaving the program to wire it was the weak
+step in the loop.
+
+**Basic entities.** Script > Add entity places a door, lift, wave and so on. Each is ordinary level content
+(named brushes, zones and markers) and a few lines added to the script, mostly calls into
+`assets/scripts/lib/kit.st`. So the rule above holds: the level file gains no logic and no new kind of
+entity, and what a door does stays readable and changeable where all the logic is.
+
+**Samples and guide.** Script > Open sample writes a fresh copy of a level from `assets/samples` to the user's
+settings directory, so it plays at once and the shipped one stays as it is. The guide (F7) is
+`assets/guide/scripting.txt` and a reference page made from the API table. Tests compile every example in it
+and compare the table with the game's own, so neither can drift.
 
 ## Not covered
 
 - Save games. The VM state could be saved, but levels have no saves today.
 - Scripted enemy AI per step, and scripted weapons. Both stay Rust.
 - Movers casting baked shadows, switchable lights.
-- Syntax colouring or a debugger for the language.
+- A debugger for the language.
 - Anything measured on the i3-7100U or LazyOS.

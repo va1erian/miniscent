@@ -11,6 +11,7 @@ mod build;
 mod files;
 mod materials;
 mod model;
+mod script;
 mod selftest;
 mod studio;
 mod ui;

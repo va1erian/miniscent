@@ -24,6 +24,7 @@ use crate::ui::{Editor, Msg, Probe, cmd};
 mod faces;
 mod keys;
 mod materials;
+mod script_pane;
 mod scripting;
 
 /// Ticks the UI `n` times, 16 ms apart, so the render thread's frames arrive
@@ -74,6 +75,18 @@ pub fn run(dir: &Path) -> i32 {
         (1280.0, 800.0),
         scripting::script,
     );
+    let pane = run_theme(
+        &dir.join("script-pane"),
+        Theme::light(),
+        (1280.0, 800.0),
+        script_pane::script,
+    );
+    let pane_dark = run_theme(
+        &dir.join("script-pane-dark"),
+        Theme::dark(),
+        (1280.0, 800.0),
+        script_pane::script,
+    );
     let light = run_theme(dir, Theme::light(), (1280.0, 800.0), script);
     let dark = run_theme(&dir.join("dark"), Theme::dark(), (1280.0, 800.0), script);
     // The layout at 2000 px wide: side panels and the build log must fit.
@@ -83,7 +96,12 @@ pub fn run(dir: &Path) -> i32 {
         (2000.0, 1124.0),
         wide_script,
     );
-    light.max(dark).max(wide).max(scripted)
+    light
+        .max(dark)
+        .max(wide)
+        .max(scripted)
+        .max(pane)
+        .max(pane_dark)
 }
 
 fn run_theme(

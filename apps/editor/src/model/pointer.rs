@@ -174,6 +174,11 @@ impl EditorState {
                 self.place_entity(k, at);
                 true
             }
+            Tool::Kit(k) => {
+                let at = self.entity_position(p.view, p.pos);
+                self.place_kit(k, at);
+                true
+            }
             Tool::Slice => self.slice_down(p, snapped),
             Tool::Vertex => self.vertex_down(p),
             Tool::Select | Tool::Face => {

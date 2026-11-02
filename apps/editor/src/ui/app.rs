@@ -11,10 +11,12 @@ use mscent_world::Op;
 use xui::prelude::*;
 use xui::widget::{FileDialog, HasText, MenuId};
 
+pub use super::commands::cmd;
 use super::commands::menus;
 use super::keys::{OPS, TOOLS, key_name, shortcut};
 use super::layouts::{self, Arrangement, Disposition};
 use super::props::{Panel, apply};
+use super::script_pane::{ScriptMsg, ScriptPane};
 use super::toolbar::IconButton;
 use super::view3d::View3d;
 use super::viewport::ViewEvent;
@@ -33,6 +35,7 @@ pub enum Msg {
     View(ViewEvent),
     Prop(super::props::Prop),
     Face(super::facepanel::FaceMsg),
+    Script(ScriptMsg),
     /// The frame timer.
     Tick,
     /// One UI tick on demand (scripted runs have no timers).
@@ -46,6 +49,8 @@ pub enum Msg {
     SavePath(PathBuf),
     /// Puts the free-fly camera somewhere (scripted runs frame a face).
     Camera(Box<crate::model::FlyCam>),
+    /// The window's close button.
+    CloseRequested,
 }
 
 /// Width of the tool palette on the left, in dip.
@@ -57,41 +62,14 @@ const SIDE_WIDTH: i32 = 340;
 /// Height of the log box, in dip.
 const LOG_HEIGHT: i32 = 110;
 
-/// Menu command ids.
-pub mod cmd {
-    use xui::widget::MenuId;
-    pub const NEW: MenuId = MenuId::new(1);
-    pub const OPEN: MenuId = MenuId::new(2);
-    pub const SAVE: MenuId = MenuId::new(3);
-    pub const PLAY: MenuId = MenuId::new(5);
-    pub const SHOWCASE: MenuId = MenuId::new(6);
-    pub const SAVE_AS: MenuId = MenuId::new(7);
-    pub const UNDO: MenuId = MenuId::new(10);
-    pub const REDO: MenuId = MenuId::new(11);
-    pub const MAKE_MOVER: MenuId = MenuId::new(26);
-    pub const DELETE: MenuId = MenuId::new(12);
-    pub const FLIP: MenuId = MenuId::new(13);
-    pub const FORWARD: MenuId = MenuId::new(14);
-    pub const BACK: MenuId = MenuId::new(15);
-    pub const SLICE: MenuId = MenuId::new(16);
-    pub const SLICE_SIDE: MenuId = MenuId::new(17);
-    pub const CARVE: MenuId = MenuId::new(18);
-    pub const EXTRUDE: MenuId = MenuId::new(19);
-    pub const EXTRUDE_IN: MenuId = MenuId::new(22);
-    pub const FIT: MenuId = MenuId::new(20);
-    pub const RESET_CAMERA: MenuId = MenuId::new(21);
-    pub const LAYOUT_CLASSIC: MenuId = MenuId::new(23);
-    pub const LAYOUT_QUAD: MenuId = MenuId::new(24);
-    pub const LEVEL_SETTINGS: MenuId = MenuId::new(25);
-}
-
 pub struct Editor {
     pub(super) state: Rc<RefCell<EditorState>>,
     pub(super) classic: Arrangement,
     pub(super) quad: Arrangement,
     pub(super) disposition: Disposition,
     pub(super) play: Handle<View3d<Msg>>,
-    menu: Handle<Menu<Msg>>,
+    pub(super) script: ScriptPane,
+    pub(super) menu: Handle<Menu<Msg>>,
     pub(super) status: Handle<StatusBar<Msg>>,
     tools: [Handle<IconButton<Msg>>; TOOLS.len()],
     ops: [Handle<IconButton<Msg>>; OPS.len()],
@@ -146,6 +124,7 @@ impl Editor {
             quad: Arrangement::default(),
             disposition: Disposition::Quad,
             play: Handle::new(),
+            script: ScriptPane::default(),
             menu: Handle::new(),
             status: Handle::new(),
             tools: Default::default(),
@@ -228,16 +207,32 @@ impl Editor {
             column().children((
                 menu_bar(menus).on_select(Msg::Menu).bind(&app.menu),
                 stack()
-                    .children((work, build(View3d::new).bind(&app.play)))
+                    .children((
+                        split(
+                            column().children((work.fill(1),)),
+                            app.script.layout(&state),
+                        )
+                        .stacked()
+                        .bind(&app.script.split)
+                        .fill(1),
+                        build(View3d::new).bind(&app.play),
+                    ))
                     .fill(1),
                 status_bar(&["Ready", "", "", ""]).bind(&app.status),
             )),
         )?;
         ui.on_key(shortcut);
+        ui.on_close(|| Some(Msg::CloseRequested));
         ui.every(16, Msg::Tick);
         app.play.get().set_visible(false);
         app.set_disposition(Disposition::Quad);
         app.log_view.get().set_enabled(false);
+        app.script.start(ui);
+        app.state.borrow_mut().open_script();
+        app.sync_script();
+        if !app.state.borrow().script.text().is_empty() {
+            app.script.set_open(true);
+        }
         app.refresh();
         app.show_prompt();
         Ok(app)
@@ -289,8 +284,9 @@ impl Editor {
     /// Whether a text box has the keyboard focus, so letters and Delete are
     /// text there and not shortcuts.
     fn text_has_focus(&self, ui: &Ui<Msg>) -> bool {
-        ui.focus_holder()
-            .is_some_and(|id| self.panel.owns(id) || id == self.log_view.get().id())
+        ui.focus_holder().is_some_and(|id| {
+            self.panel.owns(id) || self.script.owns(id) || id == self.log_view.get().id()
+        })
     }
 
     /// The 3D pane's text until the first picture of a level arrives.
@@ -328,96 +324,6 @@ F5 plays it.
         self.status.get().set_text(0, text);
     }
 
-    /// One UI tick: forwards the active pane's input to the render thread
-    /// and shows the newest frame it finished. Nothing here waits.
-    fn advance(&mut self) {
-        // Esc or focus loss ended the pointer lock: the cursor is back, so
-        // Play ends rather than running with a free cursor.
-        if self.studio.mode == Mode::Play && self.play.get().take_lock_lost() {
-            self.end_play(Some("Back in the editor"));
-        }
-        let pane = if self.studio.mode == Mode::Play {
-            self.play.get()
-        } else {
-            self.pane3d()
-        };
-        let events = pane.take_events();
-        let clicks = pane.take_clicks();
-        let size = pane.size();
-        let state = self.state.clone();
-        let tick = self.studio.tick(&events, size, &state.borrow().doc);
-        self.follow_materials();
-        self.push_log(&tick.log);
-        if let Some(s) = &tick.status {
-            self.state.borrow_mut().message = s.clone();
-            self.set_status(s);
-        }
-        if let Some(text) = &tick.blank {
-            self.pane3d().show_text(text);
-        }
-        self.show_preview(self.studio.preview(&state.borrow().doc));
-        if tick.play_now {
-            self.begin_play();
-        }
-        if tick.left_play {
-            self.end_play(None);
-        }
-        if let Some(f) = tick.frame {
-            let target = match f.mode {
-                Mode::Play => self.play.get(),
-                Mode::Edit => self.pane3d(),
-            };
-            target.set_rgba(f.w, f.h, f.rgba);
-        }
-        if self.studio.mode == Mode::Edit && !clicks.is_empty() {
-            for click in clicks {
-                self.pick_click(click);
-            }
-            self.refresh();
-        }
-    }
-
-    /// Says on the status bar how far the picture has caught up.
-    fn show_preview(&self, preview: Preview) {
-        if self.preview.replace(preview) != preview {
-            self.status.get().set_text(3, preview.label());
-        }
-    }
-
-    /// Opens the Instant Play layer over the whole work area.
-    pub(super) fn begin_play(&mut self) {
-        match self.studio.enter_play() {
-            Ok(()) => {
-                let play = self.play.get();
-                play.set_visible(true);
-                self.pane3d().set_grab(false);
-                play.set_grab(true);
-                play.focus();
-                // Focus changes from the editor are not the player's input.
-                play.take_events();
-                let text = "Playing: Esc = back, WASD (ZQSD on AZERTY) move, Space fire, Q/E roll";
-                self.state.borrow_mut().message = text.into();
-                self.set_status(text);
-            }
-            Err(e) => {
-                self.state.borrow_mut().message = e.clone();
-                self.set_status(&e);
-            }
-        }
-    }
-
-    /// Back to the editor; the document is exactly as it was.
-    pub(super) fn end_play(&mut self, message: Option<&str>) {
-        self.studio.leave_play();
-        self.play.get().set_grab(false);
-        self.play.get().set_visible(false);
-        self.pane3d().focus();
-        if let Some(m) = message {
-            self.state.borrow_mut().message = m.into();
-        }
-        self.refresh();
-    }
-
     pub(super) fn refit(&self) {
         for v in self.all_viewports() {
             v.get().refit();
@@ -442,6 +348,15 @@ impl App for Editor {
     fn update(&mut self, msg: Msg, ui: &mut Ui<Msg>) {
         match msg {
             Msg::Menu(cmd::LEVEL_SETTINGS) => self.level_settings(ui),
+            Msg::CloseRequested => {
+                if self.script_may_go(ui) {
+                    ui.close();
+                }
+                return;
+            }
+            Msg::Menu(cmd::NEW | cmd::SHOWCASE) | Msg::OpenPath(_) if !self.script_may_go(ui) => {
+                return;
+            }
             Msg::Menu(id) => self.menu_command(id),
             Msg::Tool(i) => self
                 .state
@@ -452,6 +367,7 @@ impl App for Editor {
             }
             Msg::Grid(i) => self.state.borrow_mut().grid = GRIDS[i.min(GRIDS.len() - 1)],
             Msg::Face(m) => self.face_message(m),
+            Msg::Script(m) => self.script_message(m, ui),
             Msg::Prop(p) => {
                 apply(&mut self.state.borrow_mut(), p);
             }
@@ -484,6 +400,7 @@ impl App for Editor {
                 if self.studio.mode == Mode::Play {
                     self.end_play(Some("Back in the editor"));
                 }
+                self.drop_picked_kit();
                 return;
             }
             Msg::OpenPath(p) => self.open_path(&p),
