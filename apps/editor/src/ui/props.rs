@@ -165,7 +165,7 @@ impl Panel {
             label("Nothing selected").bind(&self.what),
             group("Script names", names).bind(&self.names_group),
             group("Brush", brush).bind(&self.brush_group),
-            self.face.layout(),
+            self.face.layout(self.ui.clone()),
             group("Entity", ent).bind(&self.entity_group),
         )))
     }

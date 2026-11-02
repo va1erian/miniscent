@@ -113,13 +113,19 @@ impl FacePanel {
             .any(|h| h.get().id() == id)
     }
 
-    pub fn layout(&self) -> impl IntoEntry<Msg> + use<> {
+    /// `root` is the window-level handle the thumbnails' tooltips are made
+    /// through, so they are not clipped to this panel.
+    pub fn layout(&self, root: Option<Ui<Msg>>) -> impl IntoEntry<Msg> + use<> {
         let mut thumbs = wrap().gap(4);
         for (i, ((name, image), handle)) in self.previews.iter().zip(&self.thumbs).enumerate() {
             let (image, tip) = (image.clone(), format!("{name} (material {i})"));
             let msg = edit(FaceEdit::Material(i as u16));
+            let root = root.clone();
             thumbs = thumbs.child(
-                build(move |ui| IconButton::picture(ui, image, &tip, msg, THUMB)).bind(handle),
+                build(move |ui| {
+                    IconButton::picture(ui, root.as_ref().unwrap_or(ui), image, &tip, msg, THUMB)
+                })
+                .bind(handle),
             );
         }
         let scale_range = (-1000.0, 1000.0, 0.0625);

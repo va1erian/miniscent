@@ -168,10 +168,13 @@ impl Editor {
             layouts::classic(&app.classic, &state, &emit).fill(1),
             layouts::quad(&app.quad, &state, &emit).fill(1),
         ));
+        let root = ui.clone();
         let tool_button = |i: usize| {
             let (name, key, glyph, _) = TOOLS[i];
             let tip = format!("{name} ({})", key_name(key));
-            build(move |ui| IconButton::new(ui, glyph, &tip, Msg::Tool(i))).bind(&app.tools[i])
+            let root = root.clone();
+            build(move |ui| IconButton::new(ui, &root, glyph, &tip, Msg::Tool(i)))
+                .bind(&app.tools[i])
         };
         let tools = column().gap(2).children((
             row()
@@ -187,7 +190,8 @@ impl Editor {
         ));
         let op_button = |i: usize| {
             let (tip, glyph) = OPS[i];
-            build(move |ui| IconButton::new(ui, glyph, tip, Msg::NewOp(i))).bind(&app.ops[i])
+            let root = root.clone();
+            build(move |ui| IconButton::new(ui, &root, glyph, tip, Msg::NewOp(i))).bind(&app.ops[i])
         };
         let grid_names: Vec<String> = GRIDS.iter().map(|g| format!("{g}")).collect();
         let grid_refs: Vec<&str> = grid_names.iter().map(String::as_str).collect();
