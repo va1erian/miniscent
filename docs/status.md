@@ -385,6 +385,14 @@ Design in [voxels.md](voxels.md). The game builds the volumes' surfaces and coll
 | Merge with `main` | Done | Numbered M11 because M9 is particles and M10 scripting. Scripting took section 4 and version 3, so volumes moved to section 5 and version 4 |
 | Pre-PR review | Done | Fixed, with tests: the editor moved a volume in the CSG order on save (`model/csg_order_tests.rs`); a volume tied with a brush's order loaded; Smooth gave new solid a stale material (that test failed with the fix turned off); shapes past the range of brushes could overflow to NaN. `--dump-level` refuses volumes rather than lose them. Left for M11.3 and written into its done-when: carved rock in a `Subtract` volume shows material 0, and touching volumes do not see each other. Left: the first dab after a snapshot copies the chunk table (at most 4096 entries, once per snapshot, not measured) |
 
+## M14 Hardware renderer
+
+Design in [hardware-renderer.md](hardware-renderer.md). No GPU code exists yet.
+
+| ID | Status | Evidence |
+|---|---|---|
+| M14.1 | Done | `level/frame.rs` (`FrameInput`, `FrameRenderer`), `level/assets.rs` (`LevelAssets`, handed over with `into_assets` and `from_assets`), `Scene::visible_set`; `GameSession` draws through the trait. `tests/frame_seam.rs`: a frame through the trait equals `render`, a level handed to a new renderer draws the same frame, the visible set names the faces a frame lists. Seven flythrough PNGs (High at 640x360, Low at 1280x720) hash the same as before. 20 interleaved `frame_bench --workers 1` runs: median 1.404 ms before, 1.401 ms after, but that bench does not take the `LevelRenderer` path; the game's `--bench` at 4K High, which does, read 22.39 ms before and 22.59 ms after in one run each, within this machine's noise. The game binary grew 512 bytes to 2,033,664. The editor's `--selftest` was not run; its unit tests were. The design's `Arc` around the assets was dropped: voxel edits change them, and only one renderer is active at a time |
+
 ## Deviations from the plan
 
 - Platform layer: the game does not use xui. `mscent-platform` is a small trait with a desktop (winit + softbuffer) and a headless backend; xui is used only by `apps/editor`. A LazyOS backend is not written.

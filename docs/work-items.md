@@ -165,6 +165,22 @@ Design and what was built in [texture-studio.md](texture-studio.md). All done.
 | M12.10 | Stock recipes for all five materials with `out-specular` for `metal` and `floor` (closes M5.7), retire `gen_textures.py`; a compressing PNG encoder if file size needs it | M12.7 | M | Side-by-side contact sheet reviewed by the owner; full test suite passes, with snapshot changes explained; CI checks that committed PNGs equal the recipe output; assets size recorded |
 | M12.11 | Game builds materials from recipes at load | M12.10 | M | Decided on measured numbers: binary size against the budget, load time against the 67 ms PNG decode noted in `build.rs` |
 
+## M14 Hardware renderer
+
+Design in [hardware-renderer.md](hardware-renderer.md).
+
+| ID | Item | Deps | Size | Done when |
+|---|---|---|---|---|
+| M14.1 | Seams: `FrameInput`, `FrameRenderer`, `LevelAssets`, visible set split from clipping. No GPU yet | | M | Render suite byte-identical; `frame_bench` before and after; software-only size unchanged |
+| M14.2 | `mscent-gpu`: device, targets, readback, sky, flat faces. **The gate**: parity test, CI lines, `AGENTS.md`, both agents. Size budgets, WGSL front-end trial | M14.1 | M | Parity passes on your GPU and on lavapipe, with the added CI time recorded; a seeded difference fails; budgets recorded |
+| M14.3 | Surfaces in the editor's view: textures, mips, lightmap, fog, emissive, TexInfo, bump, specular, movers, actors | M14.2 | L | Those rows pass, at each `Quality`; constants come from Rust |
+| M14.4 | **Editor pane on the GPU**: on by default for levels without voxels, thread-owned device, highlight depth, View toggle, fallback with a reason | M14.3 | M | `--selftest` passes both ways; edit-to-picture and 4K frame cost recorded, with the UI thread's paint measured; an owner has used it in a real window |
+| M14.5 | Voxels: plain, blended, spots, detail levels, remesh. Removes the pane's voxel exception | M14.4 | L | Rows pass; a sculpt updates the picture; no sky pixel over 1000 poses, as in `fill_tests` |
+| M14.6 | Dynamic lights, particles, decals. Play in the pane on the GPU, by readback | M14.4 | L | Rows pass; `ParticleDraws` byte-equal; Play in the selftest |
+| M14.7 | Game window, direct route: `gpu_window`, swapchain, `--renderer`, HUD layer, shared particle estimate | M14.6 | M | A real window at 4K with no readback; a forced failure reaches software; any software picture change recorded |
+| M14.8 | Failure paths: device loss, hostile corpus, limits | M14.4 | S | Tests above |
+| M14.9 | Speed and default: measure, resolution control on a slow GPU, `auto` by default | All | M | Numbers in `docs/perf/`; a person has played it |
+
 ## Suggested order
 
 M0, then M1.1 through M1.4 in parallel with M2.1 through M2.3. The renderer
