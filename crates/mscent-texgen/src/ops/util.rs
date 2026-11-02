@@ -1,6 +1,8 @@
 //! What several kernels share: colour blending, a stateless hash, anti-aliased
 //! coverage and the "draw over the input, or over a background" step.
 
+use mscent_math::epsilon::TEXTURE_MIN_EDGE_RAMP;
+
 use super::Ctx;
 use crate::image::{Image, to_px, unit4};
 
@@ -46,7 +48,7 @@ pub(super) fn texel(ctx: &Ctx) -> f32 {
 /// Coverage `0.0..=1.0` of a shape at signed distance `sd` (negative inside)
 /// from its edge: a ramp of `softness` plus one texel, centred on the edge.
 pub(super) fn coverage(sd: f32, softness: f32, texel: f32) -> f32 {
-    let width = (softness + texel).max(1e-6);
+    let width = (softness + texel).max(TEXTURE_MIN_EDGE_RAMP);
     (0.5 - sd / width).clamp(0.0, 1.0)
 }
 

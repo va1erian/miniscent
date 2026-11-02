@@ -190,13 +190,112 @@ fn the_reader_accepts_exactly_what_paint_runs() {
     }
 }
 
+/// The tiniest negative `f32` prints the longest of anything in a stroke's range.
+fn longest_coordinate() -> f32 {
+    -f32::from_bits(1)
+}
+
+/// Any stroke the operator takes fits one line of a file: this is the longest one
+/// there can be, with every number as long as it prints, and it comes back the same.
+#[test]
+fn a_stroke_of_the_longest_coordinates_at_the_point_cap_is_a_line_of_a_file() {
+    let tiny = longest_coordinate();
+    assert_eq!(tiny.to_string().len(), LONGEST_NUMBER);
+    let stroke = Stroke {
+        radius: f32::from_bits(1),
+        hardness: f32::from_bits(1),
+        color: [f32::from_bits(1); 4],
+        points: vec![[tiny, tiny]; ops::MAX_POINTS],
+    };
+    let spec = ops::find("paint").expect("paint");
+    let mut params = Params::defaults(spec);
+    params.strokes_mut(1).expect("strokes").push(stroke);
+    let r = Recipe {
+        size: Size::new(8, 8).expect("size"),
+        gloss: 1,
+        blocks: vec![Block {
+            x: 0,
+            y: 0,
+            w: 1,
+            spec,
+            params,
+        }],
+    };
+    let text = write(&r);
+    let longest = text.lines().map(str::len).max().unwrap_or(0);
+    assert!(longest > 64 * 1024, "{longest} bytes: this case is real");
+    assert!(longest <= MAX_LINE, "{longest} bytes");
+    assert_eq!(read(text.as_bytes()).expect("reads back"), r);
+    assert!(text.len() < MAX_FILE, "the file limit stays out of the way");
+}
+
 #[test]
 fn a_stroke_over_the_point_or_stroke_cap_is_an_error_not_a_panic() {
-    let points = " 0.5,0.5".repeat(ops::MAX_POINTS);
+    let tiny = longest_coordinate();
+    let point = format!(" {tiny},{tiny}");
+    let points = point.repeat(ops::MAX_POINTS);
     assert!(read(painted(&format!("stroke 0.1 1 1,1,1,1{points}")).as_bytes()).is_ok());
-    let one_more = format!("stroke 0.1 1 1,1,1,1{points} 0.5,0.5");
+    let one_more = format!("stroke 0.1 1 1,1,1,1{points}{point}");
     assert!(read(painted(&one_more).as_bytes()).is_err());
     let line = "stroke 0.1 1 1,1,1,1 0.5,0.5\n";
     assert!(read(painted(&line.repeat(ops::MAX_STROKES)).as_bytes()).is_ok());
     assert!(read(painted(&line.repeat(ops::MAX_STROKES + 1)).as_bytes()).is_err());
+}
+
+#[test]
+fn a_line_past_the_limit_is_an_error() {
+    let line = format!("# {}", "x".repeat(MAX_LINE));
+    assert!(read(painted(&line).as_bytes()).is_err());
+}
+
+/// The reader and the kernel apply one rule, so what reads also runs, and neither
+/// moves with the size of the tile.
+#[test]
+fn what_the_reader_takes_of_many_strokes_paint_runs_and_no_more() {
+    let thick = "stroke 0.5 1 1,1,1,1 0.5,0.5\n";
+    let fits = |count: usize| read(painted(&thick.repeat(count)).as_bytes());
+    let mut most = 0;
+    while fits(most + 256).is_ok() && most + 256 <= ops::MAX_STROKES {
+        most += 256;
+    }
+    assert!((256..ops::MAX_STROKES).contains(&most), "{most} big dabs");
+    let r = fits(most).expect("reads");
+    let g = crate::graph::compile(&r).expect("compiles");
+    let tiny = Size::new(4, 4).expect("size");
+    assert!(crate::graph::run(&r, &g, tiny, Default::default()).is_ok());
+    assert!(fits(most + 256).is_err());
+}
+
+/// One block of many strokes. Copying the block's strokes per line, as this once
+/// did, took 12.6 s in the release profile on this file, and more in a test build.
+#[test]
+fn reading_many_strokes_takes_linear_work() {
+    let point = " 0.5,0.5".repeat(120);
+    let line = format!("stroke 0 1 1,1,1,1{point}\n");
+    let text = painted(&line.repeat(ops::MAX_STROKES));
+    assert!(text.len() > 3_900_000, "{} bytes", text.len());
+    let start = std::time::Instant::now();
+    assert!(read(text.as_bytes()).is_ok());
+    let spent = start.elapsed();
+    assert!(spent.as_secs() < 4, "{spent:?}");
+}
+
+/// Adding a stroke leaves the block's list where it was, so no line copies it.
+#[test]
+fn adding_a_stroke_does_not_copy_the_list() {
+    let mut r = read(painted("stroke 0 1 1,1,1,1 0.5,0.5").as_bytes()).expect("reads");
+    let block = &mut r.blocks[0];
+    let held = |b: &Block| match &b.params.values()[1] {
+        Value::Strokes(list) => std::sync::Arc::as_ptr(list),
+        _ => panic!("a strokes value"),
+    };
+    let before = held(block);
+    let stroke = Stroke {
+        radius: 0.0,
+        hardness: 1.0,
+        color: [1.0; 4],
+        points: Vec::new(),
+    };
+    add_stroke(block, stroke, 1).expect("adds");
+    assert_eq!(held(block), before);
 }

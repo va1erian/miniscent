@@ -104,3 +104,16 @@ pub const SLERP_LINEAR_COS: f32 = 0.9995;
 /// distances, so a contact the bisection left a hair off the rock still finds
 /// it, while a brush wall that merely shares the volume's box does not.
 pub const PARTICLE_VOXEL_NORMAL_REACH: f32 = 0.2;
+
+/// Semi-axis, in tile units, below which an ellipse is treated as this thin: far
+/// under a texel of the largest tile, and it keeps the division by it finite.
+pub const TEXTURE_MIN_ELLIPSE_AXIS: f32 = 1.0e-6;
+
+/// Width, in tile units, below which an anti-aliased edge is treated as this
+/// sharp: the ramp is softness plus a texel, so only a tile of no texels gets
+/// here, and it keeps the division by the ramp finite.
+pub const TEXTURE_MIN_EDGE_RAMP: f32 = 1.0e-6;
+
+/// Length under which a random vector in the unit square is too short to give a
+/// scratch a direction it can be trusted to normalize to.
+pub const SCRATCH_MIN_DIRECTION: f32 = 0.05;

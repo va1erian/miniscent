@@ -1,5 +1,6 @@
 //! Operators that make one image out of several.
 
+use super::cost::{Cost, Knobs};
 use super::util::mix;
 use super::{Ctx, Inputs, OpSpec, Role, choice, exactly, float};
 use crate::error::TexError;
@@ -79,6 +80,11 @@ fn paste(ctx: &Ctx) -> Result<Image, TexError> {
     }))
 }
 
+/// Nanoseconds per texel of `merge`: its copy of the first input, and each layer.
+fn merge_cost(k: &Knobs) -> f64 {
+    3.0 + 14.0 * k.inputs.saturating_sub(1) as f64
+}
+
 pub(super) const OPS: &[OpSpec] = &[
     OpSpec {
         name: "merge",
@@ -87,6 +93,7 @@ pub(super) const OPS: &[OpSpec] = &[
         params: &[choice("mode", MODES, 0)],
         role: Role::Kernel,
         kernel: merge,
+        cost: Cost::Worked(merge_cost),
     },
     OpSpec {
         name: "mask",
@@ -95,6 +102,7 @@ pub(super) const OPS: &[OpSpec] = &[
         params: &[],
         role: Role::Kernel,
         kernel: mask,
+        cost: Cost::Flat(12.0),
     },
     OpSpec {
         name: "paste",
@@ -108,5 +116,6 @@ pub(super) const OPS: &[OpSpec] = &[
         ],
         role: Role::Kernel,
         kernel: paste,
+        cost: Cost::Flat(48.0),
     },
 ];

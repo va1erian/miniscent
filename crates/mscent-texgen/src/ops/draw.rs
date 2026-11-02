@@ -1,6 +1,9 @@
 //! Shapes drawn over the input (or a background colour). Positions are
 //! normalized and distances wrapped, so a shape near an edge shows on both sides.
 
+use mscent_math::epsilon::TEXTURE_MIN_ELLIPSE_AXIS;
+
+use super::cost::Cost;
 use super::util::{BLACK, WHITE, coverage, draw, texel, unit_hash};
 use super::{Ctx, Inputs, OpSpec, Role, color, float, int};
 use crate::error::TexError;
@@ -32,8 +35,8 @@ fn rect(ctx: &Ctx) -> Result<Image, TexError> {
 fn ellipse(ctx: &Ctx) -> Result<Image, TexError> {
     let (x, y) = (ctx.float("x"), ctx.float("y"));
     let (rx, ry) = (
-        (ctx.float("w") / 2.0).max(1e-6),
-        (ctx.float("h") / 2.0).max(1e-6),
+        (ctx.float("w") / 2.0).max(TEXTURE_MIN_ELLIPSE_AXIS),
+        (ctx.float("h") / 2.0).max(TEXTURE_MIN_ELLIPSE_AXIS),
     );
     let (soft, px) = (ctx.float("softness"), texel(ctx));
     Ok(draw(ctx, |u, v| {
@@ -124,6 +127,7 @@ pub(super) const OPS: &[OpSpec] = &[
         ],
         role: Role::Kernel,
         kernel: rect,
+        cost: Cost::Flat(16.0),
     },
     OpSpec {
         name: "ellipse",
@@ -138,6 +142,7 @@ pub(super) const OPS: &[OpSpec] = &[
         ],
         role: Role::Kernel,
         kernel: ellipse,
+        cost: Cost::Flat(18.0),
     },
     OpSpec {
         name: "line",
@@ -153,6 +158,7 @@ pub(super) const OPS: &[OpSpec] = &[
         ],
         role: Role::Kernel,
         kernel: line,
+        cost: Cost::Flat(42.0),
     },
     OpSpec {
         name: "dots",
@@ -168,5 +174,6 @@ pub(super) const OPS: &[OpSpec] = &[
         ],
         role: Role::Kernel,
         kernel: dots,
+        cost: Cost::Flat(150.0),
     },
 ];

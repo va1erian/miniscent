@@ -3,6 +3,7 @@
 //! move. Each keeps the period of its input: whole zooms, or a warp that is zero
 //! before the tile's edge.
 
+use super::cost::Cost;
 use super::{Ctx, OpSpec, Role, exactly, float, int};
 use crate::error::TexError;
 use crate::image::{Image, to_px};
@@ -103,6 +104,7 @@ pub(super) const OPS: &[OpSpec] = &[
         ],
         role: Role::Kernel,
         kernel: rotozoom,
+        cost: Cost::Flat(60.0),
     },
     OpSpec {
         name: "twirl",
@@ -114,6 +116,7 @@ pub(super) const OPS: &[OpSpec] = &[
         ],
         role: Role::Kernel,
         kernel: twirl,
+        cost: Cost::Flat(58.0),
     },
     OpSpec {
         name: "bulge",
@@ -125,6 +128,7 @@ pub(super) const OPS: &[OpSpec] = &[
         ],
         role: Role::Kernel,
         kernel: bulge,
+        cost: Cost::Flat(40.0),
     },
     OpSpec {
         name: "distort",
@@ -133,5 +137,6 @@ pub(super) const OPS: &[OpSpec] = &[
         params: &[float("amount", 0.0, 0.5, 0.1)],
         role: Role::Kernel,
         kernel: distort,
+        cost: Cost::Flat(54.0),
     },
 ];

@@ -1,5 +1,6 @@
 //! Operators that change one image, texel by texel or by a wrapped blur.
 
+use super::cost::Cost;
 use super::util::WHITE;
 use super::{Ctx, OpSpec, Role, color, exactly, float};
 use crate::error::TexError;
@@ -150,6 +151,7 @@ pub(super) const OPS: &[OpSpec] = &[
         params: &[float("radius", 0.0, 0.25, 0.02)],
         role: Role::Kernel,
         kernel: blur,
+        cost: Cost::Flat(120.0),
     },
     OpSpec {
         name: "color",
@@ -158,6 +160,7 @@ pub(super) const OPS: &[OpSpec] = &[
         params: &[color("gain", WHITE), float("amount", 0.0, 8.0, 1.0)],
         role: Role::Kernel,
         kernel: color_gain,
+        cost: Cost::Flat(6.0),
     },
     OpSpec {
         name: "range",
@@ -172,6 +175,7 @@ pub(super) const OPS: &[OpSpec] = &[
         ],
         role: Role::Kernel,
         kernel: range,
+        cost: Cost::Flat(58.0),
     },
     OpSpec {
         name: "invert",
@@ -180,6 +184,7 @@ pub(super) const OPS: &[OpSpec] = &[
         params: &[],
         role: Role::Kernel,
         kernel: invert,
+        cost: Cost::Flat(6.0),
     },
     OpSpec {
         name: "hscb",
@@ -193,6 +198,7 @@ pub(super) const OPS: &[OpSpec] = &[
         ],
         role: Role::Kernel,
         kernel: hscb,
+        cost: Cost::Flat(12.0),
     },
     OpSpec {
         name: "sharpen",
@@ -204,5 +210,6 @@ pub(super) const OPS: &[OpSpec] = &[
         ],
         role: Role::Kernel,
         kernel: sharpen,
+        cost: Cost::Flat(135.0),
     },
 ];

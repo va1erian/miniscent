@@ -1,14 +1,11 @@
-//! Tests every operator gets from the table: tiling, determinism against golden
-//! hashes, and survival at the ends of every parameter's range. An operator's own
-//! behaviour is tested beside its kernel.
+//! Tests every operator gets from the table: determinism against golden hashes,
+//! and survival at the ends of every parameter's range. Tiling is `case_tests.rs`,
+//! with parameters that show something. An operator's own behaviour is tested
+//! beside its kernel.
 
 use super::*;
-use crate::image::{Px, Size};
+use crate::image::Size;
 use crate::noise::{Fold, Noise};
-
-/// How far a moved window may differ, in 16-bit levels: rounding only. One level
-/// of an 8-bit texture is 257.
-const MOVED_WINDOW_LEVELS: i32 = 96;
 
 fn size() -> Size {
     Size::new(64, 32).expect("size")
@@ -34,12 +31,6 @@ fn sample(seed: u32) -> Image {
     })
 }
 
-fn moved_half(image: &Image) -> Image {
-    let s = image.size();
-    let (dx, dy) = (s.width() as i32 / 2, s.height() as i32 / 2);
-    Image::from_xy(s, |x, y| image.at(x + dx, y + dy))
-}
-
 fn inputs_for(spec: &OpSpec) -> Vec<Image> {
     (0..u32::from(spec.inputs.min).max(u32::from(spec.inputs.max.min(1))))
         .map(sample)
@@ -48,21 +39,6 @@ fn inputs_for(spec: &OpSpec) -> Vec<Image> {
 
 fn runnable() -> impl Iterator<Item = &'static OpSpec> {
     all().filter(|op| op.role != Role::Load)
-}
-
-fn worst_difference(a: &Image, b: &Image) -> i32 {
-    let channel = |p: Px, q: Px| {
-        (0..4)
-            .map(|c| (i32::from(p[c]) - i32::from(q[c])).abs())
-            .max()
-            .unwrap_or(0)
-    };
-    a.pixels()
-        .iter()
-        .zip(b.pixels())
-        .map(|(&p, &q)| channel(p, q))
-        .max()
-        .unwrap_or(0)
 }
 
 #[test]
@@ -86,29 +62,6 @@ fn every_default_is_in_range() {
     }
 }
 
-/// A pattern that does not repeat, or a filter that does not wrap, draws a
-/// different picture when its window moves by half a tile.
-#[test]
-fn every_operator_tiles() {
-    for op in runnable() {
-        let params = Params::defaults(op);
-        let inputs = inputs_for(op);
-        let refs: Vec<&Image> = inputs.iter().collect();
-        let here = eval(op, &params, &refs, Frame::new(size())).expect(op.name);
-
-        let moved: Vec<Image> = inputs.iter().map(moved_half).collect();
-        let refs: Vec<&Image> = moved.iter().collect();
-        let frame = Frame {
-            size: size(),
-            origin: [0.5, 0.5],
-        };
-        let there = eval(op, &params, &refs, frame).expect(op.name);
-
-        let worst = worst_difference(&moved_half(&here), &there);
-        assert!(worst <= MOVED_WINDOW_LEVELS, "{}: off by {worst}", op.name);
-    }
-}
-
 fn fnv(image: &Image) -> u64 {
     let mut h = 0xcbf2_9ce4_8422_2325u64;
     for p in image.pixels() {
@@ -119,8 +72,9 @@ fn fnv(image: &Image) -> u64 {
     h
 }
 
-/// One set of bytes for one recipe, on every platform CI and development use.
-/// Change a value here only for a kernel you meant to change.
+/// One set of bytes for one recipe, on every platform CI and development use, at
+/// each operator's defaults; `case_tests.rs` has the same for parameters that show
+/// more. Change a value here only for a kernel you meant to change.
 const GOLDEN: &[(&str, u64)] = &[
     ("flat", 0x4c342288a5868325),
     ("noise", 0xbb8f2cabeccfa65a),

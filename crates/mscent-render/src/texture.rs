@@ -388,9 +388,10 @@ fn mean_byte(bytes: impl ExactSizeIterator<Item = u8>) -> u8 {
     u8::try_from(sum / n).unwrap_or(u8::MAX)
 }
 
-/// Load `dir/name.png` plus `name_n.png`, `name_h.png` and `name_s.png` when
-/// they exist. The alpha of a normal map file means nothing and is dropped, so
-/// only `name_s.png` can mask a highlight.
+/// Make the recipe `dir/name.mst` if there is one. Otherwise load `dir/name.png`
+/// plus `name_n.png`, `name_h.png` and `name_s.png` when they exist. The alpha of
+/// a normal map file means nothing and is dropped, so only `name_s.png` can mask a
+/// highlight.
 pub fn load_texture(dir: &Path, name: &str) -> Result<Texture, TextureError> {
     let recipe = dir.join(format!("{name}{}", crate::recipe_texture::EXTENSION));
     if recipe.is_file() {

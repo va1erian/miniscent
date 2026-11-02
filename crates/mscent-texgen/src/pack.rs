@@ -10,6 +10,9 @@ use crate::recipe::Recipe;
 /// Size at which `normal_strength` means what it says. A height difference per
 /// texel halves when the resolution doubles, so relief is scaled from here.
 const STRENGTH_SIZE: f32 = 128.0;
+/// Estimated nanoseconds per texel of one map, from a kernel's image to the
+/// renderer's, measured with the `recipe_limits` example.
+const PACK_NS_PER_TEXEL: u64 = 6;
 
 /// A material's maps, each `width * height` long.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -121,6 +124,20 @@ pub fn bake(recipe: &Recipe, size: Size) -> Result<Maps, TexError> {
     pack(recipe, &graph, &outcome)
 }
 
+/// The estimated nanoseconds of [`bake`], its packing and the renderer's taking of
+/// the maps included, or the refusal `bake` would give, with no pixel made. A
+/// directory of materials adds this up.
+pub fn bake_cost(recipe: &Recipe, size: Size) -> Result<u64, TexError> {
+    let graph = graph::compile(recipe)?;
+    graph::plan::check(recipe, &graph, size, &[])?;
+    let maps = [Channel::Albedo, Channel::Height, Channel::Specular]
+        .into_iter()
+        .filter(|c| graph.output(*c).is_some())
+        .count() as u64;
+    let packing = maps * PACK_NS_PER_TEXEL * size.texels() as u64;
+    Ok(graph::page_cost(recipe, &graph, size).saturating_add(packing))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,8 +151,9 @@ mod tests {
         read(format!("miniscent-recipe 1\nsize 64 64\n{body}").as_bytes()).expect("reads")
     }
 
-    /// What `tools/gen_textures.py` computes, in 8-bit-free floats.
-    fn python_normal(image: &Image, strength: f32, x: i32, y: i32) -> [i32; 3] {
+    /// The normal of a texel with no scale for the size: the formula again, so
+    /// this cannot catch a wrong formula, only a wrong scale or a slip in packing.
+    fn unscaled_normal(image: &Image, strength: f32, x: i32, y: i32) -> [i32; 3] {
         let h = |x: i32, y: i32| f32::from(image.at(x, y)[0]) / 65535.0;
         let dx = (h(x + 1, y) - h(x - 1, y)) * 0.5 * strength;
         let dy = (h(x, y + 1) - h(x, y - 1)) * 0.5 * strength;
@@ -145,7 +163,7 @@ mod tests {
     }
 
     #[test]
-    fn at_128_pixels_normals_are_within_a_level_of_the_original_generator() {
+    fn at_128_pixels_strength_means_what_it_says() {
         let r = read(
             b"miniscent-recipe 1\nsize 128 128\nop 0 0 1 noise freq_x=8 freq_y=8\nop 0 1 1 out-albedo\nop 1 0 1 noise freq_x=8 freq_y=8\nop 1 1 1 out-height normal_strength=5\n",
         )
@@ -163,7 +181,7 @@ mod tests {
                     (n >> 8) as i32 & 255,
                     n as i32 & 255,
                 ];
-                let want = python_normal(height, 5.0, x, y);
+                let want = unscaled_normal(height, 5.0, x, y);
                 for c in 0..3 {
                     assert!((got[c] - want[c]).abs() <= 1, "{x},{y}: {got:?} {want:?}");
                 }

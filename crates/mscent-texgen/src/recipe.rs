@@ -14,20 +14,28 @@
 //! stroke to the `op` above it. Anything not given takes its table default, and
 //! the writer leaves defaults out, so a table can grow without breaking files.
 
-use std::sync::Arc;
-
 use crate::error::TexError;
 use crate::image::Size;
-use crate::ops::{self, MAX_STROKES, OpSpec, ParamKind, Params, Stroke, Value};
+use crate::ops::{self, MAX_POINTS, MAX_STROKES, OpSpec, ParamKind, Params, Stroke, Value};
 
 const HEADER: &str = "miniscent-recipe 1";
 
 /// Largest recipe file, in bytes.
 pub const MAX_FILE: usize = 4 * 1024 * 1024;
-/// Longest line, in bytes: about enough for a stroke of 4096 points.
-pub const MAX_LINE: usize = 64 * 1024;
+/// The longest a coordinate of a legal stroke prints, in bytes: `-1e-45`, the
+/// tiniest negative `f32`, is written out in full, which a scan of every value from
+/// -2 to 3 confirms. A test reads back a stroke of them.
+const LONGEST_NUMBER: usize = 48;
+/// Longest line, in bytes: the start of a `stroke` line with its six numbers, then
+/// [`MAX_POINTS`] points of the longest coordinates. Any stroke the operator takes
+/// is one line of a file.
+pub const MAX_LINE: usize =
+    "stroke".len() + 6 + 6 * LONGEST_NUMBER + MAX_POINTS * (2 * LONGEST_NUMBER + 2);
 /// Most blocks on a page.
 pub const MAX_BLOCKS: usize = 256;
+/// Estimated nanoseconds to read a byte of the costliest file, measured with
+/// the `texgen_costs` example: a directory of recipes pays for its parsing too.
+pub const READ_NS_PER_BYTE: u64 = 6;
 
 /// Gloss when a recipe does not give one.
 const DEFAULT_GLOSS: u8 = 40;
@@ -173,8 +181,7 @@ fn parse_block<'a>(
     })
 }
 
-/// A stroke line's numbers, held to what `paint` runs: asking the kernel's own
-/// predicate keeps a file that loads from being a file that fails to run.
+/// A stroke line's numbers. [`read`] holds them to the rule `paint` runs by.
 fn parse_stroke<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Option<Stroke> {
     let radius = tokens.next()?.parse().ok()?;
     let hardness = tokens.next()?.parse().ok()?;
@@ -184,37 +191,25 @@ fn parse_stroke<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Option<Stroke>
         let (x, y) = token.split_once(',')?;
         points.push([x.parse().ok()?, y.parse().ok()?]);
     }
-    let stroke = Stroke {
+    Some(Stroke {
         radius,
         hardness,
         color,
         points,
-    };
-    ops::stroke_fits(&stroke).then_some(stroke)
+    })
 }
 
-/// Adds `stroke` to `block`'s strokes parameter.
+/// Adds `stroke` to `block`'s strokes parameter, in place: a block of thousands
+/// of strokes must not copy them all for each line.
 fn add_stroke(block: &mut Block, stroke: Stroke, line: usize) -> Result<(), TexError> {
-    let spec = block.spec;
-    let param = spec
-        .params
-        .iter()
-        .position(|p| matches!(p.kind, ParamKind::Strokes))
-        .and_then(|i| spec.params.get(i))
+    let strokes = Params::strokes_param(block.spec)
+        .and_then(|i| block.params.strokes_mut(i))
         .ok_or_else(|| parse_error(line, "this operator takes no strokes"))?;
-    let index = spec.params.iter().position(|p| p.name == param.name);
-    let existing = index.and_then(|i| block.params.values().get(i));
-    let mut strokes = match existing {
-        Some(Value::Strokes(s)) => s.as_ref().clone(),
-        _ => Vec::new(),
-    };
     if strokes.len() >= MAX_STROKES {
         return Err(parse_error(line, "too many strokes"));
     }
     strokes.push(stroke);
-    block
-        .params
-        .set(spec, param.name, Value::Strokes(Arc::new(strokes)))
+    Ok(())
 }
 
 /// Reads a recipe. Whether its blocks connect is [`crate::graph::compile`]'s
@@ -229,6 +224,8 @@ pub fn read(bytes: &[u8]) -> Result<Recipe, TexError> {
         return Err(parse_error(1, "not a version 1 recipe"));
     }
     let (mut size, mut gloss, mut blocks) = (None, DEFAULT_GLOSS, Vec::<Block>::new());
+    // The work of the strokes of the block being read.
+    let mut work = 0.0;
     for (line, content) in lines {
         if content.len() > MAX_LINE {
             return Err(parse_error(line, "line too long"));
@@ -257,9 +254,13 @@ pub fn read(bytes: &[u8]) -> Result<Recipe, TexError> {
                     return Err(parse_error(line, "too many blocks"));
                 }
                 blocks.push(parse_block(tokens, line)?);
+                work = 0.0;
             }
             Some("stroke") => {
                 let stroke = parse_stroke(tokens).ok_or_else(|| parse_error(line, "bad stroke"))?;
+                work = ops::charge_stroke(work, &stroke).ok_or_else(|| {
+                    parse_error(line, "bad stroke, or more work than a paint may do")
+                })?;
                 let block = blocks
                     .last_mut()
                     .ok_or_else(|| parse_error(line, "stroke before any op"))?;

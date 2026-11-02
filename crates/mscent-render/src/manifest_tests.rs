@@ -61,6 +61,75 @@ fn a_listing_becomes_text_that_parses_to_it() {
     );
 }
 
+/// A fresh directory holding empty files of these names.
+fn directory_of(tag: &str, files: &[String]) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("mscent-listing-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    for file in files {
+        std::fs::write(dir.join(file), b"").expect("write");
+    }
+    dir
+}
+
+fn listed_names(dir: &Path) -> Vec<String> {
+    from_listing(dir)
+        .expect("lists")
+        .into_iter()
+        .filter_map(|e| match e {
+            Entry::Material { name, .. } => Some(name),
+            Entry::Retired => None,
+        })
+        .collect()
+}
+
+/// Each of these names a manifest would refuse, so in a listing each would take an
+/// id, and move the ones after it, for a material no manifest can list.
+#[test]
+fn a_listing_skips_recipes_whose_names_a_manifest_refuses() {
+    let bad = [
+        ".mst",
+        "..mst",
+        "Foo Bar.mst",
+        "_hidden.mst",
+        "a_n.mst",
+        "retired.mst",
+        "con.mst",
+        "-a.mst",
+        "UPPER.mst",
+    ];
+    let mut files: Vec<String> = bad.iter().map(ToString::to_string).collect();
+    files.extend(["zinc.mst", "ash.mst", "brick.mst"].map(String::from));
+    let dir = directory_of("names", &files);
+    assert_eq!(listed_names(&dir), ["brick", "ash", "zinc"]);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_listing_keeps_the_png_rules_it_had() {
+    let files = ["a.png", "a_n.png", "_sheet.png", "b.mst", "b.png"].map(String::from);
+    let dir = directory_of("pngs", &files);
+    assert_eq!(listed_names(&dir), ["a", "b"]);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_listing_holds_to_the_most_a_manifest_may() {
+    let files: Vec<String> = (0..MAX_MATERIALS).map(|i| format!("m{i}.mst")).collect();
+    let dir = directory_of("full", &files);
+    assert_eq!(listed_names(&dir).len(), MAX_MATERIALS);
+    std::fs::write(dir.join("one-more.mst"), b"").expect("write");
+    assert!(matches!(
+        from_listing(&dir),
+        Err(TextureError::Manifest(ManifestError::TooMany))
+    ));
+    // A refused name is not an entry, so it does not count.
+    std::fs::remove_file(dir.join("one-more.mst")).expect("remove");
+    std::fs::write(dir.join("_hidden.mst"), b"").expect("write");
+    assert_eq!(listed_names(&dir).len(), MAX_MATERIALS);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn ids_come_from_the_lines_and_retired_ones_keep_their_place() {
     let text = format!("# a comment\n\n{STOCK_LINES}5 retired\r\n  6\ta-b-2  255\n");
