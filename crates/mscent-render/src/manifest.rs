@@ -202,9 +202,12 @@ pub fn from_listing(dir: &Path) -> Result<Vec<Entry>, TextureError> {
             if !stem.starts_with('_') && !companion {
                 names.push(stem.to_string());
             }
+        } else if let Some(stem) = file.strip_suffix(crate::recipe_texture::EXTENSION) {
+            names.push(stem.to_string());
         }
     }
     names.sort();
+    names.dedup();
     Ok(names
         .into_iter()
         .map(|name| Entry::Material {

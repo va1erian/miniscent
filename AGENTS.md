@@ -33,5 +33,5 @@ cargo run --release -p mscent-editor -- --selftest target/shots/editor
 ```
 
 Crate edges: world depends on math; collide on math and world; render on math
-and world; game on all of them; script depends on nothing, and game on script too; the game talks to the OS only through `mscent-platform` and never depends on xui (only `apps/editor` does). Do not add external dependencies without a
+and world; game on all of them; texgen on math, and render on texgen too (it makes materials from recipes); script depends on nothing, and game on script too; the game talks to the OS only through `mscent-platform` and never depends on xui (only `apps/editor` does). Do not add external dependencies without a
 reason recorded in the PR.

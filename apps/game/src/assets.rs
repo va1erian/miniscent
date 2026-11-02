@@ -30,7 +30,7 @@ fn candidates(explicit: Option<&Path>) -> Vec<PathBuf> {
 pub fn load_materials(assets_root: Option<&Path>) -> Result<MaterialTable, String> {
     let dirs = candidates(assets_root);
     for dir in &dirs {
-        if dir.join("brick.png").is_file() {
+        if dir.join(mscent_render::manifest::FILE).is_file() {
             return MaterialTable::load_dir(dir)
                 .map_err(|e| format!("cannot load textures from {}: {e:?}", dir.display()));
         }

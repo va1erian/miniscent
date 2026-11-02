@@ -26,6 +26,7 @@ pub mod particles;
 pub mod png;
 pub mod png_encode;
 pub mod raster;
+pub mod recipe_texture;
 pub mod resolution;
 pub mod scene;
 pub mod shade;
