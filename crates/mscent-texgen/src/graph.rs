@@ -3,6 +3,7 @@
 //! wired operators: there are no wires to store. Named `store` and `load` blocks
 //! reach further, so cycles are possible only through them, and are rejected.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -119,9 +120,20 @@ fn inputs_of(
     Ok(found)
 }
 
-/// Each block after its inputs, or an error for a cycle. Ready blocks run in page
-/// order, so the order is the same on every run.
+/// Each block after its inputs, or an error for a cycle.
 fn order_of(blocks: &[Block], inputs: &[Vec<usize>]) -> Result<Vec<usize>, TexError> {
+    let order = ordered(blocks, inputs);
+    if order.len() != blocks.len() {
+        return Err(TexError::Graph(
+            "store and load blocks form a cycle".to_string(),
+        ));
+    }
+    Ok(order)
+}
+
+/// Every block that can run, each after its inputs; those in a cycle never can.
+/// Ready blocks run in page order, so the order is the same on every run.
+fn ordered(blocks: &[Block], inputs: &[Vec<usize>]) -> Vec<usize> {
     let mut waiting: Vec<usize> = inputs.iter().map(Vec::len).collect();
     let mut readers = vec![Vec::new(); blocks.len()];
     for (i, list) in inputs.iter().enumerate() {
@@ -143,12 +155,7 @@ fn order_of(blocks: &[Block], inputs: &[Vec<usize>]) -> Result<Vec<usize>, TexEr
             }
         }
     }
-    if order.len() != blocks.len() {
-        return Err(TexError::Graph(
-            "store and load blocks form a cycle".to_string(),
-        ));
-    }
-    Ok(order)
+    order
 }
 
 fn outputs_of(blocks: &[Block]) -> Result<Vec<(Channel, usize)>, TexError> {
@@ -310,6 +317,8 @@ pub struct RunOptions<'a> {
     pub cancel: Option<&'a AtomicBool>,
     /// Blocks whose images the caller wants, on top of the outputs.
     pub keep: &'a [usize],
+    /// Told which block's kernel failed, for an editor to mark it.
+    pub failed: Option<&'a Cell<Option<usize>>>,
 }
 
 /// A finished run: the images of the outputs and of the blocks asked for.
@@ -345,6 +354,7 @@ pub fn run(
         mut cache,
         cancel,
         keep,
+        failed,
     } = options;
     let count = recipe.blocks.len();
     let mut readers = vec![0usize; count];
@@ -379,12 +389,13 @@ pub fn run(
                             return Err(TexError::TooLarge);
                         }
                         let refs: Vec<&Image> = held.iter().map(Arc::as_ref).collect();
-                        let image = Arc::new(ops::eval(
-                            block.spec,
-                            &block.params,
-                            &refs,
-                            Frame::new(size),
-                        )?);
+                        let image = ops::eval(block.spec, &block.params, &refs, Frame::new(size))
+                            .inspect_err(|_| {
+                            if let Some(failed) = failed {
+                                failed.set(Some(i));
+                            }
+                        })?;
+                        let image = Arc::new(image);
                         if let Some(c) = cache.as_deref_mut() {
                             c.put(keys[i], Arc::clone(&image));
                         }
@@ -409,6 +420,10 @@ pub fn run(
     }
     Ok(Outcome { images })
 }
+
+#[path = "graph_problems.rs"]
+mod problems;
+pub use problems::{Problem, problems};
 
 #[cfg(test)]
 #[path = "graph_tests.rs"]

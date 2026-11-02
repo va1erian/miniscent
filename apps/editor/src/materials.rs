@@ -3,9 +3,10 @@
 //! are built here, once, so a preview pays for neither. Each replacement is a
 //! new generation, which is how the 3D view and the panels know to follow.
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use miniscent_game::assets::load_materials;
+use miniscent_game::assets::load_materials_from;
 use mscent_render::MaterialTable;
 
 /// The store as shared between the UI thread and the preview jobs.
@@ -24,6 +25,8 @@ struct Slot {
     /// `None` until first asked for. A failed load is kept, as a table would
     /// be: the same directory would fail again on every preview.
     table: Option<Result<MaterialTable, String>>,
+    /// Where the table came from, which is where Save writes.
+    dir: Option<PathBuf>,
 }
 
 impl MaterialStore {
@@ -45,10 +48,27 @@ impl MaterialStore {
                 return (slot.generation, table.clone());
             }
         }
-        let loaded = load_materials(None).map(MaterialTable::filtered);
+        let (loaded, dir) = match load_materials_from(None) {
+            Ok((table, dir)) => (Ok(table.filtered()), Some(dir)),
+            Err(why) => (Err(why), None),
+        };
         let mut slot = self.slot();
+        if slot.dir.is_none() {
+            slot.dir = dir;
+        }
         let table = slot.table.get_or_insert(loaded).clone();
         (slot.generation, table)
+    }
+
+    /// The directory the table came from, once it has been loaded.
+    pub fn dir(&self) -> Option<PathBuf> {
+        self.slot().dir.clone()
+    }
+
+    /// Points Save somewhere else (scripted runs and tests must not write to the
+    /// source tree).
+    pub fn set_dir(&self, dir: PathBuf) {
+        self.slot().dir = Some(dir);
     }
 
     /// Installs `table` as a new generation and returns its number. Whoever

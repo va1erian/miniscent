@@ -246,3 +246,51 @@ fn a_recipe_runs_at_any_size() {
     let out = run(&r, &g, big, RunOptions::default()).expect("runs");
     assert_eq!(out.image(4).expect("albedo").size(), big);
 }
+
+/// Editing marks what baking refuses, and nothing else.
+#[test]
+fn problems_are_found_exactly_when_a_page_does_not_compile() {
+    let pages = [
+        "op 0 0 1 flat\nop 0 1 1 out-albedo\n",
+        "op 0 0 1 flat\nop 0 1 2 merge\n",
+        "op 0 0 1 flat\nop 1 0 1 flat\nop 0 1 2 merge\nop 0 2 1 out-albedo\n",
+        "op 0 0 1 flat\nop 0 0 1 flat\n",
+        "op 65535 0 65535 flat\n",
+        "op 0 0 0 flat\n",
+        "op 0 300 1 flat\n",
+        "op 0 0 1 load\n",
+        "op 0 0 1 flat\nop 0 1 1 store\nop 0 2 1 load\nop 0 3 1 out-albedo\n",
+        "op 0 0 1 load\nop 0 1 1 store\n",
+        "op 0 0 1 flat\nop 0 1 1 store\nop 1 0 1 flat\nop 1 1 1 store\n",
+        "op 0 0 1 flat\nop 0 1 1 out-albedo\nop 1 0 1 flat\nop 1 1 1 out-albedo\n",
+    ];
+    for page in pages {
+        let r = recipe(page);
+        let found = problems(&r);
+        assert_eq!(found.is_empty(), compile(&r).is_ok(), "{page}: {found:?}");
+    }
+}
+
+#[test]
+fn problems_name_the_blocks_they_belong_to() {
+    let blocks = |page| -> Vec<usize> { problems(&recipe(page)).iter().map(|p| p.block).collect() };
+    assert_eq!(blocks("op 0 0 1 flat\nop 5 5 1 out-albedo\n"), [1]);
+    assert_eq!(blocks("op 0 0 1 flat\nop 0 0 1 flat\n"), [0, 1]);
+    assert_eq!(blocks("op 0 0 1 load\nop 0 1 1 store\n"), [0, 1]);
+    assert_eq!(blocks("op 0 0 1 flat\nop 70 0 1 flat\n"), [1]);
+}
+
+#[test]
+fn a_failed_kernel_is_named() {
+    // No graph compile gives can make a kernel fail on its inputs, so this is a
+    // graph from another page: it says the blur at block 1 has no input.
+    let graph = compile(&recipe("op 0 0 1 flat\nop 4 4 1 flat\n")).expect("compiles");
+    let page = recipe("op 0 0 1 flat\nop 4 4 1 blur\n");
+    let failed = Cell::new(None);
+    let options = RunOptions {
+        failed: Some(&failed),
+        ..Default::default()
+    };
+    assert!(run(&page, &graph, size(), options).is_err());
+    assert_eq!(failed.get(), Some(1));
+}

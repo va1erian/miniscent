@@ -28,10 +28,17 @@ fn candidates(explicit: Option<&Path>) -> Vec<PathBuf> {
 /// Loads the material table from the first candidate directory that has the
 /// textures. The error lists where it looked.
 pub fn load_materials(assets_root: Option<&Path>) -> Result<MaterialTable, String> {
+    load_materials_from(assets_root).map(|(table, _)| table)
+}
+
+/// As [`load_materials`], and the directory the table came from, which is where
+/// a material made in the editor is saved.
+pub fn load_materials_from(assets_root: Option<&Path>) -> Result<(MaterialTable, PathBuf), String> {
     let dirs = candidates(assets_root);
     for dir in &dirs {
         if dir.join(mscent_render::manifest::FILE).is_file() {
             return MaterialTable::load_dir(dir)
+                .map(|table| (table, dir.clone()))
                 .map_err(|e| format!("cannot load textures from {}: {e:?}", dir.display()));
         }
     }
@@ -59,6 +66,14 @@ mod tests {
         for name in mscent_world::materials::NAMES {
             assert!(t.find(name).is_some(), "{name}");
         }
+    }
+
+    #[test]
+    fn the_directory_reported_is_the_one_the_table_came_from() {
+        let (table, dir) = load_materials_from(None).expect("textures");
+        assert!(dir.join(mscent_render::manifest::FILE).is_file());
+        let again = MaterialTable::load_dir(&dir).expect("loads");
+        assert_eq!(again.len(), table.len());
     }
 
     #[test]

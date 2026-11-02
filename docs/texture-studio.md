@@ -1,8 +1,40 @@
 # Texture Studio: plan
 
-Status: draft, nothing here is implemented. Time and size figures are targets
-to measure, not results. The work items below move to
-[work-items.md](work-items.md) as M12 once this is accepted.
+Status: M12.1 to M12.7 are built, and the workspace is on the Texture menu. The
+sections below are the plan as written, with the changes noted under "As built".
+Time and size figures are targets to measure, not results. The work items move
+to [work-items.md](work-items.md) as M12 once this is accepted.
+
+## As built
+
+- **Stock materials ship as recipes** (`name.mst`), which `load_texture` prefers
+  over PNGs. So Save writes the recipe and `materials.txt`, never PNGs, and
+  `--bake-texture` writes PNGs to look at and adds a row when the directory it
+  writes to has a manifest.
+- **Stacked blocks, no wires.** A block reads the row directly above it, under its
+  columns, left to right. A generator below a block starts a new chain.
+- **Preview.** Six tabs. Block shows the selected block; the others show one map
+  of the finished material, whichever block is selected. The tab stays chosen
+  when the selection moves, so one map can be watched while any block is edited.
+- **Evaluation.** Every request runs a draft of at most 128 px that keeps all
+  blocks, for the thumbnails, then the full size keeping only the selected block
+  and the outputs, unless a drag is going on. A page of 256 blocks kept at 1024 px
+  would not fit the evaluator's memory limit.
+- **Save also applies.** The running table and the disk must give a new material
+  the same id, because levels store ids. A material applied before another must
+  be saved before it, and Save says so if not. The page is baked before any file
+  is touched, since a row whose recipe fails stops the game loading any material.
+- **Lit view.** `mscent_render::texel_light` holds the steps the lighting shader
+  takes for a pixel once it knows the light, inlined into the shader, and
+  `shade_texel` is those steps in one call. The tile is drawn at most 512 px wide.
+- **A material with no recipe** (PNG files) opens on a new page of its size, and
+  nothing replaces the files until it is saved, which asks first for a stock one.
+- **Bump fade at 512 px.** A tile's world size is `texture_size * scale`, so at the
+  default scale a 512 px map has the texel density of a 128 px one and fades at
+  the same distance. Only a 512 px map scaled to a 128 px map's tile has 4 times
+  the texels per pixel, and it reaches `BUMP_GONE` at a quarter of the distance.
+  The lit view draws one texel per pixel and does not show this. This is worked
+  out from the shader's constants; no picture of it was taken.
 
 ## Goal
 

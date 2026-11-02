@@ -4,6 +4,7 @@
 use super::lighting_shader_tests::{baked, face, pack, px, red, render, setup, wall};
 use super::*;
 use crate::raster::{Vertex, draw_polygon};
+use crate::texel_light::SPEC_GAIN;
 
 /// Grey enough that a highlight has room to add.
 const GREY: u32 = 0xff60_6060;

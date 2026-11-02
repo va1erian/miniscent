@@ -9,12 +9,14 @@ use std::rc::Rc;
 
 use mscent_world::Op;
 use xui::prelude::*;
-use xui::widget::{FileDialog, HasText, MenuId};
+use xui::widget::{FileDialog, HasText};
 
 use super::commands::menus;
 use super::keys::{OPS, TOOLS, key_name, shortcut};
 use super::layouts::{self, Arrangement, Disposition};
+pub use super::messages::{Msg, cmd};
 use super::props::{Panel, apply};
+use super::texstudio::Workspace;
 use super::toolbar::IconButton;
 use super::view3d::View3d;
 use super::viewport::ViewEvent;
@@ -22,31 +24,6 @@ use super::wrap::{LOG_COLS, LOG_ROWS, wrap};
 use crate::files;
 use crate::model::{Document, EditorState, state::GRIDS};
 use crate::studio::{HELP, Mode, Preview, Studio};
-
-#[derive(Clone)]
-pub enum Msg {
-    Menu(MenuId),
-    /// A tool palette button, by index into [`TOOLS`].
-    Tool(usize),
-    NewOp(usize),
-    Grid(usize),
-    View(ViewEvent),
-    Prop(super::props::Prop),
-    Face(super::facepanel::FaceMsg),
-    /// The frame timer.
-    Tick,
-    /// One UI tick on demand (scripted runs have no timers).
-    Step,
-    /// The Escape key anywhere: leaves Play.
-    Escape,
-    /// A shortcut that would also type into a text field or fight Play's own
-    /// keys: dropped when one has the focus or the level is being played.
-    Guarded(Box<Msg>),
-    OpenPath(PathBuf),
-    SavePath(PathBuf),
-    /// Puts the free-fly camera somewhere (scripted runs frame a face).
-    Camera(Box<crate::model::FlyCam>),
-}
 
 /// Width of the tool palette on the left, in dip.
 const PALETTE_WIDTH: i32 = 130;
@@ -57,41 +34,13 @@ const SIDE_WIDTH: i32 = 340;
 /// Height of the log box, in dip.
 const LOG_HEIGHT: i32 = 110;
 
-/// Menu command ids.
-pub mod cmd {
-    use xui::widget::MenuId;
-    pub const NEW: MenuId = MenuId::new(1);
-    pub const OPEN: MenuId = MenuId::new(2);
-    pub const SAVE: MenuId = MenuId::new(3);
-    pub const PLAY: MenuId = MenuId::new(5);
-    pub const SHOWCASE: MenuId = MenuId::new(6);
-    pub const SAVE_AS: MenuId = MenuId::new(7);
-    pub const UNDO: MenuId = MenuId::new(10);
-    pub const REDO: MenuId = MenuId::new(11);
-    pub const MAKE_MOVER: MenuId = MenuId::new(26);
-    pub const DELETE: MenuId = MenuId::new(12);
-    pub const FLIP: MenuId = MenuId::new(13);
-    pub const FORWARD: MenuId = MenuId::new(14);
-    pub const BACK: MenuId = MenuId::new(15);
-    pub const SLICE: MenuId = MenuId::new(16);
-    pub const SLICE_SIDE: MenuId = MenuId::new(17);
-    pub const CARVE: MenuId = MenuId::new(18);
-    pub const EXTRUDE: MenuId = MenuId::new(19);
-    pub const EXTRUDE_IN: MenuId = MenuId::new(22);
-    pub const FIT: MenuId = MenuId::new(20);
-    pub const RESET_CAMERA: MenuId = MenuId::new(21);
-    pub const LAYOUT_CLASSIC: MenuId = MenuId::new(23);
-    pub const LAYOUT_QUAD: MenuId = MenuId::new(24);
-    pub const LEVEL_SETTINGS: MenuId = MenuId::new(25);
-}
-
 pub struct Editor {
     pub(super) state: Rc<RefCell<EditorState>>,
     pub(super) classic: Arrangement,
     pub(super) quad: Arrangement,
     pub(super) disposition: Disposition,
     pub(super) play: Handle<View3d<Msg>>,
-    menu: Handle<Menu<Msg>>,
+    pub(super) menu: Handle<Menu<Msg>>,
     pub(super) status: Handle<StatusBar<Msg>>,
     tools: [Handle<IconButton<Msg>>; TOOLS.len()],
     ops: [Handle<IconButton<Msg>>; OPS.len()],
@@ -107,6 +56,11 @@ pub struct Editor {
     pub(super) save_dialog: FileDialog<Msg>,
     /// Shared with scripted runs through [`Probe`].
     pub(super) preview: Rc<Cell<Preview>>,
+    /// Identifies the lightmap in the picture, for scripted runs through [`Probe`].
+    pub(super) light_key: Rc<Cell<u64>>,
+    /// Everything but the menu and the status bar, while the level is showing.
+    pub(super) work_host: Handle<xui::widget::Panel<Msg>>,
+    pub(super) tex: Workspace,
 }
 
 impl Editor {
@@ -140,6 +94,7 @@ impl Editor {
             .filter("Miniscent levels", &[files::EXT])
             .on_accept(|p| Some(Msg::SavePath(p)))
             .on_cancel(|| None);
+        let tex = Workspace::new(studio.materials().clone());
         let mut app = Editor {
             state: state.clone(),
             classic: Arrangement::default(),
@@ -159,8 +114,12 @@ impl Editor {
             open_dialog,
             save_dialog,
             preview: Rc::new(Cell::new(Preview::Updating)),
+            light_key: Rc::new(Cell::new(0)),
+            work_host: Handle::new(),
+            tex,
         };
         app.panel.attach(ui);
+        app.tex.attach(ui);
         let (generation, table) = app.studio.materials().current();
         state.borrow_mut().texture_sizes = app
             .panel
@@ -228,7 +187,11 @@ impl Editor {
             column().children((
                 menu_bar(menus).on_select(Msg::Menu).bind(&app.menu),
                 stack()
-                    .children((work, build(View3d::new).bind(&app.play)))
+                    .children((
+                        panel(work).plain().bind(&app.work_host),
+                        app.tex.layout(),
+                        build(View3d::new).bind(&app.play),
+                    ))
                     .fill(1),
                 status_bar(&["Ready", "", "", ""]).bind(&app.status),
             )),
@@ -236,6 +199,7 @@ impl Editor {
         ui.on_key(shortcut);
         ui.every(16, Msg::Tick);
         app.play.get().set_visible(false);
+        app.tex.set_visible(false);
         app.set_disposition(Disposition::Quad);
         app.log_view.get().set_enabled(false);
         app.refresh();
@@ -284,13 +248,16 @@ impl Editor {
         for (i, op) in [Op::Subtract, Op::Add].into_iter().enumerate() {
             self.ops[i].get().set_checked(st.new_op == op);
         }
+        drop(st);
+        self.sync_tex_menu();
     }
 
     /// Whether a text box has the keyboard focus, so letters and Delete are
     /// text there and not shortcuts.
     fn text_has_focus(&self, ui: &Ui<Msg>) -> bool {
-        ui.focus_holder()
-            .is_some_and(|id| self.panel.owns(id) || id == self.log_view.get().id())
+        ui.focus_holder().is_some_and(|id| {
+            self.panel.owns(id) || self.tex.owns(id) || id == self.log_view.get().id()
+        })
     }
 
     /// The 3D pane's text until the first picture of a level arrives.
@@ -343,10 +310,14 @@ F5 plays it.
         };
         let events = pane.take_events();
         let clicks = pane.take_clicks();
-        let size = pane.size();
+        // Under the workspace the 3D pane is not on screen, so it costs no frames.
+        let hidden = self.studio.mode == Mode::Edit && self.tex.is_open();
+        let size = if hidden { (0, 0) } else { pane.size() };
         let state = self.state.clone();
         let tick = self.studio.tick(&events, size, &state.borrow().doc);
         self.follow_materials();
+        self.light_key.set(self.studio.light_key());
+        self.tex_advance();
         self.push_log(&tick.log);
         if let Some(s) = &tick.status {
             self.state.borrow_mut().message = s.clone();
@@ -441,6 +412,12 @@ impl App for Editor {
 
     fn update(&mut self, msg: Msg, ui: &mut Ui<Msg>) {
         match msg {
+            Msg::Tex(m) => {
+                self.tex_message(m, ui);
+                return;
+            }
+            Msg::Menu(cmd::TEX_OPEN) if self.studio.mode == Mode::Edit => self.tex_open(),
+            Msg::Menu(id) if self.tex.is_open() => self.tex_menu(id, ui),
             Msg::Menu(cmd::LEVEL_SETTINGS) => self.level_settings(ui),
             Msg::Menu(id) => self.menu_command(id),
             Msg::Tool(i) => self
@@ -472,6 +449,12 @@ impl App for Editor {
                 if self.studio.mode == Mode::Play || self.text_has_focus(ui) {
                     return;
                 }
+                // Of the single keys, only those about the recipe's history and its
+                // blocks mean anything in the workspace.
+                let about_recipe = matches!(*inner, Msg::Menu(cmd::UNDO | cmd::REDO | cmd::DELETE));
+                if self.tex.is_open() && !about_recipe {
+                    return;
+                }
                 if let Msg::Tool(i) = *inner
                     && self.pane3d().flies(TOOLS[i.min(TOOLS.len() - 1)].1)
                 {
@@ -483,6 +466,8 @@ impl App for Editor {
             Msg::Escape => {
                 if self.studio.mode == Mode::Play {
                     self.end_play(Some("Back in the editor"));
+                } else if self.tex.is_open() {
+                    self.tex_close();
                 }
                 return;
             }

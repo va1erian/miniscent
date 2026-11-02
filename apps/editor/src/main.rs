@@ -6,7 +6,8 @@
 //! * `XUI_SNAPSHOT=<dir>` renders the window headlessly to PNGs.
 //! * `--selftest <dir>` runs a scripted session (load the showcase, snapshot,
 //!   play 120 frames, return, edit, snapshot) and exits 0 on success.
-//! * `--bake-texture <recipe.mst> <dir>` writes a recipe's maps as PNG files.
+//! * `--bake-texture <recipe.mst> <dir>` writes a recipe's maps as PNG files, and
+//!   adds the material to `<dir>/materials.txt` if there is one.
 
 mod build;
 mod files;
@@ -15,6 +16,7 @@ mod model;
 mod selftest;
 mod studio;
 mod texbake;
+mod texstudio;
 mod ui;
 
 use model::Document;

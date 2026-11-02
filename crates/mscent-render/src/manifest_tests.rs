@@ -18,6 +18,50 @@ fn entry(name: &str, gloss: u8) -> Entry {
 }
 
 #[test]
+fn a_new_material_goes_at_the_end_and_a_known_one_keeps_its_id_and_the_comments_stay() {
+    let text = format!("# keep me\n{STOCK_LINES}5 retired");
+    let (added, id) = with_material(&text, "new", 7).expect("adds");
+    assert_eq!(id, 6);
+    assert!(added.starts_with("# keep me\n0 a 1\n"), "{added}");
+    assert!(added.ends_with("5 retired\n6 new 7\n"), "{added}");
+    let (changed, id) = with_material(&added, "c", 200).expect("changes");
+    assert_eq!(id, 2);
+    let want = added.replace("2 c 3\n", "2 c 200\n");
+    assert_eq!(changed, want);
+    assert_eq!(parse(changed.as_bytes()).expect("parses").len(), 7);
+}
+
+#[test]
+fn a_manifest_that_would_not_load_is_never_returned() {
+    for bad in ["CON", "a/b", "a.b", "a_n", "retired", "", "../x", "con"] {
+        assert!(with_material(STOCK_LINES, bad, 1).is_err(), "{bad}");
+    }
+    assert!(
+        with_material("0 a x\n", "b", 1).is_err(),
+        "a bad row stays bad"
+    );
+    let full: String = (0..MAX_MATERIALS)
+        .map(|i| format!("{i} m{i} 1\n"))
+        .collect();
+    assert!(with_material(&full, "one-more", 1).is_err());
+    assert!(
+        with_material(&full, "m3", 9).is_ok(),
+        "room to change a row"
+    );
+}
+
+#[test]
+fn a_listing_becomes_text_that_parses_to_it() {
+    // Stock ids cannot be retired, so the retired one comes after them.
+    let mut entries: Vec<Entry> = ["a", "b", "c", "d", "e"].map(|n| entry(n, 1)).into();
+    entries.extend([Entry::Retired, entry("f", 3)]);
+    assert_eq!(
+        parse(text_of(&entries).as_bytes()).expect("parses"),
+        entries
+    );
+}
+
+#[test]
 fn ids_come_from_the_lines_and_retired_ones_keep_their_place() {
     let text = format!("# a comment\n\n{STOCK_LINES}5 retired\r\n  6\ta-b-2  255\n");
     let mut want = vec![

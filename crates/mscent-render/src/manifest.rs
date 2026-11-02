@@ -159,9 +159,58 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<Entry>, ManifestError> {
     Ok(entries)
 }
 
-/// Reads and checks the manifest at `path`, never holding more of it than the
-/// size limit allows. `None` when there is no such file.
-pub fn read(path: &Path) -> Result<Option<Vec<Entry>>, TextureError> {
+/// The text of a manifest with `name` at `gloss`: the line that names it changed,
+/// or a new line at the end, whose id is the next one. Every other line, comments
+/// included, stays as it is, so the file stays someone's to read. The result is
+/// parsed before it is returned, so what comes back is a manifest, along with the
+/// material's id.
+pub fn with_material(text: &str, name: &str, gloss: u8) -> Result<(String, u16), ManifestError> {
+    if !name_is_valid(name) {
+        return Err(ManifestError::Line(0, LineError::BadName));
+    }
+    let is_row = |line: &str| {
+        let line = line.trim_ascii();
+        !line.is_empty() && !line.starts_with('#')
+    };
+    let mut out = String::with_capacity(text.len() + MAX_LINE);
+    let mut rows = 0;
+    let mut found = None;
+    for line in text.lines() {
+        if is_row(line) {
+            if line.split_ascii_whitespace().nth(1) == Some(name) {
+                found = Some(rows);
+                out.push_str(&format!("{rows} {name} {gloss}\n"));
+                rows += 1;
+                continue;
+            }
+            rows += 1;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if found.is_none() {
+        out.push_str(&format!("{rows} {name} {gloss}\n"));
+    }
+    parse(out.as_bytes())?;
+    let id = u16::try_from(found.unwrap_or(rows)).map_err(|_| ManifestError::TooMany)?;
+    Ok((out, id))
+}
+
+/// The text of a manifest listing `entries`, for a directory that had none.
+pub fn text_of(entries: &[Entry]) -> String {
+    let mut out = String::new();
+    for (id, entry) in entries.iter().enumerate() {
+        match entry {
+            Entry::Material { name, gloss } => out.push_str(&format!("{id} {name} {gloss}\n")),
+            Entry::Retired => out.push_str(&format!("{id} {RETIRED}\n")),
+        }
+    }
+    out
+}
+
+/// The bytes of the file at `path`, never holding more of them than the size
+/// limit allows. `None` when there is no such file.
+fn read_bytes(path: &Path) -> Result<Option<Vec<u8>>, TextureError> {
     let io = |e: std::io::Error| TextureError::Io(format!("{}: {e}", path.display()));
     let file = match std::fs::File::open(path) {
         Ok(file) => file,
@@ -172,7 +221,26 @@ pub fn read(path: &Path) -> Result<Option<Vec<Entry>>, TextureError> {
     file.take(MAX_BYTES + 1)
         .read_to_end(&mut bytes)
         .map_err(io)?;
+    Ok(Some(bytes))
+}
+
+/// Reads and checks the manifest at `path`. `None` when there is no such file.
+pub fn read(path: &Path) -> Result<Option<Vec<Entry>>, TextureError> {
+    let Some(bytes) = read_bytes(path)? else {
+        return Ok(None);
+    };
     parse(&bytes).map(Some).map_err(TextureError::Manifest)
+}
+
+/// The text of the manifest at `path`, checked. `None` when there is no such file.
+pub fn read_text(path: &Path) -> Result<Option<String>, TextureError> {
+    let Some(bytes) = read_bytes(path)? else {
+        return Ok(None);
+    };
+    parse(&bytes).map_err(TextureError::Manifest)?;
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|_| TextureError::Manifest(ManifestError::NotText))
 }
 
 /// The gloss of a name in a directory with no manifest, which must draw as it

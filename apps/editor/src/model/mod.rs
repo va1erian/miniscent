@@ -12,6 +12,7 @@ pub mod pick;
 pub mod pointer;
 pub mod shape_ops;
 pub mod state;
+pub mod texdoc;
 pub mod tools;
 pub mod view;
 
