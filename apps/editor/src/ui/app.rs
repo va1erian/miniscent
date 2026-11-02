@@ -391,7 +391,7 @@ F5 plays it.
                 play.focus();
                 // Focus changes from the editor are not the player's input.
                 play.take_events();
-                let text = "Playing: Esc = back, WASD move, Space fire, Q/E roll";
+                let text = "Playing: Esc = back, WASD (ZQSD on AZERTY) move, Space fire, Q/E roll";
                 self.state.borrow_mut().message = text.into();
                 self.set_status(text);
             }
@@ -474,6 +474,11 @@ impl App for Editor {
             }
             Msg::Guarded(inner) => {
                 if self.studio.mode == Mode::Play || self.text_has_focus(ui) {
+                    return;
+                }
+                if let Msg::Tool(i) = *inner
+                    && self.pane3d().flies(TOOLS[i.min(TOOLS.len() - 1)].1)
+                {
                     return;
                 }
                 self.update(*inner, ui);

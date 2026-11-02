@@ -35,6 +35,7 @@ use std::time::Duration;
 
 pub mod headless;
 pub mod key;
+pub mod layout;
 pub mod scale;
 pub mod script;
 
@@ -43,6 +44,7 @@ pub mod desktop;
 
 pub use headless::{Frame, HeadlessPlatform};
 pub use key::{Event, Key, MouseButton};
+pub use layout::physical_letter;
 pub use script::{Action, Script, ScriptError};
 
 #[cfg(feature = "desktop")]
