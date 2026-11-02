@@ -157,7 +157,13 @@ fn a_stroke_across_the_edge_of_the_tiled_view_continues_on_the_other_side() {
     // two tiles, then on to the first: tile positions 0.9 -> 1.3 are one stroke.
     drag(&mut s, 1.9, 2.0, 1.5);
     let first = strokes(&s);
-    assert_eq!(first[0].points[0], [0.9, 0.5], "tile position of the press");
+    // Rounded to the grid points sit on: at most half a step of 1/4096 off.
+    let press = first[0].points[0];
+    let near = |a: f32, b: f32| (a - b).abs() <= 0.5 / 4096.0 + 1e-6;
+    assert!(
+        near(press[0], 0.9) && near(press[1], 0.5),
+        "tile position of the press: {press:?}"
+    );
     s.undo();
     drag(&mut s, 0.9, 1.3, 0.5);
     let stroke = &strokes(&s)[0];
