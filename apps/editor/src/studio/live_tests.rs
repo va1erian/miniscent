@@ -165,3 +165,14 @@ fn only_voxel_chunks_differing_can_take_the_live_path() {
     add.finish_stroke();
     assert_eq!(plan(&empty.doc, &add.doc), Some(LivePlan::All));
 }
+
+#[test]
+fn a_failed_build_is_not_papered_over_by_the_live_path() {
+    let (mut st, mut studio) = sculpted();
+    studio.error = Some("the last build failed".into());
+    let before = studio.live_jobs();
+    st.begin_stroke(at_wall(1.0), StrokeKeys::default());
+    st.finish_stroke();
+    studio.tick(&[], PANE, &st.doc);
+    assert_eq!(studio.live_jobs(), before);
+}

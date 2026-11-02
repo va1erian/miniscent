@@ -48,8 +48,9 @@ struct Queued {
     volume: usize,
     at: Vec3d,
     /// Filled when the dab reaches the head of the queue, as only then is the
-    /// volume it writes to the one it should see.
-    chunks: Option<Vec<[u16; 3]>>,
+    /// volume it writes to the one it should see. A touching volume reads this
+    /// one's samples through its ring, so some of these may be its chunks.
+    chunks: Option<Vec<(usize, [u16; 3])>>,
     next: usize,
     done: Vec<RemeshedChunk>,
 }
@@ -114,7 +115,10 @@ impl Destruction {
             }
             let chunks = head.chunks.as_deref().unwrap_or(&[]);
             let take = budget.min(chunks.len() - head.next);
-            let wanted = vec![(head.volume, chunks[head.next..head.next + take].to_vec())];
+            let wanted: Vec<(usize, Vec<[u16; 3]>)> = chunks[head.next..head.next + take]
+                .iter()
+                .map(|&(v, c)| (v, vec![c]))
+                .collect();
             head.done.extend(VoxelWorld::remesh(
                 &self.volumes,
                 source.brushes,
@@ -156,6 +160,11 @@ impl Destruction {
     pub fn is_idle(&self) -> bool {
         self.queue.is_empty()
     }
+
+    /// The volumes as damage has left them, once anything has been hit.
+    pub fn damaged_volumes(&self) -> &[Volume] {
+        &self.volumes
+    }
 }
 
 fn struck_destructible(volume: &Volume, brushes: &[Brush], at: Vec3d) -> bool {
@@ -163,7 +172,7 @@ fn struck_destructible(volume: &Volume, brushes: &[Brush], at: Vec3d) -> bool {
     solid_material_near(volume, &mut ctx, at).is_some_and(is_destructible)
 }
 
-fn carve(volumes: &mut [Volume], head: &Queued, brushes: &[Brush]) -> Vec<[u16; 3]> {
+fn carve(volumes: &mut [Volume], head: &Queued, brushes: &[Brush]) -> Vec<(usize, [u16; 3])> {
     let Some(volume) = volumes.get_mut(head.volume) else {
         return Vec::new();
     };
@@ -172,7 +181,15 @@ fn carve(volumes: &mut [Volume], head: &Queued, brushes: &[Brush]) -> Vec<[u16; 
     };
     let shape = volume.clone();
     let mut ctx = Context::new(&shape, brushes);
-    apply_dab(volume, &mut ctx, &prim, DabOp::Carve)
+    let own = apply_dab(volume, &mut ctx, &prim, DabOp::Carve);
+    let mut out: Vec<(usize, [u16; 3])> = own.into_iter().map(|c| (head.volume, c)).collect();
+    let (lo, hi) = prim.bounds();
+    for (i, other) in volumes.iter().enumerate() {
+        if i != head.volume && other.touches(&shape) {
+            out.extend(other.chunks_near(lo, hi).into_iter().map(|c| (i, c)));
+        }
+    }
+    out
 }
 
 impl Game {

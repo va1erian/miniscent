@@ -328,3 +328,55 @@ fn a_hostile_world_answers_without_panic() {
     let empty = VoxelWorld::default();
     assert!(!empty.is_solid(v(0.0, 0.0, 0.0)));
 }
+
+#[test]
+fn the_nearest_surface_search_finds_what_a_full_scan_finds() {
+    let room =
+        Brush::cuboid(v(-20.0, -20.0, -20.0), v(20.0, 20.0, 20.0), Op::Subtract, 0).expect("valid");
+    let brushes = vec![room];
+    let mut volume =
+        Volume::new(Op::Add, 1, CellSize::Quarter, [-16, -16, -16], [2, 2, 2]).expect("valid");
+    let shape = volume.clone();
+    let mut ctx = Context::new(&shape, &brushes);
+    for (x, y, z) in [(-1.5, -1.0, 0.5), (1.5, 1.0, -0.5), (0.0, 2.0, 1.5)] {
+        let ball = Prim::sphere(v(x, y, z), 1.2).expect("valid");
+        apply_dab(&mut volume, &mut ctx, &ball, DabOp::Add { material: 1 });
+    }
+    let level = Level {
+        brushes,
+        volumes: vec![volume],
+        ..Default::default()
+    };
+    let bsp = compile(&level.csg_brushes()).expect("compiles");
+    let world = VoxelWorld::build(&level, &level.static_brushes(), &bsp);
+    let triangles: Vec<[Vec3d; 3]> = (world.chunks.iter())
+        .flat_map(|c| {
+            let m = &c.lods[0];
+            m.triangles
+                .iter()
+                .map(|t| t.map(|i| m.vertices[usize::from(i)].pos.to_f64()))
+        })
+        .collect();
+    let g = &world.volumes[0];
+    let size = f64::from(g.chunk_size);
+    let mut rng = mscent_math::rng::Rng::new(7);
+    for _ in 0..3000 {
+        let p = v(
+            rng.range_f64(-3.9, 3.9),
+            rng.range_f64(-3.9, 3.9),
+            rng.range_f64(-3.9, 3.9),
+        );
+        let origin = g.origin.to_f64();
+        let home =
+            [p.x - origin.x, p.y - origin.y, p.z - origin.z].map(|d| (d / size).floor() as i32);
+        let found = world.nearest_surface(g, p, home, size).expect("a surface");
+        let best = (triangles.iter())
+            .map(|t| (p - super::query::closest_on_triangle(p, *t).0).length_squared())
+            .fold(f64::INFINITY, f64::min);
+        assert!(
+            (found.d2 - best).abs() < 1e-9,
+            "at {p:?}: {} against {best}",
+            found.d2
+        );
+    }
+}

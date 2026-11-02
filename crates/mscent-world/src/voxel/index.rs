@@ -184,13 +184,14 @@ impl CellIndex {
         }
         let gaps = [0, 1, 2].map(|a| self.axis_gaps(a, p[a]));
         let home = [0, 1, 2].map(|a| self.coord(a, p[a] as f32));
-        // A ring further out is at least this far from `p`, per ring.
+        // Ring `r` can be as near as `r - 1` steps: `p` may lie at the very edge
+        // of its own cell, right beside the next.
         let step = (0..3)
             .filter(|&a| self.inv[a] > 0.0)
             .map(|a| f64::from(1.0 / self.inv[a]))
             .fold(f64::INFINITY, f64::min);
         for ring in 0..INDEX_EDGE {
-            if *bound <= (ring as f64 * step).powi(2) {
+            if *bound <= (ring.saturating_sub(1) as f64 * step).powi(2) {
                 return;
             }
             for cell in ring_cells(home, ring) {

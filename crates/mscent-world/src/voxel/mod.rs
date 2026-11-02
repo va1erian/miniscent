@@ -39,7 +39,7 @@ mod edit;
 mod index;
 mod lod;
 mod prim;
-mod query;
+pub(crate) mod query;
 mod surface;
 mod volume;
 pub(crate) mod wire;
@@ -72,7 +72,7 @@ pub use lod::Lod;
 pub use prim::Prim;
 pub use surface::{ChunkMesh, Mesher, VoxelVertex};
 pub use volume::{CellSize, Volume, VolumeError};
-pub use wire::{MAX_DETAIL_CHUNKS, MAX_VOLUMES};
+pub use wire::{MAX_DETAIL_CHUNKS, MAX_TOTAL_CHUNKS, MAX_VOLUMES};
 pub use world::{NO_CHUNK, RemeshedChunk, VolumeGeometry, VoxelChunk, VoxelWorld};
 
 /// Samples along one edge of a chunk.

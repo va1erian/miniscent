@@ -157,3 +157,53 @@ fn shape_ignores_paint_but_not_carving() {
     apply_dab(&mut carved, &mut ctx, &bite, DabOp::Carve);
     assert!(!carved.same_shape(&ball));
 }
+
+#[test]
+fn an_infinite_bound_is_refused_and_does_not_overflow() {
+    let volume = add_volume();
+    let far = f64::INFINITY;
+    assert!(
+        volume
+            .grown_to_hold(v(-far, 0.0, 0.0), v(far, 1.0, 1.0))
+            .is_err()
+    );
+    assert_eq!(
+        volume.grown_to_hold(v(f64::NAN, 0.0, 0.0), v(1.0, 1.0, 1.0)),
+        Ok(None)
+    );
+}
+
+#[test]
+fn turning_over_keeps_the_look_of_rock_that_showed_its_brush() {
+    let brushes = vec![
+        Brush::cuboid(v(-8.0, -8.0, -8.0), v(0.0, 8.0, 8.0), Op::Subtract, 0)
+            .expect("valid")
+            .with_material(3),
+    ];
+    let sub =
+        Volume::new(Op::Subtract, 1, CellSize::Quarter, [-8, -8, -8], [1, 1, 1]).expect("valid");
+    let target = sub.with_op(Op::Add);
+    let mut old = Context::new(&sub, &brushes);
+    let mut new = Context::new(&target, &brushes);
+    let add = sub.converted(Op::Add, &mut old, &mut new);
+    let meshes = mesh_all(&add, &brushes);
+    let materials: Vec<u8> = (meshes.iter())
+        .flat_map(|(_, m)| m.materials.iter().copied())
+        .collect();
+    assert!(!materials.is_empty());
+    assert!(materials.iter().all(|&m| m == 3), "{materials:?}");
+}
+
+#[test]
+fn the_chunks_near_a_shape_are_those_that_read_it() {
+    let volume = Volume::new(Op::Add, 1, CellSize::Quarter, [0; 3], [4, 1, 1]).expect("valid");
+    assert_eq!(
+        volume.chunks_near(v(3.9, 1.0, 1.0), v(4.1, 2.0, 2.0)),
+        [[0, 0, 0], [1, 0, 0]]
+    );
+    assert!(
+        volume
+            .chunks_near(v(40.0, 1.0, 1.0), v(41.0, 2.0, 2.0))
+            .is_empty()
+    );
+}

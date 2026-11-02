@@ -175,3 +175,51 @@ fn a_full_queue_drops_new_hits_rather_than_fall_behind() {
     idle(&mut g, 200);
     assert!(g.destruct.is_idle());
 }
+
+/// The surface of each chunk of volume `v`, by its place in the grid.
+fn surfaces(world: &mscent_world::voxel::VoxelWorld, v: usize) -> Vec<usize> {
+    let table = &world.volumes[v].table;
+    table
+        .iter()
+        .map(|&c| {
+            world
+                .chunks
+                .get(c as usize)
+                .map_or(0, |chunk| chunk.lods[0].vertices.len())
+        })
+        .collect()
+}
+
+#[test]
+fn a_shot_at_a_shared_border_updates_the_touching_volume_too() {
+    let mut level = level_with_wall(ROCK);
+    // The wall carries on into a second volume, beside the first at x = 4.
+    let mut second =
+        Volume::new(Op::Add, 2, CellSize::Quarter, [16, -16, -16], [2, 2, 2]).expect("valid");
+    let shape = second.clone();
+    let mut ctx = Context::new(&shape, &level.brushes);
+    let wall = Prim::cuboid(Vec3d::new(4.0, -8.0, -8.0), Vec3d::new(7.0, 8.0, 8.0)).expect("valid");
+    let m = DabOp::Add {
+        material: ROCK as u8,
+    };
+    apply_dab(&mut second, &mut ctx, &wall, m);
+    level.volumes.push(second);
+    let mut g = game(&level);
+    let source = crate::destruct::VoxelSource {
+        volumes: &level.volumes,
+        brushes: &level.brushes,
+        bsp: &g.arena.bsp.clone(),
+    };
+    let mut world = g.arena.voxels.clone();
+    assert!(g.destruct.hit(source, &world, Vec3::new(3.9, 0.0, 0.0)));
+    for _ in 0..40 {
+        g.destruct.step(source, &mut world);
+    }
+    let rebuilt = {
+        let mut damaged = level.clone();
+        damaged.volumes = g.destruct.damaged_volumes().to_vec();
+        mscent_world::voxel::VoxelWorld::build(&damaged, &damaged.static_brushes(), &g.arena.bsp)
+    };
+    assert_eq!(surfaces(&world, 1), surfaces(&rebuilt, 1), "the neighbour");
+    assert_eq!(surfaces(&world, 0), surfaces(&rebuilt, 0), "the one shot");
+}

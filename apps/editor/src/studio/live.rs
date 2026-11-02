@@ -162,7 +162,9 @@ impl Studio {
         let Some(pictured) = self.wanted.as_ref().filter(|_| self.worker.is_some()) else {
             return false;
         };
-        if self.preview_job.is_some() || self.refresh {
+        // After a failed build `wanted` is a document with no picture behind it,
+        // and only the normal path can say what became of that.
+        if self.preview_job.is_some() || self.refresh || self.error.is_some() {
             return false;
         }
         let Some(bsp) = self.live_bsp.clone() else {

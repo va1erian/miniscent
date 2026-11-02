@@ -120,8 +120,9 @@ impl VoxelWorld {
     }
 
     /// Searches the chunks around `home` ring by ring, nearest first, and stops
-    /// as soon as a ring further out cannot hold anything closer.
-    fn nearest_surface(
+    /// as soon as a ring further out cannot hold anything closer. Ring `r` can be
+    /// as near as `r - 1` chunks, as `p` may lie at the edge of its own chunk.
+    pub(super) fn nearest_surface(
         &self,
         g: &VolumeGeometry,
         p: Vec3d,
@@ -130,7 +131,7 @@ impl VoxelWorld {
     ) -> Option<Hit> {
         let mut best = Hit::NONE;
         for ring in 0..=SEARCH_RINGS {
-            if best.d2 <= (f64::from(ring) * size).powi(2) {
+            if best.d2 <= (f64::from((ring - 1).max(0)) * size).powi(2) {
                 break;
             }
             for dz in -ring..=ring {
@@ -152,8 +153,8 @@ impl VoxelWorld {
 }
 
 /// The nearest surface point found so far and which side `p` is on.
-struct Hit {
-    d2: f64,
+pub(super) struct Hit {
+    pub d2: f64,
     rock: bool,
 }
 
@@ -205,7 +206,7 @@ fn behind(away: Vec3d, tri: &[VoxelVertex; 3], w: [f64; 3]) -> bool {
 
 /// Point of the triangle `t` nearest to `p`, with its barycentric weights.
 /// After Ericson, Real-Time Collision Detection 5.1.5.
-fn closest_on_triangle(p: Vec3d, t: [Vec3d; 3]) -> (Vec3d, [f64; 3]) {
+pub(super) fn closest_on_triangle(p: Vec3d, t: [Vec3d; 3]) -> (Vec3d, [f64; 3]) {
     let [a, b, c] = t;
     let (ab, ac, ap) = (b - a, c - a, p - a);
     let (d1, d2) = (ab.dot(ap), ac.dot(ap));

@@ -21,6 +21,13 @@ pub struct Stroke {
 impl EditorState {
     /// Button down in the 3D view: the first ray of a stroke.
     pub fn begin_stroke(&mut self, ray: Ray, keys: StrokeKeys) -> bool {
+        // A stroke whose button has come up is finished work: it is not this
+        // press's to cancel, and the UI never waits for one.
+        self.poll_stroke();
+        if self.stroke.as_ref().is_some_and(|s| s.ending) {
+            self.message = "The last stroke is still finishing".into();
+            return false;
+        }
         self.cancel_stroke();
         let new_id = self.doc.alloc_id();
         let job = match StrokeJob::start(self.doc.clone(), new_id, self.voxel, keys) {

@@ -48,8 +48,11 @@ impl Volume {
         for a in 0..3 {
             let start = f64::from(l.origin[a]) * l.cell.units();
             let last = start + f64::from(l.chunks[a]) * size;
-            before[a] = ((start - lo[a]) / size).ceil().max(0.0) as i64;
-            after[a] = ((hi[a] - last) / size).ceil().max(0.0) as i64;
+            // Past the largest size it is refused whatever the number, and the
+            // limit keeps an infinite bound from overflowing the sum below.
+            let most = f64::from(MAX_CHUNKS_PER_AXIS) + 1.0;
+            before[a] = ((start - lo[a]) / size).ceil().clamp(0.0, most) as i64;
+            after[a] = ((hi[a] - last) / size).ceil().clamp(0.0, most) as i64;
         }
         if before == [0; 3] && after == [0; 3] {
             return Ok(None);
@@ -92,6 +95,15 @@ impl Volume {
             }
         }
         Ok(grown)
+    }
+
+    /// How many chunks this volume has before `older`'s first, per axis, for a
+    /// volume [`Self::grown_to_hold`] made from it.
+    pub fn chunks_before(&self, older: &Volume) -> [u16; 3] {
+        [0, 1, 2].map(|a| {
+            let cells = i64::from(older.lattice.origin[a]) - i64::from(self.lattice.origin[a]);
+            u16::try_from(cells / CHUNK_EDGE as i64).unwrap_or(0)
+        })
     }
 
     /// Whether the two have the same box and kind, whatever they hold.
@@ -158,6 +170,34 @@ impl Volume {
         super::context::reaches(self, other)
     }
 
+    /// This volume's chunks whose mesh can read a sample between `lo` and `hi`.
+    pub fn chunks_near(&self, lo: Vec3d, hi: Vec3d) -> Vec<[u16; 3]> {
+        let l = self.lattice;
+        let cell = l.cell.units();
+        let size = cell * CHUNK_EDGE as f64;
+        let (start, _) = self.bounds();
+        let (lo, hi, start) = (
+            [lo.x, lo.y, lo.z],
+            [hi.x, hi.y, hi.z],
+            [start.x, start.y, start.z],
+        );
+        // A mesh reads two samples past its chunk.
+        let range = |a: usize| {
+            let last = i32::from(l.chunks[a]) - 1;
+            let at = |v: f64| ((v - start[a]) / size).floor() as i32;
+            at(lo[a] - 3.0 * cell).max(0)..=at(hi[a] + 3.0 * cell).min(last)
+        };
+        let mut out = Vec::new();
+        for z in range(2) {
+            for y in range(1) {
+                for x in range(0) {
+                    out.push([x as u16, y as u16, z as u16]);
+                }
+            }
+        }
+        out
+    }
+
     /// Whether `p` is in the box.
     pub fn holds(&self, p: Vec3d) -> bool {
         let (lo, hi) = self.bounds();
@@ -208,6 +248,11 @@ fn rewrite_chunk(
     for i in 0..data.delta.len() {
         let value = edited(old.get(i), data.delta[i]);
         data.delta[i] = (i16::from(value) - i16::from(new.get(i))) as i8;
+        // Rock that showed its brush's material has no such brush under the new
+        // kind of base, so it keeps the look by name.
+        if value >= 0 {
+            data.material[i] = old.material(i, data.material[i]);
+        }
     }
     chunk.normalize();
 }
@@ -282,9 +327,9 @@ fn is_solid(volume: &Volume, ctx: &mut Context, p: Vec3d) -> bool {
     let l = volume.lattice;
     let own = l.cell.units();
     let g = [
-        (p.x / own).round() as i32 - l.origin[0],
-        (p.y / own).round() as i32 - l.origin[1],
-        (p.z / own).round() as i32 - l.origin[2],
+        ((p.x / own).round() as i32).saturating_sub(l.origin[0]),
+        ((p.y / own).round() as i32).saturating_sub(l.origin[1]),
+        ((p.z / own).round() as i32).saturating_sub(l.origin[2]),
     ];
     resolved_at(volume, ctx, g).is_some_and(|v| v >= 0)
 }
@@ -316,7 +361,8 @@ pub fn solid_material_near(volume: &Volume, ctx: &mut Context, p: Vec3d) -> Opti
     let l = volume.lattice;
     let own = l.cell.units();
     let at = [p.x, p.y, p.z];
-    let centre: [i32; 3] = std::array::from_fn(|a| (at[a] / own).round() as i32 - l.origin[a]);
+    let centre: [i32; 3] =
+        std::array::from_fn(|a| ((at[a] / own).round() as i32).saturating_sub(l.origin[a]));
     let mut best: Option<(f64, u8)> = None;
     for dz in -1..=1 {
         for dy in -1..=1 {

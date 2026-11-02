@@ -333,3 +333,29 @@ fn a_level_past_the_file_limits_cannot_be_saved_as_if_it_were_fine() {
     assert!(!path.exists());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn a_press_does_not_throw_away_a_stroke_that_is_finishing() {
+    let mut st = room_state();
+    assert!(st.begin_stroke(at_wall(0.0), StrokeKeys::default()));
+    st.end_stroke();
+    // Whether the first is done by now or not, it must survive the second press.
+    let _ = st.begin_stroke(at_wall(1.0), StrokeKeys::default());
+    st.finish_stroke();
+    assert_eq!(st.doc.volumes().count(), 1);
+    assert!(st.history.depth() >= 2, "the room and the first stroke");
+}
+
+#[test]
+fn an_invalid_brush_does_not_stop_face_picking() {
+    let mut st = room_state();
+    let ray = at_wall(0.0);
+    let mut broken = st.doc.brushes()[0].clone();
+    broken.id = st.doc.alloc_id();
+    broken.shape = Shape::Box {
+        min: [1.0, 1.0, 1.0],
+        max: [0.0, 0.0, 0.0],
+    };
+    st.doc.insert_brush(1, broken);
+    assert!(super::pick::pick_visible_face(&st.doc, &ray).is_some());
+}

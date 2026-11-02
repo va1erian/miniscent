@@ -9,7 +9,7 @@
 //! picks from the volume as it now is, which is how a stroke builds up instead.
 
 use std::collections::BTreeSet;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use mscent_math::Vec3d;
@@ -146,7 +146,12 @@ impl StrokeJob {
     /// The stroke's final result once it has ended; `Some(None)` for a stroke
     /// that changed nothing.
     pub fn finished(&self) -> Option<Option<Sculpted>> {
-        self.done.try_recv().ok()
+        match self.done.try_recv() {
+            Ok(last) => Some(last),
+            Err(TryRecvError::Empty) => None,
+            // The thread died: what it published stands, and the stroke is over.
+            Err(TryRecvError::Disconnected) => Some(None),
+        }
     }
 
     /// Waits for the final result.
@@ -366,7 +371,7 @@ impl<'a> Sculptor<'a> {
         let at = [p.x, p.y, p.z];
         let first = at.map(|v| ((v - reach) / size).floor());
         let last = at.map(|v| ((v + reach) / size).ceil());
-        let origin = first.map(|f| f as i32 * CHUNK_EDGE as i32);
+        let origin = first.map(|f| (f as i32).saturating_mul(CHUNK_EDGE as i32));
         let chunks = [0, 1, 2].map(|a| ((last[a] - first[a]).max(1.0)) as u16);
         let order = self.doc.brushes().len() as u32;
         let volume = match Volume::new(op, order, self.tool.cell, origin, chunks) {
@@ -467,8 +472,13 @@ impl<'a> Sculptor<'a> {
             self.note = Some("Another volume is in the way".into());
             return;
         }
-        // The chunks moved in the table, so what was dirty is no longer named.
-        t.dirty = grown.all_chunks().into_iter().collect();
+        // The chunks moved in the table: what was dirty goes with them.
+        let shift = grown.chunks_before(&t.volume);
+        t.dirty = t
+            .dirty
+            .iter()
+            .map(|c| [0, 1, 2].map(|a| c[a] + shift[a]))
+            .collect();
         self.ctx = Some(Context::new(&grown, self.brushes));
         t.volume = grown;
     }

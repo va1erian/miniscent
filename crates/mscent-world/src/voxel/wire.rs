@@ -27,6 +27,10 @@ use crate::format_wire::{Cursor, len_u32, put_u16, put_u32};
 pub const MAX_VOLUMES: usize = 256;
 /// Most detail chunks in a level: 128 MiB of samples.
 pub const MAX_DETAIL_CHUNKS: usize = 16_384;
+/// Most chunks of any kind in a level. Each is meshed at load whether it holds
+/// anything or not, about 20 us a chunk, and a uniform one takes 3 bytes of file:
+/// without this a file of a few MiB could hold a load up for twenty seconds.
+pub const MAX_TOTAL_CHUNKS: usize = 65_536;
 
 /// Smallest volume record: order, op, cell, origin and chunks.
 const VOLUME_HEAD: usize = 4 + 1 + 1 + 12 + 6;
@@ -123,8 +127,9 @@ fn read_with_budget(body: &[u8], mut budget: usize) -> Result<Vec<Volume>, Forma
         return Err(FormatError::TooMany);
     }
     let mut out: Vec<Volume> = Vec::with_capacity(n);
+    let mut chunks_left = MAX_TOTAL_CHUNKS;
     for _ in 0..n {
-        let volume = read_volume(&mut c, &mut budget)?;
+        let volume = read_volume(&mut c, &mut budget, &mut chunks_left)?;
         if out.iter().any(|v| v.overlaps(&volume)) {
             return Err(FormatError::BadVolume);
         }
@@ -136,7 +141,11 @@ fn read_with_budget(body: &[u8], mut budget: usize) -> Result<Vec<Volume>, Forma
     Ok(out)
 }
 
-fn read_volume(c: &mut Cursor, budget: &mut usize) -> Result<Volume, FormatError> {
+fn read_volume(
+    c: &mut Cursor,
+    budget: &mut usize,
+    chunks_left: &mut usize,
+) -> Result<Volume, FormatError> {
     let order = c.u32()?;
     let op = match c.u8()? {
         0 => Op::Add,
@@ -151,6 +160,7 @@ fn read_volume(c: &mut Cursor, budget: &mut usize) -> Result<Volume, FormatError
     }
     // The size is small now; the table is built only if the bytes could fill it.
     let count: usize = chunks.iter().map(|&n| usize::from(n)).product();
+    *chunks_left = chunks_left.checked_sub(count).ok_or(FormatError::TooMany)?;
     if count.saturating_mul(CHUNK_MIN) > c.remaining() {
         return Err(FormatError::TooMany);
     }

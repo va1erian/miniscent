@@ -143,8 +143,15 @@ pub fn pick_face(doc: &Document, ray: &Ray) -> Option<FaceHit> {
 /// [`pick_face`], unless a voxel surface stands in front of the face.
 pub fn pick_visible_face(doc: &Document, ray: &Ray) -> Option<FaceHit> {
     let hit = pick_face(doc, ray)?;
+    if doc.volumes().next().is_none() {
+        return Some(hit);
+    }
     let unit = ray.dir.normalized()?;
-    let level = doc.to_level().ok()?;
+    // An invalid brush elsewhere must not stop picking, and no volume can be
+    // judged against a level that will not export.
+    let Ok(level) = doc.to_level() else {
+        return Some(hit);
+    };
     let brushes = level.static_brushes();
     let length = ray.dir.length();
     for (_, volume) in doc.volumes() {
