@@ -17,8 +17,13 @@
 //! sensible portal flood, so every leaf counts as visible.
 
 mod prep;
+mod reach;
+mod surface;
 mod visible;
 mod walk;
+
+pub use reach::LightReach;
+pub use surface::Surface;
 
 use mscent_math::{Aabb, DPlane, Vec3};
 use mscent_world::{Bsp, Face, LeafKind, Portals};

@@ -1,6 +1,6 @@
 use crate::mover::{CLOSED, MAX_POSES, MoverError, WhenBlocked};
 use crate::test_util::{FACE_PLUS_X, enemy, far_goal, open_level, start, v};
-use crate::{Arena, Event, Game, Input, Phase, hitscan, line_of_sight};
+use crate::{Arena, Event, Game, Input, Phase, Shooter, Struck, hitscan, line_of_sight};
 use mscent_collide::{Pose, Solids};
 use mscent_math::Vec3d;
 use mscent_world::{Brush, Entity, Level, MoverGroup, Op};
@@ -105,6 +105,28 @@ fn a_door_stops_shots_and_sight_until_it_opens() {
     let solids = Solids::new(&game.arena.bsp, &game.solids);
     assert!(line_of_sight(solids, a, b));
     assert_eq!(hitscan(solids, a, v(1.0, 0.0, 0.0), 8.0, &[]).mover, None);
+}
+
+#[test]
+fn a_shot_at_a_door_says_it_struck_the_door_and_not_a_wall() {
+    let mut game = door_game(v(0.0, 0.0, 0.0));
+    let door = game.mover_index("door").unwrap();
+    game.step(&Input {
+        fire: true,
+        ..Input::default()
+    });
+    let shot = game.take_events().into_iter().find_map(|e| match e {
+        Event::Shot {
+            shooter,
+            normal,
+            struck,
+            ..
+        } => Some((shooter, normal, struck)),
+        _ => None,
+    });
+    let (shooter, normal, struck) = shot.expect("a shot");
+    assert_eq!((shooter, struck), (Shooter::Player, Struck::Mover(door)));
+    assert!((normal - v(-1.0, 0.0, 0.0)).length() < 1e-3, "{normal:?}");
 }
 
 #[test]

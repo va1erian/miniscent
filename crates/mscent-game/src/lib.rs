@@ -14,6 +14,8 @@
 //! * [`Enemy`], [`AiState`] (`enemy.rs`): patrol, chase, attack.
 //! * [`hitscan`], [`line_of_sight`], [`ray`] (`combat.rs`): traces shared by
 //!   weapon, enemy sight and enemy fire. [`Weapon`] (`weapon.rs`).
+//! * [`fx::Fx`] (`fx/`): particle simulation, a 60 Hz tick with pools,
+//!   emitters and three collision levels. `Game` never reads it.
 //! * [`Mover`], [`WhenBlocked`] (`mover.rs`): named poses, eased motion and what
 //!   happens when a body is in the way; driven through `Game`.
 //! * Level scripts (`script.rs`): [`Game::load_script`] compiles `mscent_script`
@@ -25,9 +27,12 @@
 //! World convention: camera space of `mscent_render` (+X right, +Y up, view
 //! along -Z). Player yaw 0 looks along -Z and positive yaw turns left.
 
+#![forbid(unsafe_code)]
+
 pub mod arena;
 pub mod combat;
 pub mod enemy;
+pub mod fx;
 pub mod game;
 pub mod hud;
 pub mod input;
@@ -48,7 +53,7 @@ pub use arena::{
 };
 pub use combat::{Hitscan, Sphere, hitscan, line_of_sight, ray};
 pub use enemy::{AiState, Enemy, EnemyStats, Faction, stats_for};
-pub use game::{Event, Game, Phase};
+pub use game::{Event, Game, Phase, Shooter, Struck};
 pub use hud::{HudModel, draw_hud, draw_menu};
 pub use input::Input;
 pub use menu::{Menu, MenuAction, MenuCommand, Screen};

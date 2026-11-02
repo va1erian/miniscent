@@ -6,7 +6,7 @@
 //! after `lose_steps`; seeing the player again at any point re-acquires.
 //! Randomness comes from a per-enemy seeded generator, so replays match.
 
-use crate::combat::{Sphere, hitscan, line_of_sight};
+use crate::combat::{Hitscan, Sphere, hitscan, line_of_sight};
 use mscent_collide::{Body, STEP_HZ, Solids, sweep_sphere};
 use mscent_math::Vec3;
 use mscent_math::rng::Rng;
@@ -83,9 +83,9 @@ pub struct Enemy {
     pub state: AiState,
     /// Where the player was last in sight, while hunting.
     pub last_seen: Option<Vec3>,
-    /// True for the step in which this enemy fired (hit or miss), so the
-    /// game can show where the shot came from.
-    pub fired: bool,
+    /// The shot of the step in which this enemy fired (hit or miss), so the
+    /// game can show where it came from and where it went.
+    pub last_shot: Option<Hitscan>,
     /// A disabled enemy stays where it is, can still be shot, and does nothing.
     pub enabled: bool,
     pub faction: Faction,
@@ -112,7 +112,7 @@ impl Enemy {
             hp: stats.max_hp,
             state: AiState::Patrol,
             last_seen: None,
-            fired: false,
+            last_shot: None,
             enabled: true,
             faction: Faction::Hostile,
             stats,
@@ -165,10 +165,12 @@ impl Enemy {
     /// One fixed step with `target` as what it is after, or nothing in reach.
     /// Returns the damage dealt to the target this step.
     pub(crate) fn step_toward(&mut self, bsp: Solids, target: Option<&Sphere>) -> Option<i32> {
+        // Before the check below: an enemy killed the step after it fired must
+        // not go on reporting that shot for ever.
+        self.last_shot = None;
         if !self.alive() {
             return None;
         }
-        self.fired = false;
         if !self.enabled {
             // A mover can still push it, and it draws between these two.
             self.body.prev_pos = self.body.pos;
@@ -267,10 +269,10 @@ impl Enemy {
             return None;
         }
         self.cooldown = self.stats.attack_cooldown;
-        self.fired = true;
         let reach = self.stats.attack_range * ATTACK_HYSTERESIS;
         let dir = player.centre - self.body.pos;
         let shot = hitscan(bsp, self.body.pos, dir, reach, &[*player]);
+        self.last_shot = Some(shot);
         shot.target.map(|_| self.stats.attack_damage)
     }
 

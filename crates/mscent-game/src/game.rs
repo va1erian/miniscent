@@ -14,6 +14,7 @@ use crate::prop::{Prop, UseState};
 use crate::script::{ScriptEnd, ScriptState};
 use crate::weapon::Weapon;
 use mscent_collide::{FixedStepper, MoverSolid, STEP_HZ, Solids};
+use mscent_math::Vec3;
 use mscent_script::Vm;
 
 /// Steps the hurt flash stays on after the player is hit.
@@ -62,6 +63,36 @@ pub enum Event {
     PropPicked(usize),
     /// The player finished holding the use key on prop `i`.
     PropUsed(usize),
+    /// Where a shot went, from a player or an enemy, for effects. `normal` is
+    /// zero when `struck` is [`Struck::Nothing`].
+    Shot {
+        shooter: Shooter,
+        origin: Vec3,
+        end: Vec3,
+        normal: Vec3,
+        struck: Struck,
+    },
+}
+
+/// Who fired a shot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shooter {
+    Player,
+    Enemy(usize),
+}
+
+/// What a shot ended on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Struck {
+    /// Out of range, or fired from inside solid.
+    Nothing,
+    Wall,
+    Enemy(usize),
+    Player,
+    /// A mover, which is not in the world's BSP and has no face for a scorch to
+    /// stay on where it now stands.
+    Mover(usize),
+    Prop(usize),
 }
 
 #[derive(Clone, Debug)]
@@ -201,6 +232,17 @@ impl Game {
             .fire(solids, origin, dir, enemies, &mut self.props);
         let Some(shot) = shot else { return };
         self.events.push(Event::PlayerFired);
+        self.events.push(Event::Shot {
+            shooter: Shooter::Player,
+            origin,
+            end: shot.point,
+            normal: shot.normal,
+            struck: match (shot.hit, shot.prop) {
+                (Some(i), _) => Struck::Enemy(i),
+                (None, Some(i)) => Struck::Prop(i),
+                (None, None) => solid_struck(shot.normal, shot.mover),
+            },
+        });
         if let Some(i) = shot.mover {
             self.events.push(Event::MoverHit(i));
         }
@@ -229,9 +271,7 @@ impl Game {
         let solids = Solids::new(&self.arena.bsp, &self.solids);
         for (i, e) in self.enemies.iter_mut().enumerate() {
             let dmg = e.step(solids, &target);
-            if e.fired {
-                self.events.push(Event::EnemyFired(i));
-            }
+            report_enemy_shot(&mut self.events, i, e, Struck::Player);
             if let Some(dmg) = dmg {
                 self.player.damage(dmg);
                 self.hurt_steps = HURT_FLASH_STEPS;
@@ -251,9 +291,8 @@ impl Game {
                 continue;
             };
             let damage = enemy.step_toward(solids, sphere.as_ref());
-            if enemy.fired {
-                self.events.push(Event::EnemyFired(i));
-            }
+            let aimed = target.flatten().map_or(Struck::Player, Struck::Enemy);
+            report_enemy_shot(&mut self.events, i, enemy, aimed);
             if let (Some(damage), Some(target)) = (damage, target) {
                 self.hurt_target(target, damage);
             }
@@ -382,6 +421,32 @@ impl Game {
         let against = |e: &&Enemy| e.alive() && e.faction == Faction::Hostile;
         self.enemies.iter().filter(against).count()
     }
+}
+
+/// A shot that struck no target: only something solid gives it a normal.
+fn solid_struck(normal: Vec3, mover: Option<usize>) -> Struck {
+    match mover {
+        Some(i) => Struck::Mover(i),
+        None if normal == Vec3::ZERO => Struck::Nothing,
+        None => Struck::Wall,
+    }
+}
+
+/// Reports the shot of enemy `i`, if it fired this step; `aimed` is what it
+/// strikes if it reaches its target.
+fn report_enemy_shot(events: &mut Vec<Event>, i: usize, enemy: &Enemy, aimed: Struck) {
+    let Some(shot) = enemy.last_shot else { return };
+    events.push(Event::EnemyFired(i));
+    events.push(Event::Shot {
+        shooter: Shooter::Enemy(i),
+        origin: enemy.pos(),
+        end: shot.point,
+        normal: shot.normal,
+        struck: match shot.target {
+            Some(_) => aimed,
+            None => solid_struck(shot.normal, shot.mover),
+        },
+    });
 }
 
 fn spawn(arena: &Arena) -> (Player, Vec<Enemy>) {

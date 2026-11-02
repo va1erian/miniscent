@@ -4,9 +4,11 @@ use mscent_math::Vec3;
 
 use crate::camera::Camera;
 use crate::draw2d::{draw_text, fill_rect, stroke_rect};
+use crate::dynlight::DynLight;
 use crate::framebuffer::Framebuffer;
 use crate::mesh::{Mesh, MeshLighting, Pose, fill_meshes, list_mesh};
 use crate::raster::PolyList;
+use crate::scene::Scene;
 use crate::shade::Fog;
 use crate::texture::Texture;
 
@@ -33,6 +35,24 @@ pub struct Actor {
 
 /// Meshes are modelled about a unit wide; this makes them read at a distance.
 const ACTOR_SCALE: f32 = 1.5;
+
+/// What lights actors beyond the level's own lights: the lights of the frame
+/// and a copy of the level's lighting to add them to, whose first `base`
+/// points are the level's.
+pub(super) struct LitActors<'a> {
+    pub scene: &'a Scene,
+    pub lights: &'a [DynLight],
+    pub lighting: &'a mut MeshLighting,
+    pub base: usize,
+}
+
+fn pose_of(a: &Actor) -> Pose {
+    Pose {
+        pos: a.pos,
+        yaw: a.yaw,
+        scale: ACTOR_SCALE,
+    }
+}
 
 /// Meshes for the actor kinds, built once.
 pub(super) struct ActorMeshes {
@@ -61,6 +81,18 @@ impl ActorMeshes {
         }
     }
 
+    fn mesh_of(&self, kind: ActorKind) -> &Mesh {
+        match kind {
+            ActorKind::Enemy => &self.enemy,
+            ActorKind::Goal => &self.goal,
+            ActorKind::Friendly => &self.friendly,
+            ActorKind::Switch => &self.switch,
+            ActorKind::Keycard => &self.keycard,
+            ActorKind::Terminal => &self.terminal,
+            ActorKind::Crate => &self.crate_box,
+        }
+    }
+
     /// Replaces `list` with this frame's actor triangles.
     pub(super) fn list(
         &self,
@@ -71,21 +103,52 @@ impl ActorMeshes {
     ) {
         list.clear();
         for a in actors {
-            let mesh = match a.kind {
-                ActorKind::Enemy => &self.enemy,
-                ActorKind::Goal => &self.goal,
-                ActorKind::Friendly => &self.friendly,
-                ActorKind::Switch => &self.switch,
-                ActorKind::Keycard => &self.keycard,
-                ActorKind::Terminal => &self.terminal,
-                ActorKind::Crate => &self.crate_box,
-            };
-            let pose = Pose {
-                pos: a.pos,
-                yaw: a.yaw,
-                scale: ACTOR_SCALE,
-            };
-            list_mesh(cam, mesh, &pose, lighting, &self.carrier, list);
+            let pose = pose_of(a);
+            list_mesh(
+                cam,
+                self.mesh_of(a.kind),
+                &pose,
+                lighting,
+                &self.carrier,
+                list,
+            );
+        }
+    }
+
+    /// Like [`Self::list`], with each actor also lit by the dynamic lights
+    /// that reach the leaf it stands in, so a flash behind a wall does not
+    /// light it.
+    pub(super) fn list_lit(
+        &self,
+        cam: &Camera,
+        actors: &[Actor],
+        lit: LitActors,
+        list: &mut PolyList,
+    ) {
+        list.clear();
+        let LitActors {
+            scene,
+            lights,
+            lighting,
+            base,
+        } = lit;
+        for a in actors {
+            lighting.points.truncate(base);
+            let leaf = scene.bsp().leaf_at_f32(a.pos);
+            let reaching = lights
+                .iter()
+                .filter(|l| l.is_lit() && l.reaches_leaf(leaf))
+                .map(DynLight::mesh_light);
+            lighting.points.extend(reaching);
+            let pose = pose_of(a);
+            list_mesh(
+                cam,
+                self.mesh_of(a.kind),
+                &pose,
+                lighting,
+                &self.carrier,
+                list,
+            );
         }
     }
 

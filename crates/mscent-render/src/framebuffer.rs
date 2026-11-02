@@ -52,6 +52,45 @@ impl Framebuffer {
         Some(band)
     }
 
+    /// Remake this buffer as another band, reusing its storage: nothing is
+    /// allocated unless the new band is larger than any it has held. Colour
+    /// and depth are left as they were, for a caller that writes what it
+    /// reads. `None`, leaving the buffer as it was, for a band
+    /// [`Self::new_band`] would refuse.
+    pub(crate) fn reshape_band(
+        &mut self,
+        width: u32,
+        y0: u32,
+        rows: u32,
+        full_height: u32,
+    ) -> Option<()> {
+        let ok = |s: u32| (1..=MAX_SIDE).contains(&s);
+        if !ok(width) || !ok(rows) || y0.checked_add(rows)? > full_height {
+            return None;
+        }
+        let n = width as usize * rows as usize;
+        self.color.resize(n, 0xff00_0000);
+        self.depth.resize(n, 0.0);
+        (self.width, self.height) = (width, rows);
+        (self.y0, self.full_height) = (y0, full_height);
+        Some(())
+    }
+
+    /// Height of the whole target this buffer is a part of.
+    pub(crate) fn full_height(&self) -> u32 {
+        self.full_height
+    }
+
+    /// Stored `1/z` of screen row `y`, if this buffer holds it.
+    pub(crate) fn depth_row(&self, y: i32) -> Option<&[f32]> {
+        let y = usize::try_from(y)
+            .ok()?
+            .checked_sub(self.y0 as usize)
+            .filter(|&y| y < self.height as usize)?;
+        let w = self.width as usize;
+        self.depth.get(y * w..(y + 1) * w)
+    }
+
     /// Screen rows `start..end` this buffer holds.
     pub(crate) fn row_range(&self) -> (i32, i32) {
         (self.y0 as i32, (self.y0 + self.height) as i32)

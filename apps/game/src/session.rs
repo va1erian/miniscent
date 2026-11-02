@@ -9,27 +9,30 @@
 use std::time::Duration;
 
 use mscent_collide::FixedStepper;
+use mscent_game::fx::combat::{CombatFx, DRONE_TINT, ViewKick};
 use mscent_game::{
-    Arena, Event as GameEvent, Game, HudModel, LoadError, Menu, MenuAction, MenuCommand, Phase,
-    Screen, draw_hud, draw_menu,
+    Arena, Event as GameEvent, Game, LoadError, Menu, MenuAction, MenuCommand, Phase, Screen,
 };
 use mscent_math::{Quat, Vec3};
 use mscent_platform::{Event, Key, MouseButton};
+use mscent_render::particles::{ParticleDraws, SpriteBank};
 use mscent_render::{
     BakeCache, BuildConfig, BuildError, Framebuffer, LevelRenderer, MaterialTable, Quality, View,
-    draw_text, fill_rect,
 };
 use mscent_world::Level;
 
 use crate::controls::Controls;
-use crate::drawn::{actors_of, mover_poses_of};
 use crate::feedback::Feedback;
 use crate::notices::Notices;
 use mscent_script::{ScriptError, Source};
 
+mod frame;
+mod overlay;
+mod shots;
+
 /// Radians of turn per pixel of mouse movement.
 const DEFAULT_SENSITIVITY: f32 = 0.0022;
-/// Frames a muzzle flash or hit marker stays on screen.
+/// Frames a hit marker stays on screen.
 const FLASH_FRAMES: u32 = 6;
 
 /// How a session is built and drawn.
@@ -97,28 +100,14 @@ pub struct GameSession {
     sensitivity: f32,
     stats: FrameStats,
     fb: Option<Framebuffer>,
-    muzzle: u32,
     hit: u32,
     kill: u32,
     feedback: Feedback,
+    fx: CombatFx,
+    draws: ParticleDraws,
+    bank: SpriteBank,
+    kick: ViewKick,
     notices: Notices,
-}
-
-/// Cheap interpolation between nearby orientations.
-fn nlerp(a: Quat, b: Quat, t: f32) -> Quat {
-    let sign = if a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w < 0.0 {
-        -1.0
-    } else {
-        1.0
-    };
-    let mix = |p: f32, q: f32| p + (q * sign - p) * t;
-    Quat {
-        x: mix(a.x, b.x),
-        y: mix(a.y, b.y),
-        z: mix(a.z, b.z),
-        w: mix(a.w, b.w),
-    }
-    .normalized()
 }
 
 /// The game library keeps the camera frame (view along -Z); the level is
@@ -173,6 +162,8 @@ impl GameSession {
         let mut menu = Menu::new();
         // Item 0 of the main menu is "Start".
         menu.press(MenuCommand::Select);
+        let mut fx = CombatFx::new();
+        fx.set_quality(cfg.quality);
         Self {
             prev_orientation: game.player.orientation,
             game,
@@ -184,10 +175,13 @@ impl GameSession {
             sensitivity: cfg.mouse_sensitivity,
             stats: FrameStats::default(),
             fb: None,
-            muzzle: 0,
             hit: 0,
             kill: 0,
             feedback: Feedback::default(),
+            fx,
+            draws: CombatFx::new_draws(),
+            bank: SpriteBank::new(),
+            kick: ViewKick::default(),
             notices: Notices::default(),
         }
     }
@@ -196,6 +190,12 @@ impl GameSession {
     /// lighting for the same level arrives while it is being played.
     pub fn set_renderer(&mut self, renderer: LevelRenderer) {
         self.renderer = renderer;
+    }
+
+    /// Sets off a blast. Nothing in the game does this yet; damage from one is
+    /// a separate gameplay item, and the effect waits for it.
+    pub fn blast(&mut self, pos: Vec3, radius: f32) {
+        self.fx.blast(pos, radius, &self.game.arena.bsp);
     }
 
     /// The game and the renderer, taken apart again.
@@ -226,6 +226,7 @@ impl GameSession {
 
     pub fn set_quality(&mut self, quality: Quality) {
         self.quality = quality;
+        self.fx.set_quality(quality);
     }
 
     pub fn set_stats(&mut self, stats: FrameStats) {
@@ -257,8 +258,9 @@ impl GameSession {
         self.controls.release_all();
         self.menu = Menu::new();
         self.menu.press(MenuCommand::Select);
-        (self.muzzle, self.hit, self.kill) = (0, 0, 0);
+        (self.hit, self.kill) = (0, 0);
         self.feedback.clear();
+        self.fx.clear();
         self.notices.clear();
     }
 
@@ -272,6 +274,13 @@ impl GameSession {
         let mut quit = false;
         for e in events {
             quit |= self.on_event(e);
+        }
+        // Before this step's shots, so a new bolt is drawn before it ages. The
+        // clock runs past the end of a level so a fatal explosion finishes, and
+        // stops only on the pause menu.
+        if self.menu.screen() != Screen::Paused {
+            let ns = u64::try_from(dt.as_nanos()).unwrap_or(u64::MAX);
+            self.fx.advance(ns, &self.game.arena.bsp);
         }
         if self.playing() {
             self.look();
@@ -393,78 +402,23 @@ impl GameSession {
     fn note_events(&mut self) {
         for e in self.game.take_events() {
             match e {
-                GameEvent::PlayerFired => self.muzzle = FLASH_FRAMES,
                 GameEvent::EnemyHit(_) => self.hit = FLASH_FRAMES,
-                GameEvent::EnemyKilled(_) => self.kill = FLASH_FRAMES * 2,
+                GameEvent::EnemyKilled(i) => {
+                    self.kill = FLASH_FRAMES * 2;
+                    if let Some(enemy) = self.game.enemies.get(i) {
+                        self.fx.drone_explosion(enemy.pos(), DRONE_TINT);
+                    }
+                }
+                GameEvent::Shot {
+                    shooter,
+                    origin,
+                    end,
+                    normal,
+                    struck,
+                } => self.shot_effect(shooter, origin, end, normal, struck),
                 _ => {}
             }
             self.feedback.note(&self.game, &e);
         }
-    }
-
-    /// The camera for this frame, interpolated between the last two steps.
-    pub fn view(&self) -> View {
-        let alpha = self.stepper.alpha();
-        let p = &self.game.player;
-        View {
-            pos: p.body.prev_pos.lerp(p.body.pos, alpha) + p.bob_offset(),
-            orientation: (nlerp(self.prev_orientation, p.orientation, alpha) * p.bank_rotation())
-                .normalized(),
-        }
-    }
-
-    /// Draws the current state at `width` x `height`: world, HUD, feedback
-    /// and menus. `None` when the size is zero or the pose is invalid.
-    pub fn render(&mut self, width: u32, height: u32) -> Option<&Framebuffer> {
-        if self.fb.as_ref().map(|f| (f.width(), f.height())) != Some((width, height)) {
-            self.fb = Some(Framebuffer::new(width, height)?);
-        }
-        let view = self.view();
-        let alpha = self.stepper.alpha();
-        let actors = actors_of(&self.game, alpha);
-        let poses = mover_poses_of(&self.game, alpha);
-        let mut fb = self.fb.take()?;
-        let drawn = self
-            .renderer
-            .render_posed(&mut fb, &view, self.quality, &actors, None, &poses);
-        if drawn.is_some() {
-            let fov = self.renderer.config().fov_y;
-            self.feedback.draw(&mut fb, &view, fov);
-            self.draw_overlays(&mut fb);
-            self.notices.draw(&mut fb);
-        }
-        self.muzzle = self.muzzle.saturating_sub(1);
-        self.hit = self.hit.saturating_sub(1);
-        self.kill = self.kill.saturating_sub(1);
-        self.fb = Some(fb);
-        drawn.and(self.fb.as_ref())
-    }
-
-    fn draw_overlays(&self, fb: &mut Framebuffer) {
-        draw_hud(fb, &HudModel::from_game(&self.game));
-        let (w, h) = (fb.width() as i32, fb.height() as i32);
-        let stats = format!("{:.0} FPS {:.1} MS", self.stats.fps, self.stats.frame_ms);
-        let size = mscent_render::text_size(&stats, 1);
-        draw_text(fb, w - size.0 as i32 - 8, 8, &stats, 0xffff_ffff, 1);
-        if self.muzzle > 0 {
-            fill_rect(fb, w / 2 - 3, h - 34, 6, 18, 0xffff_e060);
-            fill_rect(fb, w / 2 - 8, h - 28, 16, 6, 0xffff_a030);
-        }
-        let (cx, cy) = (w / 2, h / 2);
-        if self.hit > 0 {
-            fill_rect(fb, cx - 9, cy - 9, 4, 4, 0xffff_3030);
-            fill_rect(fb, cx + 6, cy - 9, 4, 4, 0xffff_3030);
-            fill_rect(fb, cx - 9, cy + 6, 4, 4, 0xffff_3030);
-            fill_rect(fb, cx + 6, cy + 6, 4, 4, 0xffff_3030);
-        }
-        if self.kill > 0 {
-            draw_text(fb, cx - 12, cy + 16, "KILL", 0xffff_d040, 1);
-        }
-        if self.menu.screen() == Screen::Won || self.menu.screen() == Screen::Lost {
-            let hint = "R TO RESTART";
-            let tw = mscent_render::text_size(hint, 1).0 as i32;
-            draw_text(fb, (w - tw) / 2, h - 24, hint, 0xffc0_c0c0, 1);
-        }
-        draw_menu(fb, &self.menu);
     }
 }

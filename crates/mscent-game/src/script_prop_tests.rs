@@ -271,6 +271,57 @@ fn a_friendly_behind_a_door_does_not_shield_the_player_in_the_open() {
     no_errors(&mut game);
 }
 
+/// What the shots of this step struck, by who fired them.
+fn struck_by(game: &mut Game) -> Vec<(crate::Shooter, crate::Struck)> {
+    let events = game.take_events().into_iter();
+    events
+        .filter_map(|e| match e {
+            crate::Event::Shot {
+                shooter, struck, ..
+            } => Some((shooter, struck)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_shot_at_a_prop_says_it_struck_the_prop() {
+    let named: Vec<(Entity, &str, &[&str])> = vec![(marker(4.0, 0.0), "spot", &[])];
+    let src = "spawn: 'crate' at: (marker: 'spot') tag: 'c'.";
+    let mut game = game_on(&level(named), src);
+    game.take_events();
+    game.step(&crate::Input {
+        fire: true,
+        ..crate::Input::default()
+    });
+    let struck = struck_by(&mut game);
+    assert!(
+        struck.contains(&(crate::Shooter::Player, crate::Struck::Prop(0))),
+        "{struck:?}"
+    );
+    no_errors(&mut game);
+}
+
+#[test]
+fn a_friendly_shooting_a_foe_shows_it_as_a_shot_at_that_foe() {
+    let named: Vec<(Entity, &str, &[&str])> = vec![
+        (enemy(v(8.0, 0.0, 0.0)), "foe", &[]),
+        (enemy(v(12.0, 0.0, 0.0)), "", &["pal"]),
+    ];
+    let src = "(tagged: 'pal') setFaction: 'friendly'.";
+    let mut game = game_on(&level(named), src);
+    let mut seen = Vec::new();
+    for _ in 0..600 {
+        game.step(&crate::Input::default());
+        seen.extend(struck_by(&mut game));
+    }
+    assert!(
+        seen.contains(&(crate::Shooter::Enemy(1), crate::Struck::Enemy(0))),
+        "{seen:?}"
+    );
+    no_errors(&mut game);
+}
+
 #[test]
 fn bad_prop_requests_are_errors_on_their_line() {
     for (src, wanted) in [

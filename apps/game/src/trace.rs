@@ -34,7 +34,7 @@ fn event_fields(game: &Game, event: &Event) -> Option<String> {
         format!("\"ev\":\"{ev}\",\"{field}\":\"{name}\"")
     };
     Some(match *event {
-        Event::EnemyFired(_) | Event::PlayerFired => return None,
+        Event::EnemyFired(_) | Event::PlayerFired | Event::Shot { .. } => return None,
         Event::EnemyHit(i) => named("hit", "who", "enemy", i),
         Event::EnemyKilled(i) => named("destroyed", "who", "enemy", i),
         Event::PlayerHurt(n) => format!("\"ev\":\"hurt\",\"damage\":{n}"),

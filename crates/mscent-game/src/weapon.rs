@@ -20,6 +20,8 @@ pub struct Shot {
     pub hit: Option<usize>,
     pub killed: bool,
     pub point: Vec3,
+    /// Unit normal of what was struck; zero when nothing was.
+    pub normal: Vec3,
     /// Mover struck, if any.
     pub mover: Option<usize>,
     /// Prop struck, if any.
@@ -78,6 +80,7 @@ impl Weapon {
             hit,
             killed,
             point: result.point,
+            normal: result.normal,
             mover: result.mover,
             prop,
             prop_destroyed,

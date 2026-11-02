@@ -127,7 +127,8 @@ impl LevelRenderer {
             let Some(face) = scene.faces().get(index) else {
                 continue;
             };
-            let mut shader = self.face_shader(index, face, eye, quality);
+            // Lights reach faces through leaves, and a mover's belong to none.
+            let mut shader = self.face_shader(index, face, eye, quality, &[]);
             let texture = scene.texture_of(face.material);
             let st = list.polys.fill(fb, poly, texture, &mut shader);
             total.pixels += st.pixels;

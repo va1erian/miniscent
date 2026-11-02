@@ -107,7 +107,8 @@ pub fn lerp_toward_with(level: Level, pixels: &mut [u32], color: u32, t: u32) {
     }
 }
 
-fn usable(level: Level) -> Level {
+/// `level` if this CPU can run it, else the scalar level.
+pub(crate) fn usable(level: Level) -> Level {
     if level.is_supported() {
         level
     } else {

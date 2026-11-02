@@ -1,10 +1,11 @@
 # Particles: combat effects in a software renderer
 
-Design; of its work items only M9.0 is built. It replaces the screen-space tracer in
+M9.0 to M9.8 are built, with the gaps each section lists. It replaces the screen-space tracer that was in
 [`apps/game/src/feedback.rs`](../apps/game/src/feedback.rs) with a world-space particle system
 that covers the shots, hits and explosions of combat and can later serve a destructible brush.
+See [What was built](#what-was-built-m91-to-m93) for where the code differs from this design.
 
-## What is there now
+## What was there before
 
 - **Enemy shots.** `Feedback` draws a dotted 2D line from the projected enemy to a fixed screen
   point (`w/2, h*0.62`), plus a square muzzle flash. Both ignore depth, so they show through walls,
@@ -144,6 +145,477 @@ the slot the particle pass takes.
 `LAZYOS_SMP=1` runs one core, and where threads in user code are still unproven (M1.3). The plan
 requires a working one-worker path there, so the minimum belongs to the default, and
 `LevelRenderer::set_tiling` is the override the LazyOS backend passes; no backend passes it yet.
+
+## What was built (M9.1 to M9.3)
+
+`crates/mscent-render/src/particles/` draws and `crates/mscent-game/src/fx/` simulates, as designed.
+There is no dynamic light yet (M9.5).
+
+Measured with `cargo run --release -p mscent-render --example fx_bench` (640x360, one thread, dev
+machine). These replace the prototype figures in the table above where they differ:
+
+| Operation | Scalar | SSE2 | AVX2 |
+|---|---|---|---|
+| Additive sprite, ns per bbox pixel | 1.34 to 1.39 | 0.54 to 0.56 | 0.45 |
+| "Over" sprite, ns per bbox pixel | 1.79 to 1.88 | 0.67 to 0.70 | 0.53 |
+| Fully occluded sprite, ns per bbox pixel | 0.08 | 0.08 | 0.08 |
+
+Visible fill is about three times the prototype additive figure and 1.7 times its "over" figure,
+because these numbers include fetching the mask through the u-table. The budget weights in M9.4
+should come from this table. A spark costs 45 / 113 / 367 ns at 4 / 16 / 64 px, width 1 (about 5.7
+ns/px at 64 px, against the prototype's 2.3).
+
+**Sprite setup, the open risk from the design, is real.** A 2 px sprite costs 42 ns and a 16 px one
+375 ns, about 35 ns plus 20 ns per row. 4096 sprites of 2 to 4 px would cost about 0.2 to 0.3 ms, so
+M9.4 should cost small sprites by count as well as area, or draw them as points.
+
+The simulation ticks 4096 uncollided particles in 21 us, about 4 times the prototype, because each
+particle also has validity checks and a world bound. At the collision limits, about 3200 live
+particles of mixed classes tick in 56 us, inside the 90 us the design allowed.
+
+Where the code differs from the design:
+
+- **Bounce uses `is_solid` bisection, not `sweep_sphere`.** `sweep_sphere` allocates on every call,
+  which would break the zero-allocation promise. A bounce bisects the step 20 times and takes the
+  normal from six axis probes: exact for axis-aligned and 45 degree walls, coarse for other slopes.
+  Each query counts as one of the 32 "sweeps"; its extra `is_solid` calls (up to 28) do not count
+  against the 512.
+- **Over the test limit a bouncing particle dies** instead of skipping the test, since skipping
+  could leave it in solid. Bouncing classes step first, so this needs more than 512 of them.
+- **`Scene::material_at` became `Scene::surface_at`** and returns the material and its mean colour.
+- **Chips and shards are small soft sprites** until polygon shards arrive with M9.6.
+- **The drone explosion's tables landed in M9.3**, ahead of M9.6, because every primitive it needs
+  exists and a kill otherwise just removes the mesh. It has no light yet, and its smoke is not lit.
+- **Particles draw in the scene's band pass**, not a second one, which saves a dispatch. M9.2's
+  collect runs before the frame, so M9.4's depth probes will need a pass of their own.
+- **A hit on the player spawns no impact**, since it would burst inside the camera.
+- **`Enemy::step` clears `last_shot` before its alive check.** The old `fired` flag stayed set on an
+  enemy killed the step after it fired, so it reported `EnemyFired` on every later step.
+
+The pre-PR review of this work found these, now fixed: an enemy's flash was drawn inside its own hull
+and never showed; a landed chip spent a surface query each tick until the limit killed its neighbours
+(it now rests, `PARTICLE_REST_SPEED`); the draw lists grew during play, so they now start at the size
+of the fullest frame; debris was blue-grey on a red drone; a streak could draw one extra row at a
+band edge; `clear` kept the generator's state, so a restart did not replay its effects; and three
+tests could pass without the bolt, the particles or `contains` doing their work.
+
+Evidence: `particles/*_tests.rs`, `fx_tests.rs`, `fx_collide_tests.rs`, `fx_combat_tests.rs`,
+`surface_tests.rs`, `tests/fx_alloc.rs`, `tests/fx_collect_alloc.rs` and `apps/game/tests/combat_fx.rs`,
+which draws through a real baked level: a shot behind a wall changes no pixels (the same effects in
+the open change more than 100), a bolt alone does the same, metal and brick give different pictures,
+an enemy's flash shows in front of its hull, and a scripted shot is pixel-identical twice while its
+bolt is on screen. Screenshots of a kill and a close wall hit were looked at during development.
+Not tested: a real window, the i3-7100U, or whether the recipes look right to a person who plays it.
+
+## What was built (M9.4)
+
+`crates/mscent-game/src/fx/budget.rs` fits each frame to the budget during collect: it costs every
+draw, cuts Cosmetic and then Normal by key, and never touches Essential. Measured with
+`cargo run --release -p mscent-game --example fx_budget_bench` (40 drone explosions, 640x360, one
+thread, AVX2 on the dev machine, no scene behind them):
+
+| Quality | Spent of budget, screens | Sprites, streaks | Collect | Draw | ns per unit |
+|---|---|---|---|---|---|
+| High | 4.82 of 5.0 | 76, 149 | 15 us | 0.48 ms | 0.43 |
+| Medium | 2.94 of 3.0 | 55, 116 | 16 us | 0.28 ms | 0.41 |
+| Low | 1.21 of 1.5 | 37, 145 | 18 us | 0.12 ms | 0.40 to 0.43 |
+
+The ns per unit holding steady across all three, close to the 0.45 ns of an AVX2 additive pixel, is
+what says the weights are about right. At that rate High's 5 screens are about 0.5 ms on the dev
+machine, or 2.5 ms on the reference at the 5x guess. This is not a run on the i3-7100U.
+
+Where the code differs from the design below:
+
+- **The weights are the measured ones**: "over" 1.25, streak pixels 10, plus 64 per sprite and 36 per
+  row, which covers the small-sprite setup M9.1 found. The design's 1.7 and 5.8 came from prototypes.
+- **Depth probes read the last frame.** Collect runs before the scene is drawn, because particles
+  share its band pass, and a second dispatch would cost more than the probes save. A wrong probe
+  charges the wrong amount for one frame and changes no pixel beyond the thinning it causes.
+- **`keep` falls at once and climbs over about a second**, rather than a two-way low-pass, so the
+  budget holds on the frame of the spike. `keep` moves per frame, so it follows the frame rate. So a
+  frame overcharged by a wrong probe pays for about a second, not one frame. That happens when the
+  adaptive controller changes resolution mid-fight, since a new framebuffer has no depth to probe. It
+  cannot happen in a scripted run, and the visible effect is not measured.
+- **The first cut can pop slightly.** Going from nothing thinned to a cut puts keys inside the fade
+  at once. Not yet seen in a picture.
+- **Spawn density is by key, with no distance rule.** Quality thins Normal and Cosmetic at birth.
+  Fewer spawns at a distance and none beyond fog are not built: collect already drops fogged
+  particles, so that saves simulation only, which costs little.
+
+Not built, and needed before this design is finished:
+
+- **The adaptive multiplier.** The particle pass runs inside the scene's bands, so nothing times it
+  apart from the scene yet.
+- **Hiding particle cost from the resolution controller**, for the same reason. Until then a big
+  explosion can lower the internal resolution for a while after it ends. Not measured.
+- **Moving large sprites to the half-res layer** arrives with the layer, in M9.6.
+
+## What was built (M9.7)
+
+A shot that strikes a wall leaves a dark mark that stays on its face, in a ring of 64.
+
+- `mscent-game/src/fx/decal.rs`: `Decal` (a convex polygon of at most 12 points on the struck plane),
+  `FaceOutline` (the plane and the inward edge half-spaces of a `Face`, up to 24 edges) and the
+  `Decals` ring. Storage is a fixed array, the 65th mark replaces the first, and nothing allocates.
+  `CombatFx::shot_on(shot, Some(&outline))` cuts the mark to its face once, when the shot is made;
+  `shot` is the same without a face. The mark is added when the bolt arrives, and `clear` empties
+  the ring. The session gets the face from the new `Scene::face_at`, which `surface_at` now uses.
+- `recipes::surface_mark(material)`: half-side and darkness per material, next to the hit rows.
+  Metal is the smallest (0.18 against 0.38 for brick), a light panel only dims.
+- `mscent-render/src/particles/decal.rs`: `ParticleDraws::decals` holds `DecalDraw`s, drawn before
+  every sprite in the same band pass. A pixel is darkened by a puff mask from the bank, multiplied
+  into the colour, and depth is read, never written. `1/z`, `s/z` and `t/z` are fitted as planes
+  through the polygon's points, so a pixel is the same in a band as in a whole frame, and the mask
+  position is exact every 16 pixels. A decal seen from behind is dropped when it is projected.
+- The depth bias is `epsilon::DECAL_DEPTH_BIAS`, relative: 0.2% of `1/z`. The mark lies in the
+  wall's plane, so what it has to absorb is rounding, and the margin is wide. With the bias at 1e-4
+  the tests in `apps/game/tests/decals.rs` still passed; at zero the flicker test failed, with the
+  mark breaking up between adjacent camera positions.
+- Fog scales a mark's darkness by the fade, the way an "over" tint is faded, because a black mark
+  in fog would stand out from the haze around it.
+
+**Cost**, `cargo run --release -p mscent-render --example fx_bench`, 640x360, one thread, dev
+machine, measured per pixel of the polygon over a wall:
+
+| Case | ns per pixel | ns per decal |
+|---|---|---|
+| 1 decal, 320 px | 3.6 | |
+| 1 decal, 80 px | 3.8 | 24,300 |
+| 64 decals, 40 px | 4.1 | 6,500 |
+| 64 decals, 16 px | 4.7 | 1,200 |
+| 64 decals, 40 px, hidden behind the scene | 1.2 | 1,900 |
+| 64 decals, 16 px, hidden | 1.9 | 480 |
+
+That is about 8 times an additive pixel (0.46 to 0.55 ns), because the row loop is scalar. `Tally`
+charges 7.5 units per pixel of screen area plus 550 per decal as Essential (`budget.rs`). A whole
+ring of 40 px marks all in view is 0.42 ms on the dev machine, about 2 ms on the reference at the 5x
+guess, before the bands split it.
+
+**Decals are never thinned, so they have a bound of their own**: `Decals::collect` walks the ring
+newest first and stops once the marks fill half a screen. Without it, 64 marks piled up against a
+wall next to the player could each cover the whole frame.
+
+Tests: `crates/mscent-render/src/particles/decal_tests.rs` (bias, bands, no depth write, hostile
+values), `crates/mscent-game/src/fx_decal_tests.rs` (ring, clipping, fog, facing, area cap, hostile
+values), `crates/mscent-game/tests/fx_collect_alloc.rs` (a full ring of marks in view collects with
+zero allocations) and `apps/game/tests/decals.rs`, through a real baked level: from six views every
+changed pixel reconstructs, from the depth buffer, to a point on the pillar's face inside the mark's
+square and inside the face; the same mark uncut changes pixels off the face; a mark behind a wall is
+in the draw list and changes no pixel; the pixel sets of 40 adjacent camera positions along three
+paths flip by under 0.5%; one worker and four give the same pixels at four tilings.
+
+Where it differs from the design above:
+
+- **No hot glow on metal.** Left out: the metal hit row already has a glow sprite that lasts 0.4 s.
+- **Clipped to the face, not to the world.** A mark on one face of a coplanar pair with another
+  material stops at the seam. A face with more than 24 distinct edges is not clipped. A cut that
+  would pass 12 points is skipped, so the mark can be a little over that edge, never invalid.
+- **A concave corner needs no clip.** A mark that runs past a wall into the next is behind that
+  wall's surface and loses the depth test. The cut matters at convex edges and ledges, where the
+  overhang would hang in the air, so the test uses a pillar.
+- **A mark is not lit.** It multiplies the finished pixel, so it darkens a lit wall by the same
+  fraction as an unlit one.
+- **Looked at once.** One screenshot of brick-wall shots at a glancing angle (below). Metal, rock,
+  floor and light panel marks, a face-on view and a moving camera were not looked at by a person.
+
+Seen in a screenshot of the start room (a script firing at the near brick wall, 640x360): three
+near-black marks with soft, ragged edges lying along the wall, stretched by perspective to follow
+its slant, each about the size of a brick and running across mortar lines and bricks alike. They
+are very dark; the darkness values are starting points like the rest of the recipes.
+
+## What was built (M9.5)
+
+A face within reach of a light and facing it gets the lit variant of `LightingShader`, as designed;
+every other face runs the code it ran before. `DynLight` (`dynlight.rs`) is a point light that has
+been placed in a level: `place` floods the portals from its leaf once and keeps the leaves and the
+faces it reaches (`Scene::light_reach`, `scene/reach.rs`), so a frame tests one bit per face. The
+renderer takes the lights as a read-only slice, `LevelRenderer::render_with_effects(.., &Effects {
+particles, lights })`, and `render_with_particles` is that with no lights. `CombatFx` owns the
+lights (`fx/lights.rs`), fades them on the particle clock, and hands them out with
+`CombatFx::lights(scene)`. `Game` never sees them.
+
+Measured with `cargo run --release -p mscent-render --example light_bench` (new; 640x360, one
+thread, High, dev machine). The camera is 3 units from a wall that fills the frame, which is 14400
+spans, with 1, 2 or 4 lights in front of it; the figures are the frame time with the lights minus
+the frame time without, and the same per span:
+
+| Lights | Bright (colour 1.0, 0.8, 0.5) | Dim (5% of that) |
+|---|---|---|
+| none | 5.76 ms | 5.80 ms |
+| 1 | +0.28 ms, 19 ns per span | +0.21 ms, 15 ns per span |
+| 2 | +0.63 ms, 44 ns per span | +0.26 ms, 18 ns per span |
+| 4 | +0.98 ms, 68 ns per span | +0.35 ms, 25 ns per span |
+
+**The estimate of 100 to 150 us was wrong.** One light across the whole screen is 0.2 to 0.3 ms,
+about twice that, and four bright ones are about 1 ms. The dim column is the light's own cost: the
+sum at both span ends and the add across the span. The bright column pays more because the sum
+pushes pixels over the knee of `soft_limit`, which divides three times per pixel (baked bright
+pools pay that too). I did not run it with the roll-off removed, so that split is an inference. At
+the 5x guess for the reference machine this is 1.4 ms for one light and 5 ms for four bright ones,
+in the worst case of every pixel on screen lit. A flash covers part of the view for 0.1 to 0.25 s,
+so a frame is usually far below that, but the case is not measured. The screen-space fallback was
+221 us for all lights, so at four bright lights over the whole screen this is about four times
+worse; I did not switch to it, and M9.6 should look at the peak frame of `Blast` before deciding.
+
+**No cost with no light.** Every number here is the dev machine, and the runs were interleaved with
+a build of 7b4692d made for the purpose:
+
+- `light_bench --lights 0`, which goes through `LevelRenderer` and the lightmap shader: 5.768,
+  6.094, 6.679 and 5.798 ms at 7b4692d against 5.745, 6.318, 5.942 and 5.824 ms now (four pairs,
+  best of nine batches each; the spread is the machine's).
+- `frame_bench` (`cargo run --release -p mscent-render --example frame_bench -- --batches 11`),
+  three pairs: 1.423, 1.424, 1.426 ms before and 1.446, 1.438, 1.435 ms after, about 1% slower in
+  every pair. That bench draws through `Scene::render` and calls none of the code changed here, so
+  this is not a shader cost, but I did not find what it is.
+- The scripted flythrough PNGs at 2, 12 and 24 s (`--screenshot .. --script
+  apps/game/scripts/flythrough.txt --shots-at 2,12,24`) are byte-identical to 7b4692d's.
+- Allocations: 478 a frame at 160x90 on one worker with one drone, before, with no light, and with
+  two lights alive (`tests/dyn_light_alloc.rs`). Placing a second light into a `DynLight` that
+  held one allocates nothing.
+
+Where the code differs from the design above:
+
+- **The flood runs when the light is first drawn, not at the spawn.** A spawn has no scene (bolts
+  land inside `CombatFx::advance`, which holds only the BSP), so `CombatFx::lights(scene)` places
+  new lights, once each. It is per light, not per frame, and the bit sets are reused between
+  lights. The flood crosses a portal only if the light is on the right side of it and the portal's
+  box is within the radius; each leaf is visited once. A light in solid reaches nothing.
+- **A face is marked as well as a leaf**: in a reached leaf, in front of the light, and within the
+  radius of its plane. The frame never looks at leaves for walls.
+- **Meshes are tested by the leaf their centre is in**, so a drone beside a wall from a light is
+  not lit through it (`an_enemy_behind_a_wall_from_the_light_is_not_lit`). A mesh sees one
+  brightness, the mean of the colour, as the level's own lights do.
+- **A flash on a wall is lifted off it**: 0.6 units along the normal (0.5 for a drone), halved
+  twice if that lands in solid. At 0.05 off, `N.L` against that wall is near zero.
+- **Falloff is the mesh formula**, `(1 - d / radius)^2 * N.L`. A colour of 1.0 adds one plain
+  texture colour at point-blank range; the roll-off ends at about 1.17 of the texture, so a flash
+  cannot blow a wall out.
+- **Bump follows the baked light.** The dynamic light joins `col[]` before the bump gain, which is
+  computed from the baked light direction, so relief under a flash does not follow the flash.
+  Specular is not driven by it. Faces without a lightmap (light panels) take no dynamic light.
+- **Over the limit the dimmest gives way**, by current strength (colour sum times the fade), and
+  the new light competes: one dimmer than every light alive is dropped. `set_quality` drops the
+  dimmest at once when the limit falls.
+- **Lights age on the particle clock** with the same cap of four ticks per call, and fade as the
+  square of the time left. The session does not advance effects while paused, so lights freeze
+  with the particles. That is tested on `CombatFx` (`advance(0)` changes nothing) and not through a
+  paused `GameSession`.
+- **Recipes**: drone explosion radius 12, 0.25 s, colour (3.0, 1.8, 0.9); surface hit radius 4,
+  0.1 s, (1.0, 0.8, 0.5); drone hit radius 4, 0.1 s, (0.6, 0.95, 1.1). The explosion started at
+  1.5 and was doubled because the walls of the showcase room, 5 or more units from it, hardly
+  changed in a screenshot. At 3.0 the largest change of any channel in that frame (an explosion 3
+  units ahead of the camera, particles left out) is 19 of 255. No player has judged any of this,
+  and the effect on far brick is still subtle.
+- **Not built**: bolt-head lights, `Blast`, the half-res layer, shake, overlay (M9.6).
+
+Evidence: `face_points_tests.rs` (the formula, the four-light cap, hostile values, span steps),
+`dynlight_tests.rs` (reach through a split room and a corridor, the radius bound, hostile
+values), `fx_lights_tests.rs` (fade, limits, eviction, lift, replay), `tests/dyn_light_alloc.rs`,
+and `apps/game/tests/dynamic_lights.rs` on real pixels: a light brightens the wall facing it and
+changes nothing behind the viewer; a wall behind a wall is unchanged to the pixel, while the same
+light on the near side changes more than 10000 pixels; a mesh is lit and nothing outside it moves;
+a light that has faded out or never lit changes no pixel and matches `render_with_particles`;
+hostile lights do not panic; 1, 2, 3 and 8 workers give identical pixels with a light, two drones
+and an explosion's particles; the recipes spawn the lights above, at the arrival of the bolt and
+not at the muzzle. Mutating the shader or the mesh path to ignore the lights made the matching
+tests fail. Not tested: a real window, the i3-7100U, or a kill through a full session with the
+light on screen.
+
+## What was built (M9.6 and M9.8, except the layer)
+
+`CombatFx::blast(pos, radius, bsp)` and `CombatFx::shatter(bounds, material, tint)`, in
+`fx/combat/big.rs` with tables in `fx/recipes_big.rs`. Nothing in the game fires either; only
+`GameSession::blast`, the tests and the gallery do. `cargo run --release -p miniscent-game --example
+fx_gallery` writes a sheet per effect to `target/shots/fx/`, six frames from 0.03 to 2.5 s, and prints
+each effect's worst frame. On the dev machine at 640x360, High, on the default workers, over an empty
+frame of about 1.2 ms, with the half-res layer on:
+
+| Effect | Worst frame | Over empty | Budget spent, screens |
+|---|---|---|---|
+| A hit, by material | 1.50 to 1.62 ms | 0.28 to 0.40 ms | 0.07 to 0.08 |
+| Drone hit | 1.64 ms | 0.41 ms | 0.04 |
+| Drone explosion | 1.68 ms | 0.45 ms | 1.51 |
+| `Blast` | 1.77 to 1.82 ms | 0.55 to 0.64 ms | 4.98 of 5.0 |
+
+These are one run each, and a hit's "worst" falls at a frame where it is long over, so differences
+under about 0.3 ms are noise. **`Blast` peaks at 0.55 to 0.64 ms over the empty frame on all cores**,
+lights included. The design's 2.2 ms unbudgeted and 0.65 ms budgeted were for one thread, so this does
+not confirm them, and it is not the i3-7100U.
+
+The view (`CombatFx::view_kick`) takes a white overlay for 0.1 s and a shake of at most 0.15 units for
+0.5 s, weaker with distance out to three radii. A flood from the blast says which leaves can see it,
+so a blast behind a wall does neither. A shake that would enter a wall is dropped for that frame.
+
+What the sheets showed, looked at by the author and not by a player:
+
+- **A large fire sprite cuts the floor along a straight line.** Its one depth meets the floor at a
+  constant screen row, which is the risk under Decisions. It is plain on the `Blast` sheet at 0.25 s,
+  and it is what most needs a person's opinion; the next thing to try is the per-block fade.
+- **`Blast`'s smoke is faint** on the sheets, with the layer on as well as off, though the layer keeps
+  three times the sprites at the same cost. Its ramp's alpha is the place to start.
+- **A shatter is still faint** at 8 units. It read as nearly nothing with drone-chip sizes, so it got
+  its own classes, `SHARD` and `BRUSH_DUST`; on the sheet that is now grey dust and some small chips.
+  Its sizes and counts are the first thing to raise.
+
+Differences from the design:
+
+- **A sprite's world size does not scale with `radius`.** `EffectArgs::scale` spreads positions and
+  speeds. A blast of radius 4 still has fire and a ring sized for 12.
+- **Shards are still sprites**, not textured polygons, so debris does not look like brick up close.
+- **`Effect::Blast` and `Effect::Shatter` are methods**, since an `Effect` is a table and these also
+  set lights and the view.
+- **A shatter's debris scales in eight steps at most**, one per 8 cubic units.
+
+## What was built (M9.6 layer)
+
+Part of M9.6 only: the half-res layer. `Blast`, shake, the overlay and the gallery are elsewhere.
+
+**Drawing** (`crates/mscent-render/src/particles/layer.rs`). `ParticleDraws` has two more lists,
+`layer_over` (back to front, as given) and `layer_add`. The order is decals, layer, full-size
+"over", full-size additive, streaks. Each band draws its own part inside the existing pass
+(`draw_particles_with`), with no second dispatch:
+
+1. Take the union of the layered sprites' boxes in layer pixels. If it is empty, stop: a band with
+   no layered sprite in it does nothing, and a frame with none does not touch the layer at all.
+2. Fill the layer's depth over that region from the band's, taking the nearest `1/z` of each 2x2
+   block, so a wall in front of a sprite is never painted over.
+3. Draw the sprites at half size (position and radius halved, same mask, the next mip down) into a
+   buffer that is itself a `Framebuffer`, so clipping, the mask table and the row loop are the
+   ones full-size sprites use. The kernels take a `Dest::Layer` that keeps the alpha byte: colour
+   accumulates in RGB, and the byte holds the product of what each sprite lets through, from 255.
+   "Over" is the existing formula with the tint's alpha zeroed in the colour term, so the same
+   multiply gives `alpha * keep >> 8`; "add" adds nothing to alpha. Nothing was copied: the x86
+   kernels gained a const generic `LAYER` (no source in the alpha lane, no forced 255), and the
+   scalar definitions the same.
+4. Composite by nearest-neighbour upscale, `dst = layer.rgb + dst * (alpha + 1) / 256` per
+   channel, saturating, the frame's own alpha untouched. Alpha 255 with colour 0 is the identity,
+   so an untouched layer pixel changes nothing and a vector of them is skipped.
+
+The depth downsample (SSE2) and the composite (SSE2 and AVX2, using `mulhi` for the multiply and
+`pshufb` for the keep factor) are bit-identical to scalar definitions, tested on random rows of
+every length with untouched pixels mixed in and exhaustively over keep (`layer_kernels_tests.rs`;
+`kernels_tests.rs` for the layer variants of the sprite kernels).
+
+A layer row stands for two screen rows, so a band holds the layer only if it starts on an even row
+and ends on an even row or at the bottom of the frame. **Any other band draws the layered sprites
+at full size instead**, in the same order. A tiling with odd band starts (7 rows, say) therefore
+gives a different picture from the default 24-row one, but never a different one for another
+worker count. An odd frame width or height is drawn up to the last row and column (the last layer
+pixel stands for one). The band's layer is a `thread_local` `Framebuffer` made on first use and
+reshaped in place after, so a frame allocates nothing (`tests/layer_alloc.rs`, and a test that the
+buffer keeps its address as bands change size).
+
+**Budget** (`fx/layer.rs`, step 4). `Limits::layer` is true for High and Medium. After costing, if
+the Normal plus Cosmetic cost does not fit what Essential leaves, `Gate::apply` considers every
+Normal or Cosmetic sprite over 64 px across that the scene does not hide (at least two of five
+depth probes see it; Essential stays crisp). It moves them only if their saving on the fill beats
+the layer's own cost for the union of their boxes, then costs again and computes `keep`. `Tally`,
+`thin`, `cost_of` and the tags treat the layer lists like the others, so a moved draw is costed as
+a layer draw and still fades and is cut by its key. Once needed, the layer is held for 30 frames (a
+frame count, so a script replays), because a scene at the edge would otherwise flip smoke between
+full and half size on adjacent frames. Nothing allocates: the lists and tags are sized to the
+fullest frame, and a move pushes at most what it removed. `CombatFx::set_layer` overrides the
+quality row, for the bench and tests.
+
+**Measured** (`fx_bench`, `fx_budget_bench`; 640x360, one thread, AVX2, dev machine). Time per
+pixel of the sprite's full-size box, total in us in brackets:
+
+| Case | Full size | Layered |
+|---|---|---|
+| add, 128 px | 0.48 ns (8) | 0.34 (6) |
+| add, 320 px | 0.47 (48) | 0.31 (31) |
+| over, 320 px | 0.54 (56) | 0.33 (34) |
+| over, screen sized | 0.54 (123) | 0.36 (83) |
+| screen sized, fully hidden | 0.06 (14) | 0.11 (25) |
+
+**The saving is a third to a half, not three quarters.** The fill is a quarter, at the same 0.5 ns
+per layer pixel. What remains is the downsample and the composite, about 0.2 ns per pixel of the
+region the layer covers (0.4 of an additive pixel), more than the 0.13 ns the prototype suggested.
+The budget therefore charges what was measured and not a quarter: a layered sprite costs a quarter
+of its fill and half its row setup, and the layer costs `LAYER_BLEND` = 0.42 per pixel of the union
+of the layered boxes plus `LAYER_OVERHEAD` = 1100 units. That last is the fixed cost: a hidden
+66 px sprite takes about 0.6 us more through the layer than at full size (the scratch, the clip and
+the loops over an empty region); a hidden region costs 0.05 ns per pixel on top. With these the
+unit comes out right, 0.40 ns per unit through the layer and 0.42 without. A first version that
+priced each layered sprite at a quarter plus its own blend made a heavy frame look twice as dear as
+it was. Heavy frame, 40 drone explosions at High, one thread:
+
+| | Sprites | Streaks | Budget used | Draw | Collect |
+|---|---|---|---|---|---|
+| No layer | 76 | 149 | 4.82 of 5 screens | 0.46 ms | 15 us |
+| Layer | 260 (141 layered) | 256 | 4.97 of 5 | 0.46 ms | 20 us |
+| Same 260 sprites at full size | 260 | 256 | | 1.03 ms | |
+
+The budget is the same pixels, so the time is the same; what changes is how much it buys. The same
+picture would take 2.2 times as long without the layer, and with it the cut keeps 3.4 times the
+sprites. At Medium it is 55 against 127 sprites at 0.28 and 0.26 ms, and 0.67 ms for the 127 at
+full size. These sprites overlap a lot, so the region is paid once; a few separate large sprites
+save less (the random-scene test only requires that the total falls whenever the gate moves
+anything). The gate costs about 5 us of collect when it moves sprites. A frame with no large sprite
+is untouched: the fill, streak, setup and decal tables of `fx_bench` are the same within noise
+before and after, except that rejecting a sprite off the screen went from 6.9 to 8.3 ns, a cost of
+the clip function now shared with the layer that was not chased.
+
+**Halos, looked at.** `apps/game/tests/layer_fx.rs` renders a layered Puff and a layered Fire sprite
+behind a 2-unit pillar in the real renderer and compares it with the same sprites at full size. I
+rendered the pair to a PNG, cropped around the pillar at 3x with the difference times 8. No pixel
+of the pillar changes. On one side of it a thin line, one pixel wide, is missing the smoke where a
+2x2 block straddles the edge (137 pixels, about one a row); on the other the block boundary falls
+on the edge and nothing is lost. Elsewhere the difference shows only as a faint 2-pixel grid: mean
+0.6 of 255 per channel, worst 6. The line is visible at 3x and hardly at 1x. The tests fail if the
+loss grows past one column. Not looked at: thin near objects (a pole one or two pixels wide), and
+moving smoke.
+
+**Evidence**: `kernels_tests.rs` and `layer_kernels_tests.rs` (bit-identical on every level);
+`layer_tests.rs` (a sprite behind a wall changes no pixel, on even and odd edges; the halo is at
+most one column; mean difference from full size under 1.5 and worst at most 10 for four masks;
+bands that hold the layer match the whole frame at 1, 2, 5 and 16 workers; bands that do not draw
+full size, and match for every worker count; the last row and column of an odd frame are drawn;
+the scratch keeps its storage); `tests/layer_alloc.rs`; `fx_collect_alloc.rs` (a crowd that engages
+the layer allocates nothing); `fx_layer_tests.rs` (the gate, the hold, thinning, cost consistency,
+hostile sprites, and a heavy scene that stays in budget and keeps a higher Cosmetic cut than
+without); and `apps/game/tests/layer_fx.rs` on real pixels at six tilings. Not tested: the
+i3-7100U, a window, and flicker of the layer on a scripted explosion (the hold is tested on the
+gate alone).
+
+## What the second review changed
+
+The pre-PR review of M9.4 to M9.8 found no soundness or worker-count problem. It found these where
+separately built parts meet, now fixed:
+
+- **Decals could use up the budget.** They are charged as Essential at 7.5 units a pixel, so a wall of
+  marks at Low cut every other particle. `Limits::decal_screens` (0.25, 0.15, 0.08) now keeps them well
+  under each budget, and a mark too big for what is left is skipped rather than hiding older ones. So
+  at Low a mark closer than about 2 units is not drawn.
+- **A blast's pushed light could jump through a wall** into open space beyond. A lift now tests along
+  its length, every 0.25 units, because `segment_clear` allocates and lifts run on every hit.
+- **The layer could put far smoke over near smoke.** It draws under every full-size sprite, so the
+  "over" sprites behind the nearest moved one now go with it, and the saving is worked out on the
+  whole set.
+- **The pause menu held the flash and the shake**, since the particle clock stops there.
+- **The view's reach and clock** now match the capped flood and the particles' catch-up limit.
+
+Left as they are, knowingly: first-use allocations land in the first combat frames, not at load: each
+`DynLight` slot's bit sets, the lit copy of the level's mesh lighting, and each worker's layer scratch.
+All are bounded and none repeats. `tests/layer_alloc.rs` covers one worker.
+
+## With level scripting (M10)
+
+M10 landed while this was being built. Where the two meet:
+
+- **Shots report movers and props.** `Struck` gained `Mover(i)` and `Prop(i)`. They spark as metal
+  whatever they are made of, because the surface lookup walks the world's leaves and holds neither. A
+  mover or prop takes no scorch: it has no fixed place for one to stay.
+- **A friendly's shots show too**, with `Struck::Enemy` when they reach their target.
+- **Movers go through `Effects::poses`**, so doors and effects share one pass.
+
+Not handled, and each will show once a level has doors and big explosions together:
+
+- **Effects ignore a closed door.** Movers are not in the world's BSP, so particles fly through one,
+  and a dynamic light's flood and a blast's view kick pass it as if it were open.
+- **Dynamic lights do not light a mover**, since they reach faces through leaves and a mover's faces
+  belong to none.
+- **A destroyed prop only sparks.** It does not call `shatter` yet.
 
 ## Design overview
 
@@ -443,8 +915,9 @@ crates/mscent-render/src/particles/
   sprite.rs    clipping, u-table, row loop
   kernels.rs   scalar definitions and level dispatch; kernels_x86.rs for the unsafe paths
   beam.rs      near clip, streaks, beams
-  layer.rs     half-res layer: depth downsample, composite
+  layer.rs     half-res layer: depth downsample, composite; layer_kernels.rs (and _x86.rs): their kernels
   budget.rs    cost weights, probes, keep
+  decal.rs     scorch decals: polygon raster, depth bias
 crates/mscent-game/src/fx/
   mod.rs       Fx: spawn, tick, collect
   pool.rs      SoA pool, swap-remove
@@ -452,6 +925,11 @@ crates/mscent-game/src/fx/
   emit.rs      shapes, delayed queue, density
   collide.rs   the three collision levels and their limits
   effects.rs   Effect, Emitter and the recipe tables; effects_surface.rs for the material rows
+  decal.rs     the ring of 64 scorch marks and the face outline they are cut to
+  lights.rs    the dynamic lights of combat: slots, fade, eviction
+  layer.rs     budget step 4: which sprites move to the half-res layer, and the hold
+crates/mscent-render/src/
+  dynlight.rs  DynLight: a placed light; face_points.rs the per-face light; scene/reach.rs the flood
 ```
 
 ## Work items
@@ -459,14 +937,14 @@ crates/mscent-game/src/fx/
 | ID | Item | Deps | Size | Done when |
 |---|---|---|---|---|
 | M9.0 | **Done.** Tiled frames by default: `JobPool`, one flood and clip per frame, passes over bands | M3.6 | M | `tests/tiled_level.rs`, `jobs_tests.rs`, `tiles_tests.rs`, `tests/frame_alloc.rs`: pixels and depth identical at every worker count and to one band on one worker; one worker makes no thread; allocations equal the old renderer; panics reach the caller |
-| M9.1 | Kernels, sprite bank, sprite and streak drawing, `fx_bench` in the repo | M9.0 | M | SIMD paths bit-identical to scalar; depth test proven by pixels behind and in front of a wall; bench reproduces the table above |
-| M9.2 | Pools, classes, emitters, 60 Hz tick, collision levels | M9.1 | M | Zero allocation per frame; same seed gives identical particles; hostile arguments never panic; particles never end in solid under `Bounce` |
-| M9.3 | Bolts and hits: `Event::Shot`, `Hitscan.normal`, beams, `material_at`, surface rows; remove the tracer | M9.2 | M | Enemy shot behind a wall draws no pixels (the old tracer failed this); each material gives its own output; the replay test is unchanged |
-| M9.4 | Budget: costs, probes, tiers, `keep`, Quality rows | M9.2 | M | A frame at 100 full-screen sprites stays within 10% of budget, Essential is untouched, and a scripted run is pixel-identical twice |
-| M9.5 | Dynamic lights: per-face shader variant, reach flood, mesh lights | M9.3 | M | No cost when no light is active (frame bench unchanged); wall behind a wall stays unlit; per-span cost measured |
-| M9.6 | Drone explosion and `Blast`, half-res layer, shake, overlay | M9.4, M9.5 | L | `fx_gallery` contact sheets looked at by a person; peak cost of `Blast` reported at 640x360 |
-| M9.7 | Scorch decals: blended polygon raster, ring of 64, depth bias | M9.3 | S | Decal stays on its face from several angles without z-fighting |
-| M9.8 | `Effect::Shatter` and material rows | M9.6 | S | Gallery shows each material; a 1000-unit box stays within pool and budget |
+| M9.1 | **Done.** Kernels, sprite bank, sprite and streak drawing, `fx_bench` in the repo | M9.0 | M | SIMD paths bit-identical to scalar; depth test proven by pixels behind and in front of a wall; bench reproduces the table above |
+| M9.2 | **Done.** Pools, classes, emitters, 60 Hz tick, collision levels | M9.1 | M | Zero allocation per frame; same seed gives identical particles; hostile arguments never panic; particles never end in solid under `Bounce` |
+| M9.3 | **Done.** Bolts and hits: `Event::Shot`, `Hitscan.normal`, beams, `material_at`, surface rows; remove the tracer | M9.2 | M | Enemy shot behind a wall draws no pixels (the old tracer failed this); each material gives its own output; the replay test is unchanged |
+| M9.4 | **Done**, without the adaptive multiplier. Budget: costs, probes, tiers, `keep`, Quality rows | M9.2 | M | A frame at 100 full-screen sprites stays within 10% of budget, Essential is untouched, and a scripted run is pixel-identical twice |
+| M9.5 | **Done.** Dynamic lights: per-face shader variant, reach flood, mesh lights | M9.3 | M | No cost when no light is active (frame bench unchanged); wall behind a wall stays unlit; per-span cost measured |
+| M9.6 | **Built; the contact sheets still need a person's look.** Drone explosion and `Blast`, half-res layer, shake, overlay | M9.4, M9.5 | L | `fx_gallery` contact sheets looked at by a person; peak cost of `Blast` reported at 640x360 |
+| M9.7 | **Done.** Scorch decals: blended polygon raster, ring of 64, depth bias | M9.3 | S | `apps/game/tests/decals.rs`: the decal stays on its face from six views, changes no pixel behind a wall, does not flicker between adjacent camera positions, and is pixel-identical at every worker count; `fx_collect_alloc.rs`: zero allocation |
+| M9.8 | **Built; the contact sheets still need a person's look.** `Effect::Shatter` and material rows | M9.6 | S | Gallery shows each material; a 1000-unit box stays within pool and budget |
 
 **Evidence.** A new `examples/fx_gallery.rs` renders each effect at fixed times over the showcase
 into `target/shots/fx/`, because neither `Blast` nor `Shatter` can be triggered in play yet. A
@@ -495,8 +973,9 @@ a call for a person with a screenshot; tests can only check that pixels land whe
   the scene being about 2 times slower than on two cores.
 - **The reference factor is a guess.** Everything is stated in pixels so it can be retuned by
   changing numbers once M8.5 runs, with no redesign.
-- **Half-res halos.** Taking the nearest depth of each 2x2 block will leave a one or two pixel
-  fringe where a large sprite meets a nearer edge. Not yet seen in a picture; M9.6 finds out.
+- **Half-res halos.** Taking the nearest depth of each 2x2 block leaves a fringe where a large
+  sprite meets a nearer edge. Seen and measured in M9.6: one pixel on one side of a pillar's edge.
+  Thin near objects are not yet looked at. See "What was built (M9.6 layer)".
 - **Sprite setup cost** was below the timer's noise and could matter for hundreds of small sprites.
   M9.1 measures it, and if it does, small ones become plain points.
 - **Effect budget versus frame deadline.** Hiding the particle pass from the resolution controller
