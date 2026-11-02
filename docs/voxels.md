@@ -1,6 +1,6 @@
 # Voxel volumes: design
 
-Status: M9.1 and M9.2 are done (field, dabs, meshing, level of detail, connectivity, level file); the game and editor load and keep volumes but do not draw or edit them yet. Work items are [M9](work-items.md#m9-voxel-volumes).
+Status: M11.1 and M11.2 are done (field, dabs, meshing, level of detail, connectivity, level file); the game and editor load and keep volumes but do not draw or edit them yet. Work items are [M11](work-items.md#m11-voxel-volumes).
 
 Brushes are good at architecture and bad at anything that grows. This design adds a second kind of
 geometry for hives, coral, mushrooms, trees, cave systems, stalactites and alien interiors, painted
@@ -161,7 +161,7 @@ A hostile file is the main threat, and RLE is a decompression bomb by design, so
 
 `voxel/wire_tests.rs` covers bit flips and truncation (whatever loads is also meshed), forged runs and
 each limit. **The writer has no limit of its own:** a level can be sculpted past `MAX_DETAIL_CHUNKS` or
-`format::MAX_FILE_BYTES` and then not load, so M9.7 must refuse such edits or fail the save.
+`format::MAX_FILE_BYTES` and then not load, so M11.7 must refuse such edits or fail the save.
 
 Only deltas are stored. As with brushes, the loader recompiles: `resolved` and meshes are rebuilt at
 load (about 40 µs a chunk measured for meshing, so a large cave adds tens of milliseconds).
@@ -178,7 +178,7 @@ agrees too. A brush's value must also not depend on which chunk asks for it, so 
 sample and not only per chunk.
 
 Each mesh stores positions, normals, the cell of each vertex, material per triangle and a **15-bit air
-connectivity mask** between chunk faces. M9.3 adds dropping of buried triangles, and M9.6 the per-cell
+connectivity mask** between chunk faces. M11.3 adds dropping of buried triangles, and M11.6 the per-cell
 collision index.
 
 ### Level of detail, without cracks
@@ -443,7 +443,7 @@ noisy: repeat runs moved these by up to about 25%.
 | Carve dab, with copy on write | r=1: about 20 µs, r=2: about 90 µs, r=4: about 500 µs, r=8: about 3 ms |
 | Smooth dab, with copy on write | r=1: about 37 µs, r=2: about 230 µs, r=4: about 1.6 ms, r=8: about 12 ms |
 
-Drawing, from a throwaway prototype that M9.4 replaces with a real benchmark, on frames of 640x360
+Drawing, from a throwaway prototype that M11.4 replaces with a real benchmark, on frames of 640x360
 from 40 air positions:
 
 | What | Result |
@@ -478,7 +478,7 @@ What it does not say:
   M1.4 and M8.5 remain open for the whole game, not just this.
 - **Prototype fill has no bump or specular,** and fills at about 10 ns per pixel against about 38 ns
   for the whole showcase frame. A voxel pixel at High must cost no more than a brush pixel; the prototype
-  does not show that. M9.4 measures it.
+  does not show that. M11.4 measures it.
 - **It has no near-plane clipping** and no shader variants.
 - **Baking with voxel occluders was not measured.**
 
@@ -535,7 +535,7 @@ apps/editor/src/selftest/voxel.rs
 
 1. **Does "destructivity" mean damage while playing?** I took it as yes. The requirements in
    [plan.md](plan.md) limit game elements and need updating to match. If it only meant destructive
-   editing, M9.8 can be dropped with nothing else affected.
+   editing, M11.8 can be dropped with nothing else affected.
 2. **Should "dynamically constructed" also mean growing while playing?** I took it as procedural
    generation in the editor. Growth at runtime adds material, which can embed entities and needs light
    for cells that never had any, so it was left out.

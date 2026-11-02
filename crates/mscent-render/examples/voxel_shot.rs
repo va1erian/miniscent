@@ -1,6 +1,6 @@
 //! Pictures of voxel volumes beside real brush geometry, before the renderer
-//! knows about volumes (M9.1). Triangles go through `draw_polygon` with a light
-//! per triangle from its normal, a stand-in for the baked light of M9.5.
+//! knows about volumes (M11.1). Triangles go through `draw_polygon` with a light
+//! per triangle from its normal, a stand-in for the baked light of M11.5.
 //! Fuchsia behind everything shows any hole in a surface, and each picture
 //! reports how many such pixels it has.
 //!

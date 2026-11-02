@@ -1,4 +1,4 @@
-//! What voxel volumes cost, away from the renderer (M9.1): meshing, level of
+//! What voxel volumes cost, away from the renderer (M11.1): meshing, level of
 //! detail, connectivity, dabs and the brushes' part. The scene is denser than
 //! most real levels: every chunk of a warped gyroid cave holds surface.
 //!
