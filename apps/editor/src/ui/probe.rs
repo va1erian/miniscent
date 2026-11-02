@@ -5,11 +5,12 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use super::app::{Editor, Msg};
+use super::script_pane::ProbeHandles;
 use super::view3d::View3d;
 use crate::materials::SharedMaterials;
 use crate::model::EditorState;
 use crate::studio::Preview;
-use xui::widget::ListView;
+use xui::app::WindowHandle;
 use xui_code_editor::Editor as CodeEditor;
 
 /// What a scripted run reads and drives from outside the editor.
@@ -19,9 +20,7 @@ pub struct Probe {
     pub(super) play: Rc<View3d<Msg>>,
     pub(super) preview: Rc<Cell<Preview>>,
     pub(super) materials: SharedMaterials,
-    pub(super) code: Rc<CodeEditor<Msg>>,
-    pub(super) problems: Rc<ListView<Msg>>,
-    pub(super) script_open: Rc<Cell<bool>>,
+    pub(super) script: ProbeHandles,
 }
 
 impl Editor {
@@ -33,9 +32,7 @@ impl Editor {
             play: self.play.get(),
             preview: self.preview.clone(),
             materials: self.studio.materials().clone(),
-            code: self.script.code.get(),
-            problems: self.script.problems(),
-            script_open: self.script.open_flag(),
+            script: self.script.probe_handles(),
         }
     }
 }
@@ -70,17 +67,22 @@ impl Probe {
 impl Probe {
     /// The script pane's code editor.
     pub fn code(&self) -> Rc<CodeEditor<Msg>> {
-        self.code.clone()
+        self.script.code()
     }
 
     /// The first row of the problem list.
     pub fn problem_row(&self) -> String {
-        self.problems.cell_text(0, 0).unwrap_or_default()
+        self.script.problems().cell_text(0, 0).unwrap_or_default()
     }
 
     /// Whether the script pane is on show.
     pub fn script_open(&self) -> bool {
-        self.script_open.get()
+        self.script.is_open()
+    }
+
+    /// The script pane's own window, if it is up.
+    pub fn script_window(&self) -> Option<WindowHandle<Msg>> {
+        self.script.window()
     }
 
     /// The editor's 3D pane.

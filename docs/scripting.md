@@ -448,6 +448,8 @@ another program is followed, or offered as a choice if there are edits in the wa
 decision to have no script editor: placing a door and then leaving the program to wire it was the weak
 step in the loop.
 
+The pane sits under the views or in a window of its own, and only its widgets differ: a widget cannot move between windows, so each place has its own over one model, and moving starts the code editor's undo over. Play closes the window until it ends, since the game takes the keyboard and pointer through the main window. The guide is one code editor showing text: as separate widgets a page cost 100 ms on every re-flow, on a window whose labels ask for one whenever their text changes.
+
 **Basic entities.** Script > Add entity places a door, lift, wave and so on. Each is ordinary level content
 (named brushes, zones and markers) and a few lines added to the script, mostly calls into
 `assets/scripts/lib/kit.st`. So the rule above holds: the level file gains no logic and no new kind of

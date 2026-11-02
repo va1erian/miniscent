@@ -65,6 +65,7 @@ impl Editor {
                 play.focus();
                 // Focus changes from the editor are not the player's input.
                 play.take_events();
+                self.script.suspend();
                 let text = "Playing: Esc = back, WASD (ZQSD on AZERTY) move, Space fire, Q/E roll";
                 self.state.borrow_mut().message = text.into();
                 self.set_status(text);
@@ -82,6 +83,7 @@ impl Editor {
         self.play.get().set_grab(false);
         self.play.get().set_visible(false);
         self.pane3d().focus();
+        self.script.resume();
         if let Some(m) = message {
             self.state.borrow_mut().message = m.into();
         }

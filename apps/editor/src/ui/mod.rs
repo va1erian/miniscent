@@ -16,6 +16,7 @@ pub mod props;
 mod script_actions;
 mod script_lexer;
 pub mod script_pane;
+mod script_widgets;
 mod toolbar;
 mod view3d;
 mod viewport;

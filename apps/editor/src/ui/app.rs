@@ -125,7 +125,7 @@ impl Editor {
             quad: Arrangement::default(),
             disposition: Disposition::Quad,
             play: Handle::new(),
-            script: ScriptPane::default(),
+            script: ScriptPane::new(state.clone()),
             menu: Handle::new(),
             status: Handle::new(),
             tools: Default::default(),
@@ -211,13 +211,10 @@ impl Editor {
                 menu_bar(menus).on_select(Msg::Menu).bind(&app.menu),
                 stack()
                     .children((
-                        split(
-                            column().children((work.fill(1),)),
-                            app.script.layout(&state),
-                        )
-                        .stacked()
-                        .bind(&app.script.split)
-                        .fill(1),
+                        split(column().children((work.fill(1),)), app.script.layout())
+                            .stacked()
+                            .bind(&app.script.split)
+                            .fill(1),
                         build(View3d::new).bind(&app.play),
                     ))
                     .fill(1),
@@ -375,10 +372,10 @@ impl App for Editor {
             Msg::Face(m) => self.face_message(m),
             // No refresh: nothing in the level changed, and this is every key.
             Msg::Script(ScriptMsg::Edited) => {
-                self.script_message(ScriptMsg::Edited, ui);
+                self.script_message(ScriptMsg::Edited);
                 return;
             }
-            Msg::Script(m) => self.script_message(m, ui),
+            Msg::Script(m) => self.script_message(m),
             Msg::Prop(p) => {
                 apply(&mut self.state.borrow_mut(), p);
             }

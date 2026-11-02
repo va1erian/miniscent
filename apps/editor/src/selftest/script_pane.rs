@@ -318,16 +318,19 @@ fn guide(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     stage.emit(Msg::Script(ScriptMsg::Topic(3)));
     pump(stage, 2);
     run.shot(stage, "08-guide-doors.png");
-    stage.emit(Msg::Script(ScriptMsg::Insert(
-        "say: 'inserted'.\n".to_string(),
-    )));
+    stage.emit(Msg::Script(ScriptMsg::InsertExample));
     pump(stage, 2);
     run.check(
-        probe.code().text().contains("say: 'inserted'."),
+        probe.code().text().contains("gate pose: 'open'"),
         "a guide example goes in the script",
     );
     run.check(
-        probe.state().borrow().script.text().contains("inserted"),
+        probe
+            .state()
+            .borrow()
+            .script
+            .text()
+            .contains("gate pose: 'open'"),
         "and the model knows",
     );
     stage.emit(Msg::Menu(cmd::SCRIPT_PANE));
@@ -354,12 +357,114 @@ fn unsaved(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     );
 }
 
+/// The pane in a window of its own: same text, same model, and back again.
+fn own_window(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
+    let text = probe.code().text();
+    stage.emit(Msg::Script(ScriptMsg::Float(true)));
+    pump(stage, 2);
+    let Some(window) = probe.script_window() else {
+        run.check(false, "the pane opens in a window of its own");
+        return;
+    };
+    run.check(probe.code().text() == text, "the window has the script");
+    let shot = window
+        .capture()
+        .map(|img| img.save_png(run.dir.join("10-own-window.png")));
+    run.check(
+        matches!(shot, Ok(Ok(()))),
+        &format!("snapshot of the window {:?}", shot.is_ok()),
+    );
+    run.shot(stage, "11-views-without-pane.png");
+
+    // The model follows the window's widget. The headless backend has no wake, so
+    // a second window's own queue does not run here, and the message comes from
+    // the main window: the forward from one to the other needs a real window.
+    let code = probe.code();
+    code.set_caret(code.text().chars().count());
+    code.insert_text("say: 'typed in the window'.\n");
+    stage.emit(Msg::Script(ScriptMsg::Edited));
+    run.check(
+        probe
+            .state()
+            .borrow()
+            .script
+            .text()
+            .contains("in the window"),
+        "what is typed in the window reaches the model",
+    );
+
+    // A basic entity picked while it is out goes in the window's text.
+    let door = KIT
+        .iter()
+        .position(|e| e.kind == KitKind::Trigger)
+        .unwrap_or(0);
+    stage.emit(Msg::Script(ScriptMsg::Kit(door)));
+    stage.click(220, 132);
+    pump(stage, 2);
+    run.check(
+        probe.code().text().contains("onceEnter"),
+        "an entity placed goes in the window's text",
+    );
+
+    // Hidden and shown again, with an entity placed while it is hidden: the set
+    // of widgets not in use must not put old text back in the model.
+    let before = probe.code().text();
+    stage.emit(Msg::Menu(cmd::SCRIPT_PANE));
+    pump(stage, 2);
+    run.check(probe.script_window().is_none(), "F6 hides the window");
+    probe
+        .state()
+        .borrow_mut()
+        .place_kit(KitKind::Exit, [0.0, 0.0, 0.0]);
+    pump(stage, 2);
+    let after = probe.code().text();
+    run.check(
+        probe.script_window().is_some(),
+        "placing something shows its script again",
+    );
+    run.check(
+        after.starts_with(&before) && after.matches("exitZone").count() >= 1,
+        &format!("nothing is lost or doubled: {}", tail(&after)),
+    );
+    run.check(
+        probe.state().borrow().script.text() == after,
+        "the model and the window agree",
+    );
+
+    // Play takes the keyboard, so the window makes way and comes back.
+    stage.emit(Msg::Script(ScriptMsg::Save));
+    wait_for_preview(stage, probe);
+    stage.emit(Msg::Menu(cmd::PLAY));
+    let message = wait_for_prefix(stage, probe, "Playing");
+    run.check(message.starts_with("Playing"), &format!("plays: {message}"));
+    run.check(
+        probe.script_window().is_none(),
+        "the window makes way for Play",
+    );
+    stage.emit(Msg::Escape);
+    pump(stage, 2);
+    run.check(probe.script_window().is_some(), "and comes back after");
+    run.check(
+        probe.code().text().contains("in the window"),
+        "with the text it had",
+    );
+
+    let text = probe.code().text();
+    stage.emit(Msg::Script(ScriptMsg::Float(false)));
+    pump(stage, 2);
+    run.check(probe.script_window().is_none(), "docking closes the window");
+    run.check(probe.script_open(), "and the pane is on show");
+    run.check(probe.code().text() == text, "with the same text");
+    run.shot(stage, "12-docked-again.png");
+}
+
 pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     sample(run, stage, probe);
     typing(run, stage, probe);
     mistakes(run, stage, probe);
     outside(run, stage, probe);
     kit(run, stage, probe);
+    own_window(run, stage, probe);
     guide(run, stage, probe);
     // Last: its Save dialog stays up, as nobody is there to answer it.
     unsaved(run, stage, probe);

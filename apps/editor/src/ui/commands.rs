@@ -43,6 +43,7 @@ pub mod cmd {
     pub const LEVEL_SETTINGS: MenuId = MenuId::new(25);
     pub const SCRIPT_PANE: MenuId = MenuId::new(27);
     pub const GUIDE: MenuId = MenuId::new(28);
+    pub const SCRIPT_WINDOW: MenuId = MenuId::new(29);
 }
 
 /// Fog the dialog starts from for a level without a world entity.
@@ -87,6 +88,7 @@ pub(super) fn menus(m: &mut xui::widget::MenuScope<'_>) {
     });
     m.submenu(MenuId::new(104), "S&cript", |s| {
         s.item(cmd::SCRIPT_PANE, "Show or hide &script   F6");
+        s.item(cmd::SCRIPT_WINDOW, "Script in its own &window, or docked");
         s.separator();
         s.submenu(MenuId::new(105), "&Add entity", |a| {
             for (id, entry) in KIT_MENU.iter().zip(&KIT) {
@@ -132,6 +134,10 @@ impl Editor {
             cmd::FIT => self.refit(),
             cmd::SCRIPT_PANE => self.script_menu(ScriptMsg::Toggle),
             cmd::GUIDE => self.script_menu(ScriptMsg::ShowGuide),
+            cmd::SCRIPT_WINDOW => {
+                let floats = !self.script.floats();
+                self.script.set_floating(floats);
+            }
             _ if self.layout_command(id) => {}
             _ if self.script_list_command(id) => {}
             _ => self.edit_command(id),

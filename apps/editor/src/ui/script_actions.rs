@@ -48,15 +48,17 @@ pub(super) fn replaces_script(msg: &Msg) -> bool {
 }
 
 impl Editor {
-    pub(super) fn script_message(&mut self, msg: ScriptMsg, ui: &Ui<Msg>) {
+    pub(super) fn script_message(&mut self, msg: ScriptMsg) {
         match msg {
             ScriptMsg::Edited => self.script_edited(),
             ScriptMsg::Problem(row) => self.go_to_problem(row),
-            ScriptMsg::Insert(code) => self.insert_example(&code),
+            ScriptMsg::InsertExample => self.insert_example(),
+            ScriptMsg::GuideEdited => self.script.restore_guide(),
             ScriptMsg::Reload => self.reload_script(),
             ScriptMsg::Save => self.save_command(),
             ScriptMsg::Play => self.play_command(),
-            ScriptMsg::Topic(i) => self.script.show_topic(ui, i),
+            ScriptMsg::Topic(i) => self.script.show_topic(i),
+            ScriptMsg::Float(floats) => self.script.set_floating(floats),
             ScriptMsg::Kit(_) | ScriptMsg::Sample(_) | ScriptMsg::Toggle | ScriptMsg::ShowGuide => {
                 self.script_menu(msg)
             }
@@ -65,7 +67,7 @@ impl Editor {
     }
 
     fn script_edited(&mut self) {
-        let code = self.script.code.get();
+        let code = self.script.code();
         let text = code.text();
         // Nothing holds a name yet, so the popup would not open by itself.
         if opens_names(&text, code.caret()) {
@@ -98,7 +100,7 @@ impl Editor {
     fn go_to_problem(&mut self, row: usize) {
         self.script.show_detail(row);
         if let Some(line) = self.script.problem_line(row) {
-            let code = self.script.code.get();
+            let code = self.script.code();
             code.goto(line, 0);
             code.focus();
         }
@@ -134,10 +136,14 @@ impl Editor {
         self.script.reset_sample_list();
     }
 
-    fn insert_example(&mut self, code: &str) {
+    fn insert_example(&mut self) {
+        let Some(example) = self.script.example_here() else {
+            self.state.borrow_mut().message = "This page has no examples".into();
+            return;
+        };
         self.script.show_script();
-        let editor = self.script.code.get();
-        editor.insert_text(code);
+        let editor = self.script.code();
+        editor.insert_text(&example);
         self.state.borrow_mut().script.edited(editor.text());
     }
 
@@ -174,7 +180,7 @@ impl Editor {
             st.poll_script();
             st.script.take_widget_edits()
         };
-        let code = self.script.code.get();
+        let code = self.script.code();
         for edit in edits {
             match edit {
                 WidgetEdit::Set(text) => code.set_text(&text),

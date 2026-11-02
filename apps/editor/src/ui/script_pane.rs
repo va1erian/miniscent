@@ -1,27 +1,26 @@
-//! The script pane under the views: the code editor, what is wrong with the
-//! script, basic entities and samples on one tab, the guide on the other. The
-//! text and its rules live in `script/`; here are the widgets.
+//! The script pane: the code editor, what is wrong with the script, basic
+//! entities and samples on one tab, the guide on the other. It sits under the
+//! views or in a window of its own. The text and its rules live in `script/`,
+//! and the widgets in `script_widgets.rs`; here is what they share and where
+//! they are.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use xui::Dip;
-use xui::backend::{Result as XuiResult, WidgetId};
+use xui::app::WindowHandle;
+use xui::backend::{PlatformSpec, WidgetId};
 use xui::prelude::*;
-use xui::property::Font;
-use xui::widget::{Fill, HasText, ListView, Run, Split, Tabs};
-use xui_code_editor::{Editor as CodeEditor, FontConfig, Marker, MarkerKind, Options};
+use xui::widget::{HasText, ListView, Split};
+use xui::{Dip, dip};
+use xui_code_editor::{Editor as CodeEditor, Marker, MarkerKind};
 
 use super::app::Msg;
-use super::script_lexer::{ScriptColours, ScriptCompleter};
+use super::keys::shortcut;
+use super::script_widgets::{GUIDE_TAB, PaneWidgets, Shared};
 use super::wrap::wrap;
 use crate::model::EditorState;
 use crate::script::buffer::ScriptBuffer;
 use crate::script::check::{Checker, Problem};
-use crate::script::guide::{self, Block};
-use crate::script::kit::KIT;
-use crate::script::samples::SAMPLES;
-use crate::script::scan::Define;
 
 /// What the pane asks of the editor.
 #[derive(Clone, Debug, PartialEq)]
@@ -30,23 +29,23 @@ pub enum ScriptMsg {
     Edited,
     /// A row of the problem list.
     Problem(usize),
-    /// A basic entity's button, by index into [`KIT`].
+    /// A basic entity's button, by index into `KIT`.
     Kit(usize),
-    /// A sample, by index into [`SAMPLES`].
+    /// A sample, by index into `SAMPLES`.
     Sample(usize),
-    /// A guide example to put in the script.
-    Insert(String),
+    /// The guide's example at its caret, to put in the script.
+    InsertExample,
+    /// A key tried to change the guide.
+    GuideEdited,
     Reload,
     Save,
     Play,
-    /// A guide page, by index.
+    /// A page of the guide, by index.
     Topic(usize),
     Toggle,
     ShowGuide,
-}
-
-fn script_msg(m: ScriptMsg) -> Msg {
-    Msg::Script(m)
+    /// In a window of its own, or under the views.
+    Float(bool),
 }
 
 /// How tall the pane opens, and how small the views above can get.
@@ -56,272 +55,236 @@ const VIEWS_MIN: i32 = 120;
 /// A divider past any window's end, for the split to pull back to its limit.
 const FAR: f32 = 100_000.0;
 
-const GUIDE_TAB: usize = 1;
-
-/// The box with a whole problem in it: its height, and how wide it wraps.
-const DETAIL_HEIGHT: i32 = 70;
+/// How a problem wraps in its box.
 const DETAIL_COLS: usize = 44;
 
-/// The monospace family the code is set in; a backend without it picks one.
-const MONO: &str = "Consolas";
+/// The size the pane's own window opens at.
+const WINDOW_SIZE: (f32, f32) = (980.0, 620.0);
 
-/// The container a guide page sits in.
-type Host = xui::widget::Panel<Msg>;
+/// The pane's own window has no app of its own: what happens there is the
+/// editor's to deal with.
+struct ScriptWindow {
+    editor: Ui<Msg>,
+}
+
+impl App for ScriptWindow {
+    type Msg = Msg;
+
+    fn update(&mut self, msg: Msg, _ui: &mut Ui<Msg>) {
+        self.editor.emit(msg);
+    }
+}
+
+/// Keys in the pane's own window. A guarded key is a shortcut only outside a text
+/// field, and all there is here to type in is one, which the editor cannot see
+/// has the focus from its own window.
+fn window_shortcut(key: xui::Key, mods: xui::Modifiers) -> Option<Msg> {
+    shortcut(key, mods).filter(|msg| !matches!(msg, Msg::Guarded(_)))
+}
 
 pub struct ScriptPane {
-    pub code: Handle<CodeEditor<Msg>>,
+    /// The set under the views, there from the start.
+    docked: Rc<PaneWidgets>,
+    /// The set in use: `docked` or the one in the window.
+    active: Rc<RefCell<Rc<PaneWidgets>>>,
+    window: Rc<RefCell<Option<WindowHandle<Msg>>>>,
     pub(super) split: Handle<Split<Msg>>,
-    tabs: Handle<Tabs<Msg>>,
-    problems: Handle<ListView<Msg>>,
-    /// A problem in full: a row of the list has room for little of it.
-    detail: Handle<MultilineEdit<Msg>>,
-    topics: Handle<ListView<Msg>>,
-    status: Handle<Label<Msg>>,
-    reload: Handle<Button<Msg>>,
-    samples: Handle<ComboBox<Msg>>,
-    pages: Vec<Handle<Host>>,
+    shared: Shared,
     pub checker: Checker,
-    library: Rc<RefCell<Vec<Define>>>,
     shown: Vec<Problem>,
     open: Rc<Cell<bool>>,
-    /// To show and hide what has no such method of its own.
+    /// In a window of its own, whether or not that is open right now.
+    floats: bool,
     ui: Option<Ui<Msg>>,
 }
 
-impl Default for ScriptPane {
-    fn default() -> Self {
+impl ScriptPane {
+    pub fn new(state: Rc<RefCell<EditorState>>) -> ScriptPane {
+        let docked = Rc::new(PaneWidgets::default());
         ScriptPane {
-            code: Handle::new(),
+            active: Rc::new(RefCell::new(docked.clone())),
+            docked,
+            window: Rc::default(),
             split: Handle::new(),
-            tabs: Handle::new(),
-            problems: Handle::new(),
-            detail: Handle::new(),
-            topics: Handle::new(),
-            status: Handle::new(),
-            reload: Handle::new(),
-            samples: Handle::new(),
-            pages: guide::pages().iter().map(|_| Handle::new()).collect(),
+            shared: Shared {
+                state,
+                library: Rc::default(),
+            },
             checker: Checker::default(),
-            library: Rc::default(),
             shown: Vec::new(),
             open: Rc::default(),
+            floats: false,
             ui: None,
         }
     }
-}
 
-fn mono(size: f32) -> Font {
-    Font {
-        family: Some(MONO.to_string()),
-        size: Dip(size),
-        bold: false,
-        italic: false,
-    }
-}
-
-fn code_editor(
-    ui: &Ui<Msg>,
-    state: Rc<RefCell<EditorState>>,
-    library: Rc<RefCell<Vec<Define>>>,
-) -> XuiResult<CodeEditor<Msg>> {
-    let options = Options {
-        font: FontConfig {
-            family: Some(MONO.to_string()),
-            size: Dip(13.0),
-        },
-        ..Options::default()
-    };
-    Ok(CodeEditor::with_options(ui, Default::default(), options)?
-        .with_highlighter(ScriptColours)
-        .with_completer(ScriptCompleter { state, library })
-        .on_change(|_| Some(script_msg(ScriptMsg::Edited))))
-}
-
-fn paragraph(text: &str) -> Build<xui::widget::FlowText<Msg>, Msg> {
-    let text = text.to_string();
-    flow_text().then(move |f| f.run(Run::normal(text)))
-}
-
-fn heading(text: &str) -> Build<xui::widget::FlowText<Msg>, Msg> {
-    let text = text.to_string();
-    flow_text().then(move |f| f.run(Run::normal(text).weight(700).size(14.0)))
-}
-
-/// An example, a line at a time so it keeps its shape, and a button that puts
-/// it in the script.
-fn example(code: &str) -> Layout<Msg> {
-    let mut lines = column().gap(0);
-    for line in code.lines() {
-        // A blank label has no height, and neither would the gap it leaves.
-        let shown = if line.is_empty() { " " } else { line };
-        lines = lines.child(label(shown).then(|l| l.font(mono(12.0))));
-    }
-    let insert = script_msg(ScriptMsg::Insert(format!("{code}\n")));
-    column().gap(2).padding(4).children((
-        lines,
-        row().child(button("Insert in script").on_click(insert)),
-    ))
-}
-
-fn page(blocks: &[Block]) -> Layout<Msg> {
-    let mut out = column().padding(10).gap(8);
-    for block in blocks {
-        out = match block {
-            Block::Heading(text) => out.child(heading(text)),
-            Block::Text(text) => out.child(paragraph(text)),
-            Block::Code(code) => out.child(example(code)),
-            Block::Row(selector, help) => out.child(
-                row().gap(10).children((
-                    label(selector.as_str())
-                        .then(|l| l.font(mono(12.0)))
-                        .width(220),
-                    label(help.as_str()).fill(1),
-                )),
-            ),
-        };
-    }
-    out
-}
-
-impl ScriptPane {
-    /// The widgets, ready to mount under the views.
-    pub fn layout(&self, state: &Rc<RefCell<EditorState>>) -> Layout<Msg> {
-        let tabs = tabs()
-            .page("Script", self.script_tab(state))
-            .page("Guide", self.guide_tab())
-            .bind(&self.tabs);
-        column().children((tabs.fill(1),))
-    }
-
-    fn script_tab(&self, state: &Rc<RefCell<EditorState>>) -> Layout<Msg> {
-        let (state, library) = (state.clone(), self.library.clone());
-        let editor = build(move |ui| code_editor(ui, state.clone(), library.clone()))
-            .bind(&self.code)
-            .fill(1);
-        let sample_rows: Vec<String> = std::iter::once("Open a sample...".to_string())
-            .chain(SAMPLES.iter().map(|s| s.title.to_string()))
-            .collect();
-        let sample_refs: Vec<&str> = sample_rows.iter().map(String::as_str).collect();
-        let bar = row().gap(6).children((
-            button("Save").on_click(script_msg(ScriptMsg::Save)),
-            button("Play").on_click(script_msg(ScriptMsg::Play)),
-            button("Reload")
-                .on_click(script_msg(ScriptMsg::Reload))
-                .bind(&self.reload),
-            label("").bind(&self.status).fill(1),
-            combo_box(&sample_refs)
-                .on_select(|row| {
-                    script_msg(if row == 0 {
-                        ScriptMsg::Sample(usize::MAX)
-                    } else {
-                        ScriptMsg::Sample(row - 1)
-                    })
-                })
-                .bind(&self.samples)
-                .width(300),
-        ));
-        let problems = list()
-            .column("Problems", Fill)
-            .then(|l| l.on_select(|row| Some(script_msg(ScriptMsg::Problem(row)))))
-            .bind(&self.problems);
-        let mut kit = column().gap(3);
-        for (i, entry) in KIT.iter().enumerate() {
-            kit = kit.child(button(entry.label).on_click(script_msg(ScriptMsg::Kit(i))));
-        }
-        row().gap(6).padding(4).children((
-            column().gap(4).children((bar, editor)).fill(1),
-            column()
-                .gap(4)
-                .children((
-                    problems.fill(1),
-                    multiline_edit().bind(&self.detail).height(DETAIL_HEIGHT),
-                ))
-                .width(290),
-            column()
-                .children((group(
-                    "Add entity",
-                    column().children((scroll(column().padding(2).child(kit)).fill(1),)),
-                )
-                .fill(1),))
-                .width(130),
-        ))
-    }
-
-    fn guide_tab(&self) -> Layout<Msg> {
-        let pages = guide::pages();
-        let mut stacked = stack();
-        for (i, p) in pages.iter().enumerate() {
-            let content = column().children((scroll(page(&p.blocks)).fill(1),));
-            stacked = stacked.child(panel(content).plain().bind(&self.pages[i]).fill(1));
-        }
-        let topics = list()
-            .column("Topics", Fill)
-            .then(|l| l.on_select(|row| Some(script_msg(ScriptMsg::Topic(row)))))
-            .bind(&self.topics);
-        row().gap(6).padding(4).children((
-            column().children((topics.fill(1),)).width(170),
-            stacked.fill(1),
-        ))
+    /// The docked widgets, ready to mount under the views.
+    pub fn layout(&self) -> Layout<Msg> {
+        self.docked.layout(&self.shared, false)
     }
 
     /// What a built pane starts with.
     pub fn start(&mut self, ui: &Ui<Msg>) {
         self.ui = Some(ui.clone());
-        let titles: Vec<String> = guide::pages().into_iter().map(|p| p.title).collect();
-        self.topics.get().set_model(titles);
-        self.topics.get().select(Some(0));
-        self.show_topic(ui, 0);
+        self.docked.start(ui);
         self.show_problems();
-        self.detail.get().set_enabled(false);
-        ui.set_visible(self.reload.get().id(), false);
         self.set_open(false);
     }
 
-    /// Shows or hides the pane. The views keep what it does not need.
+    fn widgets(&self) -> Rc<PaneWidgets> {
+        self.active.borrow().clone()
+    }
+
+    pub fn code(&self) -> Rc<CodeEditor<Msg>> {
+        self.widgets().code.get()
+    }
+
+    /// Shows or hides the pane, wherever it is. The views keep what it does not
+    /// need.
     pub fn set_open(&mut self, open: bool) {
         self.open.set(open);
+        if self.floats {
+            self.show_docked(false);
+            if open {
+                self.open_window();
+            } else {
+                self.close_window();
+            }
+        } else {
+            self.show_docked(open);
+        }
+    }
+
+    fn show_docked(&self, shown: bool) {
         let split = self.split.get();
-        let below = if open { PANE_HEIGHT } else { 0 };
+        let below = if shown { PANE_HEIGHT } else { 0 };
         split.set_min(Dip(VIEWS_MIN as f32), Dip(below as f32));
         split.set_position(Dip(FAR));
         split.relayout();
-        self.tabs.get().set_visible(open);
+        self.docked.tabs.get().set_visible(shown);
     }
 
     pub fn is_open(&self) -> bool {
         self.open.get()
     }
 
-    /// Whether the pane is on show, for scripted runs.
-    pub fn open_flag(&self) -> Rc<Cell<bool>> {
-        self.open.clone()
+    pub fn floats(&self) -> bool {
+        self.floats
     }
 
-    /// The problem list, for scripted runs.
-    pub fn problems(&self) -> Rc<ListView<Msg>> {
-        self.problems.get()
+    /// Moves the pane to its own window or under the views. It is on show after.
+    pub fn set_floating(&mut self, floats: bool) {
+        self.close_window();
+        self.floats = floats;
+        self.set_open(true);
+        self.show_script();
     }
 
-    /// The page of the guide on show.
-    pub fn show_topic(&self, ui: &Ui<Msg>, topic: usize) {
-        for (i, handle) in self.pages.iter().enumerate() {
-            ui.set_visible(handle.get().id(), i == topic);
+    /// Makes `widgets` the set in use: they get the text and what is known of it.
+    /// The set not in use goes stale, so this is the only way to change which that
+    /// is. The model's text has every edit still on its way to a widget in it.
+    fn adopt(&mut self, widgets: Rc<PaneWidgets>) {
+        let caret = self.code().caret();
+        *self.active.borrow_mut() = widgets;
+        let text = {
+            let mut st = self.shared.state.borrow_mut();
+            st.script.take_widget_edits();
+            st.script.text().to_string()
+        };
+        let code = self.code();
+        code.set_text(&text);
+        code.set_caret(caret);
+        self.show_problems();
+    }
+
+    fn open_window(&mut self) {
+        if self.window.borrow().is_some() {
+            return;
+        }
+        let Some(editor) = self.ui.clone() else {
+            return;
+        };
+        let widgets = Rc::new(PaneWidgets::default());
+        let (set, shared, forward_to) = (widgets.clone(), self.shared.clone(), editor.clone());
+        let spec = PlatformSpec::new("Script").size(dip(WINDOW_SIZE.0), dip(WINDOW_SIZE.1));
+        let opened = editor.open_window(spec, move |ui| {
+            ui.on_key(window_shortcut);
+            ui.on_close(|| Some(Msg::Script(ScriptMsg::Float(false))));
+            if ui.root(set.layout(&shared, true)).is_err() {
+                ui.close();
+            }
+            set.start(ui);
+            ScriptWindow { editor: forward_to }
+        });
+        match opened {
+            Ok(window) => {
+                *self.window.borrow_mut() = Some(window);
+                self.adopt(widgets);
+            }
+            Err(e) => {
+                // Back under the views, so the script is not out of reach.
+                self.floats = false;
+                self.show_docked(true);
+                self.shared.state.borrow_mut().message =
+                    format!("Cannot open a window for the script: {e:?}");
+            }
         }
     }
 
+    fn close_window(&mut self) {
+        if let Some(window) = self.window.borrow_mut().take() {
+            window.close();
+        }
+        if !Rc::ptr_eq(&self.widgets(), &self.docked) {
+            self.adopt(self.docked.clone());
+        }
+    }
+
+    /// Play starts. A window of the pane's own goes away for it: the game takes
+    /// the keyboard and the pointer, which the main window must hold to give.
+    pub fn suspend(&mut self) {
+        if self.floats {
+            self.close_window();
+        }
+    }
+
+    /// Play ended: back as it was.
+    pub fn resume(&mut self) {
+        if self.floats && self.open.get() {
+            self.open_window();
+        }
+    }
+
+    /// A page of the guide.
+    pub fn show_topic(&self, topic: usize) {
+        self.widgets().set_topic(topic);
+    }
+
     pub fn show_guide(&self) {
-        self.tabs.get().select(GUIDE_TAB);
+        self.widgets().tabs.get().select(GUIDE_TAB);
+    }
+
+    /// Puts the guide's text back after a key changed it.
+    pub fn restore_guide(&self) {
+        self.widgets().restore_guide();
+    }
+
+    /// The guide's example at its caret.
+    pub fn example_here(&self) -> Option<String> {
+        self.widgets().example_here()
     }
 
     pub fn show_script(&self) {
-        self.tabs.get().select(0);
-        self.code.get().focus();
+        let widgets = self.widgets();
+        widgets.tabs.get().select(0);
+        widgets.code.get().focus();
     }
 
-    /// Whether the pane's code editor holds the keys, so letters are text there
+    /// Whether one of the pane's editors holds the keys, so letters are text there
     /// and not shortcuts.
     pub fn owns(&self, id: WidgetId) -> bool {
-        self.code.get().id() == id
+        let widgets = self.widgets();
+        widgets.code.get().id() == id || widgets.guide.get().id() == id
     }
 
     /// The zero-based line of a row of the problem list.
@@ -331,7 +294,7 @@ impl ScriptPane {
 
     /// Back to the first row of the samples list, ready to pick the same again.
     pub fn reset_sample_list(&self) {
-        self.samples.get().select(0);
+        self.widgets().samples.get().select(0);
     }
 
     /// Asks the checker to go on, and shows what it says.
@@ -339,7 +302,7 @@ impl ScriptPane {
         if self.checker.tick(st.script.text(), &st.doc) {
             let report = self.checker.report();
             self.shown = report.problems.clone();
-            *self.library.borrow_mut() = report.library.clone();
+            *self.shared.library.borrow_mut() = report.library.clone();
             self.show_problems();
         }
     }
@@ -347,19 +310,19 @@ impl ScriptPane {
     /// Shows a whole problem, by its row in the list.
     pub fn show_detail(&self, row: usize) {
         let text = self.shown.get(row).map_or("", |p| p.text.as_str());
-        self.detail
-            .get()
-            .set_text(&wrap(text, DETAIL_COLS).join("\n"));
+        let wrapped = wrap(text, DETAIL_COLS).join("\n");
+        self.widgets().detail.get().set_text(&wrapped);
     }
 
     fn show_problems(&self) {
         self.show_detail(0);
+        let widgets = self.widgets();
         let rows: Vec<String> = if self.shown.is_empty() {
             vec!["No problems".to_string()]
         } else {
             self.shown.iter().map(|p| p.text.clone()).collect()
         };
-        self.problems.get().refresh_model(rows);
+        widgets.problems.get().refresh_model(rows);
         let marks = self.shown.iter().filter_map(|p| {
             let kind = if p.warning {
                 MarkerKind::Warning
@@ -368,20 +331,53 @@ impl ScriptPane {
             };
             p.line.map(|line| Marker::line(line, kind))
         });
-        self.code.get().set_markers(marks.collect());
+        widgets.code.get().set_markers(marks.collect());
     }
 
     /// The line over the code: which file, and whether it is saved.
     pub fn show_state(&self, buffer: &ScriptBuffer, st: &EditorState) {
-        let conflict = buffer.conflict();
+        let widgets = self.widgets();
         let text = status_text(buffer, st);
-        let status = self.status.get();
+        let status = widgets.status.get();
         if status.text() != text {
             status.set_text(&text);
         }
-        if let Some(ui) = &self.ui {
-            ui.set_visible(self.reload.get().id(), conflict);
+        widgets.show_reload(buffer.conflict());
+    }
+
+    /// Handles for scripted runs.
+    pub fn probe_handles(&self) -> ProbeHandles {
+        ProbeHandles {
+            active: self.active.clone(),
+            window: self.window.clone(),
+            open: self.open.clone(),
         }
+    }
+}
+
+/// What a scripted run reads of the pane, which can change window under it.
+pub struct ProbeHandles {
+    active: Rc<RefCell<Rc<PaneWidgets>>>,
+    window: Rc<RefCell<Option<WindowHandle<Msg>>>>,
+    open: Rc<Cell<bool>>,
+}
+
+impl ProbeHandles {
+    pub fn code(&self) -> Rc<CodeEditor<Msg>> {
+        self.active.borrow().code.get()
+    }
+
+    pub fn problems(&self) -> Rc<ListView<Msg>> {
+        self.active.borrow().problems.get()
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.open.get()
+    }
+
+    /// The pane's own window, if it is up.
+    pub fn window(&self) -> Option<WindowHandle<Msg>> {
+        self.window.borrow().clone()
     }
 }
 

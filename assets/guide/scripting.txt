@@ -17,6 +17,8 @@ Open one from the Samples list on the Script tab. Each is a small level you can 
 ## Keys
 
 - F6 shows or hides this pane. F7 opens this guide.
+- The Own window button moves the pane to a window of its own, and Dock brings it back. Script, Script in its own window does the same. Moving it starts the script's undo over.
+- To use an example from this guide, click on it and press Insert example in script.
 - Ctrl+Space offers completions. Enter or Tab accepts one.
 - Ctrl+S saves the level and its script. F5 plays.
 
