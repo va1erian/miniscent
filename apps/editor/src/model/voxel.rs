@@ -83,7 +83,8 @@ impl EditorState {
         changed
     }
 
-    /// Ends the stroke and waits for it (tests and scripted runs).
+    /// Ends the stroke and waits for it.
+    #[cfg(test)]
     pub fn finish_stroke(&mut self) {
         self.end_stroke();
         let last = self.stroke.as_ref().and_then(|s| s.job.wait());

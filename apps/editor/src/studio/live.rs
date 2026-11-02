@@ -120,6 +120,7 @@ impl Studio {
     }
 
     /// Jobs that went through the live path.
+    #[cfg(test)]
     pub fn live_jobs(&self) -> usize {
         self.live_count
     }

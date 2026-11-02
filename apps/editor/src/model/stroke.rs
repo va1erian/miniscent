@@ -149,7 +149,8 @@ impl StrokeJob {
         self.done.try_recv().ok()
     }
 
-    /// Waits for the final result (tests and scripted runs).
+    /// Waits for the final result.
+    #[cfg(test)]
     pub fn wait(&self) -> Option<Sculpted> {
         self.done.recv().ok().flatten()
     }
