@@ -9,7 +9,7 @@ use xui::backend::Event;
 use xui::xui_canvas::snapshot::Stage;
 use xui::{Key, Modifiers};
 
-use super::{Run, pump, wait_for_preview};
+use super::{Run, guide, pump, wait_for_preview};
 use crate::model::Selection;
 use crate::script::kit::{KIT, KitKind};
 use crate::ui::script_pane::ScriptMsg;
@@ -313,39 +313,6 @@ fn kit(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     );
 }
 
-fn guide(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
-    stage.emit(Msg::Menu(cmd::GUIDE));
-    pump(stage, 2);
-    run.shot(stage, "07-guide.png");
-    stage.emit(Msg::Script(ScriptMsg::Topic(3)));
-    pump(stage, 2);
-    run.shot(stage, "08-guide-doors.png");
-    probe.code().goto(0, 2);
-    stage.emit(Msg::Script(ScriptMsg::InsertExample));
-    pump(stage, 2);
-    run.check(
-        probe.code().text().starts_with("gate := mover: 'gate'.\n"),
-        "an example goes above the caret's line, not inside it",
-    );
-    run.check(
-        probe.code().text().contains("gate pose: 'open'"),
-        "a guide example goes in the script",
-    );
-    run.check(
-        probe
-            .state()
-            .borrow()
-            .script
-            .text()
-            .contains("gate pose: 'open'"),
-        "and the model knows",
-    );
-    stage.emit(Msg::Menu(cmd::SCRIPT_PANE));
-    pump(stage, 2);
-    run.check(!probe.script_open(), "F6's command hides the pane");
-    run.shot(stage, "09-closed.png");
-}
-
 /// A level with no file has nowhere to keep a script, so F5 asks for one.
 fn unsaved(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     stage.emit(Msg::Menu(cmd::SAVE));
@@ -460,6 +427,7 @@ fn own_window(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         probe.code().text().contains("in the window"),
         "with the text it had",
     );
+    guide::in_window(run, stage, probe);
 
     let text = probe.code().text();
     let caret = probe.code().caret_line_col();
@@ -476,13 +444,15 @@ fn own_window(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
 }
 
 pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
+    super::level_settings::script(run, stage, probe);
     sample(run, stage, probe);
     typing(run, stage, probe);
     mistakes(run, stage, probe);
     outside(run, stage, probe);
     kit(run, stage, probe);
     own_window(run, stage, probe);
-    guide(run, stage, probe);
+    guide::guide(run, stage, probe);
+    guide::unsaved_edits(run, stage, probe);
     // Last: its Save dialog stays up, as nobody is there to answer it.
     unsaved(run, stage, probe);
 }

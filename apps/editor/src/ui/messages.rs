@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use xui::widget::MenuId;
+use xui::widget::{DialogAction, MenuId};
 
 use super::texstudio::TexMsg;
 use super::viewport::ViewEvent;
@@ -22,6 +22,10 @@ pub enum Msg {
     Tex(TexMsg),
     /// The window's close button.
     CloseRequested,
+    /// The level settings window's answer: the fog's start and end.
+    SetFog(f32, f32),
+    /// The answer to whether the script's unsaved edits may go.
+    Discard(DialogAction),
     /// The frame timer.
     Tick,
     /// One UI tick on demand (scripted runs have no timers).

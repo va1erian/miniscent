@@ -64,6 +64,7 @@ impl Editor {
                 }
                 // First: the main window must hold the focus to take the pointer.
                 self.script.suspend();
+                self.close_fog_window();
                 let play = self.play.get();
                 play.set_visible(true);
                 self.pane3d().set_grab(false);

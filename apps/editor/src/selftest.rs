@@ -22,7 +22,9 @@ use crate::studio::Preview;
 use crate::ui::{Editor, Msg, Probe, cmd};
 
 mod faces;
+mod guide;
 mod keys;
+mod level_settings;
 mod materials;
 mod script_pane;
 mod scripting;
@@ -125,7 +127,16 @@ pub fn run(dir: &Path) -> i32 {
         (1280.0, 800.0),
         voxel::script,
     );
+    // Text is measured apart from how it is painted, which only shows when scaled.
+    let scaled = run_at(
+        &dir.join("guide-scaled"),
+        Theme::light(),
+        (1280.0, 800.0),
+        144,
+        guide::scaled,
+    );
     light
+        .max(scaled)
         .max(dark)
         .max(wide)
         .max(scripted)
@@ -139,7 +150,18 @@ pub fn run(dir: &Path) -> i32 {
 fn run_theme(
     dir: &Path,
     theme: Theme,
+    size: (f32, f32),
+    script: fn(&mut Run, &Stage<'_, Msg>, &Probe),
+) -> i32 {
+    run_at(dir, theme, size, 96, script)
+}
+
+/// A run at a display's scale: 96 dpi is 100%.
+fn run_at(
+    dir: &Path,
+    theme: Theme,
     (width, height): (f32, f32),
+    dpi: u32,
     script: fn(&mut Run, &Stage<'_, Msg>, &Probe),
 ) -> i32 {
     if let Err(e) = std::fs::create_dir_all(dir) {
@@ -153,7 +175,7 @@ fn run_theme(
     let probe: Rc<RefCell<Option<Holder>>> = Rc::new(RefCell::new(None));
     let (p2, r2) = (probe.clone(), run.clone());
     let result = render_with(
-        Snapshot::new(Dip(width), Dip(height)).theme(theme),
+        Snapshot::new(Dip(width), Dip(height)).theme(theme).dpi(dpi),
         move |ui| {
             let app = Editor::build(ui, Document::from_level(&mscent_world::showcase_level()))?;
             *p2.borrow_mut() = Some(Holder {

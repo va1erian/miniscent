@@ -3,11 +3,9 @@
 
 use std::path::Path;
 
-use xui::prelude::Ui;
-use xui::widget::MenuId;
+use xui::widget::{DialogAction, MenuId};
 
 use super::app::{Editor, Msg, cmd};
-use super::discard_dialog::may_discard;
 use super::script_pane::ScriptMsg;
 use crate::files;
 use crate::model::Tool;
@@ -36,11 +34,12 @@ pub(super) const SAMPLE_MENU: [MenuId; SAMPLES.len()] = {
     ids
 };
 
-/// Whether `msg` puts another level's script in the buffer, which loses edits.
-/// The samples list's first row is its label, and opens nothing.
+/// Whether `msg` loses what the script buffer holds: closing, or putting another
+/// level's script there. The samples list's first row is its label, and opens
+/// nothing.
 pub(super) fn replaces_script(msg: &Msg) -> bool {
     match msg {
-        Msg::OpenPath(_) => true,
+        Msg::OpenPath(_) | Msg::CloseRequested => true,
         Msg::Menu(id) => *id == cmd::NEW || *id == cmd::SHOWCASE || SAMPLE_MENU.contains(id),
         Msg::Script(ScriptMsg::Sample(i)) => *i < SAMPLES.len(),
         _ => false,
@@ -52,8 +51,9 @@ impl Editor {
         match msg {
             ScriptMsg::Edited => self.script_edited(),
             ScriptMsg::Problem(row) => self.go_to_problem(row),
-            ScriptMsg::InsertExample => self.insert_example(),
-            ScriptMsg::GuideEdited => self.script.restore_guide(),
+            ScriptMsg::Example(n) => self.insert_example(n),
+            ScriptMsg::GuideFrame => self.script.guide_frame(),
+            ScriptMsg::Copy(text) => self.script.copy(&text),
             ScriptMsg::Reload => self.reload_script(),
             ScriptMsg::Save => self.save_command(),
             ScriptMsg::Play => self.play_command(),
@@ -77,12 +77,32 @@ impl Editor {
         self.panel.show_script_uses(&st);
     }
 
-    /// Whether what is about to replace the script may: there are no edits to
-    /// lose, or the user says so.
-    pub(super) fn script_may_go(&self, ui: &Ui<Msg>) -> bool {
-        // Not held across the dialog, whose loop may want the state.
-        let dirty = self.state.borrow().script.dirty();
-        !dirty || may_discard(ui)
+    /// Whether `msg` must wait for the user: it would lose unsaved script edits,
+    /// so it is kept and the question asked. A message let through by the answer
+    /// comes back here with the edits already given up.
+    pub(super) fn ask_before(&mut self, msg: &Msg) -> bool {
+        if !replaces_script(msg) || !self.state.borrow().script.dirty() {
+            return false;
+        }
+        self.script.reset_sample_list();
+        self.after_discard = Some(msg.clone());
+        self.discard_dialog.open();
+        true
+    }
+
+    /// The user answered: what was waiting goes ahead, or does not. Giving the
+    /// edits up here is what lets it through, whichever way it then ends.
+    pub(super) fn discard_answer(&mut self, action: DialogAction) -> Option<Msg> {
+        let waiting = self.after_discard.take();
+        match action {
+            DialogAction::Accept(_) => {
+                let mut st = self.state.borrow_mut();
+                let path = st.doc.level_path().map(|p| p.with_extension("st"));
+                st.script.reload(path.as_deref());
+                waiting
+            }
+            DialogAction::Cancel => None,
+        }
     }
 
     /// Esc with a basic entity picked goes back to Select, placing nothing.
@@ -135,9 +155,9 @@ impl Editor {
         self.script.reset_sample_list();
     }
 
-    fn insert_example(&mut self) {
-        let Some(example) = self.script.example_here() else {
-            self.state.borrow_mut().message = "This page has no examples".into();
+    fn insert_example(&mut self, n: usize) {
+        let Some(example) = self.script.example(n) else {
+            self.state.borrow_mut().message = "That example is not on this page".into();
             return;
         };
         self.script.show_script();
@@ -231,6 +251,7 @@ mod tests {
             Msg::Menu(cmd::NEW),
             Msg::Menu(cmd::SHOWCASE),
             Msg::Menu(SAMPLE_MENU[0]),
+            Msg::CloseRequested,
             Msg::OpenPath("x.msl".into()),
             Msg::Script(ScriptMsg::Sample(0)),
         ] {

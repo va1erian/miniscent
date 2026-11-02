@@ -9,15 +9,15 @@ use std::rc::Rc;
 
 use mscent_world::Op;
 use xui::prelude::*;
-use xui::widget::{FileDialog, HasText};
+use xui::widget::{Dialog, FileDialog, HasText};
 
 pub use super::commands::cmd;
 use super::commands::menus;
 use super::keys::{OPS, TOOLS, key_name, shortcut};
 use super::layouts::{self, Arrangement, Disposition};
+use super::level_dialog::FogWindow;
 pub use super::messages::Msg;
 use super::props::{Panel, apply};
-use super::script_actions::replaces_script;
 use super::script_pane::{ScriptMsg, ScriptPane};
 use super::texstudio::Workspace;
 use super::toolbar::IconButton;
@@ -44,6 +44,13 @@ pub struct Editor {
     pub(super) disposition: Disposition,
     pub(super) play: Handle<View3d<Msg>>,
     pub(super) script: ScriptPane,
+    /// Asks before unsaved script edits go. Not a modal window: the default
+    /// backend has no modal loop, and `open_modal` returns at once with nothing.
+    pub(super) discard_dialog: Dialog<Msg>,
+    /// What is waiting on that answer.
+    pub(super) after_discard: Option<Msg>,
+    /// The level settings window, once opened. It may have closed itself since.
+    pub(super) fog_window: Rc<RefCell<Option<FogWindow>>>,
     pub(super) menu: Handle<Menu<Msg>>,
     pub(super) status: Handle<StatusBar<Msg>>,
     tools: [Handle<IconButton<Msg>>; TOOLS.len()],
@@ -98,6 +105,12 @@ impl Editor {
             .filter("Miniscent levels", &[files::EXT])
             .on_accept(|p| Some(Msg::SavePath(p)))
             .on_cancel(|| None);
+        let discard_dialog = Dialog::confirm(
+            ui,
+            "Discard unsaved script edits?",
+            "The script has edits that are not saved. Discard them?",
+        )?
+        .on_action(|action| Some(Msg::Discard(action)));
         let tex = Workspace::new(studio.materials().clone());
         let mut app = Editor {
             state: state.clone(),
@@ -106,6 +119,9 @@ impl Editor {
             disposition: Disposition::Quad,
             play: Handle::new(),
             script: ScriptPane::new(state.clone()),
+            discard_dialog,
+            after_discard: None,
+            fog_window: Rc::default(),
             menu: Handle::new(),
             status: Handle::new(),
             tools: Default::default(),
@@ -347,8 +363,7 @@ impl App for Editor {
     type Msg = Msg;
 
     fn update(&mut self, msg: Msg, ui: &mut Ui<Msg>) {
-        if replaces_script(&msg) && !self.script_may_go(ui) {
-            self.script.reset_sample_list();
+        if self.ask_before(&msg) {
             return;
         }
         match msg {
@@ -358,11 +373,16 @@ impl App for Editor {
             }
             Msg::Menu(cmd::TEX_OPEN) if self.studio.mode == Mode::Edit => self.tex_open(),
             Msg::Menu(id) if self.tex.is_open() => self.tex_menu(id, ui),
-            Msg::Menu(cmd::LEVEL_SETTINGS) => self.level_settings(ui),
-            Msg::CloseRequested => {
-                if self.script_may_go(ui) {
-                    ui.quit();
+            Msg::Discard(action) => {
+                if let Some(next) = self.discard_answer(action) {
+                    self.update(next, ui);
                 }
+                return;
+            }
+            Msg::Menu(cmd::LEVEL_SETTINGS) => self.level_settings(ui),
+            Msg::SetFog(start, end) => self.set_fog(start, end),
+            Msg::CloseRequested => {
+                ui.quit();
                 return;
             }
             Msg::Menu(id) => self.menu_command(id),

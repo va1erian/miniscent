@@ -5,6 +5,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use super::app::{Editor, Msg};
+use super::level_dialog::FogWindow;
 use super::script_pane::ProbeHandles;
 use super::view3d::View3d;
 use crate::materials::SharedMaterials;
@@ -25,6 +26,7 @@ pub struct Probe {
     pub(super) tex: Rc<RefCell<TexStudio>>,
     pub(super) tex_preview: Rc<super::texstudio::TexPreview>,
     pub(super) script: ProbeHandles,
+    pub(super) fog_window: Rc<RefCell<Option<FogWindow>>>,
 }
 
 impl Editor {
@@ -40,6 +42,7 @@ impl Editor {
             tex: self.tex.studio.clone(),
             tex_preview: self.tex.preview.get(),
             script: self.script.probe_handles(),
+            fog_window: self.fog_window.clone(),
         }
     }
 }
@@ -103,9 +106,20 @@ impl Probe {
         self.script.problems().cell_text(0, 0).unwrap_or_default()
     }
 
+    /// Whether the guide's page on show has been laid out and is drawn.
+    pub fn guide_ready(&self) -> bool {
+        self.script.guide_ready()
+    }
+
     /// Whether the script pane is on show.
     pub fn script_open(&self) -> bool {
         self.script.is_open()
+    }
+
+    /// A picture of the level settings window, if it is up.
+    pub fn fog_window_picture(&self) -> Option<xui::backend::Result<xui::Image>> {
+        let window = self.fog_window.borrow();
+        window.as_ref().filter(|w| w.is_open()).map(|w| w.capture())
     }
 
     /// The script pane's own window, if it is up.

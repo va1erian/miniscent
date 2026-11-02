@@ -33,22 +33,32 @@ fn report(what: &str, (mean, worst): (f64, f64)) {
 }
 
 /// The re-flow alone, for each way the pane can be.
-fn pane_states(stage: &Stage<'_, Msg>) {
+fn pane_states(stage: &Stage<'_, Msg>, probe: &Probe) {
     let reflow = || {
         measure(|_| {
             stage.ui().invalidate_layout();
             stage.emit(Msg::Step);
         })
     };
+    let picture = || {
+        measure(|_| {
+            let _ = stage.ui().capture();
+        })
+    };
     stage.emit(Msg::Menu(cmd::SCRIPT_PANE));
     pump(stage, 5);
     report("a re-flow, pane open", reflow());
+    report("a picture, pane open", picture());
     stage.emit(Msg::Menu(cmd::GUIDE));
     pump(stage, 5);
+    super::guide::wait_for_guide(stage, probe);
     report("a re-flow, guide open", reflow());
-    stage.emit(Msg::Script(ScriptMsg::Topic(8)));
+    report("a picture, guide open", picture());
+    stage.emit(Msg::Script(ScriptMsg::Topic(7)));
     pump(stage, 5);
+    super::guide::wait_for_guide(stage, probe);
     report("a re-flow, reference page", reflow());
+    report("a picture, reference page", picture());
     stage.emit(Msg::Script(ScriptMsg::Float(true)));
     pump(stage, 5);
     report("a re-flow, own window", reflow());
@@ -56,6 +66,7 @@ fn pane_states(stage: &Stage<'_, Msg>) {
     stage.emit(Msg::Menu(cmd::SCRIPT_PANE));
     pump(stage, 5);
     report("a re-flow, pane closed again", reflow());
+    report("a picture, pane closed again", picture());
 }
 
 pub(super) fn script(_run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
@@ -81,5 +92,5 @@ pub(super) fn script(_run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
             let _ = stage.ui().capture();
         }),
     );
-    pane_states(stage);
+    pane_states(stage, probe);
 }
