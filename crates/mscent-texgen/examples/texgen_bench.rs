@@ -10,7 +10,18 @@ use mscent_texgen::graph::{self, Cache, RunOptions};
 use mscent_texgen::ops::Value;
 use mscent_texgen::{Recipe, Size, bake, recipe};
 
-const STOCK: [&str; 5] = ["brick", "floor", "lightpanel", "metal", "rock"];
+const STOCK: [&str; 10] = [
+    "bark",
+    "brick",
+    "cap",
+    "coral",
+    "floor",
+    "lightpanel",
+    "metal",
+    "rock",
+    "stem",
+    "wax",
+];
 const RUNS: usize = 20;
 
 fn stock(name: &str) -> Recipe {
@@ -60,7 +71,7 @@ fn main() {
         total += ms;
         println!("{name:<12} {ms:7.2} ms at 128 px");
     }
-    println!("{:<12} {total:7.2} ms at 128 px", "all five");
+    println!("{:<12} {total:7.2} ms at 128 px", "all");
     let size = Size::new(256, 256).expect("size");
     let mut r = stock("brick");
     let mut cache = Cache::new(256 << 20);

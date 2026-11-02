@@ -29,6 +29,11 @@ fn stock_names_with_no_manifest_keep_their_gloss_and_draw_the_same() {
             (2, "lightpanel", 120),
             (3, "metal", 200),
             (4, "rock", 10),
+            (5, "bark", 8),
+            (6, "cap", 70),
+            (7, "coral", 30),
+            (8, "stem", 20),
+            (9, "wax", 90),
         ]
     );
     let stock = MaterialTable::load_dir(&stock_dir()).expect("stock");
@@ -99,7 +104,7 @@ fn pictures(r: &LevelRenderer, eye: Vec3) -> Vec<u32> {
 fn adding_a_material_leaves_stock_ids_and_the_pixels_of_a_level_unchanged() {
     // `aaa` sorts before every stock name: with ids from the file list it would
     // move them all, and the level would not even build.
-    let text = format!("{STOCK}5 aaa 200\n6 retired\n7 zzz 40\n");
+    let text = format!("{STOCK}10 aaa 200\n11 retired\n12 zzz 40\n");
     let f = Fixture::with_stock("added", &text);
     f.png("aaa.png", 128, 0xffff_00ff);
     f.png("aaa_n.png", 128, 0xff80_80ff);
@@ -159,15 +164,15 @@ fn room_picture(dir: &Fixture, material: u16, q: Quality) -> Vec<u32> {
 
 #[test]
 fn a_new_id_draws_its_own_material_and_a_retired_one_the_grey_fallback() {
-    let f = Fixture::with_stock("new_id", &format!("{STOCK}5 concrete 40\n6 retired\n"));
+    let f = Fixture::with_stock("new_id", &format!("{STOCK}10 concrete 40\n11 retired\n"));
     f.png("concrete.png", 128, 0xff00_ff00);
-    let green = room_picture(&f, 5, Quality::Low);
+    let green = room_picture(&f, 10, Quality::Low);
     let (r, g) = green.iter().fold((0u64, 0u64), |(r, g), p| {
         (r + u64::from(p >> 16 & 0xff), g + u64::from(p >> 8 & 0xff))
     });
-    assert!(g > r * 5, "id 5 is green: {g} against {r}");
+    assert!(g > r * 5, "id 10 is green: {g} against {r}");
 
-    let grey = room_picture(&f, 6, Quality::High);
+    let grey = room_picture(&f, 11, Quality::High);
     let (mut r, mut g) = (0u64, 0u64);
     for p in &grey {
         r += u64::from(p >> 16 & 0xff);
@@ -179,12 +184,12 @@ fn a_new_id_draws_its_own_material_and_a_retired_one_the_grey_fallback() {
 #[test]
 fn a_mask_on_a_material_too_dull_for_a_highlight_changes_nothing() {
     // Gloss 0 falls back to the lit shader, which never looks at the mask.
-    let f = Fixture::with_stock("dull", &format!("{STOCK}5 dull 0\n"));
+    let f = Fixture::with_stock("dull", &format!("{STOCK}10 dull 0\n"));
     f.png("dull.png", 128, 0xff80_8080);
     std::fs::copy(f.0.join("brick_n.png"), f.0.join("dull_n.png")).expect("copy");
-    let plain = room_picture(&f, 5, Quality::High);
+    let plain = room_picture(&f, 10, Quality::High);
     f.png("dull_s.png", 128, 0xff00_0000);
-    assert_eq!(plain, room_picture(&f, 5, Quality::High));
+    assert_eq!(plain, room_picture(&f, 10, Quality::High));
 }
 
 #[test]

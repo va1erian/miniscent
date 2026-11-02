@@ -13,7 +13,8 @@ use mscent_render::png_encode::encode_png;
 use mscent_render::{MaterialTable, TextureError};
 use mscent_texgen::{bake, recipe};
 
-pub const STOCK: &str = "0 brick 25\n1 floor 90\n2 lightpanel 120\n3 metal 200\n4 rock 10\n";
+pub const STOCK: &str = "0 brick 25\n1 floor 90\n2 lightpanel 120\n3 metal 200\n4 rock 10\n\
+    5 bark 8\n6 cap 70\n7 coral 30\n8 stem 20\n9 wax 90\n";
 
 pub fn stock_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures")

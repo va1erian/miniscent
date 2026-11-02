@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use mscent_render::{MaterialId, MaterialTable};
 use mscent_texgen::{bake, ops};
-use mscent_world::materials::NAMES;
 use xui::xui_canvas::snapshot::Stage;
 
 use super::{Run, pump, texture_paint, texture_stock, wait_for_preview};
@@ -362,8 +361,8 @@ fn check_save(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe, dir: PathBuf
     };
     let id = table.find("selftest-mat");
     run.check(
-        id == Some(MaterialId(NAMES.len() as u16)),
-        &format!("past the stock ids: {id:?}"),
+        id.is_some_and(|id| usize::from(id.0) + 1 == table.len()),
+        &format!("the last id: {id:?}"),
     );
     let (_, here) = probe.materials().current();
     let here = here.ok();
