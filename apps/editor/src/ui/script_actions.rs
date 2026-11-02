@@ -58,10 +58,9 @@ impl Editor {
             ScriptMsg::Save => self.save_command(),
             ScriptMsg::Play => self.play_command(),
             ScriptMsg::Topic(i) => self.script.show_topic(i),
-            ScriptMsg::Float(floats) => self.script.set_floating(floats),
-            ScriptMsg::Kit(_) | ScriptMsg::Sample(_) | ScriptMsg::Toggle | ScriptMsg::ShowGuide => {
-                self.script_menu(msg)
-            }
+            ScriptMsg::Float(floats) => self.set_script_floating(floats),
+            ScriptMsg::Kit(i) => self.pick_kit(i),
+            ScriptMsg::Sample(i) => self.open_sample(i),
         }
         self.sync_script();
     }
@@ -143,6 +142,11 @@ impl Editor {
         };
         self.script.show_script();
         let editor = self.script.code();
+        // Above the line the caret is in: an example is whole statements.
+        let (line, col) = editor.caret_line_col();
+        if col > 0 {
+            editor.goto(line, 0);
+        }
         editor.insert_text(&example);
         self.state.borrow_mut().script.edited(editor.text());
     }
@@ -152,6 +156,19 @@ impl Editor {
         let path = st.doc.level_path().map(|p| p.with_extension("st"));
         st.script.reload(path.as_deref());
         st.message = "Took the script from the file".into();
+    }
+
+    /// Moves the pane. The main window's keys stop going to a docked editor that
+    /// is about to be hidden; docking gives them back to it.
+    pub(super) fn set_script_floating(&mut self, floats: bool) {
+        self.pane3d().focus();
+        self.script.set_floating(floats);
+    }
+
+    /// Opens the pane on the guide.
+    pub(super) fn show_guide(&mut self) {
+        self.script.set_open(true);
+        self.script.show_guide();
     }
 
     pub(super) fn toggle_script(&mut self) {
@@ -194,8 +211,9 @@ impl Editor {
         }
         let line = self.state.borrow_mut().show_script_line.take();
         if let Some(line) = line {
+            // Opening may have made another editor the one in use.
             self.script.set_open(true);
-            code.goto(line, 0);
+            self.script.code().goto(line, 0);
         }
         let st = self.state.borrow();
         self.script.tick(&st);

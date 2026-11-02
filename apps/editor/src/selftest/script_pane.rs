@@ -318,8 +318,13 @@ fn guide(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     stage.emit(Msg::Script(ScriptMsg::Topic(3)));
     pump(stage, 2);
     run.shot(stage, "08-guide-doors.png");
+    probe.code().goto(0, 2);
     stage.emit(Msg::Script(ScriptMsg::InsertExample));
     pump(stage, 2);
+    run.check(
+        probe.code().text().starts_with("gate := mover: 'gate'.\n"),
+        "an example goes above the caret's line, not inside it",
+    );
     run.check(
         probe.code().text().contains("gate pose: 'open'"),
         "a guide example goes in the script",
@@ -422,6 +427,11 @@ fn own_window(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         probe.script_window().is_some(),
         "placing something shows its script again",
     );
+    let (at, _) = probe.code().caret_line_col();
+    run.check(
+        after.lines().nth(at).is_some_and(|l| l.contains("Exit")),
+        &format!("with the caret on it, in the window: line {at}"),
+    );
     run.check(
         after.starts_with(&before) && after.matches("exitZone").count() >= 1,
         &format!("nothing is lost or doubled: {}", tail(&after)),
@@ -450,8 +460,13 @@ fn own_window(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     );
 
     let text = probe.code().text();
+    let caret = probe.code().caret_line_col();
     stage.emit(Msg::Script(ScriptMsg::Float(false)));
     pump(stage, 2);
+    run.check(
+        probe.code().caret_line_col() == caret,
+        "docking keeps the caret",
+    );
     run.check(probe.script_window().is_none(), "docking closes the window");
     run.check(probe.script_open(), "and the pane is on show");
     run.check(probe.code().text() == text, "with the same text");

@@ -42,8 +42,6 @@ pub enum ScriptMsg {
     Play,
     /// A page of the guide, by index.
     Topic(usize),
-    Toggle,
-    ShowGuide,
     /// In a window of its own, or under the views.
     Float(bool),
 }
@@ -184,7 +182,7 @@ impl ScriptPane {
     /// The set not in use goes stale, so this is the only way to change which that
     /// is. The model's text has every edit still on its way to a widget in it.
     fn adopt(&mut self, widgets: Rc<PaneWidgets>) {
-        let caret = self.code().caret();
+        let (line, col) = self.code().caret_line_col();
         *self.active.borrow_mut() = widgets;
         let text = {
             let mut st = self.shared.state.borrow_mut();
@@ -193,7 +191,7 @@ impl ScriptPane {
         };
         let code = self.code();
         code.set_text(&text);
-        code.set_caret(caret);
+        code.goto(line, col);
         self.show_problems();
     }
 

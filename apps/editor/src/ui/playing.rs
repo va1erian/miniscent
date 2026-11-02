@@ -1,7 +1,6 @@
 //! Going in and out of Instant Play.
 
 use super::app::Editor;
-use super::script_pane::ScriptMsg;
 use crate::studio::Preview;
 
 impl Editor {
@@ -58,6 +57,8 @@ impl Editor {
     pub(super) fn begin_play(&mut self) {
         match self.studio.enter_play() {
             Ok(()) => {
+                // First: the main window must hold the focus to take the pointer.
+                self.script.suspend();
                 let play = self.play.get();
                 play.set_visible(true);
                 self.pane3d().set_grab(false);
@@ -65,7 +66,6 @@ impl Editor {
                 play.focus();
                 // Focus changes from the editor are not the player's input.
                 play.take_events();
-                self.script.suspend();
                 let text = "Playing: Esc = back, WASD (ZQSD on AZERTY) move, Space fire, Q/E roll";
                 self.state.borrow_mut().message = text.into();
                 self.set_status(text);
@@ -88,27 +88,5 @@ impl Editor {
             self.state.borrow_mut().message = m.into();
         }
         self.refresh();
-    }
-
-    /// The Script pane's Save is File > Save: a level and its script go together.
-    pub(super) fn save_command(&mut self) {
-        match self.path.clone() {
-            Some(p) => self.save_path(p),
-            None => self.save_dialog.open(),
-        }
-    }
-
-    /// Script > Show script pane and the guide, from the menu.
-    pub(super) fn script_menu(&mut self, msg: ScriptMsg) {
-        match msg {
-            ScriptMsg::Kit(i) => self.pick_kit(i),
-            ScriptMsg::Sample(i) => self.open_sample(i),
-            ScriptMsg::Toggle => self.toggle_script(),
-            ScriptMsg::ShowGuide => {
-                self.script.set_open(true);
-                self.script.show_guide();
-            }
-            _ => {}
-        }
     }
 }

@@ -8,7 +8,6 @@ use xui::widget::MenuId;
 use super::app::{Editor, Msg};
 use super::level_dialog;
 use super::script_actions::{KIT_MENU, SAMPLE_MENU};
-use super::script_pane::ScriptMsg;
 use crate::files;
 use crate::model::Document;
 use crate::script::kit::KIT;
@@ -132,11 +131,11 @@ impl Editor {
                 self.studio.reset_camera(&self.state.borrow().doc);
             }
             cmd::FIT => self.refit(),
-            cmd::SCRIPT_PANE => self.script_menu(ScriptMsg::Toggle),
-            cmd::GUIDE => self.script_menu(ScriptMsg::ShowGuide),
+            cmd::SCRIPT_PANE => self.toggle_script(),
+            cmd::GUIDE => self.show_guide(),
             cmd::SCRIPT_WINDOW => {
                 let floats = !self.script.floats();
-                self.script.set_floating(floats);
+                self.set_script_floating(floats);
             }
             _ if self.layout_command(id) => {}
             _ if self.script_list_command(id) => {}
@@ -144,12 +143,20 @@ impl Editor {
         }
     }
 
+    /// The Script pane's Save is File > Save: a level and its script go together.
+    pub(super) fn save_command(&mut self) {
+        match self.path.clone() {
+            Some(p) => self.save_path(p),
+            None => self.save_dialog.open(),
+        }
+    }
+
     /// The Script menu's lists; `false` for any other command.
     fn script_list_command(&mut self, id: MenuId) -> bool {
         if let Some(i) = KIT_MENU.iter().position(|m| *m == id) {
-            self.script_menu(ScriptMsg::Kit(i));
+            self.pick_kit(i);
         } else if let Some(i) = SAMPLE_MENU.iter().position(|m| *m == id) {
-            self.script_menu(ScriptMsg::Sample(i));
+            self.open_sample(i);
         } else {
             return false;
         }

@@ -6,7 +6,7 @@
 //! changing its text asks for one. A page of wrapped text as separate widgets took
 //! 100 ms a re-flow, so the guide is one code editor, which measures nothing.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use xui::Dip;
@@ -143,7 +143,6 @@ pub struct PaneWidgets {
     pub(super) reload: Handle<Button<Msg>>,
     pub(super) samples: Handle<ComboBox<Msg>>,
     /// The guide's page on show.
-    topic: Cell<usize>,
     page: RefCell<RenderedPage>,
     ui: RefCell<Option<Ui<Msg>>>,
 }
@@ -292,7 +291,6 @@ impl PaneWidgets {
     /// Shows a page of the guide. One past the end shows nothing new.
     pub(super) fn set_topic(&self, topic: usize) {
         if let Some(page) = guide::pages().get(topic) {
-            self.topic.set(topic);
             let rendered = render_page(page);
             self.guide.get().set_text(&rendered.text);
             *self.page.borrow_mut() = rendered;

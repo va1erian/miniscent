@@ -22,7 +22,8 @@ pub enum Disk {
 }
 
 /// A file past the limit would be refused anyway, and this runs on the UI thread.
-pub fn read_disk(path: &Path) -> Disk {
+/// The text comes as read: the buffer decides about its line ends.
+fn read_raw(path: &Path) -> Disk {
     let Ok(meta) = std::fs::metadata(path) else {
         return Disk::Missing;
     };
@@ -50,9 +51,23 @@ pub struct ScriptBuffer {
     for_widget: Vec<WidgetEdit>,
     /// The file changed while the buffer has edits of its own.
     conflict: bool,
+    /// The file ends its lines in CRLF, as it does again when written. In memory
+    /// they are always LF, which is what the code editor works in.
+    crlf: bool,
 }
 
 impl ScriptBuffer {
+    /// What the file holds, with LF line ends, noting which it had.
+    fn read(&mut self, path: Option<&Path>) -> Disk {
+        match path.map_or(Disk::Missing, read_raw) {
+            Disk::Text(raw) => {
+                self.crlf = raw.contains("\r\n");
+                Disk::Text(raw.replace("\r\n", "\n"))
+            }
+            other => other,
+        }
+    }
+
     pub fn text(&self) -> &str {
         &self.text
     }
@@ -76,7 +91,7 @@ impl ScriptBuffer {
 
     /// Starts over on the script beside a newly opened level.
     pub fn open(&mut self, path: Option<&Path>) {
-        self.disk = path.map_or(Disk::Missing, read_disk);
+        self.disk = self.read(path);
         self.text = match &self.disk {
             Disk::Text(text) => text.clone(),
             Disk::Missing | Disk::Unreadable => String::new(),
@@ -120,7 +135,7 @@ impl ScriptBuffer {
             return;
         }
         self.read_at = Some(Instant::now());
-        let now = path.map_or(Disk::Missing, read_disk);
+        let now = self.read(path);
         if now == self.disk {
             return;
         }
@@ -144,7 +159,8 @@ impl ScriptBuffer {
 
     /// Throws the edits away for what the file holds now.
     pub fn reload(&mut self, path: Option<&Path>) {
-        self.take_in(path.map_or(Disk::Missing, read_disk));
+        let now = self.read(path);
+        self.take_in(now);
     }
 
     /// Writes the text beside the level, through a temporary file so a failed
@@ -157,7 +173,7 @@ impl ScriptBuffer {
                 self.text.len()
             ));
         }
-        let now = read_disk(path);
+        let now = self.read(Some(path));
         let same = now == Disk::Text(self.text.clone());
         let nothing = self.text.is_empty() && matches!(now, Disk::Missing | Disk::Unreadable);
         if same || nothing {
@@ -166,8 +182,12 @@ impl ScriptBuffer {
             return Ok(false);
         }
         let tmp = path.with_extension("st.tmp");
-        std::fs::write(&tmp, &self.text)
-            .map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
+        let bytes = if self.crlf {
+            self.text.replace('\n', "\r\n")
+        } else {
+            self.text.clone()
+        };
+        std::fs::write(&tmp, bytes).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
         if let Err(e) = std::fs::rename(&tmp, path) {
             let _ = std::fs::remove_file(&tmp);
             return Err(format!("cannot write {}: {e}", path.display()));
@@ -317,6 +337,31 @@ mod tests {
         assert_eq!(b.save(&path), Ok(true));
         assert!(!b.conflict());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "mine.");
+    }
+
+    #[test]
+    fn a_file_with_crlf_line_ends_is_edited_in_lf_and_keeps_them_on_disk() {
+        let path = temp("crlf.st");
+        std::fs::write(&path, "say: 'a'.\r\nwin.\r\n").unwrap();
+        let mut b = ScriptBuffer::default();
+        b.open(Some(&path));
+        assert_eq!(b.text(), "say: 'a'.\nwin.\n");
+        assert_eq!(
+            b.take_widget_edits(),
+            [WidgetEdit::Set("say: 'a'.\nwin.\n".into())]
+        );
+        assert!(!b.dirty(), "the same text is no edit");
+        assert_eq!(b.save(&path), Ok(false), "and nothing to write");
+        poll_now(&mut b, &path);
+        assert!(b.take_widget_edits().is_empty() && !b.conflict());
+        b.edited("lose.\nwin.\n".into());
+        assert_eq!(b.save(&path), Ok(true));
+        assert_eq!(std::fs::read(&path).unwrap(), b"lose.\r\nwin.\r\n");
+        poll_now(&mut b, &path);
+        assert!(
+            b.take_widget_edits().is_empty() && !b.conflict(),
+            "our own write"
+        );
     }
 
     #[test]
