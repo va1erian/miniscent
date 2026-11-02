@@ -40,6 +40,11 @@ pub mod cmd {
     pub const LAYOUT_CLASSIC: MenuId = MenuId::new(23);
     pub const LAYOUT_QUAD: MenuId = MenuId::new(24);
     pub const LEVEL_SETTINGS: MenuId = MenuId::new(25);
+    pub const TEX_OPEN: MenuId = MenuId::new(60);
+    pub const TEX_CLOSE: MenuId = MenuId::new(61);
+    pub const TEX_NEW: MenuId = MenuId::new(62);
+    pub const TEX_APPLY: MenuId = MenuId::new(63);
+    pub const TEX_SAVE: MenuId = MenuId::new(64);
     pub const SCRIPT_PANE: MenuId = MenuId::new(27);
     pub const GUIDE: MenuId = MenuId::new(28);
     pub const SCRIPT_WINDOW: MenuId = MenuId::new(29);
@@ -84,6 +89,14 @@ pub(super) fn menus(m: &mut xui::widget::MenuScope<'_>) {
     });
     m.submenu(MenuId::new(103), "&Play", |p| {
         p.item(cmd::PLAY, "&Play   F5");
+    });
+    m.submenu(MenuId::new(108), "&Texture", |t| {
+        t.item(cmd::TEX_OPEN, "Texture &Studio");
+        t.item(cmd::TEX_CLOSE, "&Back to the level   Esc");
+        t.separator();
+        t.item(cmd::TEX_NEW, "&New material...");
+        t.item(cmd::TEX_APPLY, "&Apply to the level");
+        t.item(cmd::TEX_SAVE, "&Save material   Ctrl+S");
     });
     m.submenu(MenuId::new(104), "S&cript", |s| {
         s.item(cmd::SCRIPT_PANE, "Show or hide &script   F6");
@@ -270,6 +283,11 @@ impl Editor {
                     .borrow_mut()
                     .doc
                     .set_level_path(Some(path.clone()));
+                let unsaved = self
+                    .tex
+                    .studio
+                    .borrow()
+                    .unsaved_among(&doc.materials_used());
                 self.saved = doc;
                 let script = self.save_script(&path);
                 if matches!(script, Ok(true)) {
@@ -277,11 +295,21 @@ impl Editor {
                     self.studio.script_changed();
                 }
                 self.path = Some(path);
-                let saved = lit.map_or(msg.clone(), |l| format!("{msg}; {l}"));
-                match script {
-                    Ok(true) => format!("{saved}; script saved"),
-                    Ok(false) => saved,
-                    Err(e) => format!("{saved}; THE SCRIPT WAS NOT SAVED: {e}"),
+                let said = lit.map_or(msg.clone(), |l| format!("{msg}; {l}"));
+                let said = match script {
+                    Ok(true) => format!("{said}; script saved"),
+                    Ok(false) => said,
+                    Err(e) => format!("{said}; THE SCRIPT WAS NOT SAVED: {e}"),
+                };
+                match unsaved.is_empty() {
+                    true => said,
+                    // The level is saved all the same: the file is right, the
+                    // material is what is missing, and Save material is the cure.
+                    false => format!(
+                        "{said}. WARNING: it uses {}, applied in the Texture Studio but not \
+                         saved: next session those faces draw grey, or another material",
+                        unsaved.join(", ")
+                    ),
                 }
             }
             Err(e) => e,

@@ -11,11 +11,10 @@
 use mscent_math::Vec3;
 
 use crate::bump::{FLAT_NORMAL, bump_gain, view_normal};
-use crate::lighting_shader::{
-    BUMP_FULL, BUMP_GONE, KNEE, MIN_SPEC, SPEC_GAIN, add_spec, dither_of, mul_rgb3, soft_limit,
-};
+use crate::lighting_shader::{BUMP_FULL, BUMP_GONE};
 use crate::shade::{Fog, SpanEnd, SpanShader, lerp_rgb};
 use crate::specular::{SpecTable, half_vector};
+use crate::texel_light::{KNEE, MIN_SPEC, SPEC_GAIN, add_spec, dither_of, mul_rgb3, soft_limit};
 use crate::texture::NormalView;
 
 /// A vector that is linear in screen space: its value divided by depth.

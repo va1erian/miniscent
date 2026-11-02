@@ -16,6 +16,7 @@ mod sculptor;
 pub mod shape_ops;
 pub mod state;
 pub mod stroke;
+pub mod texdoc;
 pub mod tools;
 pub mod view;
 pub mod voxel;

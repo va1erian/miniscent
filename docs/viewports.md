@@ -41,7 +41,7 @@ Not in scope:
 | `FAR` is 400 and `MAX_FOG_DEPTH` is 1000 | level/mod.rs, [entity.rs](../crates/mscent-world/src/entity.rs) | A view needs its own far plane and fog limit |
 | Luxels default to 0.125 units, the atlas is at most 1024x8192 (8.4 M), and an overfull atlas coarsens the **whole level** | `BakeConfig` in [lightmap/mod.rs](../crates/mscent-world/src/lightmap/mod.rs) | One 400-unit box wants 61 M luxels. A big view would blur the play space. This is the largest trap here |
 | `lamp_light` and mesh lighting use every lamp, without shadows | [compiled.rs](../crates/mscent-render/src/level/compiled.rs), `mesh_lighting` | A huge lamp in a view would light enemies in the play space |
-| Mips and bilinear sampling force alpha to 255, and the generator writes RGB at 128x128 | [mips.rs](../crates/mscent-render/src/mips.rs), `texture.rs:368`, [gen_textures.py](../tools/gen_textures.py) | Cutout textures need an alpha path and a generator change |
+| Mips and bilinear sampling force alpha to 255, and stock recipes bake RGB at 128x128 | [mips.rs](../crates/mscent-render/src/mips.rs), `texture.rs:368`, `pack.rs` | Cutout textures need an alpha path and a generator change |
 | `lightpanel` is the only emissive material, chosen by id | `face_shader` in [fill.rs](../crates/mscent-render/src/level/fill.rs) | Self-lit sky materials follow that precedent, without a lightmap |
 | Materials are per face in the editor and in level text | `TexInfo`, [level_text.rs](../crates/mscent-world/src/level_text.rs) | Painting a viewport needs only new entries in the lists |
 
@@ -192,7 +192,7 @@ care around lightmaps and actors, and nothing asks for that.
 ## Sky textures
 
 Four new stock materials, each one job, designed to stack. They are self-lit, tile
-as noted, and come from `gen_textures.py` with the existing noise helpers. The
+as noted, and are recipes in `assets/textures`, as all stock materials now are. The
 generator gets an RGBA `save` and a size argument, with colour bled under transparent
 texels so mips do not fringe. `_h` and `_n` stay flat so the loader's rules hold.
 

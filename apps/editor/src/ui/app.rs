@@ -9,15 +9,17 @@ use std::rc::Rc;
 
 use mscent_world::Op;
 use xui::prelude::*;
-use xui::widget::{FileDialog, HasText, MenuId};
+use xui::widget::{FileDialog, HasText};
 
 pub use super::commands::cmd;
 use super::commands::menus;
 use super::keys::{OPS, TOOLS, key_name, shortcut};
 use super::layouts::{self, Arrangement, Disposition};
+pub use super::messages::Msg;
 use super::props::{Panel, apply};
 use super::script_actions::replaces_script;
 use super::script_pane::{ScriptMsg, ScriptPane};
+use super::texstudio::Workspace;
 use super::toolbar::IconButton;
 use super::view3d::View3d;
 use super::viewport::ViewEvent;
@@ -25,34 +27,6 @@ use super::wrap::{LOG_COLS, LOG_ROWS, wrap};
 use crate::files;
 use crate::model::{Document, EditorState, state::GRIDS};
 use crate::studio::{HELP, Mode, Preview, Studio};
-
-#[derive(Clone)]
-pub enum Msg {
-    Menu(MenuId),
-    /// A tool palette button, by index into [`TOOLS`].
-    Tool(usize),
-    NewOp(usize),
-    Grid(usize),
-    View(ViewEvent),
-    Prop(super::props::Prop),
-    Face(super::facepanel::FaceMsg),
-    Script(ScriptMsg),
-    /// The frame timer.
-    Tick,
-    /// One UI tick on demand (scripted runs have no timers).
-    Step,
-    /// The Escape key anywhere: leaves Play.
-    Escape,
-    /// A shortcut that would also type into a text field or fight Play's own
-    /// keys: dropped when one has the focus or the level is being played.
-    Guarded(Box<Msg>),
-    OpenPath(PathBuf),
-    SavePath(PathBuf),
-    /// Puts the free-fly camera somewhere (scripted runs frame a face).
-    Camera(Box<crate::model::FlyCam>),
-    /// The window's close button.
-    CloseRequested,
-}
 
 /// Width of the tool palette on the left, in dip.
 const PALETTE_WIDTH: i32 = 130;
@@ -86,6 +60,11 @@ pub struct Editor {
     pub(super) save_dialog: FileDialog<Msg>,
     /// Shared with scripted runs through [`Probe`].
     pub(super) preview: Rc<Cell<Preview>>,
+    /// Identifies the lightmap in the picture, for scripted runs through [`Probe`].
+    pub(super) light_key: Rc<Cell<u64>>,
+    /// Everything but the menu and the status bar, while the level is showing.
+    pub(super) work_host: Handle<xui::widget::Panel<Msg>>,
+    pub(super) tex: Workspace,
 }
 
 impl Editor {
@@ -119,6 +98,7 @@ impl Editor {
             .filter("Miniscent levels", &[files::EXT])
             .on_accept(|p| Some(Msg::SavePath(p)))
             .on_cancel(|| None);
+        let tex = Workspace::new(studio.materials().clone());
         let mut app = Editor {
             state: state.clone(),
             classic: Arrangement::default(),
@@ -139,8 +119,12 @@ impl Editor {
             open_dialog,
             save_dialog,
             preview: Rc::new(Cell::new(Preview::Updating)),
+            light_key: Rc::new(Cell::new(0)),
+            work_host: Handle::new(),
+            tex,
         };
         app.panel.attach(ui);
+        app.tex.attach(ui);
         let (generation, table) = app.studio.materials().current();
         state.borrow_mut().texture_sizes = app
             .panel
@@ -211,10 +195,19 @@ impl Editor {
                 menu_bar(menus).on_select(Msg::Menu).bind(&app.menu),
                 stack()
                     .children((
-                        split(column().children((work.fill(1),)), app.script.layout())
+                        panel(
+                            column().children((split(
+                                column().children((work.fill(1),)),
+                                app.script.layout(),
+                            )
                             .stacked()
                             .bind(&app.script.split)
-                            .fill(1),
+                            .fill(1),)),
+                        )
+                        .plain()
+                        .bind(&app.work_host),
+                        app.tex.layout(),
+                        app.tex.new_form.layout(),
                         build(View3d::new).bind(&app.play),
                     ))
                     .fill(1),
@@ -225,6 +218,7 @@ impl Editor {
         ui.on_close(|| Some(Msg::CloseRequested));
         ui.every(16, Msg::Tick);
         app.play.get().set_visible(false);
+        app.tex.set_visible(false);
         app.set_disposition(Disposition::Quad);
         app.log_view.get().set_enabled(false);
         app.script.start(ui);
@@ -279,13 +273,18 @@ impl Editor {
         for (i, op) in [Op::Subtract, Op::Add].into_iter().enumerate() {
             self.ops[i].get().set_checked(st.new_op == op);
         }
+        drop(st);
+        self.sync_tex_menu();
     }
 
     /// Whether a text box has the keyboard focus, so letters and Delete are
     /// text there and not shortcuts.
     fn text_has_focus(&self, ui: &Ui<Msg>) -> bool {
         ui.focus_holder().is_some_and(|id| {
-            self.panel.owns(id) || self.script.owns(id) || id == self.log_view.get().id()
+            self.panel.owns(id)
+                || self.tex.owns(id)
+                || self.script.owns(id)
+                || id == self.log_view.get().id()
         })
     }
 
@@ -353,6 +352,12 @@ impl App for Editor {
             return;
         }
         match msg {
+            Msg::Tex(m) => {
+                self.tex_message(m, ui);
+                return;
+            }
+            Msg::Menu(cmd::TEX_OPEN) if self.studio.mode == Mode::Edit => self.tex_open(),
+            Msg::Menu(id) if self.tex.is_open() => self.tex_menu(id, ui),
             Msg::Menu(cmd::LEVEL_SETTINGS) => self.level_settings(ui),
             Msg::CloseRequested => {
                 if self.script_may_go(ui) {
@@ -393,7 +398,20 @@ impl App for Editor {
                 return;
             }
             Msg::Guarded(inner) => {
+                // Enter answers what the workspace has on top, from the name field too.
+                if matches!(*inner, Msg::Menu(cmd::SLICE))
+                    && self.tex.is_open()
+                    && self.tex_answer_key(true, ui)
+                {
+                    return;
+                }
                 if self.studio.mode == Mode::Play || self.text_has_focus(ui) {
+                    return;
+                }
+                // Of the single keys, only those about the recipe's history and its
+                // blocks mean anything in the workspace.
+                let about_recipe = matches!(*inner, Msg::Menu(cmd::UNDO | cmd::REDO | cmd::DELETE));
+                if self.tex.is_open() && !about_recipe {
                     return;
                 }
                 if let Msg::Tool(i) = *inner
@@ -407,6 +425,12 @@ impl App for Editor {
             Msg::Escape => {
                 if self.studio.mode == Mode::Play {
                     self.end_play(Some("Back in the editor"));
+                } else if self.tex.is_open() {
+                    // What is on top goes first: the question or the form, then a
+                    // drag of a block, and the next Esc goes back.
+                    if !self.tex_answer_key(false, ui) && !self.tex.cancel_drag() {
+                        self.tex_close();
+                    }
                 } else {
                     let mut st = self.state.borrow_mut();
                     st.cancel_drag();

@@ -3,6 +3,10 @@
 ## How to run
 
 ```
+# Texture > Texture Studio in the editor; see docs/texture-studio-tutorial.md
+# look at a recipe's maps as PNG files, with no window
+cargo run --release -p mscent-editor -- --bake-texture assets/textures/brick.mst target/shots/brick
+
 # play (desktop window, winit + softbuffer; WASD, mouse, Space fire, Q/E roll, Esc menu)
 cargo run --release -p miniscent-game
 cargo run --release -p miniscent-game -- --corridor --quality medium --scale 2
@@ -15,6 +19,9 @@ cargo run --release -p miniscent-game -- --bench --frames 200
 # level editor (the only xui user); XUI_SNAPSHOT=<dir> renders it headlessly
 cargo run --release -p mscent-editor
 cargo run --release -p mscent-editor -- --showcase
+# scripted editor session: load, edit, save, reload, four views, play, Esc, edit again,
+# and the Texture Studio (docs/texture-studio.md, on the Texture menu): build a recipe,
+# read its pixels, undo, apply to the level, save and load it back; PNGs in <dir>/texture
 # the same session and the script workflow: load, edit, save, reload, four views, play, Esc, edit
 # again; open a sample, type with completion, see a mistake, play it, add a door, read the guide
 cargo run --release -p mscent-editor -- --selftest target/shots/editor
@@ -268,7 +275,7 @@ GUI itself was not driven by hand, only the model through the pointer API and th
 
 | ID | Status | Evidence |
 |---|---|---|
-| M3.1 | Partial | `texture.rs` (`load_texture`) and `material.rs` (`MaterialTable`, gloss, ids from `materials.txt`) with `png.rs` and `inflate.rs`; decoding happens at load time, not build time. `assets/textures` has albedo, `_n` and `_h` |
+| M3.1 | Done | `texture.rs` (`load_texture`) and `material.rs` (`MaterialTable`, gloss, ids from `materials.txt`). Stock materials are recipes (`recipe_texture.rs`, `mscent-texgen`), made at load, not at build time; PNG materials decode through `png.rs` and `inflate.rs` |
 | M3.2 | Done | `camera.rs`, `clip.rs` and their tests |
 | M3.3 | Done | `raster.rs`; `tests/snapshot.rs::brick_quad_facing_the_camera` against `tests/ref/brick_quad.ppm` |
 | M3.4 | Done | `scene.rs` and `scene/walk.rs`; `scene_tests::flythrough_matches_brute_force_with_no_doubled_faces` |
@@ -300,7 +307,7 @@ GUI itself was not driven by hand, only the model through the pointer API and th
 | M5.4 | Done | `scene.rs` now draws baked lightmaps through `lighting_shader.rs` and `level/`; `level_render.rs` tests and the flythrough PNGs show light pools and shadows on metal, brick and floor. Frame cost: about 13.5 ms/frame in the game bench on the dev machine, not compared against the bump bench or measured on the i3-7100U |
 | M5.5 | Done | `bump.rs` wired into the scene shader (`lighting_shader_tests`, `level_render.rs`); bump is visible on bolts and mortar in the flythrough PNGs |
 | M5.6 | Partial | `specular.rs` is wired as the High quality option (default quality is high; `--quality low|medium` turn it off). Gloss comes from `assets/textures/materials.txt`, and a `name_s.png` masks the highlight per texel (M12.5). Variant D cost is still not recorded in `docs/perf/` |
-| M5.7 | Partial | The engine side is done (M12.5): `load_texture` puts `name_s.png` into the alpha of the normal texels and the specular shader multiplies the highlight by it. The generator is not: `tools/gen_textures.py` emits albedo, `_n` and `_h` only, no `_s.png`, so no stock material has a mask; gloss per material comes from `assets/textures/materials.txt` |
+| M5.7 | Done | `load_texture` puts a mask into the alpha of the normal texels and the specular shader multiplies the highlight by it. The `metal` and `floor` recipes have `out-specular` (M12.10); gloss per material comes from `assets/textures/materials.txt` |
 | M5.8 | Done | `lightmap/bounce.rs`; `bounce_lights_a_room_seen_only_through_a_door`, `ambient_fills_unlit_luxels` |
 
 ## M6 Gameplay (`mscent-game`)
@@ -383,6 +390,6 @@ Design in [voxels.md](voxels.md). The game builds the volumes' surfaces and coll
 - Platform layer: the game does not use xui. `mscent-platform` is a small trait with a desktop (winit + softbuffer) and a headless backend; xui is used only by `apps/editor`. A LazyOS backend is not written.
 - `mscent-bench` was added as a crate for `bump_bench`.
 - Core crates are not declared `no_std`; they use `std` only. `mscent-platform` (winit, softbuffer, optional) and the editor (xui) are the only crates with external dependencies.
-- Textures are decoded at load time by an in-repo PNG decoder, not at build time.
+- Stock textures are generated from recipes at load time, not decoded from PNGs at build time.
 - The "fuzz target" for the level format is a seeded in-process test.
-- Still open: `_s` gloss textures from the generator (M5.7; the engine reads them since M12.5), perf numbers on the i3-7100U, all LazyOS work (M1.3, M1.4, M8.x).
+- Still open: perf numbers on the i3-7100U, all LazyOS work (M1.3, M1.4, M8.x).

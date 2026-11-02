@@ -200,6 +200,8 @@ fn mistakes(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         &format!("F5 tries the text being edited: {message}"),
     );
     let on_disk = std::fs::read_to_string(sample_script(probe)).unwrap_or_default();
+    // A checkout on Windows may give the sample CRLF, which the editor reads as LF.
+    let on_disk = on_disk.replace("\r\n", "\n");
     run.check(on_disk == code.text(), "F5 saved the script first");
 
     // The same undo Ctrl+Z gets: the code editor's, not the level's.

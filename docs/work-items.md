@@ -147,6 +147,24 @@ without volumes draw exactly the same pixels.
 | M11.8 | Destruction: queue, atomic swap, inherited light | M11.6, M11.5 | M | Replayed destruction is bit-exact; no frame shows a sky pixel; no ray traced in play |
 | M11.9 | Generators: stalactites, mushrooms, coral, trees, hive; Tunnel, Fill, Stamp | M11.7 | L | One showcase level per use case holds its budget; same seed gives the same bytes |
 
+## M12 Texture Studio
+
+Design and what was built in [texture-studio.md](texture-studio.md). All done.
+
+| ID | Item | Deps | Size | Done when |
+|---|---|---|---|---|
+| M12.1 | `mscent-texgen`: `Rgba16`, wrapped sampling, tables, periodic noise; `texgen_bench` example; entries in both Cargo profiles | | M | Half-shift seam test for every frequency; same bytes twice; golden hash in CI; noise at 128 px timed |
+| M12.2 | First operator set and the parameter table | M12.1 | L | Per-operator tests read real pixels; seam test on every operator and on chains; golden hash per operator; invalid parity and hostile parameters are errors, not panics |
+| M12.3 | Confirm the page, store and load model against the Werkkzeug source, then pages to DAG, evaluation, refcounts, cache, recipe text format | M12.2 | L | Round trip; bit-flip and truncation fuzz; `store`/`load` cycles and misuse rejected; memory limit enforced before allocating |
+| M12.4 | Output pack and headless bake: `mscent-editor --bake-texture <recipe> <dir>` | M12.3 | M | The normal of a test height at 128 px is within 1 level of `to_normal`; draft and full relief agree; PNGs load through `load_texture` |
+| M12.5 | Engine: all of "Engine changes" | | L | Adding a material leaves stock ids and existing-level pixels unchanged; forged manifests return errors; a masked highlight differs by pixel test; a new generation reaches the lists and the 3D view; `check_frame_cost.py` and `crawl`/`stability` before and after |
+| M12.6 | Workspace shell: list, op page, parameters, preview, undo, worker | M12.3 | L | `--selftest` builds a recipe through messages and reads preview pixels; `tick_costs` `assert_cheap` during a drag, and a clock-free test that the tick never waits for the worker, as `cache_lock_tests.rs` does |
+| M12.7 | `--bake-texture` updates the manifest; lit view, Save and Apply, reload into the 3D view | M12.4, M12.5, M12.6 | M | Selftest applies a change and the 3D view's pixels change while the lightmap key does not; lit view matches the game's shader on a synthetic face; the saved material loads in the game; an agent can make a usable material with no window |
+| M12.8 | Paint operator and tool | M12.6 | M | Replay at 128 and 512 px, downsampled, is within 2 levels mean; a stroke across the edge passes the seam test; undo restores identical pixels |
+| M12.9 | Later operator set, starter templates | M12.3, M12.4 | L | Same tests as M12.2; each template bakes into a contact sheet |
+| M12.10 | Stock recipes for all five materials with `out-specular` for `metal` and `floor` (closes M5.7), retire `gen_textures.py`; a compressing PNG encoder if file size needs it | M12.7 | M | Side-by-side contact sheet reviewed by the owner; full test suite passes, with snapshot changes explained; CI checks that committed PNGs equal the recipe output; assets size recorded |
+| M12.11 | Game builds materials from recipes at load | M12.10 | M | Decided on measured numbers: binary size against the budget, load time against the 67 ms PNG decode noted in `build.rs` |
+
 ## Suggested order
 
 M0, then M1.1 through M1.4 in parallel with M2.1 through M2.3. The renderer

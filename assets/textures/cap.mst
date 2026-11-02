@@ -1,0 +1,9 @@
+miniscent-recipe 1
+size 128 128
+gloss 70
+# A toadstool's skin: broad mottling only, since fine grain under a bump map reads
+# as noise on a cap. Its spots come from the volume, not from here.
+op 0 0 1 noise freq_x=4 freq_y=4 octaves=1 persistence=0.55 seed=51 color0=0.5,0.08,0.05 color1=0.8,0.2,0.09
+op 0 1 1 out-albedo
+op 1 0 1 noise freq_x=4 freq_y=4 octaves=1 persistence=0.55 seed=51 color0=0.35,0.35,0.35 color1=0.4,0.4,0.4
+op 1 1 1 out-height normal_strength=2

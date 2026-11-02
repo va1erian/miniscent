@@ -1,0 +1,17 @@
+miniscent-recipe 1
+size 128 128
+gloss 90
+# Honey-coloured wax: warm, smooth, with soft pooled runs. Little colour range: on
+# a curved comb two projections meet, and a wide one shows where they do.
+op 0 0 1 noise freq_x=4 freq_y=4 octaves=4 persistence=0.45 seed=91 color1=0.6,0.6,0.6
+op 1 0 1 noise freq_x=8 freq_y=1 octaves=3 persistence=0.55 seed=92 color1=0.4,0.4,0.4
+op 0 1 2 merge mode=add
+op 0 2 1 store name=flow
+op 0 3 1 flat color=0.8,0.54,0.14
+op 1 3 1 flat color=0.92,0.66,0.2
+op 2 3 1 load name=flow
+op 0 4 3 mask
+op 0 5 1 out-albedo
+op 0 6 1 load name=flow
+op 0 7 1 range out_low=0.4 out_high=0.5
+op 0 8 1 out-height normal_strength=0.8
