@@ -555,21 +555,22 @@ Drawing through the real path, from `cargo run --release -p mscent-render --exam
 one worker, 640x360, the same cave from 40 air positions, against a brush room all of whose pixels are lit
 faces. The first frame of a view can run far over budget until the governor acts.
 
-| What | Low | Medium | High |
-|---|---|---|---|
-| Cave, mean frame (worst about 15 ms) | 8.4 ms | 9.5 ms | 9.6 ms |
-| Cave, cost per screen pixel | 37 ns | 41 ns | 42 ns |
-| Brush room, cost per screen pixel | 18 ns | 30 ns | 30 ns |
+| What | Low | High |
+|---|---|---|
+| Cave, mean frame (worst about 21 ms at High) | 9.1 ms | 14.1 ms |
+| Cave, cost per screen pixel | 40 ns | 61 ns |
+| Brush room, cost per screen pixel | 18 to 27 ns | 30 to 50 ns |
 
-Run with nothing else on the machine: anything compiling in the background inflates all of these, and an
-earlier version of this table, measured that way, understated the gap as 10%.
+The brush row moves between those ends from run to run on an idle machine, and the cause is not known, so
+compare ratios with care. Anything compiling in the background inflates all of these.
 
-So on this dense scene a voxel pixel at High costs about 40% more than a brush pixel, which **misses** the
-aim of no more. It is not shading or overdraw. Overdraw is 1.00 once chunks are drawn near first and covered
-spans are skipped, and bump mapping adds about 1 ms against about 2.7 ms for brushes. It is geometry: about
-40 000 triangles, past the 25 000 budget because level of detail cannot reduce this scene further, and spans
-of about 5 pixels against 16 for a wall. A level at or under the budget pays less; the generator showcases
-draw 4 000 to 24 000 triangles.
+On this dense scene a voxel pixel at High costs 1.2 to 2 times a brush pixel, which **misses** the aim of no
+more. Overdraw is 1.00, as chunks draw near first and covered spans are skipped, so it is not that. About 40 000
+triangles, past the 25 000 budget because level of detail cannot reduce this scene further, and spans of
+about 5 pixels against 16 for a wall, set the floor at Low. Keeping bump at every level of detail and fading
+projections together took High from 9.6 ms to 14.1 ms here: both were bought for the look, as a hard line at a chunk
+border and a hard cut between projections were the alternatives. A level at or under the budget pays less; the
+generator showcases draw 5 000 to 24 000 triangles.
 
 The prototype this replaced, on the same frames, for the record:
 from 40 air positions:
