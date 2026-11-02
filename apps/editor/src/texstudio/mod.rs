@@ -24,6 +24,7 @@ use crate::model::texdoc::TexDoc;
 mod eval;
 mod lit;
 mod material;
+mod paint;
 mod save;
 mod worker;
 
@@ -31,6 +32,7 @@ use eval::Request;
 pub use eval::{Failure, Picture, Tab, Thumbs};
 use material::PendingBake;
 pub use material::SaveStart;
+pub use paint::{Brush, Stroking};
 pub(crate) use save::{updated_manifest, write_atomic};
 use worker::Worker;
 
@@ -93,6 +95,8 @@ pub struct TexStudio {
     /// Waiting to go to the status bar.
     message: Option<String>,
     cleared: bool,
+    /// The paint tool: the workspace's, so none of it is in a recipe or its undo.
+    tool: paint::Tool,
 }
 
 fn read_recipe_file(path: &std::path::Path) -> Result<Recipe, String> {
@@ -127,6 +131,7 @@ impl TexStudio {
             idle_unsent: false,
             message: None,
             cleared: false,
+            tool: paint::Tool::default(),
         }
     }
 
@@ -471,6 +476,8 @@ fn check_new_name(
 
 #[cfg(test)]
 mod hostile_tests;
+#[cfg(test)]
+mod paint_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

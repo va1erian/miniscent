@@ -12,7 +12,6 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mscent_texgen::ops::{self, Value};
 use mscent_world::texinfo::DEFAULT_SCALE;
 use xui::Image;
 use xui::backend::{Result as XuiResult, WidgetId};
@@ -23,16 +22,23 @@ use super::app::{Msg, cmd};
 use crate::materials::SharedMaterials;
 use crate::texstudio::{Picture, Row, Tab, TexStudio, Thumbs};
 
+mod brush;
 mod commands;
 mod dialogs;
+mod msg;
 mod page;
 mod page_geom;
+mod page_menu;
 mod params;
 mod preview;
+mod reads;
 
 use page::Page;
+use page_menu::{MENU_DELETE, MENU_DUPLICATE, page_menu};
 use params::{Host, ParamPanel};
 use preview::Preview;
+
+pub use msg::{BrushEdit, TexMsg};
 
 /// The preview pane as a scripted run reaches it.
 pub type TexPreview = Preview<Msg>;
@@ -52,76 +58,6 @@ const TABS: [(Tab, &str); 6] = [
     (Tab::Specular, "Specular"),
     (Tab::Lit, "Lit"),
 ];
-
-/// Commands of the page's menu; adding an operator is its table index past `ADD`.
-const MENU_DELETE: MenuId = MenuId::new(1000);
-const MENU_DUPLICATE: MenuId = MenuId::new(1001);
-const GROUP_BASE: usize = 1100;
-const ADD_BASE: usize = 1200;
-
-/// A message from the workspace.
-#[derive(Clone)]
-pub enum TexMsg {
-    /// A row of the material list.
-    Open(String),
-    /// The New button: asks for a name and a size.
-    AskNew,
-    Create {
-        name: String,
-        side: u32,
-    },
-    Select(Option<usize>),
-    /// A block was dragged.
-    Move {
-        block: usize,
-        x: u16,
-        y: u16,
-    },
-    /// A block's right edge was dragged.
-    Resize {
-        block: usize,
-        w: u16,
-    },
-    /// The right button on the page, at the node's pixel; what it is over.
-    PageMenu {
-        x: i32,
-        y: i32,
-        cell: (u16, u16),
-        block: Option<usize>,
-    },
-    /// Adds the operator of this table index at a cell.
-    Add {
-        op: usize,
-        cell: (u16, u16),
-    },
-    Delete,
-    Duplicate,
-    Param {
-        block: usize,
-        index: usize,
-        value: Value,
-        live: bool,
-    },
-    /// One of a colour's channels was typed.
-    Channel {
-        block: usize,
-        index: usize,
-        channel: usize,
-        value: f32,
-    },
-    ClearStrokes {
-        block: usize,
-        index: usize,
-    },
-    Gloss {
-        value: u8,
-        live: bool,
-    },
-    Tab(Tab),
-    Tiled(bool),
-    Apply,
-    Save,
-}
 
 fn tex(msg: TexMsg) -> Msg {
     Msg::Tex(msg)
@@ -160,41 +96,6 @@ fn gloss_msg(v: f64, live: bool) -> Option<Msg> {
         value: v.round().clamp(0.0, 255.0) as u8,
         live,
     }))
-}
-
-/// The operators' menu, by their group in the table.
-fn page_menu(ui: &Ui<Msg>, cell: Rc<std::cell::Cell<(u16, u16)>>) -> Menu<Msg> {
-    let mut groups: Vec<&'static str> = Vec::new();
-    for op in ops::all() {
-        if !groups.contains(&op.group) {
-            groups.push(op.group);
-        }
-    }
-    let fill = move |m: &mut MenuScope<'_>| {
-        for (g, group) in groups.iter().enumerate() {
-            m.submenu(MenuId::new(GROUP_BASE + g), group, |sub| {
-                for (i, op) in ops::all().enumerate().filter(|(_, o)| o.group == *group) {
-                    sub.item(MenuId::new(ADD_BASE + i), op.name);
-                }
-            });
-        }
-        m.separator();
-        m.item(MENU_DUPLICATE, "Duplicate");
-        m.item(MENU_DELETE, "Delete   Del");
-    };
-    Menu::context(ui).build(fill).on_select(move |id| {
-        if id == MENU_DELETE {
-            return Some(tex(TexMsg::Delete));
-        }
-        if id == MENU_DUPLICATE {
-            return Some(tex(TexMsg::Duplicate));
-        }
-        let op = (0..ops::all().count()).find(|i| MenuId::new(ADD_BASE + i) == id)?;
-        Some(tex(TexMsg::Add {
-            op,
-            cell: cell.get(),
-        }))
-    })
 }
 
 fn rows_layout(rows: &[Row], buttons: &[Handle<ToggleButton<Msg>>]) -> Layout<Msg> {
@@ -321,7 +222,11 @@ impl Workspace {
             .padding(8)
             .gap(6)
             .child(bar)
-            .child(build(Preview::new).bind(&self.preview).fill(1))
+            .child(
+                build(|ui| Preview::new(ui, |stroking| tex(TexMsg::Paint(stroking))))
+                    .bind(&self.preview)
+                    .fill(1),
+            )
             .child(label("").bind(&self.trouble))
             .child(
                 build(move |ui| Page::new(ui, studio))
@@ -412,7 +317,8 @@ impl Workspace {
         self.sync_gloss();
         {
             let studio = self.studio.borrow();
-            self.params.sync(studio.doc())?;
+            self.params.sync(studio.doc(), studio.brush())?;
+            self.preview.get().set_paintable(studio.can_paint());
             for (i, (tab, _)) in TABS.iter().enumerate() {
                 self.tabs[i].get().set_checked(*tab == studio.tab());
             }
@@ -477,5 +383,7 @@ impl Workspace {
     }
 }
 
+#[cfg(test)]
+mod paint_tests;
 #[cfg(test)]
 mod tests;

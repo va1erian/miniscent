@@ -32,7 +32,7 @@ mod text;
 mod util;
 mod warp;
 
-pub use paint::{MAX_POINTS, MAX_STROKES};
+pub use paint::{MAX_POINTS, MAX_STROKES, STROKE_COORD, STROKE_RADIUS, stroke_fits};
 
 /// Longest text parameter, in bytes.
 pub const MAX_TEXT: usize = 64;
@@ -181,6 +181,16 @@ impl Params {
 
     pub fn values(&self) -> &[Value] {
         &self.values
+    }
+
+    /// The strokes of parameter `index`, to grow a stroke in place as the editor
+    /// does while the pointer is down. They are copied only while another holder
+    /// shares them, such as a request still on its way to the worker.
+    pub fn strokes_mut(&mut self, index: usize) -> Option<&mut Vec<Stroke>> {
+        match self.values.get_mut(index)? {
+            Value::Strokes(strokes) => Some(Arc::make_mut(strokes)),
+            _ => None,
+        }
     }
 
     /// Sets the named parameter; out of range is an error, not a clamp.
@@ -380,6 +390,8 @@ mod filter_tests;
 mod golden_tests;
 #[cfg(test)]
 mod height_tests;
+#[cfg(test)]
+mod paint_tests;
 #[cfg(test)]
 mod pattern_tests;
 #[cfg(test)]

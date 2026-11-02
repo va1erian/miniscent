@@ -8,8 +8,10 @@ use xui::Color;
 use xui::backend::{Result as XuiResult, WidgetId};
 use xui::prelude::*;
 
-use super::TexMsg;
+use super::brush::{BrushShown, brush_rows};
+use super::{BrushEdit, TexMsg, reads};
 use crate::model::texdoc::TexDoc;
+use crate::texstudio::Brush;
 use crate::ui::Msg;
 
 /// The container the widgets are remade in.
@@ -19,7 +21,7 @@ pub type Host = xui::widget::Panel<Msg>;
 const SLIDE_RANGE: i64 = 1024;
 
 /// A starting point for a colour; the fields below it say exactly which.
-const SWATCHES: [Color; 16] = [
+pub(super) const SWATCHES: [Color; 16] = [
     Color::rgb(0, 0, 0),
     Color::rgb(64, 64, 64),
     Color::rgb(128, 128, 128),
@@ -39,11 +41,11 @@ const SWATCHES: [Color; 16] = [
 ];
 
 /// A value as a recipe should hold it: three decimals, inside its range.
-fn tidy(v: f64, min: f32, max: f32) -> f32 {
+pub(super) fn tidy(v: f64, min: f32, max: f32) -> f32 {
     (((v * 1000.0).round() / 1000.0) as f32).clamp(min, max)
 }
 
-fn number(v: f32) -> f64 {
+pub(super) fn number(v: f32) -> f64 {
     (f64::from(v) * 1000.0).round() / 1000.0
 }
 
@@ -230,6 +232,10 @@ pub struct ParamPanel {
     /// The material and panel epoch they show.
     shown_of: Option<(String, u64)>,
     shown: Vec<Shown>,
+    /// What the block reads, which a name typed into a `load` changes with no
+    /// new panel.
+    reads: Handle<Label<Msg>>,
+    brush: BrushShown,
 }
 
 /// What the panel holds with no block to show.
@@ -237,22 +243,29 @@ pub(super) fn nothing_selected() -> Layout<Msg> {
     column().child(label("Select a block on the page"))
 }
 
-fn panel_layout(doc: &TexDoc, shown: &mut Vec<Shown>) -> Layout<Msg> {
+/// The panel for the selected block, and what it shows of each parameter.
+fn panel_layout(doc: &TexDoc, panel: &mut ParamPanel, brush: Brush) -> Layout<Msg> {
     let selected = doc.selected();
     let block = selected.and_then(|b| doc.recipe().blocks.get(b));
     let (Some(index), Some(block)) = (selected, block) else {
         return nothing_selected();
     };
     let spec: &OpSpec = block.spec;
-    let mut content = column().gap(6).child(label(spec.name).title());
+    let mut content = column()
+        .gap(6)
+        .child(label(spec.name).title())
+        .child(label(&reads::describe(doc, index)).bind(&panel.reads));
     if spec.params.is_empty() {
         content = content.child(label("No parameters"));
     }
     for (i, (param, value)) in spec.params.iter().zip(block.params.values()).enumerate() {
         let mut one = Shown::default();
         let entry = row_of((index, i), param, value, &mut one);
-        shown.push(one);
+        panel.shown.push(one);
         content = content.child(label(param.name)).child(entry);
+    }
+    if doc.can_stroke(index) {
+        content = content.child(brush_rows(brush, &panel.brush));
     }
     content
 }
@@ -280,17 +293,21 @@ impl ParamPanel {
     }
 
     /// Makes the widgets show `doc`, if they are not showing it.
-    pub fn sync(&mut self, doc: Option<&TexDoc>) -> XuiResult<()> {
+    pub fn sync(&mut self, doc: Option<&TexDoc>, brush: Brush) -> XuiResult<()> {
         let key = doc.map(|d| (d.name().to_string(), d.panel_epoch()));
         if key == self.shown_of {
+            self.sync_reads(doc);
             return Ok(());
         }
         let Some(host) = self.host.try_get() else {
             return Ok(());
         };
-        let mut shown = Vec::new();
+        // Whatever the old panel's widgets were bound to is gone with it.
+        self.shown.clear();
+        self.reads = Handle::new();
+        self.brush = BrushShown::default();
         let layout = match doc {
-            Some(doc) => panel_layout(doc, &mut shown),
+            Some(doc) => panel_layout(doc, self, brush),
             None => nothing_selected(),
         };
         host.set_layout(layout)?;
@@ -299,9 +316,25 @@ impl ParamPanel {
         if let Some(ui) = &self.ui {
             ui.invalidate_layout();
         }
-        self.shown = shown;
         self.shown_of = key;
         Ok(())
+    }
+
+    /// Says what the selected block reads, if that changed. Only on a change: new
+    /// text means a new layout of the window.
+    fn sync_reads(&self, doc: Option<&TexDoc>) {
+        let (Some(doc), Some(label)) = (doc, self.reads.try_get()) else {
+            return;
+        };
+        let text = doc.selected().map(|b| reads::describe(doc, b));
+        if let Some(text) = text.filter(|t| label.text() != *t) {
+            label.set_text(&text);
+        }
+    }
+
+    /// Shows a brush change in the widgets that did not make it.
+    pub fn show_brush(&self, edit: BrushEdit) {
+        self.brush.show(edit);
     }
 
     /// Shows a value in the widgets of its parameter that did not set it: a slider

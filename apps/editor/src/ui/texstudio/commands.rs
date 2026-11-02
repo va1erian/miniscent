@@ -5,7 +5,7 @@ use xui::prelude::*;
 use xui::widget::{HasText, Placeable};
 
 use super::dialogs;
-use super::{MENU_DELETE, MENU_DUPLICATE, TexMsg};
+use super::{BrushEdit, MENU_DELETE, MENU_DUPLICATE, TexMsg};
 use crate::texstudio::SaveStart;
 use crate::ui::app::{Editor, Msg, cmd};
 
@@ -208,6 +208,9 @@ impl Editor {
         if let TexMsg::Param { index, value, .. } = &msg {
             self.tex.params.show_value(*index, value);
         }
+        if let TexMsg::Brush(edit) = &msg {
+            self.tex.params.show_brush(*edit);
+        }
         if let TexMsg::Gloss { value, .. } = &msg {
             self.tex.gloss_slider.get().set_value(f64::from(*value));
             self.tex.gloss_field.get().set_value(f64::from(*value));
@@ -279,6 +282,16 @@ impl Editor {
             }
             TexMsg::ClearStrokes { block, index } => {
                 studio.edit(|d| d.clear_strokes(block, index));
+            }
+            TexMsg::Paint(stroking) => studio.paint(stroking),
+            TexMsg::Brush(edit) => {
+                let mut brush = studio.brush();
+                match edit {
+                    BrushEdit::Radius(v) => brush.radius = v,
+                    BrushEdit::Hardness(v) => brush.hardness = v,
+                    BrushEdit::Color(c) => brush.color = c,
+                }
+                studio.set_brush(brush);
             }
             TexMsg::Gloss { value, live } => {
                 studio.edit(|d| {

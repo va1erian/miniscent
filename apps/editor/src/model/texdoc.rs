@@ -38,6 +38,8 @@ struct Snapshot {
 enum Live {
     Param(usize, usize),
     Gloss,
+    /// Drawing a stroke on a block's strokes parameter (block, parameter).
+    Stroke(usize, usize),
 }
 
 /// A recipe open in the studio.
@@ -349,7 +351,10 @@ impl TexDoc {
 
     /// Empties a strokes parameter.
     pub fn clear_strokes(&mut self, block: usize, index: usize) -> Result<(), String> {
-        self.set_param(block, index, Value::Strokes(Arc::default()), false)
+        self.set_param(block, index, Value::Strokes(Arc::default()), false)?;
+        // The panel says how many there are.
+        self.panel_epoch = self.panel_epoch.wrapping_add(1);
+        Ok(())
     }
 
     /// Sets the material's gloss. `live` as in [`Self::set_param`].
@@ -399,6 +404,10 @@ pub fn clamp_to_page(x: i32, y: i32, w: u16) -> (u16, u16) {
     let y = y.clamp(0, i32::from(MAX_ROWS) - 1);
     (x as u16, y as u16)
 }
+
+#[path = "texdoc_strokes.rs"]
+mod strokes;
+pub use strokes::Growth;
 
 #[cfg(test)]
 #[path = "texdoc_tests.rs"]

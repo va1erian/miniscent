@@ -18,17 +18,18 @@ use crate::ui::texstudio::{Page, TexMsg};
 use crate::ui::{Editor, Msg, cmd};
 
 /// What a script reaches in the built editor.
-struct Handles {
-    state: Rc<RefCell<crate::model::EditorState>>,
-    studio: Rc<RefCell<TexStudio>>,
-    page: Rc<Page>,
-    menu: Rc<xui::widget::Menu<Msg>>,
+pub(super) struct Handles {
+    pub(super) state: Rc<RefCell<crate::model::EditorState>>,
+    pub(super) studio: Rc<RefCell<TexStudio>>,
+    pub(super) page: Rc<Page>,
+    pub(super) menu: Rc<xui::widget::Menu<Msg>>,
+    pub(super) preview: Rc<super::TexPreview>,
     /// Where the page is in the window.
     origin: Box<dyn Fn() -> (i32, i32)>,
 }
 
 /// Builds the editor and runs `script` with the workspace open on a new material.
-fn with_workspace(script: impl FnOnce(&Stage<'_, Msg>, &Handles) + 'static) {
+pub(super) fn with_workspace(script: impl FnOnce(&Stage<'_, Msg>, &Handles) + 'static) {
     let handles: Rc<RefCell<Option<Handles>>> = Rc::new(RefCell::new(None));
     let ran = Rc::new(Cell::new(false));
     let (h2, r2) = (handles.clone(), ran.clone());
@@ -47,6 +48,7 @@ fn with_workspace(script: impl FnOnce(&Stage<'_, Msg>, &Handles) + 'static) {
                 studio: app.tex.studio.clone(),
                 page,
                 menu: app.menu.get(),
+                preview: app.tex.preview.get(),
                 origin,
             });
             Ok(app)
@@ -68,7 +70,7 @@ fn with_workspace(script: impl FnOnce(&Stage<'_, Msg>, &Handles) + 'static) {
     assert!(ran.get(), "the script ran to the end");
 }
 
-fn mouse_event(kind: u8, x: i32, y: i32, button: MouseButton) -> Event {
+pub(super) fn mouse_event(kind: u8, x: i32, y: i32, button: MouseButton) -> Event {
     let modifiers = Modifiers::NONE;
     match kind {
         0 => Event::MouseDown {

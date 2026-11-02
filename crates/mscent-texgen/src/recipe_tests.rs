@@ -121,3 +121,56 @@ fn bit_flips_and_truncations_never_panic() {
         let _ = read(&b);
     }
 }
+
+fn painted(stroke_lines: &str) -> String {
+    format!("miniscent-recipe 1\nsize 8 8\nop 0 0 1 paint\n{stroke_lines}\n")
+}
+
+#[test]
+fn strokes_survive_the_round_trip() {
+    let text = painted(
+        "stroke 0.03 0.5 1,0.5,0.25,1 -0.25,0.5 0.5,0.5 1.125,0.75\nstroke 0.5 0 0,0,0,0.5 2.9,-1.9",
+    );
+    let r = read(text.as_bytes()).expect("reads");
+    assert_eq!(read(write(&r).as_bytes()).expect("reads back"), r);
+    let Some(Value::Strokes(s)) = r.blocks[0].params.values().get(1) else {
+        panic!("a strokes value");
+    };
+    assert_eq!(s.len(), 2);
+    assert_eq!(s[0].points, [[-0.25, 0.5], [0.5, 0.5], [1.125, 0.75]]);
+}
+
+/// The reader takes what the kernel takes and no more, at each end of each range.
+#[test]
+fn the_reader_accepts_exactly_what_paint_runs() {
+    for line in ["stroke 0.5 1 1,1,1,1 -2,3", "stroke 0 0 0,0,0,0 3,-2"] {
+        assert!(read(painted(line).as_bytes()).is_ok(), "{line}");
+    }
+    let past = [
+        "stroke 0.51 1 1,1,1,1 0,0",
+        "stroke 1 1 1,1,1,1 0,0",
+        "stroke 0.1 1.5 1,1,1,1 0,0",
+        "stroke 0.1 1 1,1,1,2 0,0",
+        "stroke 0.1 1 1,1,1,1 3.01,0",
+        "stroke 0.1 1 1,1,1,1 0,-2.01",
+        "stroke 0.1 1 1,1,1,1 16,0",
+        "stroke NaN 1 1,1,1,1 0,0",
+        "stroke 0.1 1 1,1,1,1 inf,0",
+        "stroke 0.1 1 1,1,1,1 0",
+        "stroke 0.1 1 1,1,1,1 0,0,0",
+    ];
+    for line in past {
+        assert!(read(painted(line).as_bytes()).is_err(), "{line}");
+    }
+}
+
+#[test]
+fn a_stroke_over_the_point_or_stroke_cap_is_an_error_not_a_panic() {
+    let points = " 0.5,0.5".repeat(ops::MAX_POINTS);
+    assert!(read(painted(&format!("stroke 0.1 1 1,1,1,1{points}")).as_bytes()).is_ok());
+    let one_more = format!("stroke 0.1 1 1,1,1,1{points} 0.5,0.5");
+    assert!(read(painted(&one_more).as_bytes()).is_err());
+    let line = "stroke 0.1 1 1,1,1,1 0.5,0.5\n";
+    assert!(read(painted(&line.repeat(ops::MAX_STROKES)).as_bytes()).is_ok());
+    assert!(read(painted(&line.repeat(ops::MAX_STROKES + 1)).as_bytes()).is_err());
+}

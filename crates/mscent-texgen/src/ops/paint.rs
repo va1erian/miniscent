@@ -1,6 +1,8 @@
 //! Round-brush strokes: the `paint` operator replays the strokes the editor
 //! recorded, `scratches` makes random ones. Both go through one rasterizer.
 
+use std::ops::RangeInclusive;
+
 use mscent_math::rng::Rng;
 
 use super::util::{BLACK, WHITE, canvas_at, over};
@@ -11,29 +13,33 @@ use crate::image::{Image, to_px};
 /// Caps on a recipe's strokes, which are untrusted.
 pub const MAX_STROKES: usize = 4096;
 pub const MAX_POINTS: usize = 4096;
-/// Points may leave the tile so a stroke can cross an edge, but not by much.
-const COORD_RANGE: std::ops::RangeInclusive<f32> = -2.0..=3.0;
+/// Points may leave the tile so a stroke can cross an edge, but not by much: a
+/// stroke started on a tile and dragged across the two tiles of the editor's
+/// tiled view stays inside this.
+pub const STROKE_COORD: RangeInclusive<f32> = -2.0..=3.0;
+/// Brush radius, as a fraction of the tile's width.
+pub const STROKE_RADIUS: RangeInclusive<f32> = 0.0..=0.5;
 /// Texel visits a `paint` may make, per texel of the tile, plus a floor for
 /// tiny tiles. Bounds the time a hostile recipe can take: 4096 strokes of 4096
 /// long segments would otherwise cost a tile each.
 const WORK_PER_TEXEL: u64 = 64;
 const WORK_FLOOR: u64 = 1 << 20;
 
+/// Whether one stroke is something `paint` will run: finite numbers in range and
+/// no more points than the cap. The recipe reader and the editor ask this too, so
+/// what they accept is exactly what the kernel accepts.
+pub fn stroke_fits(s: &Stroke) -> bool {
+    STROKE_RADIUS.contains(&s.radius)
+        && (0.0..=1.0).contains(&s.hardness)
+        && s.color.iter().all(|c| (0.0..=1.0).contains(c))
+        && s.points.len() <= MAX_POINTS
+        && s.points.iter().flatten().all(|c| STROKE_COORD.contains(c))
+}
+
 /// Whether strokes are within the caps and made of finite, sensible numbers.
 fn validate(strokes: &[Stroke]) -> Result<(), TexError> {
-    let bad = || TexError::BadParam("strokes".to_string());
-    if strokes.len() > MAX_STROKES {
-        return Err(bad());
-    }
-    for s in strokes {
-        let sane = (0.0..=0.5).contains(&s.radius)
-            && (0.0..=1.0).contains(&s.hardness)
-            && s.color.iter().all(|c| (0.0..=1.0).contains(c))
-            && s.points.len() <= MAX_POINTS
-            && s.points.iter().flatten().all(|c| COORD_RANGE.contains(c));
-        if !sane {
-            return Err(bad());
-        }
+    if strokes.len() > MAX_STROKES || !strokes.iter().all(stroke_fits) {
+        return Err(TexError::BadParam("strokes".to_string()));
     }
     Ok(())
 }

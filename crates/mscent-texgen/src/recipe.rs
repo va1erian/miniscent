@@ -31,9 +31,6 @@ pub const MAX_BLOCKS: usize = 256;
 
 /// Gloss when a recipe does not give one.
 const DEFAULT_GLOSS: u8 = 40;
-/// How far outside the tile a stroke may run. A path is wrapped when it is
-/// drawn, so a little past the edge is normal and far past it is garbage.
-const MAX_STROKE_COORD: f32 = 16.0;
 
 /// One operator on the page. It reads the blocks above it (see [`crate::graph`]).
 #[derive(Clone, Debug, PartialEq)]
@@ -176,34 +173,24 @@ fn parse_block<'a>(
     })
 }
 
-fn unit(text: Option<&str>) -> Option<f32> {
-    let v: f32 = text?.parse().ok()?;
-    (0.0..=1.0).contains(&v).then_some(v)
-}
-
+/// A stroke line's numbers, held to what `paint` runs: asking the kernel's own
+/// predicate keeps a file that loads from being a file that fails to run.
 fn parse_stroke<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Option<Stroke> {
-    let radius = unit(tokens.next())?;
-    let hardness = unit(tokens.next())?;
+    let radius = tokens.next()?.parse().ok()?;
+    let hardness = tokens.next()?.parse().ok()?;
     let color = parse_color(tokens.next()?)?;
-    if !color.iter().all(|c| (0.0..=1.0).contains(c)) {
-        return None;
-    }
     let mut points = Vec::new();
     for token in tokens {
         let (x, y) = token.split_once(',')?;
-        let (x, y): (f32, f32) = (x.parse().ok()?, y.parse().ok()?);
-        let fits = |v: f32| v.abs() <= MAX_STROKE_COORD;
-        if !fits(x) || !fits(y) {
-            return None;
-        }
-        points.push([x, y]);
+        points.push([x.parse().ok()?, y.parse().ok()?]);
     }
-    Some(Stroke {
+    let stroke = Stroke {
         radius,
         hardness,
         color,
         points,
-    })
+    };
+    ops::stroke_fits(&stroke).then_some(stroke)
 }
 
 /// Adds `stroke` to `block`'s strokes parameter.
