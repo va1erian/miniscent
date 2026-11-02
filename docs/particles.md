@@ -418,6 +418,118 @@ not at the muzzle. Mutating the shader or the mesh path to ignore the lights mad
 tests fail. Not tested: a real window, the i3-7100U, or a kill through a full session with the
 light on screen.
 
+## What was built (M9.6 layer)
+
+Part of M9.6 only: the half-res layer. `Blast`, shake, the overlay and the gallery are elsewhere.
+
+**Drawing** (`crates/mscent-render/src/particles/layer.rs`). `ParticleDraws` has two more lists,
+`layer_over` (back to front, as given) and `layer_add`. The order is decals, layer, full-size
+"over", full-size additive, streaks. Each band draws its own part inside the existing pass
+(`draw_particles_with`), with no second dispatch:
+
+1. Take the union of the layered sprites' boxes in layer pixels. If it is empty, stop: a band with
+   no layered sprite in it does nothing, and a frame with none does not touch the layer at all.
+2. Fill the layer's depth over that region from the band's, taking the nearest `1/z` of each 2x2
+   block, so a wall in front of a sprite is never painted over.
+3. Draw the sprites at half size (position and radius halved, same mask, the next mip down) into a
+   buffer that is itself a `Framebuffer`, so clipping, the mask table and the row loop are the
+   ones full-size sprites use. The kernels take a `Dest::Layer` that keeps the alpha byte: colour
+   accumulates in RGB, and the byte holds the product of what each sprite lets through, from 255.
+   "Over" is the existing formula with the tint's alpha zeroed in the colour term, so the same
+   multiply gives `alpha * keep >> 8`; "add" adds nothing to alpha. Nothing was copied: the x86
+   kernels gained a const generic `LAYER` (no source in the alpha lane, no forced 255), and the
+   scalar definitions the same.
+4. Composite by nearest-neighbour upscale, `dst = layer.rgb + dst * (alpha + 1) / 256` per
+   channel, saturating, the frame's own alpha untouched. Alpha 255 with colour 0 is the identity,
+   so an untouched layer pixel changes nothing and a vector of them is skipped.
+
+The depth downsample (SSE2) and the composite (SSE2 and AVX2, using `mulhi` for the multiply and
+`pshufb` for the keep factor) are bit-identical to scalar definitions, tested on random rows of
+every length with untouched pixels mixed in and exhaustively over keep (`layer_kernels_tests.rs`;
+`kernels_tests.rs` for the layer variants of the sprite kernels).
+
+A layer row stands for two screen rows, so a band holds the layer only if it starts on an even row
+and ends on an even row or at the bottom of the frame. **Any other band draws the layered sprites
+at full size instead**, in the same order. A tiling with odd band starts (7 rows, say) therefore
+gives a different picture from the default 24-row one, but never a different one for another
+worker count. An odd frame width or height is drawn up to the last row and column (the last layer
+pixel stands for one). The band's layer is a `thread_local` `Framebuffer` made on first use and
+reshaped in place after, so a frame allocates nothing (`tests/layer_alloc.rs`, and a test that the
+buffer keeps its address as bands change size).
+
+**Budget** (`fx/layer.rs`, step 4). `Limits::layer` is true for High and Medium. After costing, if
+the Normal plus Cosmetic cost does not fit what Essential leaves, `Gate::apply` considers every
+Normal or Cosmetic sprite over 64 px across that the scene does not hide (at least two of five
+depth probes see it; Essential stays crisp). It moves them only if their saving on the fill beats
+the layer's own cost for the union of their boxes, then costs again and computes `keep`. `Tally`,
+`thin`, `cost_of` and the tags treat the layer lists like the others, so a moved draw is costed as
+a layer draw and still fades and is cut by its key. Once needed, the layer is held for 30 frames (a
+frame count, so a script replays), because a scene at the edge would otherwise flip smoke between
+full and half size on adjacent frames. Nothing allocates: the lists and tags are sized to the
+fullest frame, and a move pushes at most what it removed. `CombatFx::set_layer` overrides the
+quality row, for the bench and tests.
+
+**Measured** (`fx_bench`, `fx_budget_bench`; 640x360, one thread, AVX2, dev machine). Time per
+pixel of the sprite's full-size box, total in us in brackets:
+
+| Case | Full size | Layered |
+|---|---|---|
+| add, 128 px | 0.48 ns (8) | 0.34 (6) |
+| add, 320 px | 0.47 (48) | 0.31 (31) |
+| over, 320 px | 0.54 (56) | 0.33 (34) |
+| over, screen sized | 0.54 (123) | 0.36 (83) |
+| screen sized, fully hidden | 0.06 (14) | 0.11 (25) |
+
+**The saving is a third to a half, not three quarters.** The fill is a quarter, at the same 0.5 ns
+per layer pixel. What remains is the downsample and the composite, about 0.2 ns per pixel of the
+region the layer covers (0.4 of an additive pixel), more than the 0.13 ns the prototype suggested.
+The budget therefore charges what was measured and not a quarter: a layered sprite costs a quarter
+of its fill and half its row setup, and the layer costs `LAYER_BLEND` = 0.42 per pixel of the union
+of the layered boxes plus `LAYER_OVERHEAD` = 1100 units. That last is the fixed cost: a hidden
+66 px sprite takes about 0.6 us more through the layer than at full size (the scratch, the clip and
+the loops over an empty region); a hidden region costs 0.05 ns per pixel on top. With these the
+unit comes out right, 0.40 ns per unit through the layer and 0.42 without. A first version that
+priced each layered sprite at a quarter plus its own blend made a heavy frame look twice as dear as
+it was. Heavy frame, 40 drone explosions at High, one thread:
+
+| | Sprites | Streaks | Budget used | Draw | Collect |
+|---|---|---|---|---|---|
+| No layer | 76 | 149 | 4.82 of 5 screens | 0.46 ms | 15 us |
+| Layer | 260 (141 layered) | 256 | 4.97 of 5 | 0.46 ms | 20 us |
+| Same 260 sprites at full size | 260 | 256 | | 1.03 ms | |
+
+The budget is the same pixels, so the time is the same; what changes is how much it buys. The same
+picture would take 2.2 times as long without the layer, and with it the cut keeps 3.4 times the
+sprites. At Medium it is 55 against 127 sprites at 0.28 and 0.26 ms, and 0.67 ms for the 127 at
+full size. These sprites overlap a lot, so the region is paid once; a few separate large sprites
+save less (the random-scene test only requires that the total falls whenever the gate moves
+anything). The gate costs about 5 us of collect when it moves sprites. A frame with no large sprite
+is untouched: the fill, streak, setup and decal tables of `fx_bench` are the same within noise
+before and after, except that rejecting a sprite off the screen went from 6.9 to 8.3 ns, a cost of
+the clip function now shared with the layer that was not chased.
+
+**Halos, looked at.** `apps/game/tests/layer_fx.rs` renders a layered Puff and a layered Fire sprite
+behind a 2-unit pillar in the real renderer and compares it with the same sprites at full size. I
+rendered the pair to a PNG, cropped around the pillar at 3x with the difference times 8. No pixel
+of the pillar changes. On one side of it a thin line, one pixel wide, is missing the smoke where a
+2x2 block straddles the edge (137 pixels, about one a row); on the other the block boundary falls
+on the edge and nothing is lost. Elsewhere the difference shows only as a faint 2-pixel grid: mean
+0.6 of 255 per channel, worst 6. The line is visible at 3x and hardly at 1x. The tests fail if the
+loss grows past one column. Not looked at: thin near objects (a pole one or two pixels wide), and
+moving smoke.
+
+**Evidence**: `kernels_tests.rs` and `layer_kernels_tests.rs` (bit-identical on every level);
+`layer_tests.rs` (a sprite behind a wall changes no pixel, on even and odd edges; the halo is at
+most one column; mean difference from full size under 1.5 and worst at most 10 for four masks;
+bands that hold the layer match the whole frame at 1, 2, 5 and 16 workers; bands that do not draw
+full size, and match for every worker count; the last row and column of an odd frame are drawn;
+the scratch keeps its storage); `tests/layer_alloc.rs`; `fx_collect_alloc.rs` (a crowd that engages
+the layer allocates nothing); `fx_layer_tests.rs` (the gate, the hold, thinning, cost consistency,
+hostile sprites, and a heavy scene that stays in budget and keeps a higher Cosmetic cut than
+without); and `apps/game/tests/layer_fx.rs` on real pixels at six tilings. Not tested: the
+i3-7100U, a window, and flicker of the layer on a scripted explosion (the hold is tested on the
+gate alone).
+
 ## Design overview
 
 ```
@@ -716,7 +828,7 @@ crates/mscent-render/src/particles/
   sprite.rs    clipping, u-table, row loop
   kernels.rs   scalar definitions and level dispatch; kernels_x86.rs for the unsafe paths
   beam.rs      near clip, streaks, beams
-  layer.rs     half-res layer: depth downsample, composite
+  layer.rs     half-res layer: depth downsample, composite; layer_kernels.rs (and _x86.rs): their kernels
   budget.rs    cost weights, probes, keep
   decal.rs     scorch decals: polygon raster, depth bias
 crates/mscent-game/src/fx/
@@ -728,6 +840,7 @@ crates/mscent-game/src/fx/
   effects.rs   Effect, Emitter and the recipe tables; effects_surface.rs for the material rows
   decal.rs     the ring of 64 scorch marks and the face outline they are cut to
   lights.rs    the dynamic lights of combat: slots, fade, eviction
+  layer.rs     budget step 4: which sprites move to the half-res layer, and the hold
 crates/mscent-render/src/
   dynlight.rs  DynLight: a placed light; face_points.rs the per-face light; scene/reach.rs the flood
 ```
@@ -773,8 +886,9 @@ a call for a person with a screenshot; tests can only check that pixels land whe
   the scene being about 2 times slower than on two cores.
 - **The reference factor is a guess.** Everything is stated in pixels so it can be retuned by
   changing numbers once M8.5 runs, with no redesign.
-- **Half-res halos.** Taking the nearest depth of each 2x2 block will leave a one or two pixel
-  fringe where a large sprite meets a nearer edge. Not yet seen in a picture; M9.6 finds out.
+- **Half-res halos.** Taking the nearest depth of each 2x2 block leaves a fringe where a large
+  sprite meets a nearer edge. Seen and measured in M9.6: one pixel on one side of a pillar's edge.
+  Thin near objects are not yet looked at. See "What was built (M9.6 layer)".
 - **Sprite setup cost** was below the timer's noise and could matter for hundreds of small sprites.
   M9.1 measures it, and if it does, small ones become plain points.
 - **Effect budget versus frame deadline.** Hiding the particle pass from the resolution controller

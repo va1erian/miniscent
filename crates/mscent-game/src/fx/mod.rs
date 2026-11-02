@@ -22,6 +22,7 @@ pub mod collide;
 pub mod combat;
 pub mod decal;
 pub mod emit;
+pub mod layer;
 pub mod lights;
 mod pool;
 pub mod recipes;

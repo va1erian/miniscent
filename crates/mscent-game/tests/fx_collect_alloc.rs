@@ -100,4 +100,28 @@ fn collecting_a_busy_frame_allocates_nothing_from_the_first_one() {
     let calls = CALLS.load(Ordering::Relaxed) - before;
     assert!(draws.decals.len() > 30, "{} in view", draws.decals.len());
     assert_eq!(calls, 0);
+
+    // A crowd of explosions that overruns the budget, so big sprites are moved
+    // to the half-res layer: the move and the cut allocate nothing either, and
+    // do so every frame the layer is held.
+    let mut fx = CombatFx::new();
+    for i in 0..40 {
+        let spread = i as f32 / 40.0 - 0.5;
+        let at = Vec3::new(spread * 16.0, 8.0 + spread * 4.0, spread * 6.0);
+        fx.drone_explosion(at, DRONE_TINT);
+    }
+    for _ in 0..12 {
+        fx.advance(16_666_667, &bsp);
+    }
+    for frame in 0..4 {
+        let before = CALLS.load(Ordering::Relaxed);
+        fx.collect(&cam, None, None, &mut draws);
+        let calls = CALLS.load(Ordering::Relaxed) - before;
+        let layered = draws.layer_over.len() + draws.layer_add.len();
+        assert!(
+            layered > 20,
+            "frame {frame}: {layered} sprites in the layer"
+        );
+        assert_eq!(calls, 0, "frame {frame}");
+    }
 }

@@ -22,11 +22,12 @@ const EXPLOSIONS: usize = 40;
 const ROUNDS: u32 = 40;
 const FRAME_NS: u64 = 16_666_667;
 
-fn run(name: &str, quality: Quality, arena: &Arena) {
+fn run(name: &str, quality: Quality, layer: bool, arena: &Arena) {
     let view = View::from_angles(Vec3::ZERO, 0.0, 0.0, 0.0);
     let cam = view.camera(1.3, 0.1, 400.0, W, H).expect("a camera");
     let mut fx = CombatFx::new();
     fx.set_quality(quality);
+    fx.set_layer(layer && Limits::of(quality).layer);
     for i in 0..EXPLOSIONS {
         let spread = i as f32 / EXPLOSIONS as f32 - 0.5;
         let at = Vec3::new(spread * 16.0, 8.0 + spread * 4.0, spread * 6.0);
@@ -48,27 +49,46 @@ fn run(name: &str, quality: Quality, arena: &Arena) {
         draw_particles(&mut fb, &draws, &bank);
         draw_ns += start.elapsed().as_nanos();
     }
+    let layered = draws.layer_over.len() + draws.layer_add.len();
+    // The same sprites with the layer's moved back to full size, for what the
+    // layer saves on one picture.
+    let mut flat = draws.clone();
+    flat.over.splice(0..0, flat.layer_over.drain(..));
+    flat.add.append(&mut flat.layer_add);
+    fb.clear(0xff10_1010);
+    let flat_ns = (0..ROUNDS)
+        .map(|_| {
+            let start = Instant::now();
+            draw_particles(&mut fb, &flat, &bank);
+            start.elapsed().as_nanos()
+        })
+        .min()
+        .unwrap_or(0);
     let units = cost_of(&draws, None, W as f32, H as f32);
     let screen = (W * H) as f32;
     let rounds = f64::from(ROUNDS);
     let drawn = draw_ns as f64 / rounds;
     println!(
-        "{name:<8} live {:>4}  sprites {:>4}  streaks {:>4}  {:>5.2} of {:>3.1} screens  \
-         collect {:>6.1} us  draw {:>6.2} ms  {:>5.2} ns/unit",
+        "{name:<14} live {:>4}  sprites {:>4} ({:>3} layered)  streaks {:>4}  {:>5.2} of {:>3.1} \
+         screens  collect {:>6.1} us  draw {:>6.2} ms  {:>5.2} ns/unit  same at full size {:>5.2} ms",
         fx.live(),
-        draws.over.len() + draws.add.len(),
+        draws.over.len() + draws.add.len() + layered,
+        layered,
         draws.streaks.len(),
         units / screen,
         Limits::of(quality).screens,
         collect_ns as f64 / rounds / 1000.0,
         drawn / 1.0e6,
         drawn / f64::from(units),
+        flat_ns as f64 / 1.0e6,
     );
 }
 
 fn main() {
     let arena = Arena::from_level(&showcase_level()).expect("showcase loads");
-    run("High", Quality::High, &arena);
-    run("Medium", Quality::Medium, &arena);
-    run("Low", Quality::Low, &arena);
+    run("High", Quality::High, true, &arena);
+    run("High, no layer", Quality::High, false, &arena);
+    run("Medium", Quality::Medium, true, &arena);
+    run("Medium, no layer", Quality::Medium, false, &arena);
+    run("Low", Quality::Low, true, &arena);
 }

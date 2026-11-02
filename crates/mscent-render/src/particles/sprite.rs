@@ -10,7 +10,7 @@
 //! [`MAX_RADIUS`]; a sprite asking for more is drawn at that radius instead.
 
 use super::bank::{MIPS, SpriteBank};
-use super::kernels::blend_row;
+use super::kernels::{Dest, blend_row};
 use super::{Blend, SpriteDraw};
 use crate::framebuffer::Framebuffer;
 use crate::simd::Level;
@@ -38,36 +38,70 @@ struct Plan<'a> {
     side: usize,
 }
 
+/// A sprite's box clipped to a framebuffer.
+struct Clip {
+    radius: f32,
+    /// Top-left of the unclipped box, in pixels.
+    origin: (f32, f32),
+    /// Pixel columns and screen rows the box touches, each as `start..end`.
+    cols: (usize, usize),
+    rows: (usize, usize),
+}
+
+/// `None` for a sprite the renderer refuses or one that misses `fb`.
+fn clip(s: &SpriteDraw, fb: &Framebuffer) -> Option<Clip> {
+    // `inv_z > 0` also rejects NaN and anything at or behind the eye.
+    let valid = s.x.is_finite() && s.y.is_finite() && s.radius.is_finite();
+    if !valid || s.radius <= 0.0 || !s.inv_z.is_finite() || s.inv_z <= 0.0 {
+        return None;
+    }
+    let radius = s.radius.min(MAX_RADIUS);
+    let origin = (s.x - radius, s.y - radius);
+    let (rows0, rows1) = fb.row_range();
+    let cols = span(origin.0, 2.0 * radius, 0.0, fb.width() as f32);
+    let rows = span(origin.1, 2.0 * radius, rows0 as f32, rows1 as f32);
+    (cols.1 > cols.0 && rows.1 > rows.0).then_some(Clip {
+        radius,
+        origin,
+        cols,
+        rows,
+    })
+}
+
+/// The pixel columns and screen rows [`draw_sprite`] would touch in `fb`. The
+/// layer prepares only the union of these, so this must stay the same clip.
+pub(super) fn bounds(s: &SpriteDraw, fb: &Framebuffer) -> Option<Bounds> {
+    clip(s, fb).map(|c| Bounds {
+        cols: c.cols,
+        rows: c.rows,
+    })
+}
+
+/// Pixel columns and screen rows, each as `start..end`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Bounds {
+    pub cols: (usize, usize),
+    pub rows: (usize, usize),
+}
+
 pub(super) fn draw_sprite(
     level: Level,
     fb: &mut Framebuffer,
     s: &SpriteDraw,
-    blend: Blend,
+    how: (Blend, Dest),
     bank: &SpriteBank,
 ) {
-    // `inv_z > 0` also rejects NaN and anything at or behind the eye.
-    let valid = s.x.is_finite() && s.y.is_finite() && s.radius.is_finite();
-    if !valid || s.radius <= 0.0 || !s.inv_z.is_finite() || s.inv_z <= 0.0 {
-        return;
-    }
-    let radius = s.radius.min(MAX_RADIUS);
-    let (left, top) = (s.x - radius, s.y - radius);
-    let diameter = 2.0 * radius;
-    let (rows0, rows1) = fb.row_range();
-    let (x0, x1) = span(left, diameter, 0.0, fb.width() as f32);
-    let (y0, y1) = span(top, diameter, rows0 as f32, rows1 as f32);
-    if x1 <= x0 || y1 <= y0 {
-        return;
-    }
+    let Some(c) = clip(s, fb) else { return };
+    let diameter = 2.0 * c.radius;
     let (mask, side) = bank.mip(s.mask, mip_for(diameter));
     let scale = side as f32 / diameter;
     if !scale.is_finite() || mask.len() != side * side {
         return;
     }
     let plan = Plan {
-        cols: (x0, x1.min(x0 + TABLE)),
-        rows: (y0, y1),
-        origin: (left, top),
+        cols: (c.cols.0, c.cols.1.min(c.cols.0 + TABLE)),
+        rows: c.rows,
+        origin: c.origin,
         scale,
         mask,
         side,
@@ -75,9 +109,9 @@ pub(super) fn draw_sprite(
     // Stack scratch sized to the sprite: zeroing a full table would cost more
     // than drawing a small sprite.
     match plan.cols.1 - plan.cols.0 {
-        0..=32 => fill::<32>(level, fb, &plan, s, blend),
-        33..=128 => fill::<128>(level, fb, &plan, s, blend),
-        _ => fill::<TABLE>(level, fb, &plan, s, blend),
+        0..=32 => fill::<32>(level, fb, &plan, s, how),
+        33..=128 => fill::<128>(level, fb, &plan, s, how),
+        _ => fill::<TABLE>(level, fb, &plan, s, how),
     }
 }
 
@@ -87,7 +121,7 @@ fn fill<const N: usize>(
     fb: &mut Framebuffer,
     plan: &Plan,
     s: &SpriteDraw,
-    blend: Blend,
+    how: (Blend, Dest),
 ) {
     let (x0, x1) = plan.cols;
     let (n, side) = (x1 - x0, plan.side);
@@ -121,7 +155,7 @@ fn fill<const N: usize>(
             }
             blend_row(
                 level,
-                blend,
+                how,
                 &mut color[x0 + start..x0 + end],
                 depth,
                 &gathered[start..end],

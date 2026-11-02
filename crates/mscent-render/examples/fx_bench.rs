@@ -94,6 +94,7 @@ fn fill_table(bank: &SpriteBank) {
         ("add, 320 px (upscaled)", 160.0, false, false),
         ("over, 128 px", 64.0, true, false),
         ("over, 320 px", 160.0, true, false),
+        ("add, 66 px, fully occluded", 33.0, false, true),
         ("add, 320 px, fully occluded", 160.0, false, true),
         ("over, 320 px, fully occluded", 160.0, true, true),
     ];
@@ -251,6 +252,58 @@ Scorch decals over a wall, ns per polygon pixel and per decal"
     }
 }
 
+/// The half-res layer against the same sprite at full size. A figure is
+/// nanoseconds per pixel of the sprite's full-size box, so it compares with
+/// the fill table. The occluded rows are the layer's fixed cost for a region of
+/// that size: the depth downsample and the composite, with the fill skipped.
+fn layer_table(bank: &SpriteBank) {
+    println!(
+        "
+Half-res layer, ns per full-size bbox pixel (total us), best level"
+    );
+    println!("{:<34}{:>16}{:>16}", "", "full size", "layered");
+    let cases = [
+        ("add, 128 px", 64.0f32, false, false),
+        ("add, 320 px", 160.0, false, false),
+        ("over, 128 px", 64.0, true, false),
+        ("over, 320 px", 160.0, true, false),
+        ("over, 1024 px (screen)", 512.0, true, false),
+        ("add, 66 px, fully occluded", 33.0, false, true),
+        ("add, 320 px, fully occluded", 160.0, false, true),
+        ("over, 1024 px, fully occluded", 512.0, true, true),
+    ];
+    let run = |layered: bool, radius: f32, over: bool, occluded: bool| {
+        let s = sprite(
+            W as f32 / 2.0,
+            H as f32 / 2.0,
+            radius,
+            if occluded { 0.1 } else { 0.9 },
+        );
+        let mut draws = ParticleDraws::default();
+        match (layered, over) {
+            (true, true) => draws.layer_over.push(s),
+            (true, false) => draws.layer_add.push(s),
+            (false, true) => draws.over.push(s),
+            (false, false) => draws.add.push(s),
+        }
+        let mut fb = if occluded { walled() } else { open() };
+        ns_per_call(200, || {
+            draw_particles_with(Level::best(), black_box(&mut fb), black_box(&draws), bank)
+        })
+    };
+    for (name, radius, over, occluded) in cases {
+        // A box wider than the screen is clipped to it.
+        let w = (2.0 * f64::from(radius)).min(f64::from(W));
+        let h = (2.0 * f64::from(radius)).min(f64::from(H));
+        let (full, layered) = (
+            run(false, radius, over, occluded),
+            run(true, radius, over, occluded),
+        );
+        let cell = |ns: f64| format!("{:.3} ({:.0})", ns / (w * h), ns / 1000.0);
+        println!("{name:<34}{:>16}{:>16}", cell(full), cell(layered));
+    }
+}
+
 fn main() {
     let bank = SpriteBank::new();
     println!(
@@ -261,4 +314,5 @@ fn main() {
     streak_table(&bank);
     setup_table(&bank);
     decal_table(&bank);
+    layer_table(&bank);
 }

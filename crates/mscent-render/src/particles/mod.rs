@@ -14,6 +14,8 @@ mod bank;
 mod beam;
 mod decal;
 mod kernels;
+mod layer;
+mod layer_kernels;
 mod sprite;
 
 pub use bank::SpriteBank;
@@ -23,6 +25,7 @@ pub use decal::{DecalDraw, DecalPoint, DecalVertex, MAX_DECAL_POINTS, decal_from
 use crate::camera::ScreenPoint;
 use crate::framebuffer::Framebuffer;
 use crate::simd::Level;
+use kernels::Dest;
 
 /// How a sprite combines with what is under it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,11 +72,19 @@ pub struct StreakDraw {
     pub tint: u32,
 }
 
-/// Everything to draw this frame, in the order it is drawn.
+/// Everything to draw this frame, in the order it is drawn: decals, the
+/// half-res layer (`layer_over`, then `layer_add`), `over`, `add`, streaks.
 #[derive(Clone, Debug, Default)]
 pub struct ParticleDraws {
     /// Scorch marks, multiplied into the scene before any sprite.
     pub decals: Vec<DecalDraw>,
+    /// "Over" sprites drawn into the half-res layer, back to front as given.
+    /// The layer goes over the decals and under every full-size sprite, so
+    /// these should be the farthest ones. A band that cannot hold the layer
+    /// (see `layer.rs`) draws them at full size in its place.
+    pub layer_over: Vec<SpriteDraw>,
+    /// Additive sprites drawn into the layer, in any order.
+    pub layer_add: Vec<SpriteDraw>,
     /// "Over" sprites, back to front as given.
     pub over: Vec<SpriteDraw>,
     /// Additive sprites, in any order.
@@ -87,6 +98,8 @@ impl ParticleDraws {
     pub fn with_capacity(n: usize, decals: usize) -> Self {
         Self {
             decals: Vec::with_capacity(decals),
+            layer_over: Vec::with_capacity(n),
+            layer_add: Vec::with_capacity(n),
             over: Vec::with_capacity(n),
             add: Vec::with_capacity(n),
             streaks: Vec::with_capacity(n),
@@ -96,6 +109,8 @@ impl ParticleDraws {
     /// Empty every list, keeping their capacity.
     pub fn clear(&mut self) {
         self.decals.clear();
+        self.layer_over.clear();
+        self.layer_add.clear();
         self.over.clear();
         self.add.clear();
         self.streaks.clear();
@@ -103,14 +118,17 @@ impl ParticleDraws {
 
     pub fn is_empty(&self) -> bool {
         self.decals.is_empty()
+            && self.layer_over.is_empty()
+            && self.layer_add.is_empty()
             && self.over.is_empty()
             && self.add.is_empty()
             && self.streaks.is_empty()
     }
 }
 
-/// Draw the list into the rows `fb` holds: decals, then "over" sprites, then
-/// additive ones, then streaks. Uses the fastest kernels this CPU supports.
+/// Draw the list into the rows `fb` holds: decals, then the layer, then "over"
+/// sprites, then additive ones, then streaks. Uses the fastest kernels this CPU
+/// supports.
 pub fn draw_particles(fb: &mut Framebuffer, draws: &ParticleDraws, bank: &SpriteBank) {
     draw_particles_with(Level::best(), fb, draws, bank);
 }
@@ -126,11 +144,19 @@ pub fn draw_particles_with(
     for d in &draws.decals {
         decal::draw_decal(fb, d, bank);
     }
-    for s in &draws.over {
-        sprite::draw_sprite(level, fb, s, Blend::Over, bank);
+    // A band the layer cannot serve draws its layered sprites in place, at
+    // full size, in the same relative order.
+    let layered = layer::draw(level, fb, draws, bank);
+    let (full_over, full_add): (&[SpriteDraw], &[SpriteDraw]) = if layered {
+        (&[], &[])
+    } else {
+        (&draws.layer_over, &draws.layer_add)
+    };
+    for s in full_over.iter().chain(&draws.over) {
+        sprite::draw_sprite(level, fb, s, (Blend::Over, Dest::Frame), bank);
     }
-    for s in &draws.add {
-        sprite::draw_sprite(level, fb, s, Blend::Add, bank);
+    for s in full_add.iter().chain(&draws.add) {
+        sprite::draw_sprite(level, fb, s, (Blend::Add, Dest::Frame), bank);
     }
     for st in &draws.streaks {
         beam::draw_streak(fb, st);

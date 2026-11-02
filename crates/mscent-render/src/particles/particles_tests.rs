@@ -354,6 +354,27 @@ fn empty_draw_list_changes_nothing_and_clear_keeps_capacity() {
 }
 
 #[test]
+fn the_layer_lists_are_sized_cleared_and_counted_like_the_others() {
+    let sized = ParticleDraws::with_capacity(64, 3);
+    assert!(sized.layer_over.capacity() >= 64 && sized.layer_add.capacity() >= 64);
+    for layered in 0..2 {
+        let mut d = ParticleDraws::with_capacity(8, 0);
+        let s = sprite(40.0, 30.0, 40.0, 0.5, Mask::Soft);
+        let list = if layered == 0 {
+            &mut d.layer_over
+        } else {
+            &mut d.layer_add
+        };
+        list.push(s);
+        assert!(!d.is_empty(), "list {layered} counts");
+        let cap = d.layer_over.capacity().min(d.layer_add.capacity());
+        d.clear();
+        assert!(d.is_empty());
+        assert!(d.layer_over.capacity().min(d.layer_add.capacity()) >= cap);
+    }
+}
+
+#[test]
 fn world_streak_draws_where_the_camera_sees_it() {
     let bank = SpriteBank::new();
     let cam = Camera::look_at(
