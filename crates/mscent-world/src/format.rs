@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! magic   "MSLV"           4 bytes
-//! version u16              currently 3 (1 and 2 are still read)
+//! version u16              currently 4 (1 to 3 are still read)
 //! flags   u16              reserved, must be 0
 //! count   u32              number of sections (<= MAX_SECTIONS)
 //! section*: id u32, len u32, payload[len]
@@ -13,7 +13,8 @@
 //! Sections: `1` brushes (required), `2` entities (required); `3` is
 //! reserved for compiled data, which the loader skips because it recompiles
 //! from brushes; `4` labels (`format_labels.rs`, version 3, written only when
-//! there are any). Unknown section ids are skipped for forward compatibility.
+//! there are any); `5` voxel volumes (`voxel/wire.rs`, version 4, likewise).
+//! Unknown section ids are skipped for forward compatibility.
 //! Brushes are stored as raw planes and rebuilt through [`Brush::new`], so a
 //! hostile file cannot smuggle in an invalid brush. Version 2 follows each
 //! brush's planes with one TexInfo record per plane (`texinfo.rs`, 47 bytes);
@@ -29,10 +30,11 @@ use crate::format_wire::{
 };
 use crate::labels::LabelError;
 use crate::texinfo::TexInfo;
+use crate::voxel::wire::{check_orders, read_volumes, write_volumes};
 use mscent_math::{DPlane, Vec3d};
 
 pub const MAGIC: [u8; 4] = *b"MSLV";
-pub const VERSION: u16 = 3;
+pub const VERSION: u16 = 4;
 /// Oldest version [`read`] still accepts.
 const MIN_VERSION: u16 = 1;
 pub const MAX_FILE_BYTES: usize = 64 << 20;
@@ -43,8 +45,11 @@ pub const MAX_SECTIONS: u32 = 16;
 const SEC_BRUSHES: u32 = 1;
 const SEC_ENTITIES: u32 = 2;
 const SEC_LABELS: u32 = 4;
+const SEC_VOLUMES: u32 = 5;
 /// First version whose labels section the reader understands.
 const LABELS_VERSION: u16 = 3;
+/// First version whose volumes section the reader understands.
+const VOLUMES_VERSION: u16 = 4;
 
 /// Smallest brush record: op, order, material, plane count.
 const BRUSH_HEAD: usize = 1 + 4 + 2 + 4;
@@ -76,6 +81,8 @@ pub enum FormatError {
     Brush(BrushError),
     /// A texture mapping field is non-finite or out of range.
     BadTexInfo,
+    /// A voxel volume has a bad field, a forged plane or overlaps another.
+    BadVolume,
     /// Names, tags or mover groups are inconsistent.
     Labels(LabelError),
 }
@@ -87,6 +94,9 @@ pub fn write(level: &Level) -> Vec<u8> {
     let mut sections = vec![(SEC_BRUSHES, brushes), (SEC_ENTITIES, entities)];
     if !level.labels.is_empty() || !level.mover_groups.is_empty() {
         sections.push((SEC_LABELS, write_labels(&level.labels, &level.mover_groups)));
+    }
+    if !level.volumes.is_empty() {
+        sections.push((SEC_VOLUMES, write_volumes(&level.volumes)));
     }
     let bodies: usize = sections.iter().map(|(_, body)| body.len()).sum();
     let mut out = Vec::with_capacity(32 + bodies);
@@ -185,7 +195,7 @@ pub fn read(data: &[u8]) -> Result<Level, FormatError> {
     if count > MAX_SECTIONS {
         return Err(FormatError::TooMany);
     }
-    let (mut brushes, mut entities, mut labels) = (None, None, None);
+    let (mut brushes, mut entities, mut labels, mut volumes) = (None, None, None, None);
     for _ in 0..count {
         let id = c.u32()?;
         let len = usize::try_from(c.u32()?).map_err(|_| FormatError::TooLarge)?;
@@ -194,6 +204,9 @@ pub fn read(data: &[u8]) -> Result<Level, FormatError> {
             SEC_BRUSHES => store(&mut brushes, id, read_brushes(body, version))?,
             SEC_ENTITIES => store(&mut entities, id, read_entities(body))?,
             SEC_LABELS if version >= LABELS_VERSION => store(&mut labels, id, read_labels(body))?,
+            SEC_VOLUMES if version >= VOLUMES_VERSION => {
+                store(&mut volumes, id, read_volumes(body))?;
+            }
             _ => {}
         }
     }
@@ -201,9 +214,13 @@ pub fn read(data: &[u8]) -> Result<Level, FormatError> {
         return Err(FormatError::Trailing);
     }
     let (labels, mover_groups) = labels.unwrap_or_default();
+    let brushes = brushes.ok_or(FormatError::MissingSection(SEC_BRUSHES))?;
+    let volumes = volumes.unwrap_or_default();
+    check_orders(&volumes, &brushes)?;
     let level = Level {
-        brushes: brushes.ok_or(FormatError::MissingSection(SEC_BRUSHES))?,
+        brushes,
         entities: entities.ok_or(FormatError::MissingSection(SEC_ENTITIES))?,
+        volumes,
         labels,
         mover_groups,
     };

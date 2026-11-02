@@ -6,6 +6,7 @@
 
 use crate::brush::Brush;
 use crate::labels::{EntityLabel, MoverGroup};
+use crate::voxel::Volume;
 use mscent_math::Vec3;
 
 /// Largest absolute coordinate, radius or intensity accepted for an entity.
@@ -130,6 +131,8 @@ impl Level {
 pub struct Level {
     pub brushes: Vec<Brush>,
     pub entities: Vec<Entity>,
+    /// Voxel volumes, none of which overlap. Their CSG order shares `Brush::order`.
+    pub volumes: Vec<Volume>,
     /// Names and tags of entities, for scripts.
     pub labels: Vec<EntityLabel>,
     /// Named brushes that move; they stay out of the CSG.

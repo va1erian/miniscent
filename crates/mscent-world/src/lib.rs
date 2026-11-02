@@ -58,6 +58,7 @@ pub mod polytope;
 pub mod portals;
 pub mod showcase;
 pub mod texinfo;
+pub mod voxel;
 
 pub use brush::{Brush, BrushError, Op};
 pub use bsp::{Bsp, BspError, Child, Leaf, LeafId, LeafKind, Node, NodeId, Region};

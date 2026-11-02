@@ -62,7 +62,15 @@ pub fn script_api() -> String {
 
 /// `--dump-level`: the level as text.
 pub fn dump_level(path: &Path) -> Result<String, String> {
-    Ok(level_text::to_text(&assets::load_level(path)?))
+    let level = assets::load_level(path)?;
+    // Packing the text again would drop them with no word about it.
+    if !level.volumes.is_empty() {
+        return Err(format!(
+            "{}: voxel volumes have no text form",
+            path.display()
+        ));
+    }
+    Ok(level_text::to_text(&level))
 }
 
 /// `--pack-level`: reads text and writes the binary level. Anything refused is
@@ -356,6 +364,26 @@ mod tests {
         drop(file);
         let why = pack_level(&big, &dir.join("out.msl")).unwrap_err();
         assert!(why.contains("bytes; the limit is"), "{why}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn dump_level_refuses_volumes_rather_than_lose_them() {
+        use mscent_world::Op;
+        use mscent_world::voxel::{CellSize, Volume};
+        let dir = std::env::temp_dir().join(format!("mscent-dump-vol-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("level.msl");
+        let mut level = mscent_world::showcase_level();
+        let plain = format::write(&level);
+        std::fs::write(&path, plain).unwrap();
+        assert!(dump_level(&path).is_ok());
+        let after = level.brushes.iter().map(|b| b.order()).max().unwrap() + 1;
+        let volume = Volume::new(Op::Add, after, CellSize::Quarter, [0; 3], [1, 1, 1]).unwrap();
+        level.volumes.push(volume);
+        std::fs::write(&path, format::write(&level)).unwrap();
+        let why = dump_level(&path).unwrap_err();
+        assert!(why.contains("no text form"), "{why}");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

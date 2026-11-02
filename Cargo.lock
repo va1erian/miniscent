@@ -943,6 +943,10 @@ dependencies = [
 [[package]]
 name = "mscent-bench"
 version = "0.1.0"
+dependencies = [
+ "mscent-math",
+ "mscent-world",
+]
 
 [[package]]
 name = "mscent-collide"

@@ -36,6 +36,7 @@ fn group(name: &str, brushes: &[u32]) -> MoverGroup {
 /// A subtract room, two door brushes in a group, a zone and two markers.
 fn sample() -> Level {
     Level {
+        volumes: Vec::new(),
         brushes: vec![
             cuboid(0.0, Op::Subtract, 0),
             cuboid(2.0, Op::Add, 1),

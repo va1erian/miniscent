@@ -1,6 +1,7 @@
 //! The editor's pure model: no UI types, fully testable.
 
 pub mod command;
+pub mod csg_order;
 pub mod document;
 pub mod entity;
 pub mod facetex;
@@ -14,6 +15,8 @@ pub mod state;
 pub mod tools;
 pub mod view;
 
+#[cfg(test)]
+mod csg_order_tests;
 #[cfg(test)]
 mod facetex_tests;
 #[cfg(test)]

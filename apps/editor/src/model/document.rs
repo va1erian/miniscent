@@ -10,6 +10,8 @@ use mscent_world::{Brush, BrushError, Entity, EntityLabel, Level, MoverGroup, Op
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use super::csg_order::{CsgOrders, Volumes};
+
 /// A stable identity that survives reordering, deletion and undo.
 pub type Id = u32;
 
@@ -211,6 +213,9 @@ fn shape_of(b: &Brush) -> Shape {
 pub struct Document {
     brushes: Vec<BrushDef>,
     entities: Vec<EntityDef>,
+    /// Kept so loading and saving a level does not lose them; nothing edits
+    /// them yet.
+    volumes: Volumes,
     labels: BTreeMap<Id, LabelDef>,
     groups: Vec<GroupDef>,
     next_id: Id,
@@ -228,6 +233,7 @@ impl Document {
         let mut doc = Document::new();
         let mut brushes: Vec<(usize, &Brush)> = level.brushes.iter().enumerate().collect();
         brushes.sort_by_key(|(_, b)| b.order());
+        let orders: Vec<u32> = brushes.iter().map(|(_, b)| b.order()).collect();
         let mut brush_ids = vec![0; level.brushes.len()];
         for (index, b) in brushes {
             let id = doc.alloc_id();
@@ -238,6 +244,7 @@ impl Document {
             let id = doc.alloc_id();
             doc.entities.push(EntityDef { id, entity: *e });
         }
+        doc.volumes = Volumes::new(&level.volumes, &orders, &doc.brushes);
         doc.import_labels(level, &brush_ids);
         doc
     }
@@ -302,27 +309,36 @@ impl Document {
 
     /// Exports to the game's level type; fails on the first invalid brush.
     pub fn to_level(&self) -> Result<Level, BrushError> {
+        let orders = self.csg_orders();
         let brushes = self
             .brushes
             .iter()
-            .enumerate()
-            .map(|(i, b)| b.to_brush(i as u32))
+            .zip(&orders.brushes)
+            .map(|(b, &order)| b.to_brush(order))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Level {
             brushes,
             entities: self.entities.iter().map(|e| e.entity).collect(),
+            volumes: orders.volumes,
             labels: self.export_labels(),
             mover_groups: self.export_groups(),
         })
     }
 
-    /// Whether `other` has the same shapes, operations and entities, in the
-    /// same order; only materials and texture mappings may differ. The
+    /// The CSG order of every brush and volume.
+    pub fn csg_orders(&self) -> CsgOrders {
+        self.volumes.orders(&self.brushes)
+    }
+
+    /// Whether `other` has the same shapes, operations, entities and volumes, in
+    /// the same order; only brush materials and texture mappings may differ. The
     /// lightmap depends on nothing else. A mover group counts, because it takes
-    /// its brushes out of the CSG.
+    /// its brushes out of the CSG. A volume compares whole, materials too, until
+    /// the bake reads volumes (M11.5).
     pub fn same_geometry(&self, other: &Document) -> bool {
         self.entities == other.entities
             && self.groups == other.groups
+            && self.volumes == other.volumes
             && self.brushes.len() == other.brushes.len()
             && self
                 .brushes

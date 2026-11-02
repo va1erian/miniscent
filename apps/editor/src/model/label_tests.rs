@@ -18,6 +18,7 @@ fn marker(x: f32) -> Entity {
 /// Stored out of CSG order, so list position and file index differ.
 fn level() -> Level {
     Level {
+        volumes: Vec::new(),
         brushes: vec![
             cuboid(4.0, Op::Add, 2),
             cuboid(0.0, Op::Subtract, 0),

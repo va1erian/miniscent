@@ -129,6 +129,23 @@ Design in [scripting.md](scripting.md), language choice in
 | M10.8 | Props, pickups, use key, factions, HUD messages | M10.5 | M | Keycard and terminal end to end through `--test` |
 | M10.9 | Editor: mover command, names, tags, script errors, reload in Play | M10.2, M10.5 | M | `--selftest` steps |
 
+## M11 Voxel volumes
+
+Design in [voxels.md](voxels.md); status in [status.md](status.md#m11-voxel-volumes). Each item leaves the game and editor working, and levels
+without volumes draw exactly the same pixels.
+
+| ID | Item | Deps | Size | Done when |
+|---|---|---|---|---|
+| M11.1 | `mscent-world::voxel`: chunks, copy on write, resolve, dabs, surface nets, LOD, connectivity; `voxel_bench` example | M2.3 | L | Closed-mesh test over chunk borders; `fold` sign agrees with `Bsp::is_solid`; benchmark reports the field and meshing numbers in the design |
+| M11.2 | Level format version 4, section 5 | M11.1, M2.6 | M | Round trip; versions 1 to 3 load; bit flips and forged RLE never panic or exceed the allocation cap |
+| M11.3 | Volumes in compile: shell brush, no-draw faces, chunks on leaves, node bounds | M11.1 | M | Seeded `Subtract` volume leaves a room looking the same; a volume with only shell faces still renders; a carved wall shows the material of the brush it came from; a tunnel across two touching volumes has no wall |
+| M11.4 | Triangle path, flood, governor, projection and shading | M11.3, M5.5 | L | Pinhole test over 1000 poses; `frame_alloc` unchanged; frame budget met in `check_frame_cost.py`; voxel pixel cost at High compared with a brush pixel |
+| M11.5 | Light: occluders, cell records, cache, seam blending | M11.4, M5.8 | L | Voxels shadow brushes and the reverse (pixel tests); `crawl` on a voxel shadow edge; stale and forged caches ignored; painting does not re-bake |
+| M11.6 | Collision through `Solids`, contact model, fuzz | M11.3, M4.4 | M | Extended fuzz passes; no lip on a brush to voxel slide; replay stays bit-exact |
+| M11.7 | Editor: tool, stroke semantics, auto volumes, live path, undo budget, panel | M11.4, M7.6 | L | Selftest strokes, undoes (picture equal) and plays; worst UI tick under 1 ms during a stroke; a stroke starts no CSG job; a level past the file limits cannot be saved as if it were fine |
+| M11.8 | Destruction: queue, atomic swap, inherited light | M11.6, M11.5 | M | Replayed destruction is bit-exact; no frame shows a sky pixel; no ray traced in play |
+| M11.9 | Generators: stalactites, mushrooms, coral, trees, hive; Tunnel, Fill, Stamp | M11.7 | L | One showcase level per use case holds its budget; same seed gives the same bytes |
+
 ## Suggested order
 
 M0, then M1.1 through M1.4 in parallel with M2.1 through M2.3. The renderer
