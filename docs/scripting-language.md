@@ -1,7 +1,7 @@
 # Level scripting: choosing the language
 
-Status: decided by the owner (November 2026). Nothing is implemented, and the prototype lives outside
-the repo. The design that follows from this is [scripting.md](scripting.md).
+Status: decided by the owner (November 2026). The production crate is `crates/mscent-script` (M9.4); the
+prototype this page measured lived outside the repo. The design that follows from this is [scripting.md](scripting.md).
 
 ## Decision
 
@@ -144,15 +144,15 @@ beats Rhai.
 
 ## Known weaknesses
 
-All were reproduced in the prototype. The first group has to be fixed for production.
+All were reproduced in the prototype. The first group is fixed in M9.4, each with a test that fails without the fix.
 
 | Weakness | Fix |
 |---|---|
-| A typo in an assignment declares a new variable: `timerRuning := true` loads without complaint | `--check` reports a variable that is assigned and never read |
-| `fork:` in a loop left 2,857 tasks alive; only the op budget stopped it | Cap the task count |
-| Up to 200,000 objects of up to 4 KB could reach about 800 MB | Count heap bytes, as LazyVM does |
-| A missing period gives `nothing understands 'say:say:'` | If the parts of an unknown selector are known, suggest the missing `.` |
-| Errors say `level:1` or `f::1`, not always file and line | Track the source file per code object |
+| A typo in an assignment declares a new variable: `timerRuning := true` loads without complaint | Fixed: the load result carries a warning for a variable that is assigned and never read, for `--check` to print |
+| `fork:` in a loop left 2,857 tasks alive; only the op budget stopped it | Fixed: 128 live tasks, an error at the cap |
+| Up to 200,000 objects of up to 4 KB could reach about 800 MB | Fixed: a 16 MiB heap counted in bytes with a per-object overhead |
+| A missing period gives `nothing understands 'say:say:'` | Fixed: if the unknown selector splits into known messages, the error names the missing `.` and its line |
+| Errors say `level:1` or `f::1`, not always file and line | Fixed: every error, at load and at run time, gives its source file and line |
 
 These are the language's character, and are documented rather than fixed:
 
@@ -172,10 +172,10 @@ and it has a few the prototype lacks:
 | Frames in a `Vec`, not the Rust stack | Already the same |
 | Collect only at safe points, never during allocation | Already the same, at step boundaries |
 | Natives as `fn(&mut Vm, &[Value])`, arguments rooted by staying on the stack | Already the same, with the host passed in, so no `lend` and no `unsafe` |
-| References carry a generation, so a stale one is detected instead of aliasing | **Adopt** |
-| Heap limit counted in bytes, with a per-object overhead; a separate budget for frame slots | **Adopt** |
-| `cargo fuzz` target with a stored corpus | **Adopt**, replacing the seeded loop |
-| **A size budget that fails CI** (`tools/size.py`, decision D14) | **Adopt for the whole game**: this question came up only because nothing measures size today |
+| References carry a generation, so a stale one is detected instead of aliasing | Done (M9.4) |
+| Heap limit counted in bytes, with a per-object overhead; a separate budget for frame slots | Done for the heap. Stacks sit outside it, bounded by 128 tasks times 4,096 values, about 6 MiB |
+| `cargo fuzz` target with a stored corpus | Done: `crates/mscent-script/fuzz`, seeded from the example scripts, and the seeded loop stays as an ordinary test. No corpus is stored. On Windows it needs the Visual Studio ASAN DLL on `PATH` |
+| **A size budget that fails CI** (`tools/size.py`, decision D14) | Done for the whole game (M9.1) |
 
 ## Effort
 
@@ -183,6 +183,8 @@ The prototype took one session. The language item in [work-items.md](work-items.
 twice its size: about 2,000 lines of code and 1,000 of tests, which I estimate at one or two agent
 sessions. API binding, tracing and tests are needed with any language, so the real extra cost over Rhai
 is the language core and its tests.
+
+M9.4 came to 3,100 lines of code and 2,200 of tests, against the 2,000 and 1,000 estimated above. Most of the difference is checks the prototype did not have. Measured under the workspace release profile (`opt-level = "s"`, fat LTO), the crate adds 172,032 bytes to a program that loads and runs a script with 30 natives, against the 228 KB the prototype showed in the plain release column.
 
 The lasting cost is ownership, and the guard against it is a rule: the language gets no classes, modules
 or new syntax unless a level cannot be written without them.

@@ -1,6 +1,6 @@
 # Level scripting: design
 
-Status: accepted, nothing implemented. The work is M9 in [work-items.md](work-items.md). Why this
+Status: accepted. The language and VM exist (M9.4, `crates/mscent-script`); no game API is bound to them yet. The work is M9 in [work-items.md](work-items.md). Why this
 language, with measurements: [scripting-language.md](scripting-language.md).
 
 ## The short version
@@ -289,7 +289,9 @@ fork: [ ].                     "run a block alongside"
 
 Values are nil, true, false, numbers (`f32`), strings, arrays, blocks and game handles. Precedence is
 unary, then binary, then keyword. There are no classes, modules, exceptions, maps or inheritance.
-Functions and messages share one flat namespace, and new ones come from `define`.
+Functions and messages share one flat namespace, and new ones come from `define`. A name defined twice, or one that clashes with a game function or a language message, is a load error. A function defined with a receiver (`define arr first`) must be sent to one, and a plain function (`define autoDoor: ...`) must not be.
+
+`^` returns from the method it was written in. A block that outlives that method, such as a handler written at the top level, has nothing to return from, so `^` there is a script error, not an early exit.
 
 **The rule that keeps it small:** no new syntax or language feature unless a level cannot be written
 without it. A missing capability is usually a new game function.
@@ -305,7 +307,9 @@ without it. A missing capability is usually a new game function.
   sweep at step boundaries only, frames in a `Vec`. No `Rc`, no `unsafe`, no Rust recursion while
   running. So `Game` keeps its `Clone`, and a task parks by leaving the run loop.
 - **Natives** are `fn(&mut Host, &mut Heap, Value, &[Value]) -> Result<Flow, String>`, registered from one
-  table that also feeds `--script-api` and the load-time checks.
+  table that also feeds `--script-api` and the load-time checks. `wait:` and `fork:` belong to the VM, not the
+  table, and `do:`, `timesRepeat:`, `waitUntil:`, `every:do:` and `after:do:` are the crate's own prelude, loaded
+  first as `<prelude>`. The game library must not redefine them.
 
 ### Where it runs in a step
 
@@ -318,8 +322,8 @@ player -> fire -> enemies -> movers -> zones
   together afterwards, in order.
 - **No same-step chains.** Events caused by commands start handlers on the next step, 8 ms later, so a
   script cannot loop inside one step.
-- **Budget.** At most 20,000 operations per task run, and 16 task runs per step, with the rest deferred
-  in order. Worst case is about 0.6 ms on the dev machine, reached only by a hostile script. An idle step
+- **Budget.** At most 20,000 operations per task run, and 16 task runs per step. A task that was due but
+  over the cap goes to the front of the next step's queue, so none starves. Worst case is about 0.6 ms on the dev machine, reached only by a hostile script. An idle step
   runs no script. The budget counts operations, not time, so it replays identically.
 
 ### API surface
@@ -351,8 +355,9 @@ among hostiles, with sight checks staggered across steps so the cost stays flat.
 - **Replay holds.** No clock is exposed, one seeded generator sits behind `randomFrom:to:`, and budgets
   count operations. A test runs a level twice and compares traces byte for byte.
 - **Scripts are untrusted**, since they ship with levels. The language has no file, network or clock
-  access to remove. Limits: a 1 MiB file cap, parse depth, call depth, a heap counted in bytes, string and
-  array length, a task cap, and a cap of 1024 spawned things. `cargo fuzz` feeds hostile text through
+  access to remove. Limits: a 1 MiB file cap, nesting depth 64, call depth 128, a 16 MiB heap counted in bytes (32 bytes
+  of overhead an object), strings and arrays of at most 4,096, 128 live tasks, 65,535 constants, selectors and
+  functions, 1,024 variables in one scope, and a cap of 1024 spawned things. `cargo fuzz` feeds hostile text through
   compile and run.
 - **Every command is validated in Rust.** An unknown pose, a non-finite vector or a position inside solid
   is a script error, not a game state. Arithmetic that gives a non-finite number is an error.
@@ -360,7 +365,7 @@ among hostiles, with sight checks staggered across steps so the cost stays flat.
 
 | When | What happens |
 |---|---|
-| Parse error, unknown selector or unknown literal name at load | The level does not start. `LoadError::Script` lists every problem, with file, line and closest match |
+| Parse error, unknown selector or unknown literal name at load | The level does not start. `LoadError::Script` lists every problem the compiler finds, with file, line and closest match; a syntax error ends that one file's check at its first |
 | Compile error on hot reload | Old script keeps running, error shown on the HUD |
 | Runtime error in a task | Logged with file and line, shown on the HUD, that task ended and its handler disabled for the run. A `--test` run fails |
 

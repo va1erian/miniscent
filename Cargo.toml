@@ -14,6 +14,7 @@ mscent-collide = { path = "crates/mscent-collide" }
 mscent-render = { path = "crates/mscent-render" }
 mscent-game = { path = "crates/mscent-game" }
 mscent-platform = { path = "crates/mscent-platform" }
+mscent-script = { path = "crates/mscent-script" }
 
 [workspace.lints.rust]
 # Crates that genuinely need unsafe must opt out explicitly with a reason.
@@ -34,6 +35,8 @@ opt-level = 2
 [profile.dev.package.mscent-render]
 opt-level = 2
 [profile.dev.package.mscent-game]
+opt-level = 2
+[profile.dev.package.mscent-script]
 opt-level = 2
 
 # Release builds optimize for size (the game has a binary size budget,
