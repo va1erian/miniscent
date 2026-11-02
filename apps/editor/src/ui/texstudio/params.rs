@@ -293,10 +293,12 @@ impl ParamPanel {
             Some(doc) => panel_layout(doc, &mut shown),
             None => nothing_selected(),
         };
+        host.set_layout(layout)?;
+        // After the new widgets exist: asked before, the next pass would measure
+        // the old ones and leave the new ones unplaced until something else moved.
         if let Some(ui) = &self.ui {
             ui.invalidate_layout();
         }
-        host.set_layout(layout)?;
         self.shown = shown;
         self.shown_of = key;
         Ok(())

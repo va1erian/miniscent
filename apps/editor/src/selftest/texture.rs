@@ -62,6 +62,23 @@ fn colour_index(probe: &Probe, block: usize) -> Option<usize> {
         .position(|p| matches!(p.kind, ops::ParamKind::Color { .. }))
 }
 
+/// The first block of the open page with a colour to set, and that parameter's index.
+/// A stock recipe has its colours wherever it needs them, so this reads the table
+/// rather than assuming a place on the page.
+fn first_colour(probe: &Probe) -> Option<(usize, usize)> {
+    let studio = probe.tex();
+    let studio = studio.borrow();
+    let blocks = &studio.doc()?.recipe().blocks;
+    blocks.iter().enumerate().find_map(|(i, b)| {
+        let at = b
+            .spec
+            .params
+            .iter()
+            .position(|p| matches!(p.kind, ops::ParamKind::Color { .. }))?;
+        Some((i, at))
+    })
+}
+
 /// A choice parameter of a block that has the named option: its index and the
 /// option's.
 fn choice_of(probe: &Probe, block: usize, option: &str) -> Option<(usize, u8)> {
@@ -275,10 +292,10 @@ fn check_apply(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     let (picture, key) = (pane.frame_checksum(), probe.light_key());
     let generation = probe.materials().generation();
     tex(stage, TexMsg::Open("brick".to_string()));
-    let Some(index) = colour_index(probe, 0) else {
+    let Some((block, index)) = first_colour(probe) else {
         return run.check(false, "brick's page has a colour to set");
     };
-    set_colour(stage, 0, index, [0.0, 1.0, 1.0]);
+    set_colour(stage, block, index, [0.0, 1.0, 1.0]);
     tex(
         stage,
         TexMsg::Gloss {

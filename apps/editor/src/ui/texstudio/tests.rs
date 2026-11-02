@@ -222,6 +222,21 @@ fn changed_box(a: &xui::Image, b: &xui::Image) -> Option<(u32, u32, u32, u32)> {
     found
 }
 
+/// A picture once the window has stopped changing. The parameter panel is rebuilt
+/// for a new selection and lays out a frame after the first picture that shows it,
+/// so a "before" taken at once would count that as part of what a popup changed.
+fn steady_shot(stage: &Stage<'_, Msg>) -> xui::Image {
+    let mut last = stage.ui().capture().expect("captures");
+    for _ in 0..8 {
+        let next = stage.ui().capture().expect("captures");
+        if next == last {
+            break;
+        }
+        last = next;
+    }
+    last
+}
+
 /// Real events through the real popups: the right button, the operator's group and
 /// the operator. Where things are is read from the pictures, so a longer name in the
 /// table does not break this.
@@ -229,7 +244,7 @@ fn changed_box(a: &xui::Image, b: &xui::Image) -> Option<(u32, u32, u32, u32)> {
 fn the_right_button_adds_an_operator_and_deletes_a_block() {
     with_workspace(|stage, h| {
         let (ox, oy) = (h.origin)();
-        let shot = || stage.ui().capture().expect("captures");
+        let shot = || steady_shot(stage);
         let right = |x: i32, y: i32, kind| {
             stage.inject(mouse_event(kind, ox + x, oy + y, MouseButton::Right));
         };
@@ -269,6 +284,31 @@ fn the_right_button_adds_an_operator_and_deletes_a_block() {
         let last_row = (popup.0 as i32 + 30, popup.3 as i32 - 16);
         left(last_row.0, last_row.1);
         assert_eq!(blocks(h).len(), before, "deleted");
+    });
+}
+
+/// The menu is grouped, so it is short, and it stays inside the window where the
+/// pointer is at the bottom of the page.
+#[test]
+fn the_add_menu_is_grouped_and_fits_the_window_at_the_page_bottom() {
+    with_workspace(|stage, h| {
+        let (ox, oy) = (h.origin)();
+        let closed = steady_shot(stage);
+        let (x, y) = cell(3, 4);
+        for kind in [0, 2] {
+            stage.inject(mouse_event(kind, ox + x, oy + y, MouseButton::Right));
+        }
+        let popup = changed_box(&closed, &steady_shot(stage)).expect("a menu showed");
+        let mut groups: Vec<&str> = Vec::new();
+        for op in mscent_texgen::ops::all() {
+            if !groups.contains(&op.group) {
+                groups.push(op.group);
+            }
+        }
+        // A row is under 30 pixels: one per group, a rule and two commands.
+        let rows = groups.len() as u32 + 3;
+        assert!(popup.3 - popup.1 < 30 * rows, "short: {popup:?}");
+        assert!(popup.2 < 1280 && popup.3 < 800, "inside: {popup:?}");
     });
 }
 
