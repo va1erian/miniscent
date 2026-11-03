@@ -15,6 +15,7 @@ mod scenes;
 
 use compare::Frame;
 use mscent_gpu::{Finish, Gpu, GpuError, GpuRenderer};
+use mscent_math::Vec3;
 use mscent_math::epsilon::{
     FINE_DEPTH_AGREEMENT, FINE_EDGES_NEARER, FINE_MEAN_LEVELS, FINE_NEARER, PARITY_DEPTH_RELATIVE,
     PARITY_EDGE_DEPTH,
@@ -148,6 +149,34 @@ fn depth_agreement(a: &Frame, b: &Frame) -> f64 {
     agree as f64 / both.max(1) as f64
 }
 
+/// Holds the fine frame of `scene` at `pose` to the reference and the truth.
+fn holds_fine(gpu: &Gpu, scene: &Scene, pose: Pose) {
+    let framing = scene.framing(pose);
+    let reference = draw(gpu, scene, &framing, Finish::Reference, 1);
+    let fine = draw(gpu, scene, &framing, Finish::Fine, 1);
+    let truth = truth(gpu, scene, &framing);
+    let error = mean_error(&reference, &fine);
+    let (was, now) = (mean_error(&reference, &truth), mean_error(&fine, &truth));
+    let edges = silhouette(&reference);
+    let (edge_was, edge_now) = (
+        mean_error_among(&reference, &truth, &edges),
+        mean_error_among(&fine, &truth, &edges),
+    );
+    let agreement = depth_agreement(&reference, &fine);
+    eprintln!("apart {error:.2}; from the truth {was:.2} to {now:.2}");
+    eprintln!("  on edges {edge_was:.2} to {edge_now:.2}; depth agrees {agreement:.3}");
+    assert!(error < FINE_MEAN_LEVELS, "the same picture: {error}");
+    assert!(now < was * FINE_NEARER, "nearer the truth: {was} to {now}");
+    assert!(
+        edge_now < edge_was * FINE_EDGES_NEARER,
+        "on edges: {edge_was} to {edge_now}"
+    );
+    assert!(
+        agreement > FINE_DEPTH_AGREEMENT,
+        "the same depth: {agreement}"
+    );
+}
+
 #[test]
 fn a_fine_frame_is_the_same_picture_smoother() {
     let Some(gpu) = gpu() else { return };
@@ -157,29 +186,24 @@ fn a_fine_frame_is_the_same_picture_smoother() {
         Pose::FarFromMaterial("floor"),
         Pose::AtActor,
     ] {
-        let framing = showcase.framing(pose);
-        let reference = draw(&gpu, &showcase, &framing, Finish::Reference, 1);
-        let fine = draw(&gpu, &showcase, &framing, Finish::Fine, 1);
-        let truth = truth(&gpu, &showcase, &framing);
-        let error = mean_error(&reference, &fine);
-        let (was, now) = (mean_error(&reference, &truth), mean_error(&fine, &truth));
-        let edges = silhouette(&reference);
-        let (edge_was, edge_now) = (
-            mean_error_among(&reference, &truth, &edges),
-            mean_error_among(&fine, &truth, &edges),
-        );
-        let agreement = depth_agreement(&reference, &fine);
-        eprintln!("apart {error:.2}; from the truth {was:.2} to {now:.2}");
-        eprintln!("  on edges {edge_was:.2} to {edge_now:.2}; depth agrees {agreement:.3}");
-        assert!(error < FINE_MEAN_LEVELS, "the same picture: {error}");
-        assert!(now < was * FINE_NEARER, "nearer the truth: {was} to {now}");
-        assert!(
-            edge_now < edge_was * FINE_EDGES_NEARER,
-            "on edges: {edge_was} to {edge_now}"
-        );
-        assert!(
-            agreement > FINE_DEPTH_AGREEMENT,
-            "the same depth: {agreement}"
-        );
+        holds_fine(&gpu, &showcase, pose);
+    }
+}
+
+/// Voxels are multisampled like faces, and their texels filtered as software
+/// filters them, as they are not in a texture the sampler can filter. Not the
+/// room's wide view from the south, whose edges are mostly its brick walls: they
+/// come 9% nearer, and 5% with the voxels taken out, so faces hold it back there.
+#[test]
+fn fine_voxels_are_the_same_picture_smoother() {
+    let Some(gpu) = gpu() else { return };
+    let room = Scene::voxel_room();
+    for (eye, at) in [
+        (Vec3::new(2.5, 3.0, 0.0), Vec3::new(2.0, 6.5, -2.0)),
+        (Vec3::new(4.0, 3.5, 0.5), Vec3::new(3.6, 7.5, -2.0)),
+        (Vec3::new(-2.0, 2.0, 0.5), Vec3::new(-4.5, 6.0, -2.0)),
+        (Vec3::new(2.5, 0.5, 0.5), Vec3::new(0.0, 5.0, -1.0)),
+    ] {
+        holds_fine(&gpu, &room, Pose::Looking { eye, at });
     }
 }

@@ -122,14 +122,49 @@ fn mark_ball(table: &mut [i8], c: Vec3, r: f32) {
 
 /// Whether `material` has spots, and so must take the path that draws them.
 #[inline]
-pub(super) fn has_spots(material: u8) -> bool {
+pub fn has_spots(material: u8) -> bool {
     u16::from(material) == CAP
+}
+
+/// The one table of spots there is.
+fn spots() -> &'static Spots {
+    static SPOTS: OnceLock<Spots> = OnceLock::new();
+    SPOTS.get_or_init(Spots::new)
 }
 
 /// The spots of `material`, if it has any.
 pub(super) fn spots_of(material: u8) -> Option<&'static Spots> {
-    static SPOTS: OnceLock<Spots> = OnceLock::new();
-    has_spots(material).then(|| SPOTS.get_or_init(Spots::new))
+    has_spots(material).then(spots)
+}
+
+/// The table of spots and the numbers that read it, for another renderer to
+/// draw the same spots with the sums of `Spots::coverage`.
+pub struct SpotField {
+    /// Distance to the nearest ball, `i8::MAX` at [`Self::band`], by
+    /// `x + y * edge + z * edge * edge`.
+    pub distance: &'static [i8],
+    pub edge: u32,
+    pub spacing: f32,
+    pub band: f32,
+    pub min_edge: f32,
+    pub lost_at: f32,
+    pub mean: f32,
+    pub color: u32,
+}
+
+/// The spots' table, made on first use.
+pub fn spot_field() -> SpotField {
+    let s = spots();
+    SpotField {
+        distance: &s.distance,
+        edge: EDGE as u32,
+        spacing: SPACING,
+        band: BAND,
+        min_edge: MIN_EDGE,
+        lost_at: LOST_AT,
+        mean: s.mean,
+        color: SPOT_COLOR,
+    }
 }
 
 #[cfg(test)]

@@ -10,7 +10,8 @@ use mscent_render::{
     Actor, BakeCache, BuildConfig, LevelRenderer, Material, MaterialTable, MoverPose, Quality,
     Texture, View,
 };
-use mscent_world::materials::METAL;
+use mscent_world::materials::{BRICK, CAP, METAL, ROCK, WAX};
+use mscent_world::voxel::{CellSize, Context, DabOp, Prim, Volume, apply_dab};
 use mscent_world::{Brush, Entity, Level, MoverGroup, Op, materials, showcase_level};
 
 /// How far from a surface `Pose::AtMaterial` stands.
@@ -28,6 +29,10 @@ pub enum Taken {
     Quality(Quality),
     Actors,
     MoverPose,
+    /// The level's voxel volumes.
+    Voxels,
+    /// The spotted material, painted as rock instead.
+    Spots,
 }
 
 /// Where a case stands.
@@ -43,6 +48,11 @@ pub enum Pose {
     FarFromMaterial(&'static str),
     AtActor,
     AtDoor,
+    /// From `eye`, looking at `at`.
+    Looking {
+        eye: Vec3,
+        at: Vec3,
+    },
 }
 
 /// A frame's inputs, as a case draws them.
@@ -55,6 +65,8 @@ pub struct Framing {
 /// A level, and its bake shared by all the frames of it.
 pub struct Scene {
     level: Level,
+    /// The same level with no spots, for `Taken::Spots`.
+    spotless: Option<Level>,
     cfg: BuildConfig,
     bakes: RefCell<BakeCache>,
     materials: fn() -> MaterialTable,
@@ -90,6 +102,7 @@ impl Scene {
     pub fn showcase() -> Self {
         Self {
             level: showcase_level(),
+            spotless: None,
             cfg: BuildConfig::default(),
             bakes: RefCell::new(BakeCache::new()),
             materials: real_materials,
@@ -103,6 +116,7 @@ impl Scene {
     pub fn hard_shadows() -> Self {
         Self {
             level: showcase_level(),
+            spotless: None,
             cfg: BuildConfig {
                 luxel_size: 0.03125,
                 light_radius: 0.0,
@@ -152,7 +166,42 @@ impl Scene {
         };
         Self {
             level,
+            spotless: None,
             cfg,
+            bakes: RefCell::new(BakeCache::new()),
+            materials: real_materials,
+        }
+    }
+
+    /// A long room with voxel balls on its floor: rock sunk into the floor, wax
+    /// against the rock, so two materials meet, a spotted cap, and a pebble
+    /// between the lamp and the rock, so a shadow falls on a voxel surface. A
+    /// brick block stands to one side.
+    pub fn voxel_room() -> Self {
+        Self::voxels_in_fog(
+            BuildConfig::default().fog_start,
+            BuildConfig::default().fog_end,
+        )
+    }
+
+    /// The voxel room with its fog far off, so that distant voxels show their
+    /// mips and detail levels. Not for near cases: it shows the far brick walls
+    /// too, where faces part by more than voxels do.
+    pub fn voxel_distance() -> Self {
+        Self::voxels_in_fog(20.0, 90.0)
+    }
+
+    fn voxels_in_fog(fog_start: f32, fog_end: f32) -> Self {
+        Self {
+            level: voxel_room(CAP as u8),
+            spotless: Some(voxel_room(ROCK as u8)),
+            cfg: BuildConfig {
+                luxel_size: 0.5,
+                shadow_samples: 4,
+                fog_start,
+                fog_end,
+                ..BuildConfig::default()
+            },
             bakes: RefCell::new(BakeCache::new()),
             materials: real_materials,
         }
@@ -171,6 +220,8 @@ impl Scene {
             Some(Taken::Lamps) => level
                 .entities
                 .retain(|e| !matches!(e, Entity::Light { .. })),
+            Some(Taken::Voxels) => level.volumes.clear(),
+            Some(Taken::Spots) => level = self.spotless.clone().expect("a spotted level"),
             _ => {}
         }
         let mut bakes = self.bakes.borrow_mut();
@@ -225,6 +276,7 @@ impl Scene {
                 )
             }
             Pose::AtDoor => looking(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0)),
+            Pose::Looking { eye, at } => looking(eye, (at - eye).normalized().expect("apart")),
         };
         let poses = match pose {
             Pose::AtDoor => vec![MoverPose {
@@ -238,5 +290,50 @@ impl Scene {
             actors: renderer.actors().to_vec(),
             poses,
         }
+    }
+}
+
+/// The level of [`Scene::voxel_room`], with its cap of `cap`.
+fn voxel_room(cap: u8) -> Level {
+    let corner = |x, y, z| Vec3d::new(x, y, z);
+    let room = Brush::cuboid(
+        corner(-20.0, -40.0, -4.0),
+        corner(20.0, 14.0, 8.0),
+        Op::Subtract,
+        0,
+    )
+    .expect("a room");
+    // Quarter cells, four units to a chunk: x -8..8, y 0..12, z -4..4.
+    let mut volume =
+        Volume::new(Op::Add, 1, CellSize::Quarter, [-32, 0, -16], [4, 3, 2]).expect("a volume");
+    let shape = volume.clone();
+    let brushes = vec![room];
+    let mut ctx = Context::new(&shape, &brushes);
+    let balls = [
+        (corner(0.0, 5.0, -2.5), 3.0, ROCK as u8),
+        (corner(3.6, 7.5, -2.0), 2.0, WAX as u8),
+        (corner(-4.5, 6.0, -2.0), 2.0, cap),
+        (corner(0.0, 2.2, 2.4), 0.7, ROCK as u8),
+    ];
+    for (centre, radius, material) in balls {
+        let ball = Prim::sphere(centre, radius).expect("a ball");
+        apply_dab(&mut volume, &mut ctx, &ball, DabOp::Add { material });
+    }
+    // Flat and in brick, whose mortar shows which mip level a far wall took.
+    let block = Prim::cuboid(corner(5.5, 1.0, -4.0), corner(7.5, 3.0, -1.5)).expect("a block");
+    let brick = DabOp::Add {
+        material: BRICK as u8,
+    };
+    apply_dab(&mut volume, &mut ctx, &block, brick);
+    Level {
+        brushes,
+        volumes: vec![volume],
+        entities: vec![Entity::Light {
+            pos: Vec3::new(0.0, 0.5, 5.0),
+            color: Vec3::new(1.0, 1.0, 1.0),
+            radius: 30.0,
+            intensity: 2.0,
+        }],
+        ..Level::default()
     }
 }

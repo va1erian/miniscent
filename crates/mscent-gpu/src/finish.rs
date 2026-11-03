@@ -19,6 +19,17 @@ pub enum Finish {
 }
 
 impl Finish {
+    /// How many finishes there are, for what is kept for each.
+    pub(crate) const COUNT: usize = 2;
+
+    /// This finish's place among [`Finish::COUNT`].
+    pub(crate) fn index(self) -> usize {
+        match self {
+            Self::Reference => 0,
+            Self::Fine => 1,
+        }
+    }
+
     /// What a frame of `quality` gets: [`Finish::Fine`] for the highest.
     pub fn of(quality: Quality) -> Self {
         if quality == Quality::High {

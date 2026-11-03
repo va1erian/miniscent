@@ -27,6 +27,7 @@ const INDEX_BYTES: usize = 4;
 const POSE_BYTES: usize = 80;
 const SHADER: &str = concat!(
     include_str!("../shaders/common.wgsl"),
+    include_str!("../shaders/shading.wgsl"),
     include_str!("../shaders/face.wgsl"),
 );
 
@@ -121,9 +122,18 @@ fn buffer(
 }
 
 /// A storage buffer holding `bytes`, or `at_least` zero bytes where there are
-/// none: a level can have no faces, and a binding must hold one element.
-fn storage(gpu: &Gpu, label: &str, bytes: &[u8], at_least: u64) -> Result<wgpu::Buffer, GpuError> {
+/// none: a level can have no faces, and a binding must hold one element. More
+/// than a shader may bind is an error, not a buffer it would read short.
+pub(crate) fn storage(
+    gpu: &Gpu,
+    label: &str,
+    bytes: &[u8],
+    at_least: u64,
+) -> Result<wgpu::Buffer, GpuError> {
     let size = (bytes.len() as u64).max(at_least);
+    if size > gpu.device.limits().max_storage_buffer_binding_size {
+        return Err(GpuError::TooLarge("a storage buffer"));
+    }
     let buffer = buffer(gpu, label, size, wgpu::BufferUsages::STORAGE)?;
     gpu.queue.write_buffer(&buffer, 0, bytes);
     Ok(buffer)

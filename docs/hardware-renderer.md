@@ -1,6 +1,6 @@
 # Hardware renderer: plan
 
-Status: accepted, M14.1 to M14.4, M14.10 and M14.12 done and the rest not started ([status.md](status.md)). Figures
+Status: accepted, M14.1 to M14.5, M14.10 and M14.12 done and the rest not started ([status.md](status.md)). Figures
 under "Measured" were run for this plan; all others are targets to measure. The work
 items are in [work-items.md](work-items.md) as M14.
 
@@ -49,6 +49,22 @@ ended at 250 permille, the lowest it goes. So 24 threads miss 60 fps at 4K befor
 present, and the frame's cost grows nearly with its pixel count, which more CPU
 optimisation will not fix. The reference i3-7100U has 4 threads and was not measured.
 The `voxel-*.msl` levels have no player start, so `--bench` cannot run them.
+
+Voxel levels on the GPU (M14.5), through `examples/gpu_shot.rs` from the poses
+`voxel_shot` uses, High, release, median of 60 render calls including the colour
+readback, against software's `render` at the same size:
+
+| Level, voxel triangles | 1920x1080 GPU | 1920x1080 software | 3840x2160 GPU | 3840x2160 software |
+|---|---|---|---|---|
+| `voxel-mushrooms.msl`, 6,759 | 1.23 ms | 7.35 ms | 4.88 ms | 23.64 ms |
+| `voxel-coral.msl`, 20,480 | 1.28 ms | 8.25 ms | 4.96 ms | 24.10 ms |
+| `voxel-cave.msl`, 24,184 | 1.29 ms | 5.93 ms | 5.04 ms | 18.57 ms |
+
+The same frames with the voxel draw taken out read 4.81 ms (cave) and 4.99 ms (coral)
+at 4K, so the voxel pass itself is lost in the noise of the readback, which is most of
+the 4K figure. A new scene of coral and its first frame take 7.4 to 8.2 ms at 1080p,
+against 10.6 to 11.4 ms for the showcase, which has more faces. The first voxel scene
+on a device also compiles the voxel pipeline, about 4 ms, kept for the device's life.
 
 Cost of the abstraction: the same probe for each library, with one pipeline, a sampled
 texture, a full-screen draw and a readback, built with the workspace's release profile.
@@ -226,8 +242,17 @@ Each of these carries a software fact over unchanged, so there is less to reconc
 - Dynamic lights: at most `MAX_DYN_LIGHTS` in a uniform. `reaches_face` and
   `reaches_leaf`, already computed on the CPU, choose the mask, so light stays out of
   rooms it cannot reach, exactly as in software.
-- Voxel chunks and actors keep one vertex buffer each. A remesh updates only what
-  changed, between frames, through the existing `apply_voxels`.
+- Each voxel chunk keeps its three levels of detail in two storage buffers of its own,
+  and the shader pulls its vertices from them, so every corner sees its whole
+  triangle: whether it is plain, its three looks, and the mip level software takes
+  once per triangle. Which chunks, at which level, is software's own `VoxelList`. A
+  chunk's mesh and light are shared `Arc`s, so a sculpt between frames, through the
+  existing `apply_voxels`, remakes only the chunks whose pointers changed.
+- A blended triangle can carry three materials, which one bind group per material
+  cannot draw. Voxel texels therefore live in one storage buffer, only for the
+  materials in use, and are filtered with software's integer bilinear weights on the
+  same box-filtered mips: no device feature, and the same texel to the bit.
+- Actors keep one vertex buffer.
 
 No depth pre-pass at first. If overdraw shows in the measurements, the flood's
 front-to-back order can be kept within each material's indices.
@@ -269,8 +294,8 @@ unscaled path for the image.
 **Fallback.** Hardware is on by default in the editor, with `--software` and a View menu
 command to switch, which is not remembered between runs. No adapter or a failed device
 means software with the reason in the log panel. Until they are ported, a level with
-voxel volumes or viewports takes the software path and says so, rather than showing a
-picture with holes. Until particles land (M14.6), Play stays software. Tests stay on
+viewports takes the software path and says so, rather than showing a picture with
+holes. Voxel levels draw on the GPU from M14.5. Until particles land (M14.6), Play stays software. Tests stay on
 software unless they ask, as they read exact pixels.
 
 **The paint (M14.10).** The UI thread paints each frame through xui's software canvas.
@@ -321,6 +346,14 @@ truth than the reference, and without multisampling its silhouettes gain 1% to 8
 two of the three views, so each half of the finish fails the test when taken out. On
 the RTX 5070 Ti a 4K frame costs 5.12 ms fine against 4.92 ms reference, readback
 included.
+
+Voxels (M14.5) are multisampled the same way, with a voxel pipeline compiled for each
+finish. Their texels sit in a storage buffer, filtered by software's own integer
+weights, so they get no anisotropic filtering: a fine voxel frame is the reference
+with smoothed edges. On four voxel views its silhouettes come 22% to 31% nearer the
+truth (`tests/finish.rs`). The room's wide view, whose edges are mostly brick walls,
+comes 9% nearer, and 5% with the voxels taken out, so there the faces' edges gain
+less than elsewhere, not the voxels'. Filtering voxel texels in a texture is not done.
 
 ## Two traps in the game path
 
@@ -379,8 +412,8 @@ const CASES: &[Case] = &[
 ```
 
 The features: sky, fog, texture, mips, lightmap, light mips, emissive, bump, specular,
-actor and mover so far, then voxel, voxel blend, dynamic light, sprite, decal and depth
-test. A feature adds a row when it is ported, and a new feature adds one in the PR that
+actor, mover, and voxel surfaces with their shadows, bump, specular, blends, spots,
+detail levels and mips so far, then dynamic light, sprite, decal and depth test. A feature adds a row when it is ported, and a new feature adds one in the PR that
 makes it.
 
 Each case makes two checks:
@@ -523,7 +556,7 @@ As everywhere: read real pixels.
 - The parity cases, as above. Each shader term is broken by hand once during M14 to see
   its case fail, recorded in the PR, as M10.3 did with its deliberate bugs.
 - Editor: `--selftest` passes with hardware on and on the software fallback. A pick, a
-  highlight, an edit, a voxel level taking the software path, and Play.
+  highlight, an edit, a viewport level taking the software path, a sculpt, and Play.
 - Hostile levels through the GPU build: errors, no panic. A forced device loss, and a
   forced limit below the level's atlas, both reach software with the reason logged.
 - Resize, minimize and a monitor move in a real window: only the owner can run these,
