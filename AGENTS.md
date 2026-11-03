@@ -14,8 +14,11 @@ Miniscent is a Rust workspace (see [docs/plan.md](docs/plan.md) and
 - Tolerances live only in `mscent_math::epsilon`.
 - The software and hardware renderers stay on par. A change to what a frame looks
   like lands in both in one PR, with a row in `crates/mscent-gpu/tests/parity.rs`.
-  New looks go in both or neither. Shared constants are never retyped in WGSL. Do
-  not loosen a parity limit to pass a test ([docs/hardware-renderer.md](docs/hardware-renderer.md)).
+  New looks go in both or neither. The one exception is drawing finer: the GPU may
+  add resolution, anti-aliasing and texture filtering (`Finish::Fine`), by the
+  owner's decision, as long as `Finish::Reference` stays on par with software.
+  Shared constants are never retyped in WGSL. Do not loosen a parity limit to pass
+  a test ([docs/hardware-renderer.md](docs/hardware-renderer.md)).
 
 Gate before pushing:
 

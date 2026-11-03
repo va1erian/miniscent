@@ -23,9 +23,11 @@ still holds the two to one picture.
 
 Not in scope:
 
-- New looks. No shadow maps, HDR, MSAA, anisotropy or post-processing on one side
-  only. Resolution is the only thing the GPU may do better. A new look goes in both
-  renderers or in neither.
+- New looks. No shadow maps, HDR or post-processing on one side only. A new look
+  goes in both renderers or in neither. The GPU may draw finer, by the owner's
+  decision of 2026-11-03: more resolution, and at High multisampling and
+  anisotropic filtering (`Finish::Fine`, M14.12), as the shading stays the same and
+  `Finish::Reference` is still held to software.
 - Baking on the GPU. Lightmaps stay CPU work, shared by both renderers.
 - OpenGL, D3D12, macOS, the web and LazyOS. A machine without working Vulkan draws in
   software.
@@ -442,8 +444,9 @@ rule goes there:
 ```
 - The software and hardware renderers stay on par. A change to what a frame looks
   like lands in both in one PR, with a row in crates/mscent-gpu/tests/parity.rs.
-  New looks go in both or neither. Shared constants are never retyped in WGSL.
-  Do not loosen a parity limit to pass a test.
+  New looks go in both or neither, except that the GPU may draw finer
+  (Finish::Fine) while Finish::Reference stays on par. Shared constants are never
+  retyped in WGSL. Do not loosen a parity limit to pass a test.
 ```
 
 The crate edges paragraph gains `mscent-gpu`.

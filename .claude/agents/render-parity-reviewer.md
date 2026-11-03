@@ -10,7 +10,9 @@ are in `docs/hardware-renderer.md`, section "The parity gate". Read that first.
 Run `cargo test -p mscent-gpu --test parity -- --nocapture`, then read the diff
 against `main` and report, with file and line:
 
-- A change to what a frame looks like on one side only.
+- A change to what a frame looks like on one side only. Drawing finer on the GPU
+  (resolution, anti-aliasing, texture filtering, in `Finish::Fine`) is allowed;
+  a change to shading, lighting or content is not.
 - A constant from the software renderer retyped in a WGSL file.
 - A feature with no row in `crates/mscent-gpu/tests/parity.rs`.
 - A case whose `without` does not remove the feature it names.
