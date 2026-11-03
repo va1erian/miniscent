@@ -69,6 +69,8 @@ pub struct Editor {
     pub(super) preview: Rc<Cell<Preview>>,
     /// Identifies the lightmap in the picture, for scripted runs through [`Probe`].
     pub(super) light_key: Rc<Cell<u64>>,
+    /// When the 3D camera's mark last moved in the 2D views.
+    pub(super) eye_moved: std::time::Instant,
     /// Everything but the menu and the status bar, while the level is showing.
     pub(super) work_host: Handle<xui::widget::Panel<Msg>>,
     pub(super) tex: Workspace,
@@ -136,6 +138,7 @@ impl Editor {
             save_dialog,
             preview: Rc::new(Cell::new(Preview::Updating)),
             light_key: Rc::new(Cell::new(0)),
+            eye_moved: std::time::Instant::now(),
             work_host: Handle::new(),
             tex,
         };
@@ -256,7 +259,7 @@ impl Editor {
         }
         self.panel.sync(&mut self.state.borrow_mut());
         let st = self.state.borrow();
-        self.studio.set_highlights(st.highlighted_faces());
+        self.studio.set_highlights(st.highlights());
         let dirty = st.doc != self.saved;
         let bar = self.status.get();
         bar.set_text(0, &st.message);
@@ -292,6 +295,19 @@ impl Editor {
         }
         drop(st);
         self.sync_tex_menu();
+    }
+
+    /// A step of a drag in a 2D view or of a sculpt stroke: only the views, the
+    /// selected brush's bounds and the 3D highlight change. A full refresh sets
+    /// every panel, menu item and tool button, and each repaints its part of the
+    /// window, which made a drag step cost 25 to 60 ms; the release does that once.
+    pub(super) fn refresh_gesture(&mut self) {
+        for v in self.shown_viewports() {
+            v.get().invalidate();
+        }
+        let st = self.state.borrow();
+        self.panel.sync_bounds(&st);
+        self.studio.set_highlights(st.highlights());
     }
 
     /// Whether a text box has the keyboard focus, so letters and Delete are
@@ -411,6 +427,10 @@ impl App for Editor {
                 self.status
                     .get()
                     .set_text(1, &format!("{} {:.2}   {} {:.2}", n[a], p[0], n[b], p[1]));
+                return;
+            }
+            Msg::View(ViewEvent::Changed) if self.state.borrow().drag.is_some() => {
+                self.refresh_gesture();
                 return;
             }
             Msg::View(ViewEvent::Changed) => {}

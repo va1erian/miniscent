@@ -81,6 +81,8 @@ pub struct EditorState {
     pub(super) stroke: Option<super::voxel::Stroke>,
     /// What Copy captured, for Stamp.
     pub clip: Option<std::sync::Arc<mscent_world::voxel::Clip>>,
+    /// The 3D pane's camera, as the 2D views draw it.
+    pub eye: Option<super::view::Eye>,
 }
 
 impl Default for EditorState {
@@ -115,6 +117,7 @@ impl EditorState {
             voxel: Default::default(),
             stroke: None,
             clip: None,
+            eye: None,
         }
     }
 

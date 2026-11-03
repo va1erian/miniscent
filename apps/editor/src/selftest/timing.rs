@@ -94,6 +94,21 @@ pub(super) fn script(_run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     );
     report("a new 3D frame, painted", new_frame(stage, probe));
     pane_states(stage, probe);
+    drags(stage, probe);
+}
+
+/// A small brush and the biggest one on the showcase, then a voxel level.
+fn drags(stage: &Stage<'_, Msg>, probe: &Probe) {
+    super::drag_timing::fly(stage, probe);
+    super::drag_timing::drag(stage, probe, "showcase, brush 5", 5);
+    super::drag_timing::drag(stage, probe, "showcase, brush 0", 0);
+    let cave =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/levels/voxel-cave.msl");
+    stage.emit(Msg::OpenPath(cave));
+    for which in 0..2 {
+        super::drag_timing::drag(stage, probe, &format!("voxel-cave, brush {which}"), which);
+    }
+    super::drag_timing::sculpt(stage, probe, "voxel-cave");
 }
 
 /// What the UI thread pays for each picture the render thread sends: a frame the

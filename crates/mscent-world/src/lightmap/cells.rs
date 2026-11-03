@@ -201,14 +201,22 @@ pub(super) fn settle(
         Some(k) if k != u32::MAX => direct.get(k as usize).copied().unwrap_or(Direct::Solid),
         _ => direct_cell(env, sites, i),
     };
-    which
-        .iter()
-        .zip(direct)
-        .map(|(&i, &d)| {
-            let (color, dir) = filtered(sites, i, d, &known);
-            CellRecord::new(color + env.cfg.ambient, dir)
-        })
-        .collect()
+    // Each record reads only the inputs, so the batches run side by side and
+    // come out the same as one pass: on a voxel level this filter was most of
+    // a draft bake, run on one thread while the rest of the bake used all.
+    // A cancelled pass leaves `direct` short; the pairs end with it, as a zip would.
+    let count = which.len().min(direct.len());
+    let parts = par_map(env.cfg.workers, count.div_ceil(BATCH), |b| {
+        let from = b * BATCH;
+        let to = (from + BATCH).min(count);
+        (which[from..to].iter().zip(&direct[from..to]))
+            .map(|(&i, &d)| {
+                let (color, dir) = filtered(sites, i, d, &known);
+                CellRecord::new(color + env.cfg.ambient, dir)
+            })
+            .collect::<Vec<_>>()
+    });
+    parts.into_iter().flatten().collect()
 }
 
 /// What site `i` shows: its own light, read across its surface around it.

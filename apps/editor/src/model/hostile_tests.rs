@@ -60,7 +60,7 @@ fn hammer(st: &mut EditorState) {
         for e in edits() {
             st.apply_face_edit(e);
             let _ = st.face_view();
-            let _ = st.highlighted_faces();
+            let _ = st.highlights();
             for f in st.target_faces() {
                 st.copy_face(f);
                 st.paste_onto(&[f]);

@@ -42,6 +42,14 @@ impl View {
     }
 }
 
+/// Where the 3D pane looks from, which the 2D views show.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Eye {
+    pub pos: [f64; 3],
+    /// Unit vector the camera looks along.
+    pub forward: [f64; 3],
+}
+
 /// Pan and zoom of one 2D view. `center` is the world point at the middle of
 /// the view and `scale` the pixels per world unit.
 #[derive(Clone, Copy, Debug, PartialEq)]

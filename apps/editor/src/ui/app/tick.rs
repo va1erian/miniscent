@@ -2,7 +2,30 @@
 
 use super::{Editor, Mode};
 
+/// How often the 3D camera's mark may move in the 2D views: each move repaints
+/// them, and the last pose of a flight still arrives within this.
+const EYE_EVERY: std::time::Duration = std::time::Duration::from_millis(100);
+
 impl Editor {
+    /// Moves the 3D camera's mark in the 2D views when the camera moved. Only
+    /// the views on show repaint, at most every [`EYE_EVERY`]: on every tick of
+    /// a flight they took most of the UI thread. A camera the render thread is
+    /// holding is read next tick, as falling back to an older pose would move
+    /// the mark back and forth and repaint the views every time.
+    fn follow_eye(&mut self) {
+        let eye = self.studio.shown_camera().map(|c| c.eye());
+        let shown = self.state.borrow().eye;
+        let soon = shown.is_some() && self.eye_moved.elapsed() < EYE_EVERY;
+        if eye.is_none() || shown == eye || soon {
+            return;
+        }
+        self.eye_moved = std::time::Instant::now();
+        self.state.borrow_mut().eye = eye;
+        for v in self.shown_viewports() {
+            v.get().invalidate();
+        }
+    }
+
     /// One UI tick: forwards the active pane's input to the render thread
     /// and shows the newest frame it finished. Nothing here waits.
     pub(super) fn advance(&mut self) {
@@ -27,6 +50,9 @@ impl Editor {
         let sculpted = state.borrow_mut().poll_stroke();
         self.studio.set_stroking(state.borrow().stroking());
         let tick = self.studio.tick(&events, size, &state.borrow().doc);
+        if self.studio.mode == Mode::Edit {
+            self.follow_eye();
+        }
         self.follow_materials();
         self.light_key.set(self.studio.light_key());
         self.tex_advance();
@@ -62,7 +88,9 @@ impl Editor {
             for drag in drags {
                 self.pane_drag(drag);
             }
-            if busy {
+            if busy && self.state.borrow().stroking() {
+                self.refresh_gesture();
+            } else if busy {
                 self.refresh();
             }
         }

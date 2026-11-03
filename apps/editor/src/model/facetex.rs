@@ -337,16 +337,46 @@ impl EditorState {
         true
     }
 
-    /// The faces to outline in the 3D view: the targets while the face tool
-    /// is active, as lists of corners.
-    pub fn highlighted_faces(&self) -> Vec<Vec<mscent_math::Vec3>> {
-        if self.tool != super::state::Tool::Face {
-            return Vec::new();
+    /// What the 3D view marks: with the face tool its targets, tinted;
+    /// otherwise the selected brush's faces, outlined, so a selection made in a
+    /// 2D view shows in 3D too. A volume has no faces and is not marked.
+    pub fn highlights(&self) -> Marks {
+        let corners = |faces: Vec<FaceRef>| -> Vec<Vec<mscent_math::Vec3>> {
+            faces
+                .into_iter()
+                .filter_map(|f| face_polygon(&self.doc, f))
+                .map(|(poly, _)| poly.vertices().iter().map(|v| v.to_f32()).collect())
+                .collect()
+        };
+        if self.tool == super::state::Tool::Face {
+            return Marks {
+                tinted: corners(self.target_faces()),
+                outlined: Vec::new(),
+            };
         }
-        self.target_faces()
-            .into_iter()
-            .filter_map(|f| face_polygon(&self.doc, f))
-            .map(|(poly, _)| poly.vertices().iter().map(|v| v.to_f32()).collect())
-            .collect()
+        let Some(brush) = self.selected_brush().filter(|b| !b.is_volume()) else {
+            return Marks::default();
+        };
+        let id = brush.id;
+        let faces = (0..brush.full_texinfos().len()).map(|plane| FaceRef { brush: id, plane });
+        Marks {
+            tinted: Vec::new(),
+            outlined: corners(faces.collect()),
+        }
+    }
+}
+
+/// Faces the 3D view marks, as lists of corners in world space.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Marks {
+    /// Tinted and outlined: the faces the face tool works on.
+    pub tinted: Vec<Vec<mscent_math::Vec3>>,
+    /// Outlined only: a selected room tinted all over would hide the picture.
+    pub outlined: Vec<Vec<mscent_math::Vec3>>,
+}
+
+impl Marks {
+    pub fn is_empty(&self) -> bool {
+        self.tinted.is_empty() && self.outlined.is_empty()
     }
 }

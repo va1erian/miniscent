@@ -7,12 +7,13 @@ use mscent_world::texinfo::Justify;
 use xui::Image;
 use xui::backend::WidgetId;
 use xui::prelude::*;
-use xui::widget::{CheckBox, GroupBox, HasText};
+use xui::widget::{CheckBox, GroupBox};
 
 use super::Msg;
 use super::app::cmd;
 use super::material_list::view_rows;
 use super::props::Mount;
+use super::quiet;
 use super::toolbar::IconButton;
 use crate::model::EditorState;
 use crate::model::facetex::{DEFAULT_TEXTURE, FaceEdit, FaceView};
@@ -326,7 +327,7 @@ impl FacePanel {
             .iter()
             .find(|p| p.id == t.material)
             .map_or("?", |p| p.name.as_str());
-        self.summary.get().set_text(&format!("{faces}: {name}"));
+        quiet::set_text(&*self.summary.get(), &format!("{faces}: {name}"));
         for (h, p) in self.thumbs.iter().zip(&self.previews) {
             h.get().set_checked(p.id == t.material);
         }
@@ -337,6 +338,6 @@ impl FacePanel {
                 v.texture.0, v.texture.1, v.tile.0, v.tile.1
             ),
         };
-        self.info.get().set_text(&info);
+        quiet::set_text(&*self.info.get(), &info);
     }
 }

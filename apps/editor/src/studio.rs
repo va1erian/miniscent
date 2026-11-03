@@ -21,6 +21,7 @@ use crate::model::{Document, FlyCam};
 
 pub mod gpu_view;
 pub use gpu_view::frame_size;
+mod camera;
 mod highlight;
 mod live;
 mod preview;
@@ -210,26 +211,13 @@ impl Studio {
         self.unplayable = None;
     }
 
-    /// Puts the fly camera back where a new document starts.
-    pub fn reset_camera(&mut self, doc: &Document) {
-        self.set_camera(FlyCam::for_document(doc));
-    }
-
-    /// The fly camera as it is right now.
-    pub fn fly_camera(&self) -> FlyCam {
-        self.worker
-            .as_ref()
-            .and_then(Worker::current_camera)
-            .unwrap_or_else(|| self.camera.clone())
-    }
-
-    /// Sets the faces to outline in the 3D view. Nothing is sent when they
-    /// are the ones already shown.
-    pub fn set_highlights(&mut self, polys: Vec<Vec<mscent_math::Vec3>>) {
-        if *self.highlights == polys {
+    /// Sets the faces to mark in the 3D view. Nothing is sent when they are
+    /// the ones already shown.
+    pub fn set_highlights(&mut self, marks: crate::model::facetex::Marks) {
+        if *self.highlights == marks {
             return;
         }
-        self.highlights = Highlights::new(polys);
+        self.highlights = Highlights::new(marks);
         if let Some(w) = &self.worker {
             w.highlights(&self.highlights);
         }

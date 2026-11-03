@@ -14,6 +14,7 @@ use super::scene::LevelScene;
 use super::worker::{Request, Scene};
 use crate::build::{self, Built};
 use crate::model::Document;
+use crate::model::facetex::Marks;
 
 fn showcase() -> Document {
     Document::from_level(&mscent_world::showcase_level())
@@ -31,7 +32,18 @@ fn built(doc: &Document) -> Built {
     }
 }
 
-fn request(w: u32, h: u32, highlights: Vec<Vec<Vec3>>) -> Request {
+fn request(w: u32, h: u32, picked: Vec<Vec<Vec3>>) -> Request {
+    request_with(
+        w,
+        h,
+        Marks {
+            tinted: picked,
+            outlined: Vec::new(),
+        },
+    )
+}
+
+fn request_with(w: u32, h: u32, highlights: Marks) -> Request {
     Request {
         w,
         h,
@@ -210,8 +222,17 @@ fn pane_cost() {
         println!("a new scene's first frame {:?}", t.elapsed());
     }
     for (w, h) in [(1920, 1080), (3840, 2160)] {
-        for highlights in [Vec::new(), vec![vec![Vec3::ZERO; 3]]] {
-            let req = request(w, h, highlights);
+        let face = vec![vec![Vec3::ZERO; 3]];
+        let picked = Marks {
+            tinted: face.clone(),
+            outlined: Vec::new(),
+        };
+        let selected = Marks {
+            tinted: Vec::new(),
+            outlined: face,
+        };
+        for highlights in [Marks::default(), picked, selected] {
+            let req = request_with(w, h, highlights);
             let t = Instant::now();
             scene.render(&req);
             let first = t.elapsed();
@@ -224,8 +245,9 @@ fn pane_cost() {
                 .collect();
             costs.sort();
             println!(
-                "{w}x{h} highlights {}: first {first:?}, median {:?}, worst {:?}",
-                req.highlights.len(),
+                "{w}x{h} tinted {} outlined {}: first {first:?}, median {:?}, worst {:?}",
+                req.highlights.tinted.len(),
+                req.highlights.outlined.len(),
                 costs[30],
                 costs[59]
             );

@@ -140,7 +140,8 @@ impl Scene for LevelScene {
             quality: Quality::High,
             actors: renderer.actors(),
             effects: Effects::default(),
-            wants_depth: !req.highlights.is_empty(),
+            // Only the face tool's tint is cut by what is in front.
+            wants_depth: !req.highlights.tinted.is_empty(),
         };
         if !self.gpu.draw(renderer.assets(), fb, &frame) {
             renderer.render(fb, &req.view, Quality::High, renderer.actors(), None)?;
