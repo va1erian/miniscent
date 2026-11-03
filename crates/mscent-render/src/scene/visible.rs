@@ -10,6 +10,7 @@
 //! z-buffer makes extra leaves harmless, missing ones would not be.
 
 use mscent_math::Vec3;
+use mscent_math::epsilon::PORTAL_CLIP_DEPTH;
 use mscent_world::LeafId;
 
 use super::{SIDE_SLACK, Scene};
@@ -92,8 +93,13 @@ pub(super) fn visible_through(
             if entry.is_some_and(|old| old.contains(&rect)) {
                 continue;
             }
-            *entry = Some(entry.map_or(rect, |old| old.union(rect)));
-            work.push((target, rect));
+            // The leaf floods on with all it has been seen through, not only this
+            // window: windows that came before may have bounded a part of the
+            // screen that none of them looked through, and the next window there
+            // would be skipped as seen. Wider only adds leaves, which is safe.
+            let grown = entry.map_or(rect, |old| old.union(rect));
+            *entry = Some(grown);
+            work.push((target, grown));
         }
     }
     seen.iter().map(Option::is_some).collect()
@@ -127,11 +133,14 @@ fn cross(
     Some((target, window.intersect(rect)?))
 }
 
-/// Screen bounds of a world-space polygon after clipping to the near plane.
+/// Screen bounds of the part of a world-space polygon in front of the eye. Not
+/// the part past the near plane: a ray that crosses a doorway nearer than that
+/// still sees the room beyond it, which an eye just off the doorway's plane does
+/// across much of the screen.
 fn project_rect(cam: &Camera, points: &[Vec3]) -> Option<Rect> {
     let cam_pts: Vec<Vec3> = points.iter().map(|&p| cam.world_to_camera(p)).collect();
     let mut rect: Option<Rect> = None;
-    for p in clip_near(&cam_pts, cam.near()) {
+    for p in clip_near(&cam_pts, PORTAL_CLIP_DEPTH) {
         let s = cam.project(p)?;
         let r = Rect {
             x0: s.x - MARGIN,
