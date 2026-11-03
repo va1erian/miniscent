@@ -15,6 +15,9 @@ override PARALLAX_MAX_STEPS: f32;
 override SPEC_GAIN: f32;
 override MIN_SPEC: f32;
 override MIN_LENGTH: f32;
+// Where a face's flags hold the set of rooms it is in front of (RoomMap in
+// mscent-render), above the bits below.
+override SET_SHIFT: u32;
 // Finish::Fine: materials filtered trilinearly and anisotropically from the
 // pixel's own footprint, rather than one level a span as software takes.
 override FINE: bool;
@@ -58,7 +61,7 @@ struct Pose {
 @group(0) @binding(5) var atlas: texture_2d<f32>;
 @group(0) @binding(6) var smooth_clamped: sampler;
 @group(0) @binding(7) var smooth_repeat: sampler;
-@group(0) @binding(8) var<storage, read> face_lights: array<u32>; // a bit a light
+@group(0) @binding(8) var<storage, read> set_lights: array<u32>; // by set, a bit a light
 @group(1) @binding(0) var albedo: texture_2d<f32>;
 @group(1) @binding(1) var normals: texture_2d<f32>;
 @group(1) @binding(2) var heights: texture_2d<f32>; // 255 is the face's plane
@@ -244,7 +247,7 @@ fn lit(face: Face, corner: Corner, texel: vec3f, rate: f32, grad: mat2x2f, shift
     let u_v = vec3f(corner.texels, 1.0);
     let luxel = vec2f(dot(face.to_luxel_x.xyz, u_v), dot(face.to_luxel_y.xyz, u_v));
     var k = light_color(face, luxel, rate) * 256.0;
-    let mask = face_lights[corner.face];
+    let mask = set_lights[face.flags >> SET_SHIFT];
     if mask != 0u {
         k += dynamic_light(face, mask, luxel);
     }

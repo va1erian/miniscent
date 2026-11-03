@@ -9,6 +9,7 @@ use mscent_render::specular::SpecTable;
 use mscent_render::{EMISSIVE, LevelAssets, SELF_LIT, Texture, UNLIT, UvToLuxel};
 use mscent_world::materials::{LIGHTPANEL, is_self_lit};
 
+use crate::dyn_lights::SET_SHIFT;
 use crate::lightmap::{FaceRects, LightAtlas};
 
 const HAS_NORMALS: u32 = 1;
@@ -144,10 +145,12 @@ pub(crate) fn build(assets: &LevelAssets, atlas: &LightAtlas) -> FaceData {
                 .filter(|_| flat.is_none() && !texture.is_masked()),
         );
         push_floats(&mut out.faces, &relief.unwrap_or([0.0; 4]));
+        let set = assets.scene().rooms().set_of_face(index);
         let flags = u32::from(texture.has_normals()) * HAS_NORMALS
             + u32::from(relief.is_some()) * HAS_HEIGHT
             + u32::from(visible) * SPEC_VISIBLE
-            + u32::from(is_self_lit(face.material)) * PANS;
+            + u32::from(is_self_lit(face.material)) * PANS
+            + (set << SET_SHIFT);
         let count = rects.map_or(0, |r| r.levels.len() as u32);
         push_uints(
             &mut out.faces,

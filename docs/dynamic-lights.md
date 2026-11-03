@@ -1,8 +1,8 @@
 # Many dynamic lights on the hardware renderer
 
-Status: draft plan, not started. Work items are M17 in [work-items.md](work-items.md) once
-accepted. Builds on [hardware-renderer.md](hardware-renderer.md) and sits beside
-[hardware-effects.md](hardware-effects.md).
+Status: draft plan; M17.1 (cost per light) is measured and M17.2 (the wall rule by room) is built, see
+"Decided in M17.2". Work items are M17 in [work-items.md](work-items.md) once accepted. Builds on
+[hardware-renderer.md](hardware-renderer.md) and sits beside [hardware-effects.md](hardware-effects.md).
 
 ## Goal
 
@@ -74,6 +74,88 @@ replays.
 6. **Overdraw.** No depth pre-pass at first. If the light loop shows overdraw in the
    measurement, a depth-only pass of the faces comes before the lit pass.
 
+## Decided in M17.2
+
+Built in `mscent-world/src/rooms.rs`, `mscent-render/src/scene/{reach,rooms}.rs` and
+`mscent-gpu/src/dyn_lights.rs`. It changes how a light's reach is decided, not how many
+lights there are (still 4), and not the simulation: the room table is derived from the BSP
+at compile time and never read from a level file, so the level format is unchanged.
+
+- **Rooms merge cleanly enough.** A room is the empty leaves joined by *open* portals. A
+  portal is open when the portals on its plane cover at least half of the face the plane
+  gives the leaf, in both leaves (`OPEN_SHARE`). A plane that only cut open space (a
+  pillar's extended planes) is open in both leaves; a doorway covers a small part of the
+  wall's face in the room it opens from, so it stays a boundary. Per portal the test was
+  too strict (a 6-unit pillar in a 40 wide room made four rooms), so the area is summed
+  over the leaf's portals on the plane. A generated 3x3 level (9 rooms, 10 corridors) gives
+  18 rooms and 5x5 gives 47, about a room or a corridor each.
+- **Face and chunk ownership.** A face takes the rooms of its front leaves, as a set. No
+  face of any shipped or generated level is in front of two rooms (the report below), so a
+  face has one room in practice, and a set of two (a face merged across a room's edge,
+  which can leak a little light across the wall) is kept for any level that has one. Faces
+  with the same rooms share a set (`RoomMap`), and the GPU decides each set once a frame.
+  A voxel chunk already lists the leaves it touches; its mask is the union of those
+  leaves' rooms, as planned.
+- **The table is a distance, not a bit.** A bit table of "room sees room" would let a light
+  into the whole of a room it can see any part of, and the old flood stopped at the light's
+  radius. So an entry holds, in sixteenths of a unit rounded down, the smallest over the
+  portal chains from room `a` to room `b` of the largest gap between `a`'s bounding box and
+  a portal of the chain. A light at `pos` of `radius` in `a` reaches `b` if the entry is
+  below `radius`. The light is inside `a`'s box, so the entry never exceeds the distance the
+  old flood tested at any portal: **the table reaches every leaf and face the flood did**,
+  for every light, and is a superset because it takes the room's box for the light's
+  position and keeps a room whole. `scene/reach_tests.rs` checks it against the old flood,
+  kept there as the oracle, for 7,900 random lights over the showcase and two generated
+  levels. Rooms past `MAX_LIGHT_REACH` (64, the largest radius) hold `NEVER`.
+- **How much wider than the flood.** Counting the faces `has_face` answers for over those
+  lights, the table says yes to 2.2 times (showcase), 3.1 times (3x3) and 3.2 times (5x5)
+  as many as the flood. Most of the difference is faces of the light's own room that are
+  turned away from the light or past its radius, which the flood dropped per face and the
+  shading drops per pixel: `add_lights` in `level/fill.rs` keeps that per-face test for the
+  software renderer (`DynLight::lights_plane`), so software spans should cost what they did (not measured
+  with `light_bench`). The GPU takes it per pixel in the loop it already had, which is a
+  little more work per pixel in a room the light cannot reach far into (not measured).
+- **A moving light needs no flood.** `Scene::light_reach` is a leaf lookup and one row of the
+  table (`DynLight::place` for a light that moves, every frame if it likes). The flood is
+  gone from the game's path. `dyn_light_alloc` shows placing again allocates nothing, and
+  `tests/room_lights.rs` shows a light put down in the other room lights that room and not
+  this one.
+- **`FaceMasks::write` no longer visits every face.** The GPU's mask buffer is by set of
+  rooms (`SetMasks`), a few dozen entries, and the face's set is in bits 8 and up of its
+  `flags` in `face.wgsl` (`SET_SHIFT`, passed as an override), so a frame writes one word
+  per set. A level of 8x8 generated rooms has 1,251 faces and 123 rooms.
+- **Fallbacks, and what is refused.** More than `MAX_ROOMS` (4096) rooms: a room for each
+  island. More islands than that: the level reaches nothing, the dark side of being wrong.
+  `Rooms::from_parts` is the only constructor and refuses a count over the cap, a table that
+  is not `count` squared (checked multiplication), a leaf in a room that does not exist, and
+  a room not at zero from itself; every lookup is a `get`, so a forged table cannot index
+  past itself.
+- **Not done here.** True line of sight through the portals (the "real PVS") is not used: a
+  light still lights what is around a corner within its radius, as the flood did.
+
+Measured by `cargo run --release -p mscent-world --example rooms_report` (the build is
+timed on a release build; `csg` is the BSP compile it follows):
+
+| level | empty leaves | portals | rooms | table bytes | faces in >1 room | csg ms | rooms ms |
+|---|---|---|---|---|---|---|---|
+| corridor.msl | 5 | 4 | 3 | 18 | 0 | 2.3 | 0.12 |
+| facility.msl | 1 | 0 | 1 | 2 | 0 | 0.0 | 0.01 |
+| facing.msl | 117 | 258 | 5 | 50 | 0 | 18.0 | 2.71 |
+| showcase.msl | 32 | 52 | 8 | 128 | 0 | 4.4 | 0.41 |
+| voxel-cave.msl | 6 | 13 | 1 | 2 | 0 | 0.3 | 0.05 |
+| voxel-coral, hive, mushrooms, tree | 1 | 0 | 1 | 2 | 0 | 0.0 | 0.01 |
+| generated 3x3 | 42 | 48 | 18 | 648 | 0 | 10.4 | 0.54 |
+| generated 5x5 | 179 | 200 | 47 | 4,418 | 0 | 52.5 | 3.38 |
+| generated 8x8 | 495 | 543 | 123 | 30,258 | 0 | 239.7 | 10.10 |
+
+The table is under 31 KB for a level of 64 rooms, and building it takes 4 to 15 percent of the
+BSP compile.
+
+Tests that fail with the room test taken out (`has_leaf` and `has_set` answering yes for any
+reached map): `dynlight_tests` (3 of 8), `tests/room_lights.rs` in `mscent-render` (the wall
+and the moving light), and the same two in `mscent-gpu`. The doorway test and the oracle
+(a superset check) pass without it, which is right: neither is a test of the wall.
+
 ## Later: real occlusion for every light (optional, GPU only)
 
 A coarse 3D occupancy or distance grid of the solid world (brushes and voxels together),
@@ -106,7 +188,7 @@ use the larger list first, so the two halves can land apart.
 | ID | Item | Deps | Size | Done when |
 |---|---|---|---|---|
 | M17.1 | Measure: a throwaway branch raising the cap, timing `gpu_shot` at 4K with 4, 16, 64 and 256 lights, and `scene.light_reach` per light | | S | Numbers in `docs/perf/`, and this plan's costs updated or the plan dropped |
-| M17.2 | Wall rule by room: merge empty leaves into rooms, a room visibility table, room ids on faces and chunks, at 4 lights still. Also stops `FaceMasks::write` visiting every face | | M | Existing renderer tests pass; a test where a light beside a wall leaves the far room dark, on the old mask and the room table alike; the table's size and compile time recorded. If rooms do not merge cleanly, falls back to per-leaf bitsets |
+| M17.2 | **Built.** Wall rule by room: merge empty leaves into rooms, a room visibility table, room ids on faces and chunks, at 4 lights still. Also stops `FaceMasks::write` visiting every face | | M | Existing renderer tests pass; a test where a light beside a wall leaves the far room dark, on the old mask and the room table alike; the table's size and compile time recorded. If rooms do not merge cleanly, falls back to per-leaf bitsets |
 | M17.3 | Cluster lists: `FrameInput` carries the full list, CPU binning, buffers, both shaders read clusters | M17.1, M17.2 | L | 256 lights draw; a frame with at most 4 lights equals the GPU's own frame from before, byte for byte; each cluster's list checked against a brute-force count in a test |
 | M17.4 | Moving lights: leaf-crossing re-flood, cached reach, game slots lifted from 4 to `GPU_LIGHTS`, software takes the strongest 4 | M17.3 | M | `light_bench` and a flight of 256 lights show frame cost within budget; replay unchanged |
 | M17.5 | Real projectiles: entity, swept test, hit and damage, replay, scripts, bolts removed | | L | Hit-for-hit equal to hitscan at close range, tunnelling tests on thin walls, replay bit-exact. Owner's decision |

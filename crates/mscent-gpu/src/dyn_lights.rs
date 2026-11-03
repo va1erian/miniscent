@@ -1,6 +1,7 @@
 //! The frame's dynamic lights: in `Frame`, for every shader, and for faces a
-//! mask a face of the lights that reach it, as `add_lights` in `level/fill.rs`
-//! picks them. Voxels take theirs a chunk, actors on the CPU.
+//! mask a set of rooms (`RoomMap` in mscent-render) of the lights that reach
+//! it. A face names its set in its flags, so a frame decides the level's few
+//! sets and never every face. Voxels take theirs a chunk, actors on the CPU.
 
 use mscent_render::{DynLight, MAX_DYN_LIGHTS};
 
@@ -44,8 +45,13 @@ pub(crate) fn mask(lights: &[DynLight], reaches: impl Fn(&DynLight) -> bool) -> 
         .fold(0, |m, (i, _)| m | 1 << i)
 }
 
-/// By face, the lights that reach it this frame.
-pub(crate) struct FaceMasks {
+/// Most sets a face can name: the rest of its flags word holds them.
+pub(crate) const MAX_SETS: usize = 1 << (32 - SET_SHIFT);
+/// Where a face's flags hold its set, above the bits `face.wgsl` tests.
+pub(crate) const SET_SHIFT: u32 = 8;
+
+/// By set of rooms, the lights that reach it this frame.
+pub(crate) struct SetMasks {
     pub(crate) buffer: wgpu::Buffer,
     bytes: Vec<u8>,
     /// Whether the buffer holds any bit, so a frame with no lights after one
@@ -53,10 +59,13 @@ pub(crate) struct FaceMasks {
     any: bool,
 }
 
-impl FaceMasks {
-    pub(crate) fn new(gpu: &Gpu, faces: usize) -> Result<Self, GpuError> {
-        let bytes = vec![0; faces.saturating_mul(4)];
-        let buffer = storage(gpu, "face lights", &bytes, 4)?;
+impl SetMasks {
+    pub(crate) fn new(gpu: &Gpu, sets: usize) -> Result<Self, GpuError> {
+        if sets > MAX_SETS {
+            return Err(GpuError::TooLarge("room sets"));
+        }
+        let bytes = vec![0; sets.saturating_mul(4)];
+        let buffer = storage(gpu, "set lights", &bytes, 4)?;
         Ok(Self {
             buffer,
             bytes,
@@ -69,9 +78,9 @@ impl FaceMasks {
         if !lit && !self.any {
             return;
         }
-        for (face, slot) in self.bytes.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        for (set, slot) in (0u32..).zip(self.bytes.as_chunks_mut::<4>().0.iter_mut()) {
             let m = if lit {
-                mask(lights, |l| l.reaches_face(face))
+                mask(lights, |l| l.reaches_set(set))
             } else {
                 0
             };
