@@ -12,13 +12,15 @@ Miniscent is a Rust workspace (see [docs/plan.md](docs/plan.md) and
 - Evidence over assertion: write tests that read real output and run them.
 - Performance is a feature; measure before and after.
 - Tolerances live only in `mscent_math::epsilon`.
-- The software and hardware renderers stay on par. A change to what a frame looks
-  like lands in both in one PR, with a row in `crates/mscent-gpu/tests/parity.rs`.
-  New looks go in both or neither. The one exception is drawing finer: the GPU may
-  add resolution, anti-aliasing and texture filtering (`Finish::Fine`), by the
-  owner's decision, as long as `Finish::Reference` stays on par with software.
-  Shared constants are never retyped in WGSL. Do not loosen a parity limit to pass
-  a test ([docs/hardware-renderer.md](docs/hardware-renderer.md)).
+- Gameplay is identical on every renderer; pictures need not be. The simulation,
+  collision, hits, scripts and replays never read the renderer, and a replay is
+  bit-exact whichever draws. The hardware renderer is free to look better (its
+  own lighting, shadows, filtering, HDR); a new look may land on one renderer
+  only. The software renderer has to look good, and hold its frame budget, on
+  the LazyOS reference box, not match the GPU. Both still show everything play
+  depends on: enemies, the goal, shots, doors and the HUD. Shared constants are
+  passed from Rust, never retyped in WGSL
+  ([docs/hardware-renderer.md](docs/hardware-renderer.md), "Two renderers").
 
 Gate before pushing:
 

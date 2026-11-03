@@ -14,8 +14,8 @@ are in [work-items.md](work-items.md).
 - CSG brush worlds, additive and subtractive, ordered.
 - Precomputed lightmaps.
 - Software renderer, 60 fps with every graphics feature on, on the reference
-  machine. A hardware renderer on desktop holds 4K with the same picture
-  ([hardware-renderer.md](hardware-renderer.md)).
+  machine. A hardware renderer on desktop holds 4K and may look better; the game
+  plays the same on both ([hardware-renderer.md](hardware-renderer.md)).
 - Game elements are the player start, point lights, enemies, a goal to reach,
   and what level scripting adds: movers, zones, markers, and props spawned by a
   script ([scripting.md](scripting.md)).
@@ -45,7 +45,7 @@ hardware (`lazyos/docs/compat/kabylake/hw-survey/03-cpuinfo.txt`).
 | Area | Choice | Why |
 |---|---|---|
 | Language | Rust workspace, `no_std + alloc` in core crates where practical | xui and LazyOS are Rust; keeps the LazyOS port cheap |
-| Renderer | Software everywhere, and wgpu on Vulkan on desktop, kept on par by a test | LazyOS has a framebuffer and no GPU driver for rendering; software tops out below 4K ([hardware-renderer.md](hardware-renderer.md)) |
+| Renderer | Software everywhere, and wgpu on Vulkan on desktop; the same game on both, not the same picture | LazyOS has a framebuffer and no GPU driver for rendering; software tops out below 4K, and holding the GPU to its picture held the GPU back ([hardware-renderer.md](hardware-renderer.md)) |
 | Platform layer | A small `mscent-platform` trait (present a framebuffer, poll input with relative mouse, time, quit); desktop backend on winit + softbuffer, headless scripted backend, LazyOS backend later. The game does not use xui; only the editor does | Keeps the game small and portable between Windows and LazyOS |
 | World | Ordered add/subtract convex brushes compiled to a solid/empty-leaf BSP with portals | The original Unreal model |
 | Collision | Swept sphere against the BSP, analytic sphere-sphere for entities | Tunnel-proof; a sphere suits 6DoF |
