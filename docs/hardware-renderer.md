@@ -1,6 +1,6 @@
 # Hardware renderer: plan
 
-Status: accepted, M14.1 to M14.5, M14.8 and M14.10 to M14.12 done, M14.6 done but for one test (see status.md) and the rest not started ([status.md](status.md)). Figures
+Status: accepted, M14.1 to M14.6, M14.8 and M14.10 to M14.12 done, M14.7 done but for the particle depth estimate (see status.md) and the rest not started ([status.md](status.md)). Figures
 under "Measured" were run for this plan; all others are targets to measure. The work
 items are in [work-items.md](work-items.md) as M14.
 
@@ -413,7 +413,8 @@ Level data is validated before it reaches here, but the GPU adds new limits:
 
 The game takes `--renderer auto|software|hardware`. `software` until M14.8, `auto`
 after. `hardware` fails with its reason instead of falling back, for tests and bug
-reports.
+reports. A headless run (`--screenshot`, `--script`, `--bench`) stays `software` unless
+asked, as its pictures are to be the same on every machine.
 
 ## The parity gate
 

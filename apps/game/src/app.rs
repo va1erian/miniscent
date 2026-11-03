@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use mscent_platform::Platform;
 use mscent_render::png_encode::encode_png;
 use mscent_render::resolution::{ResolutionConfig, ResolutionController};
+use mscent_render::{FrameInput, Framebuffer, LevelAssets};
 
 use crate::scripts::ScriptWatcher;
 use crate::session::{FrameStats, GameSession};
@@ -48,6 +49,53 @@ pub struct RunReport {
     /// Internal resolution scale at the end, in per-mille.
     pub final_scale: u32,
     pub shots: Vec<PathBuf>,
+    /// Why the run stopped before it was done: a renderer asked for that could
+    /// not draw.
+    pub stopped: Option<String>,
+}
+
+/// What draws a frame's world where software does not: the frame is read back
+/// into the framebuffer software would fill, so what goes over it is drawn as
+/// before.
+pub trait World {
+    /// Draws `frame` of `assets` into `fb`. False leaves it to software.
+    fn draw(&mut self, assets: &LevelAssets, fb: &mut Framebuffer, frame: &FrameInput) -> bool;
+
+    /// Whether this world shows its frames in the window itself, through
+    /// [`World::show`], rather than giving them to the platform to present.
+    fn shows(&self) -> bool {
+        false
+    }
+
+    /// Shows `frame` of `assets` in the window with what `over` says over it.
+    /// False leaves the frame to software and the platform.
+    fn show(&mut self, _: &LevelAssets, _: &FrameInput, _: &Shown) -> bool {
+        false
+    }
+
+    /// Why the run must stop, for a world that may not leave frames to software.
+    fn stop(&self) -> Option<String> {
+        None
+    }
+}
+
+/// What goes over a frame [`World::show`] shows, and where.
+pub struct Shown<'a> {
+    /// What the HUD, feedback, menus and notices drew, from cleared to nothing.
+    pub layer: &'a Framebuffer,
+    /// The white flash between the world and the layer, `0..=256`.
+    pub white: u32,
+    /// The window's inner size.
+    pub window: (u32, u32),
+}
+
+/// Software draws every world.
+pub struct Software;
+
+impl World for Software {
+    fn draw(&mut self, _: &LevelAssets, _: &mut Framebuffer, _: &FrameInput) -> bool {
+        false
+    }
 }
 
 fn percentile(sorted: &[f64], p: f64) -> f64 {
@@ -66,8 +114,18 @@ fn shot_path(stem: &std::path::Path, t: f64) -> PathBuf {
 }
 
 /// Runs until the platform asks to quit, the player quits or the autoclose
-/// time passes.
+/// time passes, with software drawing the world.
 pub fn run(platform: &mut dyn Platform, session: &mut GameSession, opts: &RunOptions) -> RunReport {
+    run_with(platform, session, opts, &mut Software)
+}
+
+/// [`run`], with `world` drawing the world where it can.
+pub fn run_with(
+    platform: &mut dyn Platform,
+    session: &mut GameSession,
+    opts: &RunOptions,
+    world: &mut dyn World,
+) -> RunReport {
     let mut controller = ResolutionController::new(ResolutionConfig::default());
     let mut costs: Vec<f64> = Vec::new();
     let mut shots = Vec::new();
@@ -109,12 +167,41 @@ pub fn run(platform: &mut dyn Platform, session: &mut GameSession, opts: &RunOpt
             _ => opts.base,
         };
         let render_start = Instant::now();
-        let Some(fb) = session.render(w, h) else {
-            break;
+        let fb = if world.shows() {
+            let window = platform.size();
+            let shown = session.render_layered((w, h), &mut |assets, frame, layer, white| {
+                world.show(
+                    assets,
+                    frame,
+                    &Shown {
+                        layer,
+                        white,
+                        window,
+                    },
+                )
+            });
+            let Some(fb) = shown else {
+                break;
+            };
+            fb
+        } else {
+            let drawn = session
+                .render_through(w, h, &mut |assets, fb, frame| world.draw(assets, fb, frame));
+            let Some(fb) = drawn else {
+                break;
+            };
+            Some(fb)
         };
+        if world.stop().is_some() {
+            break;
+        }
         let cost = render_start.elapsed();
-        platform.present(fb.pixels(), w, h);
-        if let (Some(stem), Some(&t)) = (&opts.shot_stem, opts.shot_times.get(next_shot))
+        if let Some(fb) = fb {
+            platform.present(fb.pixels(), w, h);
+        }
+        // A frame the world showed itself is not on the CPU to be written.
+        if let (Some(stem), Some(&t), Some(fb)) =
+            (&opts.shot_stem, opts.shot_times.get(next_shot), fb)
             && now.as_secs_f64() >= t
         {
             next_shot += 1;
@@ -147,11 +234,15 @@ pub fn run(platform: &mut dyn Platform, session: &mut GameSession, opts: &RunOpt
     if captured {
         platform.set_mouse_captured(false);
     }
-    summarize(
+    let report = summarize(
         costs,
         controller.map_or(1000, |c| c.scale_permille()),
         shots,
-    )
+    );
+    RunReport {
+        stopped: world.stop(),
+        ..report
+    }
 }
 
 /// Sleeps most of the remaining frame time, then spins the last bit, since
@@ -179,6 +270,7 @@ fn summarize(mut costs: Vec<f64>, final_scale: u32, shots: Vec<PathBuf>) -> RunR
         max_ms: costs.last().copied().unwrap_or(0.0),
         final_scale,
         shots,
+        stopped: None,
     }
 }
 

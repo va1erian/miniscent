@@ -23,6 +23,8 @@ pub enum GpuError {
     /// wgpu refused what a level or a frame asked of it, which the checks before
     /// it missed.
     Rejected(String),
+    /// The window cannot be shown into: no surface, or none in a format it takes.
+    NoSurface(String),
 }
 
 impl std::fmt::Display for GpuError {
@@ -33,6 +35,7 @@ impl std::fmt::Display for GpuError {
             Self::TooLarge(what) => write!(f, "too large for this GPU: {what}"),
             Self::Lost(why) => write!(f, "the GPU device was lost: {why}"),
             Self::Rejected(why) => write!(f, "the GPU refused what it was asked: {why}"),
+            Self::NoSurface(why) => write!(f, "the window cannot be drawn into: {why}"),
         }
     }
 }
@@ -61,6 +64,9 @@ fn record(slot: &Mutex<Option<String>>, what: String) {
 pub struct Gpu {
     pub(crate) device: wgpu::Device,
     pub(crate) queue: wgpu::Queue,
+    /// What a window's surface is made from and checked against.
+    pub(crate) instance: wgpu::Instance,
+    pub(crate) wgpu_adapter: wgpu::Adapter,
     adapter: String,
     /// The adapter is a driver that draws on the CPU.
     cpu: bool,
@@ -115,8 +121,10 @@ impl Gpu {
         Ok(Self {
             device,
             queue,
+            instance,
             adapter: adapter.get_info().name,
             cpu: adapter.get_info().device_type == wgpu::DeviceType::Cpu,
+            wgpu_adapter: adapter,
             first_error,
             lost,
             voxel_pipelines: Arc::default(),

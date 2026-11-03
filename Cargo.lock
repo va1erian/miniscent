@@ -1832,6 +1832,7 @@ version = "0.1.0"
 dependencies = [
  "mscent-collide",
  "mscent-game",
+ "mscent-gpu",
  "mscent-math",
  "mscent-platform",
  "mscent-render",
@@ -1920,6 +1921,7 @@ name = "mscent-gpu"
 version = "0.1.0"
 dependencies = [
  "mscent-math",
+ "mscent-platform",
  "mscent-render",
  "mscent-world",
  "wgpu",

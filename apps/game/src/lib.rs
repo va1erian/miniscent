@@ -20,6 +20,8 @@ pub mod cli;
 pub mod controls;
 mod drawn;
 mod feedback;
+#[cfg(feature = "hardware")]
+pub mod gpu_world;
 pub mod levels;
 pub mod lightcache;
 mod notices;

@@ -17,6 +17,9 @@
 //!   relative motion; a backend without a pointer may ignore it.
 //! * [`Platform::should_quit`] turns true once the window was closed or the
 //!   scripted run is over.
+//! * `Platform::gpu_window` (feature `desktop`) hands the window to a renderer
+//!   that presents on its own, a GPU's, instead of through `present`. The game
+//!   still names no windowing library, and this crate names no GPU API.
 //!
 //! # Adding a LazyOS backend
 //!
@@ -32,6 +35,9 @@
 //! * `DesktopPlatform` (feature `desktop`): winit 0.30 and softbuffer 0.4.
 
 use std::time::Duration;
+
+#[cfg(feature = "desktop")]
+use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
 pub mod headless;
 pub mod key;
@@ -50,6 +56,13 @@ pub use script::{Action, Script, ScriptError};
 #[cfg(feature = "desktop")]
 pub use desktop::{DesktopConfig, DesktopPlatform};
 
+/// A window a GPU renderer can make its surface on.
+#[cfg(feature = "desktop")]
+pub trait GpuWindow: HasWindowHandle + HasDisplayHandle + Send + Sync {}
+
+#[cfg(feature = "desktop")]
+impl<T: HasWindowHandle + HasDisplayHandle + Send + Sync> GpuWindow for T {}
+
 /// What the game needs from its host. See the crate docs for the contract.
 pub trait Platform {
     /// Drawable size in pixels (the window's inner size).
@@ -65,4 +78,10 @@ pub trait Platform {
     fn set_mouse_captured(&mut self, captured: bool);
     /// True once the run should end.
     fn should_quit(&self) -> bool;
+    /// The window to present into, for a renderer that can: one that does
+    /// calls [`Platform::present`] no more. Headless has none.
+    #[cfg(feature = "desktop")]
+    fn gpu_window(&self) -> Option<std::sync::Arc<dyn GpuWindow>> {
+        None
+    }
 }
