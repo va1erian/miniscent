@@ -59,6 +59,14 @@ pub const MIN_LENGTH_F64: f64 = 1.0e-9;
 /// `f32` counterpart of [`MIN_LENGTH_F64`].
 pub const MIN_LENGTH_F32: f32 = 1.0e-6;
 
+/// How far in front of the eye the portal flood clips a portal before projecting
+/// it, in world units: only to keep the projection finite, not at the near
+/// plane, as a ray can cross a portal nearer than that and see what is past it
+/// further off. The flood treats an eye nearer a portal's plane than 0.05 as in
+/// it, so a crossing it projects is at least 0.05 times the cosine of a screen
+/// corner's angle from the view axis in front, well past this.
+pub const PORTAL_CLIP_DEPTH: f32 = 1.0e-3;
+
 /// Polygons whose area is below this (in squared world units) are discarded
 /// as slivers after splitting.
 pub const MIN_POLYGON_AREA: f64 = 1.0e-8;
