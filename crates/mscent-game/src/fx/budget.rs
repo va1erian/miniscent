@@ -438,26 +438,33 @@ fn shaped_cost(
     if area <= 0.0 {
         return 0.0;
     }
-    let pixels = area * per_pixel * (OCCLUDED_WEIGHT + (1.0 - OCCLUDED_WEIGHT) * seen(s, depth));
+    let pixels =
+        area * per_pixel * (OCCLUDED_WEIGHT + (1.0 - OCCLUDED_WEIGHT) * seen(s, depth, w, h));
     SPRITE_SETUP + ROW_SETUP * rows_scale * clipped_box(s, w, h).1 + pixels
 }
 
-/// The visible fraction of a sprite, for the depth the last frame left.
-pub(super) fn seen(s: &SpriteDraw, depth: Option<&Framebuffer>) -> f32 {
-    depth.map_or(1.0, |fb| visible_fraction(s, fb))
+/// The visible fraction of a sprite on a `w` by `h` screen, for `depth`: the
+/// scene's, at that size or smaller, as an estimate drawn at a fraction of it is.
+pub(super) fn seen(s: &SpriteDraw, depth: Option<&Framebuffer>, w: f32, h: f32) -> f32 {
+    depth.map_or(1.0, |fb| visible_fraction(s, fb, w, h))
 }
 
 /// How much of a large sprite is in front of the scene, from five probes.
-fn visible_fraction(s: &SpriteDraw, fb: &Framebuffer) -> f32 {
+fn visible_fraction(s: &SpriteDraw, fb: &Framebuffer, w: f32, h: f32) -> f32 {
     if 2.0 * s.radius <= PROBE_DIAMETER {
         return 1.0;
     }
     let d = s.radius.min(MAX_RADIUS) * 0.5;
+    // 1 for a depth of the screen's own size, which then reads as it always did.
+    let (kx, ky) = (
+        fb.width() as f32 / w.max(1.0),
+        fb.height() as f32 / h.max(1.0),
+    );
     let points = [(0.0, 0.0), (-d, 0.0), (d, 0.0), (0.0, -d), (0.0, d)];
     let (mut on_screen, mut seen) = (0u8, 0u8);
     for (dx, dy) in points {
         // Saturating casts: a point off in the distance just misses the buffer.
-        if let Some(z) = fb.depth_at((s.x + dx) as i32, (s.y + dy) as i32) {
+        if let Some(z) = fb.depth_at(((s.x + dx) * kx) as i32, ((s.y + dy) * ky) as i32) {
             on_screen += 1;
             seen += u8::from(s.inv_z >= z);
         }

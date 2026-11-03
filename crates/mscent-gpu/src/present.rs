@@ -39,6 +39,9 @@ pub(crate) struct Compositor {
     uniform: wgpu::Buffer,
     /// The layer's texture, made again when the frame's size changes.
     layer: Option<(wgpu::Texture, wgpu::TextureView)>,
+    /// The rows of the layer that held anything when it was last uploaded, which
+    /// the next upload must clear if they hold nothing now.
+    marked: Option<(u32, u32)>,
 }
 
 fn pipeline(gpu: &Gpu, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
@@ -89,7 +92,7 @@ impl Presenter {
         let format = *format
             .or(caps.formats.first())
             .ok_or_else(|| GpuError::NoSurface("no format this GPU can draw".into()))?;
-        let mailbox = caps.present_modes.contains(&wgpu::PresentMode::Mailbox);
+        let present_mode = present_mode(&caps.present_modes);
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
@@ -98,11 +101,7 @@ impl Presenter {
             height: 1,
             // A frame shown as soon as it is drawn: input latency.
             desired_maximum_frame_latency: 1,
-            present_mode: if mailbox {
-                wgpu::PresentMode::Mailbox
-            } else {
-                wgpu::PresentMode::Fifo
-            },
+            present_mode,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
         };
@@ -184,6 +183,7 @@ impl Compositor {
             pipeline: pipeline(gpu, format),
             uniform,
             layer: None,
+            marked: None,
         }
     }
 
@@ -216,19 +216,45 @@ impl Compositor {
             });
             let view = texture.create_view(&Default::default());
             self.layer = Some((texture, view));
+            // A new texture holds nothing yet, so all of it is written.
+            self.marked = Some((0, size.1));
         }
         let (texture, view) = self
             .layer
             .as_ref()
             .ok_or(GpuError::Rejected("layer".into()))?;
-        let bytes: Vec<u8> = pixels.iter().flat_map(|p| p.to_le_bytes()).collect();
+        // Only the rows marked now or at the last upload: the rest is empty in
+        // both, and a HUD's text and bars are a small part of the screen.
+        let now = marked_rows(pixels, size.0 as usize);
+        let rows = match (now, self.marked) {
+            (Some(a), Some(b)) => Some((a.0.min(b.0), a.1.max(b.1))),
+            (a, b) => a.or(b),
+        };
+        self.marked = now;
+        let Some((first, end)) = rows else {
+            return Ok(view);
+        };
+        let width = size.0 as usize;
+        let span = &pixels[first as usize * width..end as usize * width];
+        let bytes: Vec<u8> = span.iter().flat_map(|p| p.to_le_bytes()).collect();
         let layout = wgpu::TexelCopyBufferLayout {
             offset: 0,
             bytes_per_row: Some(size.0 * 4),
             rows_per_image: None,
         };
-        gpu.queue
-            .write_texture(texture.as_image_copy(), &bytes, layout, extent);
+        let at = wgpu::TexelCopyTextureInfo {
+            origin: wgpu::Origin3d {
+                x: 0,
+                y: first,
+                z: 0,
+            },
+            ..texture.as_image_copy()
+        };
+        let rows = wgpu::Extent3d {
+            height: end - first,
+            ..extent
+        };
+        gpu.queue.write_texture(at, &bytes, layout, rows);
         Ok(view)
     }
 
@@ -303,6 +329,29 @@ impl Compositor {
         }
         Ok(())
     }
+}
+
+/// How frames go to the screen: one that never waits for the display where the
+/// window offers it. The game paces itself, and the adaptive resolution reads a
+/// frame's cost from how long showing it took, which then rises only when the
+/// GPU falls behind, at a latency of one frame, and not at every vertical sync
+/// as `Fifo` would make it, which is taken only where nothing else is offered.
+fn present_mode(offered: &[wgpu::PresentMode]) -> wgpu::PresentMode {
+    use wgpu::PresentMode::{Fifo, Immediate, Mailbox};
+    [Mailbox, Immediate]
+        .into_iter()
+        .find(|m| offered.contains(m))
+        .unwrap_or(Fifo)
+}
+
+/// The first row of `pixels`, `width` to a row, with anything in it and the row
+/// past the last; `None` for a layer that is empty.
+fn marked_rows(pixels: &[u32], width: usize) -> Option<(u32, u32)> {
+    let mut rows = pixels.chunks(width.max(1));
+    let marked = |row: &[u32]| row.iter().any(|&p| p != 0);
+    let first = rows.clone().position(marked)?;
+    let last = rows.rposition(marked)?;
+    Some((u32::try_from(first).ok()?, u32::try_from(last + 1).ok()?))
 }
 
 #[cfg(test)]

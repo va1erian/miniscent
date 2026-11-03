@@ -56,7 +56,7 @@ fn platform(frames: u64) -> HeadlessPlatform {
 /// pixels, stepping the session as the app does.
 fn play(world: &mut dyn World, frames: u64) -> (Vec<(bool, String)>, Vec<u32>) {
     let (mut s, mut p) = (session(), platform(frames));
-    // More than the budget holds, so what the last frame's depth hides is what
+    // More than the budget holds, so what its depth estimate hides is what
     // decides which particles are thinned.
     let at = s.game().player.pos();
     for i in 0..BLASTS {
