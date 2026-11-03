@@ -19,8 +19,11 @@ GPU. The software renderer keeps its 4 lights. The extra lights are a GPU-only l
   wall. Any design past 4 lights has to keep it.
 - `dynamic_light()` uses the face's geometric normal only, not the bumped one.
 - Gameplay is hitscan. A bolt (`fx/combat.rs`, 32 at most) is a cosmetic streak and glow.
-- `examples/light_bench.rs` (software) reads about 23 ns a span per light, linear. The
-  GPU cost per light has not been measured.
+- `examples/light_bench.rs` (software, 640x360 High, one thread) reads 5.64, 5.96, 6.61 and
+  6.92 ms for 0, 1, 2 and 4 lights, about 23 ns a span per light and linear. The GPU
+  cost per light has not been measured.
+- A light's reach is a portal flood by distance only (`scene/reach.rs`). It tests no
+  occlusion inside a room: a pillar does not stop a light.
 
 ## Options
 
@@ -36,23 +39,46 @@ GPU. The software renderer keeps its 4 lights. The extra lights are a GPU-only l
 1. **Light list.** One storage buffer of up to `GPU_LIGHTS` (512): position, radius,
    colour. `Frame` keeps the strongest 4 for Reference and for actors, whose light is
    taken on the CPU.
-2. **Tile binning on the CPU.** Each light is projected to a screen rectangle and added to
-   every 16x16 tile it touches, with at most 32 lights a tile, dropping the dimmest. A
-   few hundred lights is trivial work, and the project uses no compute shader today. The
-   lists go to two storage buffers: a count and offset a tile, and the indices.
+2. **Cluster binning on the CPU.** Clusters, not flat tiles: 16x16 pixels by 16 to 24
+   logarithmic depth slices, because in a 6DoF tunnel a flat tile collects the lights of
+   every depth along the view. Each light is added to the clusters its sphere touches, at
+   most 32 a cluster, dropping the dimmest. A few hundred lights is trivial work, and the
+   project uses no compute shader today. The lists go to two storage buffers: a count and
+   offset a cluster, and the indices. The cluster count at 4K is checked in M17.1.
 3. **Shader.** The loop in `dynamic_light()` (`face.wgsl`) and `with_dynamic` (`voxel.wgsl`)
-   reads the fragment's tile instead of the face mask. A tile is found from
-   `@builtin(position)`.
-4. **The wall rule, per leaf.** The per-face mask becomes, per light, a bitset of the BSP
-   leaves it reached, with a static face to leaf table (a voxel chunk takes its leaf).
-   The shader tests one bit a light. 512 lights over 1,000 leaves is 64 KB. The `n.l`
-   clamp and the radius already do what "faces it" did. A moving light re-floods only
-   when it crosses into another leaf, using the reach cached for that leaf and a small
-   radius margin, so a flying shot costs no flood each frame.
+   reads the fragment's cluster instead of the face mask. The cluster comes from
+   `@builtin(position)` and the view depth.
+4. **The wall rule, by room.** Suggested by the engine-review session, which found the
+   leaf version below ambiguous. At compile time, empty leaves merge into rooms and a
+   room to room visibility table is stored (a bit table, a row a room). A face and a voxel
+   chunk carry a room id. A light lights a pixel only if the pixel's room bit is set in
+   the light's row, one lookup, so a moving light needs no re-flood: it only needs the
+   room it is in. A face is one-sided, so it takes the room it faces. A voxel chunk that
+   spans rooms takes the union of its rooms' bits, which can leak a little light across a
+   thin wall. Whether leaves merge cleanly into rooms in this engine's BSP, and what that
+   costs the compiler and the level file, is checked in M17.2 before anything is built on
+   it.
+   - *Rejected: a bitset of reached leaves a light, with a face to leaf table.* A face
+     borders several leaves and a chunk spans several, so the table is ambiguous, and a
+     moving light's reach had to be approximated from a cached leaf. If the rooms do not
+     merge cleanly, this is the fallback, with those costs.
+   - `FaceMasks::write` today loops over every face of the level each frame with a lit
+     light, not only the visible ones. Both versions remove that loop.
 5. **Order of sums.** Lights add in index order, so up to 4 lights the Reference sum is the
-   same as now and the parity rows are unchanged.
+   same as now and the parity rows are unchanged. The software renderer is not changed and
+   does not read the cluster lists: it keeps its 4 lights and its `FacePoints` slots,
+   so LazyOS pays nothing.
 6. **Overdraw.** No depth pre-pass at first. If the light loop shows overdraw in the
    measurement, a depth-only pass of the faces comes before the lit pass.
+
+## Later: real occlusion for every light (optional, GPU only)
+
+A coarse 3D occupancy or distance grid of the solid world (brushes and voxels together),
+ray-marched a few steps per light per pixel, would occlude every light, not only the two
+with shadow maps ([hardware-effects.md](hardware-effects.md)). The same grid could serve
+AI line of sight. It is a feature of its own, with a grid to build and keep in step with
+sculpts, so it is a candidate for after M17.4 and is not planned here. Room visibility
+stays as the cheap first test either way.
 
 ## Pairing with real projectiles
 
@@ -77,8 +103,8 @@ use the larger list first, so the two halves can land apart.
 | ID | Item | Deps | Size | Done when |
 |---|---|---|---|---|
 | M17.1 | Measure: a throwaway branch raising the cap, timing `gpu_shot` at 4K with 4, 16, 64 and 256 lights, and `scene.light_reach` per light | | S | Numbers in `docs/perf/`, and this plan's costs updated or the plan dropped |
-| M17.2 | Wall rule per leaf: face to leaf table, per-light leaf bitsets, at 4 lights still | | M | The parity suite passes untouched; a test where a light beside a wall leaves the far room dark, on the old mask and the new bitset alike |
-| M17.3 | Tiled lists: `FrameInput` carries the full list, CPU binning, buffers, both shaders read tiles | M17.1, M17.2 | L | 256 lights draw; Reference byte-equal to before; each tile's list checked against a brute-force count in a test |
+| M17.2 | Wall rule by room: merge empty leaves into rooms, a room visibility table, room ids on faces and chunks, at 4 lights still. Also stops `FaceMasks::write` visiting every face | | M | The parity suite passes untouched; a test where a light beside a wall leaves the far room dark, on the old mask and the room table alike; the table's size and compile time recorded. If rooms do not merge cleanly, falls back to per-leaf bitsets |
+| M17.3 | Cluster lists: `FrameInput` carries the full list, CPU binning, buffers, both shaders read clusters | M17.1, M17.2 | L | 256 lights draw; Reference byte-equal to before; each cluster's list checked against a brute-force count in a test |
 | M17.4 | Moving lights: leaf-crossing re-flood, cached reach, game slots lifted from 4 to `GPU_LIGHTS`, software takes the strongest 4 | M17.3 | M | `light_bench` and a flight of 256 lights show frame cost within budget; replay unchanged |
 | M17.5 | Real projectiles: entity, swept test, hit and damage, replay, scripts, bolts removed | | L | Hit-for-hit equal to hitscan at close range, tunnelling tests on thin walls, replay bit-exact. Owner's decision |
 | M17.6 | Speed and limits: tile caps, dimmest-dropped rule, record in `docs/perf/` | M17.4 | S | 4K cost with 256 lights recorded against budget |
@@ -89,22 +115,23 @@ M17.2 and M17.1 are independent and can run side by side.
 
 - **Reference unchanged.** Frames with at most 4 lights equal their former bytes at
   `Finish::Reference`.
-- **Tile lists.** A test builds the lists for a scene of random lights and compares each
-  tile with a brute-force test of every light against the tile's rectangle.
+- **Cluster lists.** A test builds the lists for a scene of random lights and compares each
+  cluster with a brute-force test of every light against the cluster's box.
 - **Truth for many lights.** A grey room with 64 lights on a grid: a pixel under each is the
   sum of its neighbours' hand-computed falloffs, within the shading's rounding.
 - **Walls.** A light in the next room lights nothing here, with 1 light and with 256.
 - **Cap and drop.** More lights than a tile holds drop the dimmest, and the picture still
   draws; a hostile count or a NaN position is refused, not a panic.
-- **Seeded.** Break each piece once (tile off by one, leaf test off, no re-flood on a
-  move) and record that its test fails.
+- **Seeded.** Break each piece once (cluster off by one, room test off, wrong room for a moving
+  light) and record that its test fails.
 
 ## Risks
 
-- **Wall rule at scale.** A moving light's reach from a leaf cache is an approximation of a
-  flood from its exact position. Light could reach a room by a hair at a doorway. The
-  margin and a doorway test decide it.
-- **Tile overflow.** A hot spot of many overlapping flashes drops the dimmest in a tile,
+- **Wall rule by room.** The room table is coarser than the flood: it lets a light into a
+  whole room it can see any part of, where the flood stopped at its radius. The radius and
+  the falloff already cut that down, and a doorway test decides whether the leak shows.
+  Merging leaves into rooms is the unproven part (M17.2).
+- **Cluster overflow.** A hot spot of many overlapping flashes drops the dimmest in a cluster,
   which reads as a flicker if the choice is unstable. Order by strength, with a tie
   broken by index.
 - **Parity blind spot.** Same as the shadows plan: more than 4 lights has no software
