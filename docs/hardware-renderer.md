@@ -1,6 +1,6 @@
 # Hardware renderer: plan
 
-Status: accepted, M14.1 to M14.4 and M14.12 done and the rest not started ([status.md](status.md)). Figures
+Status: accepted, M14.1 to M14.4, M14.10 and M14.12 done and the rest not started ([status.md](status.md)). Figures
 under "Measured" were run for this plan; all others are targets to measure. The work
 items are in [work-items.md](work-items.md) as M14.
 
@@ -271,24 +271,37 @@ voxel volumes or viewports takes the software path and says so, rather than show
 picture with holes. Until particles land (M14.6), Play stays software. Tests stay on
 software unless they ask, as they read exact pixels.
 
-**What this does not fix: the paint.** The UI thread still paints each frame through
-xui's software canvas, and that is now **the bottleneck at 4K**. `--ui-timing`, in "a new
-3D frame, painted", measures it on the offscreen backend:
+**The paint (M14.10).** The UI thread paints each frame through xui's software canvas.
+At 4K that cost 175 to 182 ms a frame, on both renderers, and set the pane's frame
+rate. Painting the 3D pane itself took 8.5 ms of that. The rest went on the three
+2D views around it, which sit 5 px from the pane. xui repaints a margin of 8 px around
+every change, for painters that draw past their bounds (an outline, a glow). That
+margin took in each 2D view, whose painter then ran in full: 45 to 67 ms each, mostly
+long grid lines, rasterised whole even where a strip of 3 px was all that was kept.
 
-| Window | Pane | A new frame painted |
-|---|---|---|
-| 1280x800 | about 400x370 | 26 ms |
-| 3840x2160 | 1683x1049 | 175 to 182 ms |
+Two changes in xui fix it, merged as [va1erian/xui#319](https://github.com/va1erian/xui/pull/319):
 
-The render thread needs 5.6 ms for that 4K frame, so the UI thread is over thirty times
-the cost. It blocks the UI, not just the picture, and it is the same on both renderers,
-so it predates this work. The cost follows the window and not the pane or the frame:
-a whole-window repaint takes about the same (179 ms), and neither a tiny frame scaled up
-nor leaving out the pane's clear brings it down. Why a damaged pane costs what the window
-costs was not found, and the windowed backend's own path was not run. Either finding the
-cause in xui's repaint or a native surface for the pane (below) would remove it. A native
-surface also removes the readback, but needs a handle per node, and must deal with xui's
-tooltips and menus, which it would cover.
+- **`NodeSpec::contained()`**: a node whose painter stays inside its bounds gets no
+  margin, in what it reaches or in the damage it causes. The 3D pane and the 2D views
+  are contained, so a new frame repaints the pane and nothing else.
+- **Shapes that miss the repainted rectangle are skipped**, which changes no pixel; xui's
+  region tests, which compare a repaint with a whole-window paint pixel for pixel, pass.
+  Painting that repaints a strip of a busy painter costs nearer the strip.
+
+Measured with `--ui-timing target/shots/timing WxH`, release, offscreen backend, a new
+frame through the pane's own path and then a picture of the window. The picture copies
+the whole window, which a real window does not, so "painting" below is the frame less
+that copy, from xui's own timing:
+
+| Window | Before | After | Of which painting |
+|---|---|---|---|
+| 1280x800 | 26 ms | 2.0 ms | about 1 ms |
+| 1920x1080 | | 4.2 ms | about 2.3 ms |
+| 3840x2160 | 175 to 182 ms | 17.7 to 20.8 ms | 11.5 ms median, 12.3 ms at the 95th percentile |
+
+Skipping missed shapes alone took the 4K paint from 172 ms to 57 ms. One frame in 300 at
+4K took 134 ms. The windowed backend repaints by the same compositor and damage, then
+converts the damaged rows for `softbuffer`; that path was not run here.
 
 **The finish (M14.12).** At High, the GPU draws more finely than software can afford:
 4x multisampling on edges and trilinear, 16x anisotropic filtering of the materials
@@ -464,7 +477,7 @@ Targets, on the dev machine, at 3840x2160, High:
 |---|---|
 | Editor pane: a new scene's first frame, 1080p | 6.8 ms measured; software's edit to picture is 15 ms |
 | Editor pane: frame including readback | 5.6 ms measured, 11.7 ms with a highlight |
-| Editor pane: a new frame painted by the UI thread | **175 to 182 ms measured, against a budget of 16 ms** |
+| Editor pane: a new frame painted by the UI thread | 11.5 ms median measured offscreen, against 16 ms; was 175 to 182 ms |
 | Game, direct route: CPU side of a frame | Under 1.5 ms |
 | Game, direct route: GPU side | Under 4 ms |
 | Game, direct route: worst frame in the flythrough | Under 8.3 ms (120 Hz) |
@@ -483,7 +496,8 @@ A GPU that cannot hold native size renders smaller and scales up, using the exis
 - **Vulkan only.** No Vulkan driver means no acceleration on that machine, with no second
   GPU path to fall to. Software covers it, slow at 4K but correct. The HD 620's Vulkan
   support on the reference machine has not been tried.
-- **The pane's paint.** Measured, and it is the limit at 4K: see "What this does not fix".
+- **The pane's paint.** Fixed offscreen in M14.10, through va1erian/xui#319. A real
+  window is not measured.
 - **Mesa in CI.** Passes on `ubuntu-latest`. A Mesa update could move a result, and two
   cases sit close to the block limit. The fallback is under "In CI".
 - **Tolerance as a loophole.** Filtering, 16-pixel span subdivision against exact
@@ -521,6 +535,5 @@ M14.6 can then run side by side.
 
 ## Later
 
-- **The canvas paint** is M14.10, now it has a number.
 - **Texture Studio's lit preview** on the GPU, which stays software until something asks.
 - **A self-hosted runner** with a real GPU, and 4K in CI, if local runs miss something.

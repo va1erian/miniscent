@@ -44,7 +44,11 @@ impl<M: 'static> Viewport<M> {
         state: Rc<RefCell<EditorState>>,
         emit: Rc<dyn Fn(ViewEvent) -> M>,
     ) -> Result<Viewport<M>> {
-        let spec = NodeSpec::new(NodeKind::Custom, Rect::new(0, 0, 10, 10)).tab_stop();
+        // Contained: it draws only inside its bounds, so the 3D pane's frames
+        // next to it do not repaint it.
+        let spec = NodeSpec::new(NodeKind::Custom, Rect::new(0, 0, 10, 10))
+            .tab_stop()
+            .contained();
         let control = Control::new(ui, &spec)?;
         let cam = Rc::new(RefCell::new(Camera2D::default()));
         let auto_fit = Rc::new(Cell::new(true));
