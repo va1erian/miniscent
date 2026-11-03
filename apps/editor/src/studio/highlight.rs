@@ -1,12 +1,15 @@
-//! The face tool's overlay: picked faces tinted and outlined on top of the
-//! rendered frame. It is drawn with the frame's depth buffer, so a face
-//! behind a wall stays hidden, and it needs no new rendering path.
+//! The 3D view's overlay: the face tool's faces tinted and outlined, and the
+//! selected brush's faces outlined, on top of the rendered frame. It is drawn
+//! with the frame's depth buffer, so a face behind a wall stays hidden, and it
+//! needs no new rendering path.
 
 use mscent_math::Vec3;
 use mscent_render::{Camera, Framebuffer};
 
-/// Corners of picked faces in world space, shared with the render thread.
-pub type Highlights = std::sync::Arc<Vec<Vec<Vec3>>>;
+use crate::model::facetex::Marks;
+
+/// What to mark, shared with the render thread.
+pub type Highlights = std::sync::Arc<Marks>;
 
 /// Tint colour and its opacity out of 256.
 const TINT: (u32, u32) = (0x00ff_a020, 80);
@@ -29,14 +32,15 @@ struct P {
     on_near: bool,
 }
 
-/// Draws every polygon of `polys` over `fb` as seen by `cam`.
-pub fn draw(fb: &mut Framebuffer, cam: &Camera, polys: &[Vec<Vec3>]) {
-    for poly in polys {
+/// Draws `marks` over `fb` as seen by `cam`.
+pub fn draw(fb: &mut Framebuffer, cam: &Camera, marks: &Marks) {
+    let polys = marks.tinted.iter().map(|p| (p, true));
+    for (poly, tinted) in polys.chain(marks.outlined.iter().map(|p| (p, false))) {
         let pts = project(cam, poly);
         if pts.len() < 3 {
             continue;
         }
-        for i in 1..pts.len() - 1 {
+        for i in (1..pts.len() - 1).filter(|_| tinted) {
             fill(fb, [pts[0], pts[i], pts[i + 1]]);
         }
         for i in 0..pts.len() {
@@ -162,6 +166,13 @@ mod tests {
         view.camera(1.3, 0.1, 100.0, 64, 64).expect("camera")
     }
 
+    fn tinted(polys: Vec<Vec<Vec3>>) -> Marks {
+        Marks {
+            tinted: polys,
+            outlined: Vec::new(),
+        }
+    }
+
     fn quad(y: f32) -> Vec<Vec3> {
         vec![
             Vec3::new(-1.0, y, -1.0),
@@ -175,7 +186,7 @@ mod tests {
     fn a_face_ahead_is_tinted_inside_and_outlined_at_its_border() {
         let mut fb = Framebuffer::new(64, 64).expect("fb");
         fb.clear(0xff20_2020);
-        draw(&mut fb, &cam(), &[quad(3.0)]);
+        draw(&mut fb, &cam(), &tinted(vec![quad(3.0)]));
         let centre = fb.pixel(32, 32).expect("pixel");
         assert!(
             centre != 0xff20_2020 && (centre & 0xff) < 0x40,
@@ -193,7 +204,7 @@ mod tests {
     fn faces_behind_the_eye_and_half_clipped_ones_do_not_panic() {
         let mut fb = Framebuffer::new(64, 64).expect("fb");
         fb.clear(0xff20_2020);
-        draw(&mut fb, &cam(), &[quad(-3.0)]);
+        draw(&mut fb, &cam(), &tinted(vec![quad(-3.0)]));
         assert!(fb.pixels().iter().all(|&p| p == 0xff20_2020));
         // A floor quad crossing the eye plane still draws its visible part.
         let floor = vec![
@@ -202,7 +213,27 @@ mod tests {
             Vec3::new(1.0, 6.0, -0.5),
             Vec3::new(-1.0, 6.0, -0.5),
         ];
-        draw(&mut fb, &cam(), &[floor]);
+        draw(&mut fb, &cam(), &tinted(vec![floor]));
         assert!(fb.pixels().iter().any(|&p| p != 0xff20_2020));
+    }
+
+    #[test]
+    fn an_outlined_face_keeps_its_inside_and_draws_its_border() {
+        let mut fb = Framebuffer::new(64, 64).expect("fb");
+        fb.clear(0xff20_2020);
+        let marks = Marks {
+            tinted: Vec::new(),
+            outlined: vec![quad(3.0)],
+        };
+        draw(&mut fb, &cam(), &marks);
+        assert_eq!(
+            fb.pixel(32, 32),
+            Some(0xff20_2020),
+            "the inside is not tinted"
+        );
+        let edge = (0..64)
+            .filter_map(|x| fb.pixel(x, 32))
+            .any(|p| p == (EDGE | 0xff00_0000));
+        assert!(edge, "no outline pixel on the middle row");
     }
 }

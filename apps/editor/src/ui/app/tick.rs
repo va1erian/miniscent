@@ -3,6 +3,19 @@
 use super::{Editor, Mode};
 
 impl Editor {
+    /// Moves the 3D camera's mark in the 2D views when the camera moved. Only
+    /// the views on show repaint, and only then.
+    fn follow_eye(&mut self) {
+        let eye = Some(self.studio.fly_camera().eye());
+        if self.state.borrow().eye == eye {
+            return;
+        }
+        self.state.borrow_mut().eye = eye;
+        for v in self.shown_viewports() {
+            v.get().invalidate();
+        }
+    }
+
     /// One UI tick: forwards the active pane's input to the render thread
     /// and shows the newest frame it finished. Nothing here waits.
     pub(super) fn advance(&mut self) {
@@ -27,6 +40,9 @@ impl Editor {
         let sculpted = state.borrow_mut().poll_stroke();
         self.studio.set_stroking(state.borrow().stroking());
         let tick = self.studio.tick(&events, size, &state.borrow().doc);
+        if self.studio.mode == Mode::Edit {
+            self.follow_eye();
+        }
         self.follow_materials();
         self.light_key.set(self.studio.light_key());
         self.tex_advance();
@@ -62,7 +78,9 @@ impl Editor {
             for drag in drags {
                 self.pane_drag(drag);
             }
-            if busy {
+            if busy && self.state.borrow().stroking() {
+                self.refresh_gesture();
+            } else if busy {
                 self.refresh();
             }
         }

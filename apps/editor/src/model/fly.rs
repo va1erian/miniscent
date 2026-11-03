@@ -9,6 +9,7 @@ use mscent_platform::{Event, Key};
 use mscent_render::View;
 
 use super::document::Document;
+use super::view::Eye;
 
 /// Metres (world units) per second at normal speed.
 const SPEED: f32 = 8.0;
@@ -63,6 +64,15 @@ impl FlyCam {
 
     pub fn view(&self) -> View {
         View::from_angles(self.pos, self.yaw, self.pitch, self.roll)
+    }
+
+    /// Where the camera is and looks, for the 2D views.
+    pub fn eye(&self) -> Eye {
+        let (p, f) = (self.pos, self.view().forward());
+        Eye {
+            pos: [p.x, p.y, p.z].map(f64::from),
+            forward: [f.x, f.y, f.z].map(f64::from),
+        }
     }
 
     fn down(&self, c: char) -> bool {
@@ -133,6 +143,22 @@ impl FlyCam {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_eye_is_where_the_camera_is_and_looks_where_it_looks() {
+        let cam = FlyCam::new(Vec3::new(1.0, 2.0, 3.0), 0.0, 0.0);
+        let eye = cam.eye();
+        assert_eq!(eye.pos, [1.0, 2.0, 3.0]);
+        // Yaw 0 looks along +Y; a quarter turn left looks along -X.
+        let near = |a: [f64; 3], b: [f64; 3]| (0..3).all(|i| (a[i] - b[i]).abs() < 1e-5);
+        assert!(near(eye.forward, [0.0, 1.0, 0.0]), "{:?}", eye.forward);
+        let turned = FlyCam::new(Vec3::ZERO, std::f32::consts::FRAC_PI_2, 0.0).eye();
+        assert!(
+            near(turned.forward, [-1.0, 0.0, 0.0]),
+            "{:?}",
+            turned.forward
+        );
+    }
 
     fn key(c: char, pressed: bool) -> Event {
         Event::Key {

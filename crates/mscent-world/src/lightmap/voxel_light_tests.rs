@@ -453,3 +453,24 @@ fn light_is_not_read_from_the_far_side_of_a_thin_shape() {
     let (color, _) = super::cells::filtered(&sites, i, known(i), &known);
     assert_eq!(color.x, 0.0);
 }
+
+#[test]
+fn cells_settle_the_same_on_one_thread_and_on_many() {
+    let (bsp, world) = world_of(&pillar_level(false, false));
+    let sites = CellSites::of(&world);
+    let occ = Occluders::new(&bsp, &world);
+    let lights = [lamp(3.0, 10.0, 1.5)];
+    let all: Vec<usize> = (0..sites.len()).collect();
+    let records = |workers: usize| {
+        let cfg = BakeConfig { workers, ..cfg() };
+        let env = CellLighting {
+            occ: &occ,
+            lights: &lights,
+            cfg: &cfg,
+        };
+        light_cells(&env, &sites, &all)
+    };
+    let one = records(1);
+    assert!(one.len() > 64, "{} cells: too few to split", one.len());
+    assert_eq!(one, records(7));
+}

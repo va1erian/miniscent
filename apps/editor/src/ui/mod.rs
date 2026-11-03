@@ -26,9 +26,11 @@ mod voxelpanel;
 mod wrap;
 
 mod probe;
+mod quiet;
 
 pub use app::{Editor, Msg, cmd};
 pub use probe::Probe;
 pub use props::Prop;
 pub use view3d::{Click, PaneDrag};
+pub use viewport::ViewEvent;
 pub use voxelpanel::VoxelProp;

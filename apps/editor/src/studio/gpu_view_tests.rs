@@ -14,6 +14,7 @@ use super::scene::LevelScene;
 use super::worker::{Request, Scene};
 use crate::build::{self, Built};
 use crate::model::Document;
+use crate::model::facetex::Marks;
 
 fn showcase() -> Document {
     Document::from_level(&mscent_world::showcase_level())
@@ -38,7 +39,10 @@ fn request(w: u32, h: u32, highlights: Vec<Vec<Vec3>>) -> Request {
         play: false,
         view: View::from_angles(Vec3::new(3.0, 3.0, 2.5), -0.78, -0.2, 0.0),
         banner: None,
-        highlights: Arc::new(highlights),
+        highlights: Arc::new(Marks {
+            tinted: highlights,
+            outlined: Vec::new(),
+        }),
     }
 }
 
@@ -225,7 +229,7 @@ fn pane_cost() {
             costs.sort();
             println!(
                 "{w}x{h} highlights {}: first {first:?}, median {:?}, worst {:?}",
-                req.highlights.len(),
+                req.highlights.tinted.len(),
                 costs[30],
                 costs[59]
             );

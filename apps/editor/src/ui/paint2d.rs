@@ -20,6 +20,10 @@ use crate::model::{Camera2D, EditorState, Selection, Shape, View};
 const ADD: Color = Color::rgb(235, 150, 55);
 /// Colour of a subtractive brush.
 const SUBTRACT: Color = Color::rgb(55, 150, 230);
+/// Colour of the 3D pane's camera.
+pub const EYE: Color = Color::rgb(235, 45, 160);
+/// Length of the camera's look line, in design pixels.
+const EYE_REACH: f64 = 56.0;
 
 /// Everything one paint needs.
 pub struct Scene<'a> {
@@ -85,12 +89,53 @@ pub fn paint(canvas: &mut dyn Canvas, scene: &Scene) {
     grid(&mut pen, scene);
     brushes(&mut pen, scene);
     entities(&mut pen, scene);
+    eye(&mut pen, scene);
     creating(&mut pen, scene);
     slicing(&mut pen, scene);
     corners(&mut pen, scene);
     label(&mut pen, scene, bounds);
     pen.canvas.pop_clip();
     pen.canvas.stroke_rect(bounds, theme.border, 1.0);
+}
+
+/// The 3D pane's camera: a dot where it is, a line where it looks and the
+/// edges of what it sees. A line shortens as the camera turns toward or away
+/// from the view, so a camera looking straight along it shows only its dot.
+fn eye(pen: &mut Pen, scene: &Scene) {
+    let Some(eye) = scene.state.eye else {
+        return;
+    };
+    let (a, b) = scene.view.axes();
+    let c = pen.pt([eye.pos[a], eye.pos[b]]);
+    let (dx, dy) = (eye.forward[a], eye.forward[b]);
+    let along = dx.hypot(dy);
+    let fov_y = f64::from(mscent_render::BuildConfig::default().fov_y);
+    // The pane is wider than tall: seen from above, the edges are wider apart.
+    let half = if scene.view == View::Top {
+        ((fov_y * 0.5).tan() * 1.6).atan()
+    } else {
+        fov_y * 0.5
+    };
+    let reach = EYE_REACH * f64::from(pen.s) * along;
+    let tip = |turn: f64, k: f64| {
+        let (s, co) = turn.sin_cos();
+        let (x, y) = ((dx * co - dy * s) / along, (dx * s + dy * co) / along);
+        // Screen y grows downward.
+        Point::new(
+            clamp(c.x as f64 + x * reach * k),
+            clamp(c.y as f64 - y * reach * k),
+        )
+    };
+    if along > 0.05 {
+        let edge = EYE.lerp(scene.theme.input_background, 0.2);
+        pen.canvas.draw_line(c, tip(half, 0.8), edge, 1.5 * pen.s);
+        pen.canvas.draw_line(c, tip(-half, 0.8), edge, 1.5 * pen.s);
+        pen.canvas.draw_line(c, tip(0.0, 1.0), EYE, 2.0 * pen.s);
+    }
+    let r = 5.0 * pen.s;
+    pen.canvas.fill_ellipse(c, r, r, EYE);
+    pen.canvas
+        .stroke_ellipse(c, r, r, Color::rgb(255, 255, 255), pen.s);
 }
 
 fn grid(pen: &mut Pen, scene: &Scene) {
@@ -107,13 +152,17 @@ fn grid(pen: &mut Pen, scene: &Scene) {
     let minor = bg.lerp(theme.text, 0.08);
     let major = bg.lerp(theme.text, 0.17);
     let axis = bg.lerp(theme.text, 0.45);
+    // A one-pixel rectangle, not a line: the canvas strokes a line as an
+    // anti-aliased path, and a grid of them cost 3 ms a paint during a drag.
     let line = |pen: &mut Pen, vertical: bool, w: f64, color: Color| {
-        let (p, q) = if vertical {
-            (pen.pt([w, lo[1]]), pen.pt([w, hi[1]]))
+        let rect = if vertical {
+            let (p, q) = (pen.pt([w, hi[1]]), pen.pt([w, lo[1]]));
+            Rect::new(p.x, p.y, p.x + 1, q.y)
         } else {
-            (pen.pt([lo[0], w]), pen.pt([hi[0], w]))
+            let (p, q) = (pen.pt([lo[0], w]), pen.pt([hi[0], w]));
+            Rect::new(p.x, p.y, q.x, p.y + 1)
         };
-        pen.canvas.draw_line(p, q, color, 1.0);
+        pen.canvas.fill_rect(rect, color);
     };
     for vertical in [true, false] {
         let (from, to) = if vertical {

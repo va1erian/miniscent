@@ -108,6 +108,11 @@ impl Editor {
         self.arrangement().view3d.get()
     }
 
+    /// The 2D views on show.
+    pub(super) fn shown_viewports(&self) -> &[Handle<Viewport<Msg>>] {
+        &self.arrangement().viewports
+    }
+
     /// The 2D views of both arrangements.
     pub(super) fn all_viewports(&self) -> impl Iterator<Item = &Handle<Viewport<Msg>>> {
         self.classic.viewports.iter().chain(&self.quad.viewports)

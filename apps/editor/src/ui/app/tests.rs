@@ -120,6 +120,8 @@ fn render_session(theme: Theme, scripted: bool) -> (Image, Rc<Cell<u32>>) {
             let (tx, ty) = at(28.0, 56.0);
             mouse(stage, 0, mx, my);
             mouse(stage, 1, tx, ty);
+            // A drag step skips the full refresh, but the bounds follow it.
+            assert_eq!(probe.min_x.value(), 26.0, "the panel follows the drag");
             mouse(stage, 2, tx, ty);
             assert_eq!(bounds(&probe.state).0[0], 26.0);
 
@@ -150,6 +152,12 @@ fn render_session(theme: Theme, scripted: bool) -> (Image, Rc<Cell<u32>>) {
             mouse(stage, 0, cx, cy);
             mouse(stage, 2, cx, cy);
             assert_eq!(probe.state.borrow().selection, Some(Selection::Brush(id)));
+            // A tick puts the 3D camera in the views.
+            stage.emit(Msg::Step);
+            assert!(
+                probe.state.borrow().eye.is_some(),
+                "the views know the camera"
+            );
             checks.set(checks.get() + 1);
         },
     )
@@ -175,6 +183,11 @@ fn scripted_session_edits_the_model_and_the_pixels() {
         }
     }
     assert!(colours.len() > 8, "top view has content: {}", colours.len());
+    // The 3D camera's dot is in the top view.
+    let eye = super::super::paint2d::EYE;
+    let marked = (40..390)
+        .any(|y| (160..580).any(|x| image.pixel(x, y).unwrap()[..3] == [eye.r, eye.g, eye.b]));
+    assert!(marked, "the 3D camera is drawn in the top view");
     // The empty 3D pane is a flat placeholder, different from the views.
     assert!(differs(
         image.pixel(700, 650).unwrap(),

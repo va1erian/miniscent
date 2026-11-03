@@ -223,13 +223,13 @@ impl Studio {
             .unwrap_or_else(|| self.camera.clone())
     }
 
-    /// Sets the faces to outline in the 3D view. Nothing is sent when they
-    /// are the ones already shown.
-    pub fn set_highlights(&mut self, polys: Vec<Vec<mscent_math::Vec3>>) {
-        if *self.highlights == polys {
+    /// Sets the faces to mark in the 3D view. Nothing is sent when they are
+    /// the ones already shown.
+    pub fn set_highlights(&mut self, marks: crate::model::facetex::Marks) {
+        if *self.highlights == marks {
             return;
         }
-        self.highlights = Highlights::new(polys);
+        self.highlights = Highlights::new(marks);
         if let Some(w) = &self.worker {
             w.highlights(&self.highlights);
         }
