@@ -99,6 +99,7 @@ pub(super) fn script(_run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
 
 /// A small brush and the biggest one on the showcase, then a voxel level.
 fn drags(stage: &Stage<'_, Msg>, probe: &Probe) {
+    super::drag_timing::fly(stage, probe);
     super::drag_timing::drag(stage, probe, "showcase, brush 5", 5);
     super::drag_timing::drag(stage, probe, "showcase, brush 0", 0);
     let cave =

@@ -1,6 +1,6 @@
 //! `--ui-timing`, part two: gestures at the pace of a hand, one step per 16 ms
-//! frame. A brush dragged across the top view and a stroke sculpted in the 3D
-//! pane: what each step costs the UI thread, how many new pictures the 3D pane
+//! frame. A brush dragged across the top view, a stroke sculpted in the 3D pane
+//! and a flight of the 3D camera: what each step costs the UI thread, how many new pictures the 3D pane
 //! showed during it, and how long after the release the picture is current and
 //! then fully lit.
 
@@ -138,4 +138,22 @@ pub(super) fn sculpt(stage: &Stage<'_, Msg>, probe: &Probe, label: &str) {
     stage.emit(Msg::Step);
     costs.report(stage, probe, &format!("sculpt {label}"));
     probe.state().borrow_mut().set_tool(Tool::Select);
+}
+
+/// Flies the 3D camera forward, one step a frame, as held keys do.
+pub(super) fn fly(stage: &Stage<'_, Msg>, probe: &Probe) {
+    wait_for_preview(stage, probe);
+    pump(stage, 10);
+    let start = probe.state().borrow().eye.map_or([0.0; 3], |e| e.pos);
+    let mut costs = Costs::default();
+    for i in 1..=STEPS {
+        let pos = mscent_math::Vec3::new(
+            start[0] as f32,
+            start[1] as f32 + i as f32 * 0.1,
+            start[2] as f32,
+        );
+        let cam = crate::model::FlyCam::new(pos, 0.0, 0.0);
+        costs.step(stage, probe, || stage.emit(Msg::Camera(Box::new(cam))));
+    }
+    costs.report(stage, probe, "fly the 3D camera");
 }
