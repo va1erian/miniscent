@@ -34,6 +34,7 @@ use crate::camera::Camera;
 use crate::framebuffer::Framebuffer;
 use crate::material::{MaterialId, MaterialTable};
 use crate::mesh::MeshLighting;
+use crate::model::ModelList;
 use crate::particles::{ParticleDraws, SpriteBank};
 use crate::raster::PolyList;
 use crate::scene::{HoleList, Scene, SceneStats};
@@ -121,6 +122,7 @@ struct FrameState {
     lit: Option<MeshLighting>,
     movers: movers::MoverList,
     voxels: VoxelList,
+    models: ModelList,
 }
 
 fn check_materials(table: &MaterialTable) -> Result<(), BuildError> {
@@ -317,6 +319,7 @@ impl LevelRenderer {
                 lit: None,
                 movers: movers::MoverList::default(),
                 voxels: VoxelList::default(),
+                models: ModelList::default(),
             });
         }
         let frame = slot.as_mut()?;

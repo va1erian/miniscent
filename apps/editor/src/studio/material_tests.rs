@@ -65,20 +65,27 @@ fn a_new_table_changes_the_picture_and_keeps_the_light() {
         Preview::Updating,
         "the picture is known to be behind"
     );
-    let after = settle(&mut studio, &doc);
+    let mut after = settle(&mut studio, &doc);
     assert_eq!(studio.built_materials, generation);
 
-    assert_ne!(before.rgba, after.rgba, "the new colours reached the view");
     let green = |f: &Frame| {
         let (pixels, _) = f.rgba.as_chunks::<4>();
         pixels.iter().filter(|p| p[1] > p[0] && p[1] > p[2]).count()
     };
-    assert!(
-        green(&after) > green(&before) * 2,
-        "{} green pixels, {} before",
-        green(&after),
-        green(&before)
-    );
+    // The picture being up says nothing of when the render thread draws it, and on
+    // a busy machine that can be long after: wait for the colours, not for a time.
+    let end = Instant::now() + Duration::from_secs(120);
+    while green(&after) <= green(&before) * 2 {
+        assert!(
+            Instant::now() < end,
+            "{} green pixels, {} before",
+            green(&after),
+            green(&before)
+        );
+        after = studio.tick(&[], PANE, &doc).frame.unwrap_or(after);
+        std::thread::sleep(Duration::from_millis(3));
+    }
+    assert_ne!(before.rgba, after.rgba, "the new colours reached the view");
     assert_eq!(studio.light_key, key, "the light key does not see textures");
     assert_eq!(studio.light, Light::Full, "no draft in between");
     assert_eq!(
@@ -157,7 +164,7 @@ fn idle_log(studio: &mut Studio, doc: &Document, span: Duration) -> Vec<String> 
     let mut end = Instant::now() + span;
     while Instant::now() < end {
         log.extend(studio.tick(&[], PANE, doc).log);
-        if studio.bake_job.is_some() {
+        if studio.bake_job.is_some() || studio.preview_job.is_some() {
             end = Instant::now() + span;
         }
         assert!(

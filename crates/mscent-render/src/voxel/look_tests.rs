@@ -73,7 +73,6 @@ fn frame(scene: &VoxelScene, texture: &crate::Texture, spec: &[crate::SpecTable]
     list.prepare(scene, &cam, EYE, |_| 0);
     let texture_of = |_: u16| texture;
     let ctx = FillContext {
-        scene,
         cam: &cam,
         eye: EYE,
         fog: None,
@@ -85,7 +84,7 @@ fn frame(scene: &VoxelScene, texture: &crate::Texture, spec: &[crate::SpecTable]
     };
     let mut fb = Framebuffer::new(WIDTH, HEIGHT).expect("size");
     fb.clear_sky(SKY, SKY);
-    fill_voxels(&mut fb, &list, &ctx);
+    fill_voxels(&mut fb, &list, scene, &ctx);
     fb
 }
 

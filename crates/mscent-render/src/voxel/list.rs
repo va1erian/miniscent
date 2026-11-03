@@ -284,7 +284,7 @@ pub(super) fn snap(v: f32) -> i32 {
     (v * SUBPIXEL).round().clamp(-MAX_SCREEN, MAX_SCREEN) as i32
 }
 
-fn project(cam: &Camera, pos: Vec3) -> ScreenV {
+pub(crate) fn project(cam: &Camera, pos: Vec3) -> ScreenV {
     let c = cam.world_to_camera(pos);
     if -c.z < cam.near() {
         return ScreenV::default();
@@ -300,7 +300,7 @@ fn project(cam: &Camera, pos: Vec3) -> ScreenV {
 }
 
 /// Rows a chunk may cover. A vertex past the near plane could land anywhere.
-fn row_span(verts: &[ScreenV], height: i32) -> (i32, i32) {
+pub(crate) fn row_span(verts: &[ScreenV], height: i32) -> (i32, i32) {
     let mut lo = i32::MAX;
     let mut hi = i32::MIN;
     for v in verts {

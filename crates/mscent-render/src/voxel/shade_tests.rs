@@ -63,7 +63,6 @@ fn voxel_frame_from(
     list.prepare(scene, &cam, eye, |_| 0);
     let texture_of = |_: u16| texture;
     let ctx = FillContext {
-        scene,
         cam: &cam,
         eye,
         fog: None,
@@ -74,7 +73,7 @@ fn voxel_frame_from(
         texture_of: &texture_of,
     };
     let mut fb = Framebuffer::new(320, 180).expect("fb");
-    fill_voxels(&mut fb, &list, &ctx);
+    fill_voxels(&mut fb, &list, scene, &ctx);
     fb
 }
 

@@ -200,6 +200,24 @@ Design in [hardware-renderer.md](hardware-renderer.md).
 | M14.11 | Viewports on the GPU: viewport faces, vista layers, masked textures, removing the pane's viewport exception | M14.5 | L | Rows for vista, parallax and cutout pass; `facing.msl` draws on the GPU |
 | M14.12 | The fine finish: 4x multisampling and trilinear, anisotropic material filtering at High, with depth resolved for reading | M14.4 | M | `tests/finish.rs`: the same picture in the mean, nearer a supersampled truth, each half failing when taken out |
 
+## M15 Enemy foundry
+
+Design and what was built in [enemies.md](enemies.md). M15.1, M15.2 and M15.11 are done. Shading changes from M15.3 on go into both renderers, held by the parity cases.
+
+| ID | Item | Deps | Size | Done when |
+|---|---|---|---|---|
+| M15.1 | `mscent-world::model`: blueprint reader and writer, limits, cost, build with direct solids, local cuts, cells per part | | L | Round trip; bit-flip and truncation fuzz; same bytes give the same mesh; `model_bench` repeats the build table here, including local cuts; binary size against budget |
+| M15.2 | `mscent-render::model`: `Quat` pose, frame preparation, fill, model-space shading, levels, budget, table | M15.1 | L | Texture does not swim; `frame_alloc` unchanged; textured cost per model recorded; side-by-side with flat path |
+| M15.3 | Light: leaf test, ambient cube, `glow`, instance tint | M15.2 | M | Wall and zero-lamp pixel tests; compared by eye with the baked picture; `check_frame_cost.py` gains a crowd scene |
+| M15.4 | Game: `enemies.txt`, kinds, facing, hit spheres, bounding body; level and script use by name | M15.1 | M | Replay bit-exact; fuzz with large radii; old levels draw the same pixels; a hand-written blueprint plays end to end |
+| M15.5 | Motion: parts, sway, debris on death | M15.2 | M | Replay unaffected; moving parts at both ends of a swing by pixel test; no per-frame allocation |
+| M15.6 | `mscent-foundry`: helpers, genes, sockets, gates, silhouette, archive; `--foundry` headless | M15.1 | L | Same seed gives the same file; a run of 2000 seeds writes a contact sheet; gates reject planted failures |
+| M15.7 | First plans: the nine spiked, with two weak plans reworked | M15.6 | L | Owner reviews a sheet of each; no two kept designs of a plan overlap by over 80% |
+| M15.8 | Skin sets: plating, chitin, flesh, glass and two factions as recipes | M15.3 | M | Directory limits still met; load time and binary size recorded; ids append-only |
+| M15.9 | Modules and the other nine plans | M15.7 | L | Eight modules of each tag; a sheet shows a module on three plans of different classes |
+| M15.10 | Editor: Foundry workspace, placing by name, Open as level | M15.6, M15.4 | L | `--selftest` rolls, locks a gene and promotes; worst UI tick during a roll held by `tick_costs` |
+| M15.11 | Models on the GPU: the same list, drawn through the voxel pipeline in model space; parity cases | M15.2, M14.5 | M | Parity cases pass on the GPU, each failing with its feature taken out; seeded GPU bugs caught; cost recorded |
+
 ## Suggested order
 
 M0, then M1.1 through M1.4 in parallel with M2.1 through M2.3. The renderer

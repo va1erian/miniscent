@@ -210,6 +210,7 @@ fn draw(&mut self, fb: &mut Framebuffer, frame: &FrameInput) -> Option<SceneStat
 | `faces.rs`, `textures.rs` | `level/fill.rs`, `lighting_shader.rs`, `light_sampler.rs`, `bump.rs`, `specular.rs` | `face.wgsl` |
 | `movers.rs` | `level/movers.rs` | `face.wgsl` with a pose |
 | `voxels.rs` | `voxel/` | `voxel.wgsl` |
+| `models.rs` (M15.11) | `model/` | `voxel.wgsl`, in model space |
 | `actors.rs` | `mesh.rs` | `mesh.wgsl` |
 | `particles.rs` | `particles/` | `sprite.wgsl`, `decal.wgsl` |
 | `vistas.rs`, `holes.rs` | `level/vista.rs`, `scene/holes.rs` | `face.wgsl` per layer, `hole.wgsl` |

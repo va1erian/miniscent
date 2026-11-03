@@ -2,6 +2,7 @@
 
 use super::movers::MoverPose;
 use crate::dynlight::DynLight;
+use crate::model::{ModelInstance, ModelTable};
 use crate::particles::{ParticleDraws, SpriteBank};
 
 /// Extras of one frame, all read-only: nothing here is changed by drawing,
@@ -21,4 +22,6 @@ pub struct Effects<'a> {
     /// (spin and pan). It only moves cameras and textures, never the simulation;
     /// not finite or below zero counts as 0, which is also the default.
     pub vista_time: f32,
+    /// Enemy models and where they are.
+    pub models: Option<(&'a ModelTable, &'a [ModelInstance])>,
 }

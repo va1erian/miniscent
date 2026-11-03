@@ -23,6 +23,7 @@ pub mod manifest;
 pub mod material;
 pub mod mesh;
 pub mod mips;
+pub mod model;
 pub mod particles;
 pub mod png;
 pub mod png_encode;

@@ -352,7 +352,6 @@ impl LevelRenderer {
         let eye = eye_of(cam);
         let texture_of = |id: u16| self.assets.scene.texture_of(id);
         let ctx = FillContext {
-            scene: self.assets.scene.voxels(),
             cam,
             eye,
             fog: layer.fog,
@@ -362,7 +361,7 @@ impl LevelRenderer {
             spec: &self.assets.spec,
             texture_of: &texture_of,
         };
-        let mut total = fill_voxels(fb, &list.voxels, &ctx);
+        let mut total = fill_voxels(fb, &list.voxels, self.assets.scene.voxels(), &ctx);
         let faces = (self.assets.scene).fill_frame(fb, &list.faces, None, &mut |i, face| {
             self.face_shader(i, face, eye, quality, &[], layer.fog)
         });

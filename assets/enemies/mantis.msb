@@ -1,0 +1,38 @@
+miniscent-blueprint 1
+# A segmented voxel body on voxel legs, with brush blades that swing.
+name mantis
+class alien
+scale 0.25
+skin shell chitin
+skin eye glass glow
+skin blade metal
+
+part body cell=1
+add spheroid 6 0 0  1 0 0  3 2 shell
+add spheroid 2 0 -0.25  1 0 0  3.5 2.5 shell
+add spheroid -3 0 -0.5  1 0 0  4.25 3 shell
+add spheroid 9.5 0 1  0 1 0  2.5 1.5 shell
+smooth sphere 3 0 0 10
+paint sphere 10 1.5 1.5 0.75 eye
+paint sphere 10 -1.5 1.5 0.75 eye
+
+part leg-l cell=0.5 pivot=0,1,0 axis=1,0,0 motion=swing:0.15:1.5
+add round_cone 0 1 0  -1 7 2  0.875 0.75 shell
+add round_cone -1 7 2  -3 10 -4  0.75 0.75 shell
+
+part leg-r cell=0.5 pivot=0,-1,0 axis=1,0,0 motion=swing:0.15:1.5
+add round_cone 0 -1 0  -1 -7 2  0.875 0.75 shell
+add round_cone -1 -7 2  -3 -10 -4  0.75 0.75 shell
+
+part blade-l cell=0.5 pivot=6,2,0 axis=0,0,1 motion=swing:0.5:1
+add round_cone 6 2 0  8 4.5 1  0.875 0.75 shell
+solid plate 0.5  7.25 4.5 1  10 4.5 2.5  16 4.5 0  8.5 4.5 -1 blade
+
+part blade-r cell=0.5 pivot=6,-2,0 axis=0,0,1 motion=swing:-0.5:1
+add round_cone 6 -2 0  8 -4.5 1  0.875 0.75 shell
+solid plate 0.5  7.25 -4.5 1  10 -4.5 2.5  16 -4.5 0  8.5 -4.5 -1 blade
+
+hit 7 0 0.5 3.5
+hit -1 0 -0.5 4.5
+hit 12 4.5 1 2
+hit 12 -4.5 1 2
