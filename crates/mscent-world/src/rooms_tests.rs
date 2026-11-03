@@ -1,6 +1,6 @@
 use super::*;
 use crate::{Brush, Op, compile};
-use mscent_math::Vec3d;
+use mscent_math::{Vec3, Vec3d};
 
 fn cuboid(a: [f64; 3], b: [f64; 3], op: Op, order: u32) -> Brush {
     let v = |p: [f64; 3]| Vec3d::new(p[0], p[1], p[2]);
@@ -147,4 +147,66 @@ fn a_forged_table_cannot_make_a_lookup_leave_the_table() {
     assert!(!rooms.reaches(5, 0, 64.0));
     assert_eq!(rooms.room_of(LeafId(2)), None);
     assert_eq!(rooms.row(u32::MAX), None);
+}
+
+/// A grouping of `count` rooms and no leaves, to be told apart by its count.
+fn counted(count: usize) -> Parts {
+    Parts {
+        of_leaf: Vec::new(),
+        count,
+        boxes: Vec::new(),
+    }
+}
+
+#[test]
+fn the_grouping_kept_is_the_first_that_fits() {
+    let never = || -> Parts { panic!("not asked for") };
+    assert_eq!(fit(4, counted(4), never, never).count, 4);
+    assert_eq!(fit(4, counted(5), || counted(3), never).count, 3);
+    assert_eq!(fit(4, counted(5), || counted(4), never).count, 4);
+    assert_eq!(fit(4, counted(5), || counted(5), || counted(1)).count, 1);
+    assert_eq!(fit(0, counted(0), never, never).count, 0);
+}
+
+fn built_within(brushes: &[Brush], most: usize) -> (Bsp, Rooms) {
+    let bsp = compile(brushes).expect("a tree");
+    let portals = Portals::build(&bsp);
+    let rooms = Rooms::build_within(&bsp, &portals, most);
+    (bsp, rooms)
+}
+
+#[test]
+fn more_rooms_than_allowed_become_the_islands_of_portals() {
+    // Two rooms and the doorway between: three rooms, and one island.
+    let brushes = two_rooms(2.0);
+    assert_eq!(built_within(&brushes, 3).1.count(), 3);
+    let (bsp, rooms) = built_within(&brushes, 2);
+    assert_eq!(rooms.count(), 1);
+    let (a, b) = (
+        room_at(&bsp, &rooms, [-10.0; 3]),
+        room_at(&bsp, &rooms, [11.0, 0.0, 0.0]),
+    );
+    assert_eq!(a, b);
+    assert!(rooms.reaches(a, b, 1.0));
+}
+
+#[test]
+fn more_islands_than_allowed_become_one_room_that_every_light_reaches_by_radius() {
+    // Two rooms with no portal between: two islands, and one allowed.
+    let brushes = [
+        cuboid([-20.0, -10.0, -10.0], [0.0, 10.0, 10.0], Op::Subtract, 0),
+        cuboid([2.0, -10.0, -10.0], [22.0, 10.0, 10.0], Op::Subtract, 1),
+    ];
+    assert_eq!(built_within(&brushes, 2).1.count(), 2);
+    let (bsp, rooms) = built_within(&brushes, 1);
+    assert_eq!(rooms.count(), 1, "not zero, which would light nothing");
+    let (a, b) = (
+        room_at(&bsp, &rooms, [-5.0, 0.0, 0.0]),
+        room_at(&bsp, &rooms, [5.0, 0.0, 0.0]),
+    );
+    assert_eq!((a, b), (0, 0));
+    assert!(rooms.reaches(a, b, 0.5), "the radius is all that limits it");
+    assert!(!rooms.reaches(a, b, 0.0), "no radius reaches nothing");
+    assert_eq!(rooms.table_bytes(), 2);
+    assert!(rooms.table_bytes() <= MAX_ROOMS * MAX_ROOMS * 2);
 }

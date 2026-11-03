@@ -124,8 +124,15 @@ at compile time and never read from a level file, so the level format is unchang
   rooms (`SetMasks`), a few dozen entries, and the face's set is in bits 8 and up of its
   `flags` in `face.wgsl` (`SET_SHIFT`, passed as an override), so a frame writes one word
   per set. A level of 8x8 generated rooms has 1,251 faces and 123 rooms.
-- **Fallbacks, and what is refused.** More than `MAX_ROOMS` (4096) rooms: a room for each
-  island. More islands than that: the level reaches nothing, the dark side of being wrong.
+- **Fallbacks, and what is refused.** `MAX_ROOMS` is 1,024, so a table is 2 MB at the most
+  (it was 4,096, and 32 MB with a Dijkstra a room run inside `Scene::new`, in the software
+  build too). More rooms than that: a room for each island of leaves joined by any portal.
+  More islands than that: the whole level is one room, which every light reaches by its
+  radius alone, through walls (too bright in a level that big, never dark where it should be
+  lit). It was no rooms, which made every dynamic light reach nothing. The decision is
+  `rooms::fit`, tested on its own with made-up counts and on real levels with the cap
+  lowered (`more_rooms_than_allowed_become_the_islands_of_portals`,
+  `more_islands_than_allowed_become_one_room_that_every_light_reaches_by_radius`).
   `Rooms::from_parts` is the only constructor and refuses a count over the cap, a table that
   is not `count` squared (checked multiplication), a leaf in a room that does not exist, and
   a room not at zero from itself; every lookup is a `get`, so a forged table cannot index
@@ -148,8 +155,20 @@ timed on a release build; `csg` is the BSP compile it follows):
 | generated 5x5 | 179 | 200 | 47 | 4,418 | 0 | 52.5 | 3.38 |
 | generated 8x8 | 495 | 543 | 123 | 30,258 | 0 | 239.7 | 10.10 |
 
-The table is under 31 KB for a level of 64 rooms, and building it takes 4 to 15 percent of the
-BSP compile.
+The table is under 31 KB for a level of 123 rooms, and building it takes 4 to 15 percent of the
+BSP compile. The generator stops at 123 rooms, so the cap was measured on grids made for it
+(`grid` in the report: rooms 20 across, 2 wide doorways, which is 3 rooms a cell with the
+doorways):
+
+| level | empty leaves | portals | rooms | table bytes | rooms ms |
+|---|---|---|---|---|---|
+| grid 8x8 | 288 | 336 | 176 | 61,952 | 8.4 |
+| grid 14x14 | 924 | 1,092 | 560 | 627,200 | 47.1 |
+| grid 18x18 | 1,548 | 1,836 | 936 | 1,752,192 | 111.1 |
+
+So 1,024 rooms is about 2 MB and about 120 ms, near-linear in rooms (each room's walk stops
+at the light's reach of 64 units), where 4,096 would be 32 MB and, extrapolated, about 0.5 s on every
+`Scene::new`, which the editor runs on each edit.
 
 Tests that fail with the room test taken out (`has_leaf` and `has_set` answering yes for any
 reached map): `dynlight_tests` (3 of 8), `tests/room_lights.rs` in `mscent-render` (the wall

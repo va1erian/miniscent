@@ -26,6 +26,7 @@ mod particles;
 mod present;
 mod resolve;
 mod shadow_lights;
+mod shadow_maps;
 mod shadows;
 mod sky;
 mod targets;
@@ -272,7 +273,9 @@ impl GpuRenderer {
         let looks = (quality, effects);
         let clip = cam.gpu_clip_matrix();
         let (slots, holders) = match effects.shadows {
-            true => self.shadows.pick(frame.effects.lights, eye_of(&cam)),
+            true => self
+                .shadows
+                .pick(&self.gpu, frame.effects.lights, eye_of(&cam)),
             false => (Slots::NONE, Default::default()),
         };
         let lit = (assets.fog(), frame.effects.lights);

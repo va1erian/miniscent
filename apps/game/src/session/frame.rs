@@ -123,7 +123,9 @@ impl GameSession {
         let drawn = if other(self.renderer.assets(), &mut fb, &input) {
             Some(())
         } else {
-            self.renderer.draw(&mut fb, &input).map(|_| ())
+            self.renderer
+                .draw(&mut fb, &software_input(&input))
+                .map(|_| ())
         };
         if drawn.is_some() {
             if self.kick.white > 0 {
@@ -173,7 +175,11 @@ impl GameSession {
                 self.quality,
             );
             let mut frame = take_sized(&mut self.fb, layer_size)?;
-            if self.renderer.draw(&mut frame, &input).is_some() {
+            if self
+                .renderer
+                .draw(&mut frame, &software_input(&input))
+                .is_some()
+            {
                 if self.kick.white > 0 {
                     simd::lerp_toward(frame.pixels_mut(), WHITE, self.kick.white);
                 }
@@ -272,6 +278,22 @@ fn take_sized(slot: &mut Option<Framebuffer>, (width, height): (u32, u32)) -> Op
     match slot.take() {
         Some(fb) if (fb.width(), fb.height()) == (width, height) => Some(fb),
         _ => Framebuffer::new(width, height),
+    }
+}
+
+/// `input` as software draws it: without the player's ship, which only the
+/// hardware renderer draws (and shadows), so that a chase view's ship is not
+/// drawn by whichever renderer happens to be in use.
+fn software_input<'a>(input: &FrameInput<'a>) -> FrameInput<'a> {
+    FrameInput {
+        view: input.view,
+        quality: input.quality,
+        actors: input.actors,
+        effects: Effects {
+            models: None,
+            ..input.effects
+        },
+        wants_depth: input.wants_depth,
     }
 }
 

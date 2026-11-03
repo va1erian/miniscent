@@ -1,9 +1,11 @@
 //! The player's ship: a model that follows the player's pose, for the GPU
 //! renderer's shadows and for a chase view. It is cosmetic. It is made from the
 //! frame's own interpolated pose and never read by the simulation, so collision,
-//! aim and replays do not see it, and software, which has no shadows, draws none
-//! of it. It exists only in a build with the hardware renderer, so the software
-//! build keeps its size.
+//! aim and replays do not see it. Software, which has no shadows, never draws it,
+//! chase view or not: the session hands software a frame without models
+//! (`software_input`). The ship's code and blueprint are only in a build with
+//! the hardware renderer; the rest of what this work added to the software build
+//! is in `docs/hardware-effects.md`.
 //!
 //! The blueprint is authored in the player's frame (nose along -Z, up along +Y),
 //! so the player's orientation turns it as it is.

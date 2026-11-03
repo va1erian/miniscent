@@ -81,7 +81,7 @@ pub struct Gpu {
     pub(crate) face_pipelines: Arc<[OnceLock<Compiled>; Finish::COUNT]>,
     pub(crate) hole_pipelines: Arc<[OnceLock<wgpu::RenderPipeline>; Finish::COUNT]>,
     /// The shadow casters' pipelines, which do not depend on a finish.
-    pub(crate) shadow_pipelines: Arc<OnceLock<Arc<crate::shadows::Pipelines>>>,
+    pub(crate) shadow_pipelines: Arc<OnceLock<Result<Arc<crate::shadows::Pipelines>, GpuError>>>,
 }
 
 impl Gpu {

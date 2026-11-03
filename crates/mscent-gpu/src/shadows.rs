@@ -15,16 +15,19 @@ use std::sync::Arc;
 
 use mscent_math::Vec3;
 
-use crate::device::Gpu;
+use crate::device::{Gpu, GpuError};
 use crate::shadow_lights::{Candidate, FACES, Pick, SHADOW_LIGHTS, Slots, cube_bytes};
 use crate::targets::DEPTH;
+
+use crate::shadow_maps::Drawable;
+pub(crate) use crate::shadow_maps::{ShadowMaps, cube_arrays};
 
 /// A side of a cube face, in texels.
 pub(crate) const SIDE: u32 = 768;
 /// Beyond the map, which is lit.
 const NOTHING: f64 = 2.0;
-const MAP: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
-const LAYERS: u32 = 6 * SHADOW_LIGHTS as u32;
+pub(crate) const MAP: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
+pub(crate) const LAYERS: u32 = 6 * SHADOW_LIGHTS as u32;
 /// The nearest a caster is drawn to the light, in world units.
 const NEAR: f32 = 0.05;
 /// Bytes of a `Cube` in `shadow.wgsl`.
@@ -60,74 +63,6 @@ pub(crate) fn sample_constants() -> [(&'static str, f64); 10] {
         ("SHADOW_BLOCKER_TAPS", f64::from(BLOCKER_TAPS)),
         ("SHADOW_TAPS", f64::from(TAPS)),
     ]
-}
-
-/// The cube maps, one array of them, and what the faces' shader reads them with.
-pub(crate) struct ShadowMaps {
-    /// Whether this GPU can hold them. One that cannot is given maps of a texel,
-    /// which the shader never reads, and draws no shadows.
-    ready: bool,
-    pub(crate) cube: wgpu::TextureView,
-    pub(crate) sampler: wgpu::Sampler,
-    /// A view of each layer, to draw into.
-    layers: Vec<wgpu::TextureView>,
-    depth: wgpu::TextureView,
-}
-
-impl ShadowMaps {
-    pub(crate) fn new(gpu: &Gpu) -> Self {
-        let device = &gpu.device;
-        let limits = device.limits();
-        let ready =
-            limits.max_texture_dimension_2d >= SIDE && limits.max_texture_array_layers >= LAYERS;
-        let side = if ready { SIDE } else { 1 };
-        let make = |format, layers, usage| {
-            device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("shadow maps"),
-                size: wgpu::Extent3d {
-                    width: side,
-                    height: side,
-                    depth_or_array_layers: layers,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format,
-                usage,
-                view_formats: &[],
-            })
-        };
-        let drawn = wgpu::TextureUsages::RENDER_ATTACHMENT;
-        let maps = make(MAP, LAYERS, drawn | wgpu::TextureUsages::TEXTURE_BINDING);
-        let cube = maps.create_view(&wgpu::TextureViewDescriptor {
-            dimension: Some(wgpu::TextureViewDimension::CubeArray),
-            ..Default::default()
-        });
-        let layers = (0..LAYERS)
-            .map(|layer| {
-                maps.create_view(&wgpu::TextureViewDescriptor {
-                    dimension: Some(wgpu::TextureViewDimension::D2),
-                    base_array_layer: layer,
-                    array_layer_count: Some(1),
-                    ..Default::default()
-                })
-            })
-            .collect();
-        let depth = make(DEPTH, 1, drawn).create_view(&Default::default());
-        // Taps are single texels: the filter is the shader's own.
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
-        Self {
-            ready,
-            cube,
-            sampler,
-            layers,
-            depth,
-        }
-    }
 }
 
 /// What a model part contributes: where its triangles are in the corner list, and
@@ -293,14 +228,63 @@ impl Pipelines {
     }
 }
 
-/// The shadow maps of a renderer, and who holds them.
-pub(crate) struct ShadowPass {
-    pub(crate) maps: ShadowMaps,
+/// What drawing a map needs beyond the maps, made with the first light that casts:
+/// the caster pipelines, which a device compiles once, and a `Cube` a face.
+struct Drawing {
     pipelines: Arc<Pipelines>,
     uniform: wgpu::Buffer,
     /// By face of each map: its `Cube`.
     cubes: Vec<wgpu::BindGroup>,
     stride: u64,
+}
+
+impl Drawing {
+    fn new(gpu: &Gpu) -> Result<Self, GpuError> {
+        let pipelines = gpu
+            .shadow_pipelines
+            .get_or_init(|| gpu.checked(|| Ok(Arc::new(Pipelines::new(gpu)))))
+            .clone()?;
+        gpu.checked(|| {
+            let align = u64::from(gpu.device.limits().min_uniform_buffer_offset_alignment);
+            let stride = CUBE_BYTES.next_multiple_of(align.max(1));
+            let uniform = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("shadow cubes"),
+                size: stride * u64::from(LAYERS),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let cubes = (0..u64::from(LAYERS))
+                .map(|layer| {
+                    gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("shadow cube"),
+                        layout: &pipelines.cube,
+                        entries: &[wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                buffer: &uniform,
+                                offset: layer * stride,
+                                size: wgpu::BufferSize::new(CUBE_BYTES),
+                            }),
+                        }],
+                    })
+                })
+                .collect();
+            Ok(Self {
+                pipelines,
+                uniform,
+                cubes,
+                stride,
+            })
+        })
+    }
+}
+
+/// The shadow maps of a renderer, and who holds them.
+pub(crate) struct ShadowPass {
+    pub(crate) maps: ShadowMaps,
+    /// Made when a light first casts. A failure is kept, and the renderer draws
+    /// on without shadows, as it does where the maps do not fit.
+    drawing: Option<Result<Drawing, ()>>,
     pick: Pick,
 }
 
@@ -311,55 +295,37 @@ fn meet(a: (Vec3, f32), b: (Vec3, f32)) -> bool {
 
 impl ShadowPass {
     pub(crate) fn new(gpu: &Gpu) -> Self {
-        let pipelines = gpu
-            .shadow_pipelines
-            .get_or_init(|| Arc::new(Pipelines::new(gpu)))
-            .clone();
-        let align = u64::from(gpu.device.limits().min_uniform_buffer_offset_alignment);
-        let stride = CUBE_BYTES.next_multiple_of(align.max(1));
-        let uniform = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("shadow cubes"),
-            size: stride * u64::from(LAYERS),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let cubes = (0..u64::from(LAYERS))
-            .map(|layer| {
-                gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("shadow cube"),
-                    layout: &pipelines.cube,
-                    entries: &[wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &uniform,
-                            offset: layer * stride,
-                            size: wgpu::BufferSize::new(CUBE_BYTES),
-                        }),
-                    }],
-                })
-            })
-            .collect();
         Self {
             maps: ShadowMaps::new(gpu),
-            pipelines,
-            uniform,
-            cubes,
-            stride,
+            drawing: None,
             pick: Pick::default(),
         }
     }
 
     /// Which lights hold maps this frame, as the `Frame` wants them, and who they
-    /// are. `eye` is the camera's.
+    /// are. `eye` is the camera's. Compiles the caster pipelines the first time a
+    /// light holds one; if that fails, no light does, and the error is reported.
     pub(crate) fn pick(
         &mut self,
+        gpu: &Gpu,
         lights: &[mscent_render::DynLight],
         eye: Vec3,
     ) -> (Slots, [Option<(usize, Candidate)>; SHADOW_LIGHTS]) {
-        if !self.maps.ready {
-            return (Slots::NONE, Default::default());
+        let none = (Slots::NONE, Default::default());
+        if !self.maps.ready() {
+            return none;
         }
-        self.pick.pick(lights, eye)
+        let (slots, holders) = self.pick.pick(lights, eye);
+        if !holders.iter().any(Option::is_some) {
+            return (slots, holders);
+        }
+        let drawing = self.drawing.get_or_insert_with(|| {
+            Drawing::new(gpu).map_err(|why| gpu.report(format!("shadows are off: {why}")))
+        });
+        match drawing {
+            Ok(_) => (slots, holders),
+            Err(()) => none,
+        }
     }
 
     /// Draws the maps of `holders` from `casters`, ahead of the scene.
@@ -370,30 +336,33 @@ impl ShadowPass {
         holders: &[Option<(usize, Candidate)>; SHADOW_LIGHTS],
         casters: &Casters,
     ) {
-        let groups = self.caster_groups(gpu, casters);
+        let (Some(Ok(drawing)), Some(drawable)) = (&self.drawing, &self.maps.drawable) else {
+            return;
+        };
+        let groups = Self::caster_groups(&drawing.pipelines, gpu, casters);
         for (slot, holder) in holders.iter().enumerate() {
             let Some((_, light)) = holder else { continue };
             for face in 0..FACES.len() {
                 let layer = slot * FACES.len() + face;
                 let cube = cube_bytes(light.pos, light.radius, face);
                 gpu.queue
-                    .write_buffer(&self.uniform, layer as u64 * self.stride, &cube);
-                let mut pass = self.begin(encoder, layer);
-                pass.set_bind_group(0, &self.cubes[layer], &[]);
-                self.draw_casters(&mut pass, light, casters, &groups);
+                    .write_buffer(&drawing.uniform, layer as u64 * drawing.stride, &cube);
+                let mut pass = Self::begin(drawable, encoder, layer);
+                pass.set_bind_group(0, &drawing.cubes[layer], &[]);
+                Self::draw_casters(&drawing.pipelines, &mut pass, light, casters, &groups);
             }
         }
     }
 
     fn begin<'e>(
-        &self,
+        drawable: &Drawable,
         encoder: &'e mut wgpu::CommandEncoder,
         layer: usize,
     ) -> wgpu::RenderPass<'e> {
         encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("shadow face"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &self.maps.layers[layer],
+                view: &drawable.layers[layer],
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
@@ -405,7 +374,7 @@ impl ShadowPass {
                 },
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &self.maps.depth,
+                view: &drawable.depth,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(1.0),
                     store: wgpu::StoreOp::Discard,
@@ -420,11 +389,10 @@ impl ShadowPass {
 
     /// The bind groups of the models' and movers' storage, once for the frame.
     fn caster_groups(
-        &self,
+        p: &Pipelines,
         gpu: &Gpu,
         casters: &Casters,
     ) -> (Option<wgpu::BindGroup>, Option<wgpu::BindGroup>) {
-        let p = &self.pipelines;
         let make = |pipeline: &wgpu::RenderPipeline, buffers: &[(u32, &wgpu::Buffer)]| {
             let entries: Vec<_> = buffers
                 .iter()
@@ -452,14 +420,13 @@ impl ShadowPass {
 
     /// Draws what of `casters` meets `light`'s sphere into the pass's face.
     fn draw_casters(
-        &self,
+        p: &Pipelines,
         pass: &mut wgpu::RenderPass,
         light: &Candidate,
         casters: &Casters,
         (models, movers): &(Option<wgpu::BindGroup>, Option<wgpu::BindGroup>),
     ) {
         let reach = (light.pos, light.radius);
-        let p = &self.pipelines;
         // Actors are few, and their triangles come in one list: all of them.
         if let Some((vertices, count)) = casters.actors.filter(|&(_, n)| n > 0) {
             pass.set_pipeline(&p.world);

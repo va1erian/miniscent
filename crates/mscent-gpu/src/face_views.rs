@@ -64,9 +64,14 @@ impl Shared<'_> {
             wgpu::BindingResource::Sampler(&self.clamped),
             wgpu::BindingResource::Sampler(&self.repeat),
             self.lights.as_entire_binding(),
-            wgpu::BindingResource::TextureView(&self.shadows.cube),
-            wgpu::BindingResource::Sampler(&self.shadows.sampler),
         ];
+        let shadows = self.shadows.bound.iter().flat_map(|(cube, sampler)| {
+            [
+                wgpu::BindingResource::TextureView(cube),
+                wgpu::BindingResource::Sampler(sampler),
+            ]
+        });
+        let resources = resources.into_iter().chain(shadows);
         let entries: Vec<wgpu::BindGroupEntry> = (0u32..)
             .zip(resources)
             .map(|(binding, resource)| wgpu::BindGroupEntry { binding, resource })

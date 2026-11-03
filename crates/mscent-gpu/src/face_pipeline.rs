@@ -22,12 +22,21 @@ use crate::targets::{COLOR, DEPTH};
 
 /// Position, texel coordinates, face.
 pub(crate) const VERTEX_BYTES: usize = 24;
-const SHADER: &str = concat!(
-    include_str!("../shaders/common.wgsl"),
-    include_str!("../shaders/shading.wgsl"),
-    include_str!("../shaders/shadow_sample.wgsl"),
-    include_str!("../shaders/face.wgsl"),
-);
+/// The faces' shader, with the shadow lookup where the device has cube arrays to
+/// hold the maps, and a stub that sees every light whole where it has not.
+fn shader(shadows: bool) -> String {
+    let lookup = match shadows {
+        true => include_str!("../shaders/shadow_sample.wgsl"),
+        false => include_str!("../shaders/shadow_none.wgsl"),
+    };
+    [
+        include_str!("../shaders/common.wgsl"),
+        include_str!("../shaders/shading.wgsl"),
+        lookup,
+        include_str!("../shaders/face.wgsl"),
+    ]
+    .concat()
+}
 
 /// Which texels of a material a pipeline draws.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -110,31 +119,30 @@ impl Layouts {
             min_binding_size: None,
         };
         let filtering = wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering);
+        let mut entries = vec![
+            entry(0, uniform),
+            entry(1, read_only()),
+            entry(2, read_only()),
+            entry(3, read_only()),
+            entry(4, read_only()),
+            entry(5, texture()),
+            entry(6, filtering),
+            entry(7, filtering),
+            entry(8, read_only()),
+        ];
+        let shadows = crate::shadows::cube_arrays(gpu);
+        if shadows {
+            let cube = wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                view_dimension: wgpu::TextureViewDimension::CubeArray,
+                multisampled: false,
+            };
+            let nearest = wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering);
+            entries.extend([entry(9, cube), entry(10, nearest)]);
+        }
         let frame = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("faces"),
-            entries: &[
-                entry(0, uniform),
-                entry(1, read_only()),
-                entry(2, read_only()),
-                entry(3, read_only()),
-                entry(4, read_only()),
-                entry(5, texture()),
-                entry(6, filtering),
-                entry(7, filtering),
-                entry(8, read_only()),
-                entry(
-                    9,
-                    wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::CubeArray,
-                        multisampled: false,
-                    },
-                ),
-                entry(
-                    10,
-                    wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-                ),
-            ],
+            entries: &entries,
         });
         let material = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("material"),
@@ -159,9 +167,10 @@ impl Layouts {
 
 fn pipeline(gpu: &Gpu, layouts: &Layouts, finish: Finish, texels: Texels) -> wgpu::RenderPipeline {
     let device = &gpu.device;
+    let shadows = crate::shadows::cube_arrays(gpu);
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("faces"),
-        source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+        source: wgpu::ShaderSource::Wgsl(shader(shadows).into()),
     });
     let constants = [
         ("SHARP_RATE", f64::from(SHARP_RATE)),
@@ -187,10 +196,12 @@ fn pipeline(gpu: &Gpu, layouts: &Layouts, finish: Finish, texels: Texels) -> wgp
         ("FINE", f64::from(u8::from(finish == Finish::Fine))),
         ("MASK", texels.mask()),
     ];
-    let constants: Vec<_> = constants
-        .into_iter()
-        .chain(crate::shadows::sample_constants())
-        .collect();
+    let looks = if shadows {
+        crate::shadows::sample_constants().to_vec()
+    } else {
+        Vec::new()
+    };
+    let constants: Vec<_> = constants.into_iter().chain(looks).collect();
     let options = wgpu::PipelineCompilationOptions {
         constants: &with_common(&constants),
         ..Default::default()

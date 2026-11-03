@@ -75,3 +75,22 @@ fn a_chase_view_moves_only_the_camera() {
         "the chase camera is {behind} from the first-person one"
     );
 }
+
+/// The chase view draws the ship, on the hardware renderer. Software never does:
+/// its frame from behind the player is the frame a session with no ship draws.
+#[test]
+fn software_draws_no_ship_in_a_chase_view() {
+    let (mut a, mut b) = (with_ship(), without_ship());
+    a.set_chase(true);
+    b.set_chase(true);
+    let script = Script::parse(PLAY).expect("a script");
+    let mut platform = HeadlessPlatform::new(SIZE.0, SIZE.1, DT, script).with_frame_limit(60);
+    for frame in 0..60 {
+        let events = platform.poll_events();
+        a.step(DT, &events);
+        b.step(DT, &events);
+        let pa = a.render(SIZE.0, SIZE.1).expect("a frame").pixels().to_vec();
+        let pb = b.render(SIZE.0, SIZE.1).expect("a frame").pixels().to_vec();
+        assert_eq!(pa, pb, "frame {frame}");
+    }
+}

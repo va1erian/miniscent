@@ -21,16 +21,16 @@
 //! file, so a level file cannot forge them. [`Rooms::from_parts`] is the one
 //! door every table goes through, and it refuses what the builder cannot make.
 
-use std::cmp::Reverse;
-use std::collections::BinaryHeap;
-
 use crate::bsp::{Bsp, Child, LeafId, LeafKind};
 use crate::portals::{Portal, Portals};
 use crate::{csg, polytope};
-use mscent_math::{Aabb, DPlane, Vec3, epsilon};
+use mscent_math::{Aabb, DPlane, epsilon};
 
-/// Most rooms a level keeps; the table is the square of this many entries.
-pub const MAX_ROOMS: usize = 4096;
+/// Most rooms a level keeps; the table is the square of this many entries, 2 MB
+/// at the most, and the walk that fills it a Dijkstra a room. Generated levels of
+/// 8 by 8 cells have 123 rooms (`docs/dynamic-lights.md`), so this holds levels
+/// more than ten times that size before the fallback below.
+pub const MAX_ROOMS: usize = 1024;
 /// Farthest a dynamic light reaches, in world units. A pair farther apart than
 /// this holds [`NEVER`].
 pub const MAX_LIGHT_REACH: f32 = 64.0;
@@ -103,19 +103,25 @@ impl Rooms {
     }
 
     /// The rooms of `bsp`. A level with more rooms than [`MAX_ROOMS`] takes one
-    /// room for each island of leaves, and one with more islands than that
-    /// reaches nothing, which is the dark side of being wrong.
+    /// room for each island of leaves, and one with more islands than that is a
+    /// single room, which every light then reaches by its radius alone, through
+    /// walls: too bright in a level that big, and never dark where it should be
+    /// lit. Never no rooms, which would make every dynamic light reach nothing.
     pub fn build(bsp: &Bsp, portals: &Portals) -> Self {
+        Self::build_within(bsp, portals, MAX_ROOMS)
+    }
+
+    /// [`Self::build`] with `most` rooms allowed, which a test lowers.
+    fn build_within(bsp: &Bsp, portals: &Portals, most: usize) -> Self {
         let mut cells = cells_of(bsp);
         measure_openings(portals, &mut cells);
-        let mut parts = Parts::open(bsp, portals, &cells);
-        if parts.count > MAX_ROOMS {
-            parts = Parts::islands(bsp, portals, &cells);
-        }
-        if parts.count > MAX_ROOMS {
-            return Self::default();
-        }
-        let steps = steps_of(&parts, portals);
+        let parts = fit(
+            most,
+            Parts::open(bsp, portals, &cells),
+            || Parts::islands(bsp, portals, &cells),
+            || Parts::single(bsp, &cells),
+        );
+        let steps = table::steps_of(&parts, portals);
         Self::from_parts(parts.of_leaf, parts.count, steps).unwrap_or_default()
     }
 
@@ -240,6 +246,25 @@ fn cell_of(bounding: &[DPlane]) -> Cell {
     }
 }
 
+/// The grouping to keep: `open` where it has at most `most` rooms, else the one
+/// `islands` makes if that has, else the one room of `one`.
+fn fit(
+    most: usize,
+    open: Parts,
+    islands: impl FnOnce() -> Parts,
+    one: impl FnOnce() -> Parts,
+) -> Parts {
+    if open.count <= most {
+        return open;
+    }
+    let islands = islands();
+    if islands.count <= most {
+        islands
+    } else {
+        one()
+    }
+}
+
 /// Leaves grouped into rooms and the box around each.
 struct Parts {
     of_leaf: Vec<u32>,
@@ -266,6 +291,11 @@ impl Parts {
             groups.join(p.front.0 as usize, p.back.0 as usize);
         }
         Self::from_groups(bsp, cells, |leaf| groups.find(leaf))
+    }
+
+    /// Every empty leaf in one room.
+    fn single(bsp: &Bsp, cells: &[Option<Cell>]) -> Self {
+        Self::from_groups(bsp, cells, |_| 0)
     }
 
     /// Numbers the groups of the empty leaves in the order of their lowest leaf.
@@ -375,111 +405,8 @@ fn same_plane(a: &DPlane, b: &DPlane) -> bool {
     (a.normal - b.normal).length() <= eps && (a.dist - b.dist).abs() <= eps
 }
 
-/// The gap between two boxes, zero where they touch or overlap.
-fn box_gap(a: &Aabb, b: &Aabb) -> f32 {
-    let gap = |lo: f32, hi: f32, olo: f32, ohi: f32| (olo - hi).max(lo - ohi).max(0.0);
-    Vec3::new(
-        gap(a.min.x, a.max.x, b.min.x, b.max.x),
-        gap(a.min.y, a.max.y, b.min.y, b.max.y),
-        gap(a.min.z, a.max.z, b.min.z, b.max.z),
-    )
-    .length()
-}
-
-/// A portal between two rooms: the rooms and the box around it.
-struct Edge {
-    rooms: [u32; 2],
-    bounds: Aabb,
-}
-
-fn edges_of(parts: &Parts, portals: &Portals) -> Vec<Edge> {
-    let room = |leaf: LeafId| {
-        parts
-            .of_leaf
-            .get(leaf.0 as usize)
-            .copied()
-            .unwrap_or(NO_ROOM)
-    };
-    portals
-        .portals()
-        .iter()
-        .filter_map(|p| {
-            let rooms = [room(p.front), room(p.back)];
-            let bounds = p
-                .polygon
-                .vertices()
-                .iter()
-                .fold(Aabb::empty(), |b, v| b.including(v.to_f32()));
-            (rooms[0] != rooms[1] && rooms.iter().all(|&r| r != NO_ROOM))
-                .then_some(Edge { rooms, bounds })
-        })
-        .collect()
-}
-
-/// For each room, the portals that touch it, by index into `edges`.
-fn touching(count: usize, edges: &[Edge]) -> Vec<Vec<u32>> {
-    let mut out = vec![Vec::new(); count];
-    for (i, e) in (0u32..).zip(edges) {
-        for r in e.rooms {
-            if let Some(list) = out.get_mut(r as usize) {
-                list.push(i);
-            }
-        }
-    }
-    out
-}
-
-fn steps_of(parts: &Parts, portals: &Portals) -> Vec<u16> {
-    let edges = edges_of(parts, portals);
-    let touch = touching(parts.count, &edges);
-    let mut table = vec![NEVER; parts.count.saturating_mul(parts.count)];
-    for (from, home) in parts.boxes.iter().enumerate() {
-        let start = from.saturating_mul(parts.count);
-        if let Some(row) = table.get_mut(start..start.saturating_add(parts.count)) {
-            narrowest_chains(from, home, (&edges, &touch), row);
-        }
-    }
-    table
-}
-
-/// Fills `row` with the step from room `from` to each room: Dijkstra where a
-/// chain costs its worst portal, so the first time a room comes off the heap is
-/// the best chain to it.
-fn narrowest_chains(
-    from: usize,
-    home: &Aabb,
-    (edges, touch): (&[Edge], &[Vec<u32>]),
-    row: &mut [u16],
-) {
-    let limit = (MAX_LIGHT_REACH * STEPS_PER_UNIT) as u32;
-    let mut heap = BinaryHeap::new();
-    // `from` is below `MAX_ROOMS`.
-    heap.push(Reverse((0u32, u32::try_from(from).unwrap_or(0))));
-    while let Some(Reverse((cost, room))) = heap.pop() {
-        let Some(slot) = row.get_mut(room as usize) else {
-            continue;
-        };
-        if *slot != NEVER {
-            continue;
-        }
-        *slot = u16::try_from(cost).unwrap_or(NEVER);
-        for &e in touch.get(room as usize).map_or(&[][..], Vec::as_slice) {
-            let Some(edge) = edges.get(e as usize) else {
-                continue;
-            };
-            let across = (box_gap(home, &edge.bounds) * STEPS_PER_UNIT) as u32;
-            let next = cost.max(across);
-            let other = if edge.rooms[0] == room {
-                edge.rooms[1]
-            } else {
-                edge.rooms[0]
-            };
-            if next < limit {
-                heap.push(Reverse((next, other)));
-            }
-        }
-    }
-}
+#[path = "rooms_table.rs"]
+mod table;
 
 #[cfg(test)]
 #[path = "rooms_tests.rs"]
