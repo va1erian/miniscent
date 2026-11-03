@@ -52,6 +52,20 @@ impl LevelScene {
         scene
     }
 
+    /// Draws on `device`, a test's own, which it may lose.
+    #[cfg(test)]
+    pub fn on_own_gpu(built: Built, device: mscent_gpu::Gpu) -> LevelScene {
+        let mut scene = LevelScene::on_gpu(built);
+        scene.gpu.own_device = Some(device);
+        scene
+    }
+
+    /// Why the GPU gave this scene up, if it has.
+    #[cfg(test)]
+    pub fn gpu_failure(&self) -> Option<&str> {
+        self.gpu.failure()
+    }
+
     /// The running game, for tests that look inside.
     #[cfg(test)]
     pub fn session(&mut self) -> Option<&mut miniscent_game::GameSession> {

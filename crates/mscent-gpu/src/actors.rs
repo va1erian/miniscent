@@ -7,7 +7,7 @@ use mscent_render::scene::eye_of;
 use mscent_render::{Actor, DynLight, LevelAssets};
 
 use crate::common::with_common;
-use crate::device::Gpu;
+use crate::device::{Gpu, GpuError};
 use crate::finish::Finish;
 use crate::targets::{COLOR, DEPTH};
 
@@ -86,7 +86,7 @@ impl ActorPass {
     }
 
     /// Lights and lists `actors`. An actor list too large for the GPU's buffers
-    /// draws nothing this frame, and reports through the device's error.
+    /// is an error, and draws none of them.
     pub(crate) fn prepare(
         &mut self,
         gpu: &Gpu,
@@ -94,7 +94,30 @@ impl ActorPass {
         cam: &Camera,
         actors: &[Actor],
         lights: &[DynLight],
-    ) {
+    ) -> Result<(), GpuError> {
+        self.list(assets, cam, actors, lights);
+        let needed = self.listed.len() as u64;
+        let most = gpu.device.limits().max_buffer_size;
+        let vertices = needed / VERTEX_BYTES;
+        if needed > most || u32::try_from(vertices).is_err() {
+            self.listed.clear();
+            return Err(GpuError::TooLarge("the actors"));
+        }
+        if self.vertices.as_ref().is_none_or(|b| b.size() < needed) && needed > 0 {
+            self.vertices = Some(gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("actors"),
+                size: needed.saturating_mul(2).min(most),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+        }
+        if let Some(vertices) = self.vertices.as_ref().filter(|_| needed > 0) {
+            gpu.queue.write_buffer(vertices, 0, &self.listed);
+        }
+        Ok(())
+    }
+
+    fn list(&mut self, assets: &LevelAssets, cam: &Camera, actors: &[Actor], lights: &[DynLight]) {
         self.listed.clear();
         let listed = &mut self.listed;
         assets.actor_triangles(actors, eye_of(cam), lights, |corners, color| {
@@ -106,25 +129,16 @@ impl ActorPass {
                 listed.extend_from_slice(&light.to_le_bytes());
             }
         });
-        let needed = self.listed.len() as u64;
-        if self.vertices.as_ref().is_none_or(|b| b.size() < needed) && needed > 0 {
-            self.vertices = Some(gpu.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("actors"),
-                size: needed.saturating_mul(2),
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-        }
-        if let Some(vertices) = self.vertices.as_ref().filter(|_| needed > 0) {
-            gpu.queue.write_buffer(vertices, 0, &self.listed);
-        }
     }
 
     pub(crate) fn draw(&self, pass: &mut wgpu::RenderPass) {
         let Some(vertices) = &self.vertices else {
             return;
         };
-        let count = (self.listed.len() as u64 / VERTEX_BYTES) as u32;
+        // `prepare` holds the count to this.
+        let Ok(count) = u32::try_from(self.listed.len() as u64 / VERTEX_BYTES) else {
+            return;
+        };
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_vertex_buffer(0, vertices.slice(..));

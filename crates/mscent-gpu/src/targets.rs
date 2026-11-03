@@ -2,7 +2,7 @@
 
 use mscent_render::{Camera, Framebuffer};
 
-use crate::device::Gpu;
+use crate::device::{Gpu, GpuError};
 use crate::finish::Finish;
 use crate::resolve::{DepthResolve, RESOLVED};
 
@@ -72,6 +72,16 @@ fn map(gpu: &Gpu, buffer: &wgpu::Buffer) -> Option<()> {
     finished.try_recv().ok()?.ok()
 }
 
+/// Maps `buffer`, hands its bytes to `read`, and unmaps it again, so that a
+/// failure here or later leaves it free for the next frame's copy. `None` when
+/// the device has gone or the buffer cannot be mapped.
+fn read_mapped<R>(gpu: &Gpu, buffer: &wgpu::Buffer, read: impl FnOnce(&[u8]) -> R) -> Option<R> {
+    map(gpu, buffer)?;
+    let out = buffer.get_mapped_range(..).ok().map(|bytes| read(&bytes));
+    buffer.unmap();
+    out
+}
+
 /// Each row of a read buffer with its texels, past the padding wgpu asks for,
 /// beside its row of `out`. A loop over one row at a time is what the compiler
 /// can turn into a straight copy, at a frame's eight million pixels.
@@ -89,14 +99,24 @@ fn rows<'a, T>(
 
 impl Targets {
     /// `width` and `height` come from a [`Framebuffer`], which holds them to
-    /// 8192, so none of this arithmetic can overflow. `resolve` is there when
-    /// `finish` multisamples.
+    /// 8192, so none of this arithmetic can overflow; a GPU can hold less, which
+    /// is an error. `resolve` is there when `finish` multisamples.
     pub(crate) fn new(
         gpu: &Gpu,
         (width, height): (u32, u32),
         finish: Finish,
         resolve: Option<&DepthResolve>,
-    ) -> Self {
+    ) -> Result<Self, GpuError> {
+        let limits = gpu.device.limits();
+        let side = limits.max_texture_dimension_2d;
+        if width == 0 || height == 0 || width > side || height > side {
+            return Err(GpuError::TooLarge("the frame"));
+        }
+        let row_bytes = (width * TEXEL_BYTES).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+        let bytes = u64::from(row_bytes) * u64::from(height);
+        if bytes > limits.max_buffer_size {
+            return Err(GpuError::TooLarge("the frame's readback"));
+        }
         let size = wgpu::Extent3d {
             width,
             height,
@@ -113,9 +133,7 @@ impl Targets {
             let view = texture.create_view(&Default::default());
             (texture, view, resolve.bind(gpu, &depth_view))
         });
-        let row_bytes = (width * TEXEL_BYTES).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
-        let bytes = u64::from(row_bytes) * u64::from(height);
-        Self {
+        Ok(Self {
             size: (width, height),
             color_view: color.create_view(&Default::default()),
             samples_view,
@@ -126,7 +144,7 @@ impl Targets {
             color_read: read_buffer(gpu, bytes),
             depth_read: read_buffer(gpu, bytes),
             row_bytes,
-        }
+        })
     }
 
     pub(crate) fn size(&self) -> (u32, u32) {
@@ -223,7 +241,7 @@ impl Targets {
 
     /// Copies the finished frame into `fb`, which must be this size, leaving its
     /// depth as it was unless `with_depth`. `None` when the device has gone or the
-    /// buffers cannot be read.
+    /// buffers cannot be read, and either way both are left unmapped.
     pub(crate) fn read_into(
         &self,
         gpu: &Gpu,
@@ -231,32 +249,48 @@ impl Targets {
         fb: &mut Framebuffer,
         with_depth: bool,
     ) -> Option<()> {
-        map(gpu, &self.color_read)?;
-        if with_depth {
-            map(gpu, &self.depth_read)?;
-        }
         let (row, width) = (self.row_bytes as usize, self.size.0 as usize);
         let (pixels, depths) = fb.planes_mut();
-        {
-            let color = self.color_read.get_mapped_range(..).ok()?;
-            for (texels, out) in rows(&color, row, pixels, width) {
+        read_mapped(gpu, &self.color_read, |color| {
+            for (texels, out) in rows(color, row, pixels, width) {
                 for (pixel, texel) in out.iter_mut().zip(texels) {
                     *pixel = u32::from_le_bytes(*texel);
                 }
             }
-        }
-        self.color_read.unmap();
+        })?;
         if with_depth {
-            {
-                let depth = self.depth_read.get_mapped_range(..).ok()?;
-                for (texels, out) in rows(&depth, row, depths, width) {
+            read_mapped(gpu, &self.depth_read, |depth| {
+                for (texels, out) in rows(depth, row, depths, width) {
                     for (stored, texel) in out.iter_mut().zip(texels) {
                         *stored = cam.inv_z_of_gpu_depth(f32::from_le_bytes(*texel));
                     }
                 }
-            }
-            self.depth_read.unmap();
+            })?;
         }
         Some(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mscent_math::Vec3;
+
+    use super::*;
+
+    /// Skipped on a machine with no GPU; `tests/parity.rs` is what insists on one.
+    #[test]
+    fn a_failed_depth_read_leaves_the_colour_free_for_the_next_frame() {
+        let Ok(gpu) = Gpu::new() else { return };
+        let targets = Targets::new(&gpu, (4, 4), Finish::Reference, None).expect("fits");
+        let (x, z) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+        let cam = Camera::look_at(Vec3::ZERO, x, z, 1.0, 0.1, 100.0, 4, 4).expect("a camera");
+        // Mapped already, so the read's own mapping of it fails.
+        map(&gpu, &targets.depth_read).expect("maps");
+        let mut fb = Framebuffer::new(4, 4).expect("a framebuffer");
+        assert_eq!(targets.read_into(&gpu, &cam, &mut fb, true), None);
+        let _ = gpu.take_error();
+        let again = map(&gpu, &targets.color_read);
+        assert_eq!(again, Some(()), "the colour was left mapped");
+        assert_eq!(gpu.take_error(), None);
     }
 }
