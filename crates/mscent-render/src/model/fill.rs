@@ -4,11 +4,10 @@
 
 use mscent_math::Vec3;
 
-use super::list::{ListedPart, ModelList};
+use super::list::{GLOW_LIGHT, ListedPart, ModelList};
 use super::{Level, ModelTable};
 use crate::camera::Camera;
 use crate::framebuffer::Framebuffer;
-use crate::level::EMISSIVE;
 use crate::raster::DrawStats;
 use crate::shade::Fog;
 use crate::specular::SpecTable;
@@ -16,7 +15,6 @@ use crate::texture::Texture;
 use crate::voxel::fill::{FillContext, draw_look};
 use crate::voxel::list::ScreenV;
 use crate::voxel::tri::{Corner, clip_near_of};
-use crate::voxel::{dominant_axis, tangent_of};
 
 /// Everything a frame's model triangles share.
 pub(crate) struct ModelFill<'a> {
@@ -42,11 +40,7 @@ pub(crate) fn fill_models(
         if listed.first >= band.1 || listed.last <= band.0 {
             continue;
         }
-        let level = table
-            .get(listed.model)
-            .and_then(|m| m.parts.get(listed.part as usize))
-            .and_then(|levels| levels.get(usize::from(listed.lod)));
-        if let Some(level) = level {
+        if let Some(level) = table.level_of(listed) {
             fill_part(fb, list, listed, level, fill, band, &mut stats);
         }
     }
@@ -130,7 +124,6 @@ fn corners(
     screen: [ScreenV; 3],
     glow: bool,
 ) -> [Corner; 3] {
-    let bright = Vec3::new(EMISSIVE as f32, EMISSIVE as f32, EMISSIVE as f32);
     [0, 1, 2].map(|k| {
         let i = index[k];
         let v = &level.vertices[i];
@@ -145,8 +138,8 @@ fn corners(
             y: screen[k].y,
             iz: screen[k].iz,
             pos: v.pos,
-            light: if glow { bright } else { light[i] },
-            dir: tangent_of(v.normal, dominant_axis(v.normal), listed.dir),
+            light: if glow { GLOW_LIGHT } else { light[i] },
+            dir: listed.tangent_dir(v.normal),
             world_dir: listed.dir,
             normal: v.normal,
             weight,

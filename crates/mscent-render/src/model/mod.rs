@@ -13,6 +13,8 @@ mod fill;
 mod list;
 
 #[cfg(test)]
+mod list_tests;
+#[cfg(test)]
 mod tests;
 
 use mscent_math::{Quat, Vec3};
@@ -23,8 +25,7 @@ use crate::material::MaterialTable;
 use crate::voxel::vertex_axis;
 
 pub(crate) use fill::{ModelFill, fill_models};
-pub use list::MAX_MODEL_TRIS;
-pub(crate) use list::ModelList;
+pub use list::{ListedPart, MAX_MODEL_TRIS, ModelList, ModelVertex};
 
 /// Which model of a [`ModelTable`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,7 +59,7 @@ impl ModelInstance {
 
 /// One level of detail of a part, with what drawing needs for each vertex.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Level {
+pub struct Level {
     pub vertices: Vec<PartVertex>,
     pub triangles: Vec<[u16; 3]>,
     /// Whether each triangle glows.
@@ -139,6 +140,18 @@ impl ModelTable {
 
     pub(crate) fn get(&self, id: u32) -> Option<&Prepared> {
         self.models.get(id as usize)
+    }
+
+    /// The level a listed part is drawn at.
+    pub fn level_of(&self, listed: &ListedPart) -> Option<&Level> {
+        let levels = self.get(listed.model)?.parts.get(listed.part as usize)?;
+        levels.get(usize::from(listed.lod))
+    }
+
+    /// Every material any vertex of any model is textured with.
+    pub fn materials(&self) -> impl Iterator<Item = u8> + '_ {
+        let levels = self.models.iter().flat_map(|m| m.parts.iter().flatten());
+        levels.flat_map(|l| l.material.iter().copied())
     }
 }
 

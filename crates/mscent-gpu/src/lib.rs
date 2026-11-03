@@ -1,8 +1,8 @@
 //! The hardware renderer: the same frames as [`mscent_render::LevelRenderer`],
 //! drawn on a GPU through wgpu and read back into a [`Framebuffer`].
 //!
-//! So far it draws the sky, faces, movers, voxel surfaces, actors, cutouts and
-//! viewports with their vistas, with the frame's dynamic lights, and its
+//! So far it draws the sky, faces, movers, voxel surfaces, actors, enemy models,
+//! cutouts and viewports with their vistas, with the frame's dynamic lights, and its
 //! particles over them. These arrive item by item
 //! (`docs/hardware-renderer.md`), each with a case in `tests/parity.rs`, which holds
 //! the two renderers to the same picture.
@@ -18,6 +18,7 @@ mod faces;
 mod finish;
 mod holes;
 mod lightmap;
+mod models;
 mod particle_data;
 mod particles;
 mod resolve;
@@ -32,13 +33,13 @@ mod voxels;
 pub use device::{Gpu, GpuError};
 pub use finish::Finish;
 
+use mscent_math::Mat4;
 use mscent_render::scene::SceneStats;
-use mscent_render::{
-    Camera, DynLight, Fog, FrameInput, Framebuffer, LevelAssets, Quality, VistaView,
-};
+use mscent_render::{DynLight, Fog, FrameInput, Framebuffer, LevelAssets, Quality, VistaView};
 
 use actors::ActorPass;
 use faces::FacePass;
+use models::ModelPass;
 use particles::ParticlePass;
 use resolve::DepthResolve;
 use sky::SkyPass;
@@ -47,7 +48,7 @@ use vistas::VistaPass;
 use voxels::VoxelPass;
 
 /// The `Frame` of `common.wgsl`.
-const FRAME_BYTES: u64 = 96 + dyn_lights::BYTES;
+pub(crate) const FRAME_BYTES: u64 = 96 + dyn_lights::BYTES;
 
 /// A level on a GPU. It keeps what it uploaded and borrows the level to draw it,
 /// so the level can stay with its owner and with the software renderer.
@@ -60,6 +61,7 @@ pub struct GpuRenderer {
     sky: SkyPass,
     faces: FacePass,
     voxels: VoxelPass,
+    models: ModelPass,
     actors: ActorPass,
     particles: ParticlePass,
     /// `None` for a level with no viewport faces.
@@ -67,16 +69,16 @@ pub struct GpuRenderer {
     targets: Option<Targets>,
 }
 
-/// What every shader reads about a frame seen by `cam`, as the bytes of `Frame`.
-fn frame_bytes(
-    cam: &Camera,
+/// What every shader reads about a frame whose vertices `clip` takes to clip
+/// space, as the bytes of `Frame`.
+pub(crate) fn frame_bytes(
+    clip: Mat4,
     (fog, lights): (Option<Fog>, &[DynLight]),
     quality: Quality,
     atlas: (u32, u32),
 ) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(FRAME_BYTES as usize);
-    let matrix = cam.gpu_clip_matrix();
-    for c in &matrix.cols {
+    for c in &clip.cols {
         for value in [c.x, c.y, c.z, c.w] {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
@@ -120,6 +122,7 @@ impl GpuRenderer {
             faces: FacePass::new(&gpu, assets, &frame_uniform, finish)?,
             sky: SkyPass::new(&gpu, assets.config(), finish),
             voxels,
+            models: ModelPass::new(finish),
             actors: ActorPass::new(&gpu, &frame_uniform, finish),
             particles: ParticlePass::new(&gpu, finish),
             vistas: VistaPass::new(&gpu, assets, &frame_uniform, finish)?,
@@ -179,7 +182,8 @@ impl GpuRenderer {
         }
         let targets = self.targets.as_ref()?;
         let (quality, atlas) = (frame.quality, self.faces.atlas_size);
-        let uniform = frame_bytes(&cam, (assets.fog(), frame.effects.lights), quality, atlas);
+        let clip = cam.gpu_clip_matrix();
+        let uniform = frame_bytes(clip, (assets.fog(), frame.effects.lights), quality, atlas);
         self.gpu
             .queue
             .write_buffer(&self.frame_uniform, 0, &uniform);
@@ -194,7 +198,8 @@ impl GpuRenderer {
             None => &[],
         };
         // A layer's sealed room has its own fog, and no dynamic light reaches it.
-        let layer_frame = |v: &VistaView| frame_bytes(&v.cam, (v.fog, &[]), quality, atlas);
+        let layer_frame =
+            |v: &VistaView| frame_bytes(v.cam.gpu_clip_matrix(), (v.fog, &[]), quality, atlas);
         let visible = (&cam, &stats.drawn[..]);
         let effects = (poses, lights);
         let faces = (self.faces).prepare(&self.gpu, assets, visible, effects, layers, layer_frame);
@@ -208,6 +213,11 @@ impl GpuRenderer {
                 .prepare(&self.gpu, assets, &cam, lights, &mut stats)
         });
         self.reported(voxels)?;
+        let models = self.gpu.checked(|| {
+            let seen = (frame.effects.models, lights);
+            (self.models).prepare(&self.gpu, assets, (&cam, quality), seen, &mut stats)
+        });
+        self.reported(models)?;
         if let Some(vistas) = self.vistas.as_mut() {
             let layered = vistas.prepare_voxels(&self.gpu, assets, &self.voxels, &self.faces);
             stats.vista_triangles = self.reported(layered)?;
@@ -237,6 +247,9 @@ impl GpuRenderer {
                 multiview_mask: None,
             });
             self.sky.draw(&mut pass);
+            // First of the solid things, as software has them: what stands in a
+            // room covers its walls.
+            self.models.draw(&mut pass);
             // Before faces, as software has them: a voxel pixel costs less.
             self.voxels.draw(&mut pass);
             self.faces.draw_soft(&mut pass, 0);

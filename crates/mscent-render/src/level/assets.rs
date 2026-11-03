@@ -16,6 +16,7 @@ use crate::lighting_shader::UvToLuxel;
 use crate::lightmap_mips::LightMips;
 use crate::material::MaterialTable;
 use crate::mesh::MeshLighting;
+use crate::model::{ModelInstance, ModelList, ModelTable};
 use crate::scene::Scene;
 use crate::shade::Fog;
 use crate::specular::SpecTable;
@@ -199,6 +200,27 @@ impl LevelAssets {
             lighting: &mut lighting,
         };
         self.meshes.each_triangle_lit(actors, lit, eye, visit);
+    }
+
+    /// Lists the parts of `instances` that `cam` sees, lit by the level and by the
+    /// first [`MAX_DYN_LIGHTS`] of `lights` where they reach, as a software frame
+    /// lists them; `None` empties it.
+    pub fn list_models(
+        &self,
+        list: &mut ModelList,
+        models: Option<(&ModelTable, &[ModelInstance])>,
+        cam: &Camera,
+        lights: &[DynLight],
+    ) {
+        let Some((table, instances)) = models else {
+            list.clear();
+            return;
+        };
+        let lights = &lights[..lights.len().min(MAX_DYN_LIGHTS)];
+        let bsp = self.scene.bsp();
+        list.prepare(table, instances, cam, &self.lighting, lights, |p| {
+            bsp.leaf_at_f32(p)
+        });
     }
 
     /// The camera a frame uses for this view and target size.

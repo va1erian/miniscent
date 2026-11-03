@@ -2,15 +2,17 @@
 //! parts, at which level of detail, with their vertices projected and lit once so
 //! that bands share them read-only. Nothing here allocates once its lists have grown.
 
-use mscent_math::{Aabb, Mat3, Vec3};
+use mscent_math::{Aabb, Mat3, Mat4, Vec3};
 use mscent_world::LeafId;
 
-use super::{ModelInstance, ModelTable, Prepared};
+use super::{Level, ModelInstance, ModelTable, Prepared};
 use crate::camera::{Camera, Frustum};
 use crate::dynlight::DynLight;
+use crate::level::EMISSIVE;
 use crate::mesh::MeshLighting;
 use crate::scene::eye_of;
 use crate::voxel::list::{ScreenV, in_view, project, row_span};
+use crate::voxel::{dominant_axis, tangent_of};
 
 /// Triangles a frame submits at the level its distance asks for. Past this, the
 /// farthest models take their lowest level, so an overloaded view loses distant
@@ -43,6 +45,18 @@ impl Placement {
         self.rot.mul_vec(d)
     }
 
+    /// The same, as a matrix.
+    fn matrix(&self) -> Mat4 {
+        let s = self.scale;
+        let [x, y, z] = [
+            Vec3::new(s, 0.0, 0.0),
+            Vec3::new(0.0, s, 0.0),
+            Vec3::new(0.0, 0.0, s),
+        ]
+        .map(|axis| self.rot.mul_vec(axis));
+        Mat4::from_rotation_translation(Mat3::from_cols(x, y, z), self.pos)
+    }
+
     fn inverse_point(&self, p: Vec3) -> Vec3 {
         self.rot.transpose().mul_vec(p - self.pos) * (1.0 / self.scale)
     }
@@ -54,28 +68,62 @@ impl Placement {
 
 /// One part of a frame.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ListedPart {
+pub struct ListedPart {
     pub model: u32,
     pub part: u32,
     pub lod: u8,
     /// Where its vertices start in the frame's lists.
-    pub start: usize,
+    pub(crate) start: usize,
     /// Screen rows `first..last` it may cover.
-    pub first: i32,
-    pub last: i32,
-    pub place: Placement,
-    /// The eye and the direction of the light, in model units.
+    pub(crate) first: i32,
+    pub(crate) last: i32,
+    pub(crate) place: Placement,
+    /// The eye, in model units.
     pub eye: Vec3,
+    /// The direction of the light, in model units.
     pub dir: Vec3,
+}
+
+impl ListedPart {
+    /// From model units to the world.
+    pub fn to_world(&self) -> Mat4 {
+        self.place.matrix()
+    }
+
+    /// The light's direction in the frame normal maps are authored in, at a
+    /// vertex facing `normal`.
+    pub(crate) fn tangent_dir(&self, normal: Vec3) -> Vec3 {
+        tangent_of(normal, dominant_axis(normal), self.dir)
+    }
+}
+
+/// The light a glowing triangle has at every corner.
+pub(crate) const GLOW_LIGHT: Vec3 = Vec3::new(EMISSIVE as f32, EMISSIVE as f32, EMISSIVE as f32);
+
+/// A vertex of a listed part, as a renderer that projects it itself wants it. All
+/// in model units but the light.
+#[derive(Clone, Copy, Debug)]
+pub struct ModelVertex {
+    pub pos: Vec3,
+    pub normal: Vec3,
+    /// Lamps and sun at this vertex this frame, 256 a full light.
+    pub light: Vec3,
+    /// See [`ListedPart::tangent_dir`].
+    pub tangent_dir: Vec3,
+    pub axis: u8,
+    pub material: u8,
 }
 
 /// A frame's model parts, and what is kept from one frame to the next.
 #[derive(Default)]
-pub(crate) struct ModelList {
-    pub parts: Vec<ListedPart>,
-    pub screen: Vec<ScreenV>,
-    pub light: Vec<Vec3>,
+pub struct ModelList {
+    pub(crate) parts: Vec<ListedPart>,
+    pub(crate) screen: Vec<ScreenV>,
+    pub(crate) light: Vec<Vec3>,
+    /// Triangles listed.
     pub triangles: u32,
+    /// For a renderer that projects vertices itself: `screen` stays empty.
+    unprojected: bool,
     /// Those in view, with how far off they are and their instance.
     near: Vec<(f32, u32)>,
     /// By instance: its level of detail last frame.
@@ -85,6 +133,43 @@ pub(crate) struct ModelList {
 }
 
 impl ModelList {
+    /// A list for a renderer that projects vertices itself, as a GPU does.
+    pub fn unprojected() -> Self {
+        Self {
+            unprojected: true,
+            ..Self::default()
+        }
+    }
+
+    /// This frame's parts, nearest model first.
+    pub fn parts(&self) -> &[ListedPart] {
+        &self.parts
+    }
+
+    /// Vertex `i` of `listed`, whose level is `level`, lit as a glowing triangle
+    /// if `glow` says so. `None` past the end of either.
+    pub fn vertex(
+        &self,
+        listed: &ListedPart,
+        level: &Level,
+        i: usize,
+        glow: bool,
+    ) -> Option<ModelVertex> {
+        let v = level.vertices.get(i)?;
+        let light = match glow {
+            true => GLOW_LIGHT,
+            false => *self.light.get(listed.start.checked_add(i)?)?,
+        };
+        Some(ModelVertex {
+            pos: v.pos,
+            normal: v.normal,
+            light,
+            tangent_dir: listed.tangent_dir(v.normal),
+            axis: level.axis.get(i).copied()?,
+            material: level.material.get(i).copied()?,
+        })
+    }
+
     /// Empties the list, keeping its storage for a frame with models.
     pub(crate) fn clear(&mut self) {
         self.parts.clear();
@@ -191,19 +276,23 @@ impl ModelList {
         let (model_eye, dir) = (place.inverse_point(eye), place.inverse_direction(world_dir));
         for (p, levels) in (0u32..).zip(&model.parts) {
             let level = &levels[usize::from(lod)];
-            let start = self.screen.len();
+            let start = self.light.len();
             let (lighting, tint) = (&self.lighting, instance.tint);
-            self.screen.extend(
-                level
+            if !self.unprojected {
+                let projected = level
                     .vertices
                     .iter()
-                    .map(|v| project(cam, place.point(v.pos))),
-            );
+                    .map(|v| project(cam, place.point(v.pos)));
+                self.screen.extend(projected);
+            }
             self.light.extend(level.vertices.iter().map(|v| {
                 let k = lighting.at(place.point(v.pos), place.direction(v.normal)) * PLAIN;
                 Vec3::new(k * tint.x, k * tint.y, k * tint.z)
             }));
-            let (first, last) = row_span(&self.screen[start..], cam.height() as i32);
+            let (first, last) = match self.unprojected {
+                true => (0, 0),
+                false => row_span(&self.screen[start..], cam.height() as i32),
+            };
             self.triangles = self.triangles.saturating_add(level.triangles.len() as u32);
             self.parts.push(ListedPart {
                 model: instance.model.0,

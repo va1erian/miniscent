@@ -165,7 +165,6 @@ Design and what was built in [texture-studio.md](texture-studio.md). All done.
 | M12.10 | Stock recipes for all five materials with `out-specular` for `metal` and `floor` (closes M5.7), retire `gen_textures.py`; a compressing PNG encoder if file size needs it | M12.7 | M | Side-by-side contact sheet reviewed by the owner; full test suite passes, with snapshot changes explained; CI checks that committed PNGs equal the recipe output; assets size recorded |
 | M12.11 | Game builds materials from recipes at load | M12.10 | M | Decided on measured numbers: binary size against the budget, load time against the 67 ms PNG decode noted in `build.rs` |
 
-<<<<<<< HEAD
 ## M13 Viewport surfaces
 
 Design in [viewports.md](viewports.md); status in [status.md](status.md#m13-viewport-surfaces). All done. Levels with no viewport face draw the same pixels.
@@ -200,10 +199,10 @@ Design in [hardware-renderer.md](hardware-renderer.md).
 | M14.10 | The pane's paint: find why a new frame costs what the window costs, fix it in xui or give the pane a native surface | M14.4 | L | A new 4K frame painted in under 16 ms, in a real window |
 | M14.11 | Viewports on the GPU: viewport faces, vista layers, masked textures, removing the pane's viewport exception | M14.5 | L | Rows for vista, parallax and cutout pass; `facing.msl` draws on the GPU |
 | M14.12 | The fine finish: 4x multisampling and trilinear, anisotropic material filtering at High, with depth resolved for reading | M14.4 | M | `tests/finish.rs`: the same picture in the mean, nearer a supersampled truth, each half failing when taken out |
-=======
+
 ## M15 Enemy foundry
 
-Design and what was built in [enemies.md](enemies.md). M15.1 and M15.2 are done.
+Design and what was built in [enemies.md](enemies.md). M15.1, M15.2 and M15.11 are done. Shading changes from M15.3 on go into both renderers, held by the parity cases.
 
 | ID | Item | Deps | Size | Done when |
 |---|---|---|---|---|
@@ -217,7 +216,7 @@ Design and what was built in [enemies.md](enemies.md). M15.1 and M15.2 are done.
 | M15.8 | Skin sets: plating, chitin, flesh, glass and two factions as recipes | M15.3 | M | Directory limits still met; load time and binary size recorded; ids append-only |
 | M15.9 | Modules and the other nine plans | M15.7 | L | Eight modules of each tag; a sheet shows a module on three plans of different classes |
 | M15.10 | Editor: Foundry workspace, placing by name, Open as level | M15.6, M15.4 | L | `--selftest` rolls, locks a gene and promotes; worst UI tick during a roll held by `tick_costs` |
->>>>>>> e45f458 (Generate enemy models from blueprints and draw them in software (M15.1, M15.2))
+| M15.11 | Models on the GPU: the same list, drawn through the voxel pipeline in model space; parity cases | M15.2, M14.5 | M | Parity cases pass on the GPU, each failing with its feature taken out; seeded GPU bugs caught; cost recorded |
 
 ## Suggested order
 

@@ -5,9 +5,9 @@ use std::sync::PoisonError;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::{Actor, Effects, LevelRenderer, Quality, View};
-use crate::model::{ModelFill, fill_models};
 use crate::dynlight::MAX_DYN_LIGHTS;
 use crate::framebuffer::Framebuffer;
+use crate::model::{ModelFill, fill_models};
 use crate::particles::draw_particles;
 use crate::raster::DrawStats;
 use crate::scene::{SceneStats, eye_of};
@@ -85,16 +85,7 @@ impl LevelRenderer {
         stats.vista_triangles = frame.layers.iter().map(|l| l.voxel_triangles()).sum();
         self.list_movers(&cam, effects.poses, &mut frame.movers);
         self.list_actors(&cam, actors, lights, frame);
-        if let Some((table, instances)) = effects.models {
-            let bsp = assets.scene.bsp();
-            frame
-                .models
-                .prepare(table, instances, &cam, &assets.lighting, lights, |p| {
-                    bsp.leaf_at_f32(p)
-                });
-        } else {
-            frame.models.clear();
-        }
+        assets.list_models(&mut frame.models, effects.models, &cam, lights);
         stats.model_triangles = frame.models.triangles;
         let (faces, meshes, movers) = (&frame.faces, &frame.actors, &frame.movers);
         let (voxels, models) = (&frame.voxels, &frame.models);

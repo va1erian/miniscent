@@ -1,7 +1,7 @@
 # Enemy foundry: design
 
-Status: accepted, and M15.1 and M15.2 are built ([as built](#as-built)). The renderer can draw a model, but
-the game does not ask it to until M15.4, so it looks as it did. The numbers under [What the spike showed](#what-the-spike-showed) are measured on the dev machine
+Status: accepted, and M15.1, M15.2 and M15.11 are built ([as built](#as-built)). Both renderers can draw a
+model, but the game does not ask either to until M15.4, so it looks as it did. The numbers under [What the spike showed](#what-the-spike-showed) are measured on the dev machine
 by a throwaway spike that is not in the tree. Figures for anything not yet built are targets. Work items are
 [M15](work-items.md#m15-enemy-foundry).
 
@@ -82,6 +82,51 @@ takes 4.3 and 8.4 ms. An estimated factor of 5 puts the 12 at about 9 ms at High
   old actors work the same way. Worth doing when M15.4 has real rooms to measure in.
 - **Light is a stopgap until M15.3:** the old per-vertex lamp sum, in grey, through walls, with one direction per model
   for its bump and highlight. Parts do not move until M15.5: `Motion` is read and kept, and nothing applies it.
+- **Mip level of a blended triangle ignores scale.** It takes the texel rate from depth in world units, while a
+  model's texels are in its own units, so the stock designs at scale 0.25 take a level four times too sharp on
+  blended triangles, and shimmer at a distance. Plain triangles take theirs from the projected texels and are right.
+  The GPU does the same, to stay on par. Fix in both when M15.3 touches the shading.
+
+### M15.11
+
+Added when the hardware renderer (M14) landed during this work, so that a model is never what keeps a frame off
+the GPU. `crates/mscent-gpu/src/models.rs`: the parts, their detail levels and their vertex light are software's own
+`ModelList`, unprojected, through `LevelAssets::list_models`, which software's frame now calls too. Each part draws
+through the voxel pipeline already compiled for the device, with no shader of its own: its frame's clip matrix is the
+world's times its own `ListedPart::to_world`, and its voxel uniform's eye is in its units, as software's model path
+has it. Glowing triangles take a second frame with neither bump nor highlight, and copies of their vertices at full
+light. Vertices, corners and the parts' uniforms go into three buffers per renderer, grown when a frame needs more.
+
+**Parity** on the RTX 5070 Ti, 7 new cases on a probe in stock materials (`tests/support/models.rs`: metal and
+brick solids, a cut, a brick ball where projections blend, a metal dome, a glowing lens), three of them turned and
+one larger, before the showcase's brick wall seen square on, or down the long voxel room for `model_lod`:
+
+| Case | Quality | Mean | Worst block | Taken out of software |
+|---|---|---|---|---|
+| `model` | Low | 0.26 | 2.49 | The models |
+| `model_texture` | High | 0.36 | 2.78 | Textures |
+| `model_turned` | Low | 0.26 | 2.49 | The models' turns |
+| `model_bump` | Medium | 0.21 | 2.73 | Medium, so no bump |
+| `model_specular` | High | 0.40 | 2.89 | High, so no highlight |
+| `model_lod` | Low | 0.43 | 1.31 | The models |
+| `model_dyn_light` | Low | 0.28 | 2.52 | Dynamic lights |
+
+Each fails with its feature taken out. Down the hall they failed at Medium and High, worst block 4.0, on the
+hall's steep side walls alone, which `hardware-renderer.md` records as where the two parted already; hence the wall.
+
+**Seeded** on the GPU, one at a time: no models drawn, glowing triangles lit as the rest, no bump, no highlight,
+the eye in world units, the texture mapped in the world (vertices and clip both), light 10% low, the bump's light
+direction flat. All caught, worst blocks 6.4 for the light to 126; the highlight and the eye only once the probe
+had its dome, as its flat facets caught no highlight from any light a case had, and those cases had failed only
+through the floor's.
+
+**Cost**, `cargo run --release -p mscent-gpu --example model_gpu_shot`, 12 stock designs (14 444 triangles) down
+the showcase's hall at High in the fine finish, median of 60 with colour read back: 1.26 ms without and 1.80 ms with
+at 1080p; at 4K 6.72 and 5.71 ms, the wrong way round, so within this machine's noise there. Software's frame at
+1080p, 6.87 and 7.41 ms. The example writes both renderers' pictures; they were looked at and agree.
+
+Not verified: lavapipe and any Intel GPU, until CI runs the parity test; the game, which draws on neither renderer
+with models until M15.4.
 
 ## Goal
 
@@ -503,6 +548,7 @@ Each leaves the game and editor working, and sizes are as in work-items.md.
 | M15.8 | Skin sets: plating, chitin, flesh, glass and two factions as recipes | M15.3 | M | Directory limits still met; load time and binary size recorded; ids append-only |
 | M15.9 | Modules and the other nine plans | M15.7 | L | Eight modules of each tag; a sheet shows a module on three plans of different classes |
 | M15.10 | Editor: Foundry workspace, placing by name, Open as level | M15.6, M15.4 | L | `--selftest` rolls, locks a gene and promotes; worst UI tick during a roll held by `tick_costs` |
+| M15.11 | Models on the GPU: the same list, drawn through the voxel pipeline in model space; parity cases | M15.2, M14.5 | M | Parity cases pass on the GPU, each failing with its feature taken out; seeded GPU bugs caught; cost recorded |
 
 The first playable result is M15.1 to M15.4 with one hand-written blueprint per class. M15.6 onward is what makes
 it many. M15.1, M15.2 and M15.6 can run in parallel once the format is fixed.
