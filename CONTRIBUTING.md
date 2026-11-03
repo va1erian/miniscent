@@ -32,7 +32,7 @@ python tools/check_docs.py
 After the checks above pass and the branch is committed, run a review of the
 diff against `main` before opening the PR. Fix each finding or answer it in the
 PR description before merge. A diff touching `mscent-render`, `mscent-gpu` or
-materials also gets the `render-parity-reviewer` agent's review.
+materials also gets the `render-reviewer` agent's review.
 
 ## Benchmarks
 
