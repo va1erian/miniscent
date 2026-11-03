@@ -1,0 +1,28 @@
+miniscent-blueprint 1
+# A hull of hard panels, wings, two engines with hollow nozzles, a voxel canopy.
+name dart
+class ship
+scale 0.25
+skin hull plating
+skin wing metal
+skin engine floor
+skin glow lightpanel glow
+skin canopy glass
+
+part hull cell=0.5
+solid ngon 3 0 0  16 0 0  3 0.5  6 hull
+solid ngon -11 0 0  3 0 0  2.5 3  6 hull
+solid plate 0.75  5 2 0  -7 12 -2  -10 12 -2  -11 2 0 wing
+solid plate 0.75  5 -2 0  -7 -12 -2  -10 -12 -2  -11 -2 0 wing
+solid plate 0.5  -11 0 1.5  -5 0 1.5  -12 0 8  -14 0 8 wing
+solid ngon -13 4.5 -0.75  -5 4.5 -0.75  1.75 1.5  8 engine
+solid ngon -13 -4.5 -0.75  -5 -4.5 -0.75  1.75 1.5  8 engine
+cut ngon -13.5 4.5 -0.75  -11.5 4.5 -0.75  1.25 1.25  8 glow
+cut ngon -13.5 -4.5 -0.75  -11.5 -4.5 -0.75  1.25 1.25  8 glow
+add spheroid 7 0 2  1 0 0  4 1.5 canopy
+
+hit 8 0 0 3
+hit 0 0 0 3.5
+hit -9 0 0 3.5
+hit -7 8 -1.5 2.5
+hit -7 -8 -1.5 2.5

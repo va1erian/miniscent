@@ -16,6 +16,10 @@ pub const PLANE_EPSILON_F32: f32 = 1.0e-3;
 /// floating point.
 pub const SNAP_GRID: f64 = 0.125;
 
+/// Twice the area below which a triangle of a model solid face is a sliver left
+/// by a repaired T-junction, in square model units.
+pub const MODEL_MIN_TWICE_AREA: f32 = 1.0e-5;
+
 /// The least a voxel vertex's smoothed normal must agree with its own cell's, as
 /// a cosine, to be believed: less, and the reach spanned a thin sheet.
 pub const VOXEL_NORMAL_MIN_AGREEMENT: f32 = 0.3;

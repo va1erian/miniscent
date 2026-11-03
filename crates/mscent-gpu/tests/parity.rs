@@ -218,6 +218,7 @@ fn software(scene: &Scene, frame: &Framing, quality: Quality, without: Option<Ta
         lights,
         particles,
         vista_time: frame.time,
+        models: None,
     };
     renderer
         .render_with_effects(&mut fb, &frame.view, quality, actors, None, &effects)
@@ -236,6 +237,7 @@ fn hardware(on_gpu: &mut OnGpu, frame: &Framing, case: &Case) -> Frame {
             lights: &frame.lights,
             particles: frame.particles.as_ref().map(|p| (p, bank())),
             vista_time: frame.time,
+            models: None,
         },
         wants_depth: true,
     };

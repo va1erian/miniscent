@@ -280,20 +280,22 @@ impl Studio {
     /// freeze the editor: the file then moves right after it.
     pub fn save_lightmap(&mut self, level: &Path, doc: &Document) -> Option<String> {
         let path = lightcache::path_for(Some(level), "untitled")?;
-        let current = self.light == Light::Full
-            && self
-                .built_doc
-                .as_ref()
-                .is_some_and(|d| d.same_geometry(doc));
+        let same_level = self
+            .built_doc
+            .as_ref()
+            .is_some_and(|d| d.same_geometry(doc));
+        let lit = same_level && self.light == Light::Full;
         let mut cache = match self.cache.try_lock() {
             Ok(c) => c,
             Err(TryLockError::Poisoned(p)) => p.into_inner(),
             Err(TryLockError::WouldBlock) => {
                 self.pending_path = Some(Some(path));
-                return current.then(|| "lightmap not cached yet: the cache is busy".to_string());
+                return lit.then(|| "lightmap not cached yet: the cache is busy".to_string());
             }
         };
-        if !current {
+        // A bake can be done while the picture is still a draft. Nothing else would
+        // write it: its own write went to wherever the cache pointed then.
+        if !lit && !(same_level && cache.holds(self.light_key)) {
             cache.set_path(Some(path));
             return None;
         }

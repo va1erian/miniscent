@@ -188,6 +188,11 @@ impl BakeCache {
         self.last.as_ref()
     }
 
+    /// Whether the lightmap for `key` is the one held in memory.
+    pub fn holds(&self, key: u64) -> bool {
+        self.slot.as_ref().is_some_and(|(held, _)| *held == key)
+    }
+
     /// Writes the held lightmap to `path` and makes that the cache file.
     /// `Ok(false)` when nothing is held yet.
     pub fn save_to(&mut self, path: PathBuf) -> Result<bool, String> {

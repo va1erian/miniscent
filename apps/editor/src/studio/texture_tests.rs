@@ -201,3 +201,28 @@ fn saving_on_draft_light_writes_no_file_and_the_coming_bake_goes_to_the_new_plac
     settle_log(&mut studio, &doc);
     assert!(lit.is_file(), "the bake wrote next to the saved level");
 }
+
+#[test]
+fn saving_after_a_bake_ends_but_before_the_picture_has_it_writes_the_file() {
+    let doc = showcase();
+    let mut studio = Studio::new(&doc);
+    let bakes = |s: &Studio| s.cache().lock().expect("cache").bakes();
+    let end = Instant::now() + Duration::from_secs(60);
+    while studio.bake_job.is_none() {
+        studio.tick(&[], PANE, &doc);
+        assert!(Instant::now() < end, "no bake");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    // No ticks from here: the bake is in the cache, and the picture is still a draft.
+    while bakes(&studio) == 0 {
+        assert!(Instant::now() < end, "the bake never ended");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(studio.light, Light::Draft);
+    let level = temp_lit("just_baked.msl");
+    let lit = temp_lit("just_baked.msl.lit");
+    let note = studio.save_lightmap(&level, &doc);
+    assert!(lit.is_file(), "nothing else will write this bake: {note:?}");
+    settle_log(&mut studio, &doc);
+    assert_eq!(bakes(&studio), 1);
+}

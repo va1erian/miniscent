@@ -1,0 +1,25 @@
+miniscent-blueprint 1
+# A faceted hub with a lens, and two pods that spin around it.
+name sentry
+class drone
+scale 0.25
+skin hull plating
+skin trim floor
+skin strut metal
+skin lens glass glow
+
+part hub cell=0.5
+solid ngon -2.5 0 0  0 0 0  2.5 4.25  7 hull
+solid ngon 0 0 0  2 0 0  4.25 2.75  7 hull
+add sphere 2 0 0 1.75 lens
+cut ngon 3.5 0 0  6 0 0  0.5 1  6 hull
+
+part pods pivot=0,0,0 axis=1,0,0 motion=spin:0.25 cell=0.5
+solid ngon 0 3 0  0 6.5 0  0.5 0.375  4 strut
+solid ngon -1.5 6.5 0  1.5 6.5 0  1.25 0.875  6 trim
+solid ngon 0 -3 0  0 -6.5 0  0.5 0.375  4 strut
+solid ngon -1.5 -6.5 0  1.5 -6.5 0  1.25 0.875  6 trim
+
+hit 0 0 0 4.5
+hit 0 6.5 0 1.5
+hit 0 -6.5 0 1.5

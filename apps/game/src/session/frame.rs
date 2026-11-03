@@ -104,6 +104,7 @@ impl GameSession {
             lights: self.fx.lights(self.renderer.scene()),
             poses: &poses,
             vista_time,
+            models: None,
         };
         let input = FrameInput {
             view: &view,
