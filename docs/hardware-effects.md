@@ -6,7 +6,7 @@ toggles (M16.5) are not. Work items are M16 in [work-items.md](work-items.md) on
 accepted. Builds on [hardware-renderer.md](hardware-renderer.md).
 
 Where parallax as built differs from the plan below: a material's depth defaults to 0, so
-only a `materials.txt` line that gives one (brick 4, rock 5) draws relief; a map is lifted
+only a `materials.txt` line that gives one (brick 14, rock 16) draws relief; a map is lifted
 so that its highest texel is the face's plane, which makes a flat map no relief; the offset
 is not clamped to the face's rectangle; the effects are `GpuEffects`, set on a
 `GpuRenderer`, and follow the frame's quality when none is set.
@@ -125,7 +125,7 @@ sky, movers, voxels, faces, actors, particles ... as now
 ### Approach: parallax occlusion mapping in the face fragment shader
 
 - **Data.** Heights upload as an `R8Unorm` texture with a mip chain (built by the
-  existing `mips` code, not the GPU's), one per material that has them, in the
+  alpha plane's box-filter builder, not the GPU's), one per material that has them, in the
   material's bind group. A face flag `HAS_HEIGHT` says so, like `HAS_NORMALS`. A
   material without heights draws exactly as now.
 - **Depth of the relief.** A per-material depth in texel-space units, from an optional

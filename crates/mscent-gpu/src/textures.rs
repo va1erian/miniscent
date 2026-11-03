@@ -8,9 +8,9 @@ use crate::device::{Gpu, GpuError};
 
 /// `0xAARRGGBB` little-endian, the bytes a [`Texture`] holds.
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
-/// A flat normal with a full mask, as [`mscent_render::texture::NormalView`] reads.
 /// One byte a texel: the height, 255 the face's plane.
 const HEIGHT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
+/// A flat normal with a full mask, as [`mscent_render::texture::NormalView`] reads.
 const FLAT_NORMAL_TEXEL: u32 = 0xff80_80ff;
 
 fn create(gpu: &Gpu, size: (u32, u32), levels: u32, format: wgpu::TextureFormat) -> wgpu::Texture {

@@ -66,7 +66,9 @@ fn relief_matrix(texture: &Texture, map: Option<&UvToLuxel>) -> Option<[f32; 4]>
         return None;
     }
     let k = f32::from(plane.depth()) * scale / det;
-    Some([e * k, -b * k, -d * k, a * k])
+    let matrix = [e * k, -b * k, -d * k, a * k];
+    // A map that is nearly singular overflows here, and draws no relief.
+    matrix.iter().all(|v| v.is_finite()).then_some(matrix)
 }
 
 /// The `Face` records, the `levels` they point into, and the table rows.

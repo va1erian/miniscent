@@ -172,7 +172,9 @@ fn relieved(face: Face, corner: Corner, rate: f32) -> vec2f {
     let slide = vec2f(dot(face.relief.xy, slope), dot(face.relief.zw, slope)) * fade;
     let steps = clamp(ceil(mix(PARALLAX_MIN_STEPS, PARALLAX_MAX_STEPS, 1.0 - to_eye.z / length_to_eye) * fade), 2.0, PARALLAX_MAX_STEPS);
     let level = albedo_level(rate);
-    var above = 0.0; // how far above the surface the ray was at the last step
+    // How far above the surface the ray was at the last step; at the entry point
+    // the ray is at the face's plane, the highest the surface gets.
+    var above = 1.0 - height_at(corner.texels, level);
     var last = 0.0;
     var depth = 1.0;
     for (var i = 1.0; i <= steps; i += 1.0) {
