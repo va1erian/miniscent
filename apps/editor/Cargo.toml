@@ -18,11 +18,11 @@ mscent-game.workspace = true
 mscent-script.workspace = true
 mscent-platform = { workspace = true }
 miniscent-game = { path = "../game", default-features = false }
-xui = { git = "https://github.com/va1erian/xui", rev = "83c0b6419029e56308a293713970ea123890094f" }
-xui-code-editor = { git = "https://github.com/va1erian/xui", rev = "83c0b6419029e56308a293713970ea123890094f" }
+xui = { git = "https://github.com/va1erian/xui", rev = "876803f680803e629a40de07017f8fcd45fad903" }
+xui-code-editor = { git = "https://github.com/va1erian/xui", rev = "876803f680803e629a40de07017f8fcd45fad903" }
 # The guide is an HTML page: it replaces a pile of text widgets (docs/scripting.md). Blitz over
 # xui-litehtml, which measures text at 96 dpi and paints it at the display's, so words drift when scaled.
-xui-blitz = { git = "https://github.com/va1erian/xui", rev = "83c0b6419029e56308a293713970ea123890094f" }
+xui-blitz = { git = "https://github.com/va1erian/xui", rev = "876803f680803e629a40de07017f8fcd45fad903" }
 
 [lints]
 workspace = true
