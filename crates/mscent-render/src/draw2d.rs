@@ -33,7 +33,11 @@ fn clip_rect(
     ))
 }
 
-/// Blend `src` over `dst` using the alpha in `src`'s top byte.
+/// Blend `src` over `dst` using the alpha in `src`'s top byte. The alpha that
+/// results covers as much as both did, so over a frame, which is opaque, it
+/// stays opaque, and over a layer cleared to nothing it is the layer's coverage,
+/// with its colour premultiplied by it: composited over a frame later, the layer
+/// gives what drawing on the frame would have, to a level of rounding.
 fn blend(dst: u32, src: u32) -> u32 {
     let a = src >> 24;
     match a {
@@ -44,8 +48,23 @@ fn blend(dst: u32, src: u32) -> u32 {
                 let (s, d) = ((src >> shift) & 0xff, (dst >> shift) & 0xff);
                 (s * a + d * (255 - a) + 127) / 255
             };
-            0xff00_0000 | ch(16) << 16 | ch(8) << 8 | ch(0)
+            let covered = a + ((dst >> 24) * (255 - a) + 127) / 255;
+            covered << 24 | ch(16) << 16 | ch(8) << 8 | ch(0)
         }
+    }
+}
+
+/// Puts `layer`, drawn into from cleared to nothing, over `fb` as a GPU puts it
+/// over a frame: its colour, and what its alpha leaves of the frame's. Nothing
+/// is done unless the two are the same size.
+pub fn layer_over(fb: &mut Framebuffer, layer: &Framebuffer) {
+    if (fb.width(), fb.height()) != (layer.width(), layer.height()) {
+        return;
+    }
+    for (p, &l) in fb.pixels_mut().iter_mut().zip(layer.pixels()) {
+        let keep = 255 - (l >> 24);
+        let ch = |s: u32| (((l >> s) & 255) + (((*p >> s) & 255) * keep + 127) / 255).min(255);
+        *p = 0xff00_0000 | ch(16) << 16 | ch(8) << 8 | ch(0);
     }
 }
 

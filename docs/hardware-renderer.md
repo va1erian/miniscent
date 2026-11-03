@@ -1,6 +1,6 @@
 # Hardware renderer: plan
 
-Status: accepted, M14.1 to M14.6, M14.8 and M14.10 to M14.12 done, M14.7 begun (the game on the GPU by readback) and the rest not started ([status.md](status.md)). Figures
+Status: accepted, M14.1 to M14.6, M14.8 and M14.10 to M14.12 done, M14.7 done but for the particle depth estimate (see status.md) and the rest not started ([status.md](status.md)). Figures
 under "Measured" were run for this plan; all others are targets to measure. The work
 items are in [work-items.md](work-items.md) as M14.
 

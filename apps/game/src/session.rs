@@ -102,6 +102,8 @@ pub struct GameSession {
     sensitivity: f32,
     stats: FrameStats,
     fb: Option<Framebuffer>,
+    /// What goes over the world, for a renderer that shows the frame itself.
+    layer: Option<Framebuffer>,
     hit: u32,
     kill: u32,
     feedback: Feedback,
@@ -177,6 +179,7 @@ impl GameSession {
             sensitivity: cfg.mouse_sensitivity,
             stats: FrameStats::default(),
             fb: None,
+            layer: None,
             hit: 0,
             kill: 0,
             feedback: Feedback::default(),

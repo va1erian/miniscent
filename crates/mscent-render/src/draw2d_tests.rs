@@ -178,3 +178,37 @@ fn drawing_into_a_band_uses_screen_rows() {
     fill_rect(&mut band, 0, 0, 8, 4, RED);
     assert_eq!(band.pixels().iter().filter(|&&p| p == RED).count(), 0);
 }
+
+#[test]
+fn a_layer_composited_over_a_frame_is_drawing_on_the_frame() {
+    let scene = |f: &mut Framebuffer| {
+        for (i, p) in f.pixels_mut().iter_mut().enumerate() {
+            *p = 0xff00_0000 | (i as u32 * 37 % 256) << 16 | (i as u32 * 91 % 256) << 8 | 200;
+        }
+    };
+    let draw = |f: &mut Framebuffer| {
+        fill_rect(f, 1, 1, 6, 6, 0x80ff_2010);
+        fill_rect(f, 3, 3, 6, 6, 0x4010_ff40);
+        fill_rect(f, 5, 0, 2, 9, RED);
+        draw_text(f, 0, 2, "A", 0xc0ff_ffff, 1);
+    };
+    let mut direct = fb(10, 10);
+    scene(&mut direct);
+    draw(&mut direct);
+    let mut layer = Framebuffer::new(10, 10).unwrap();
+    layer.clear(0);
+    draw(&mut layer);
+    let mut frame = fb(10, 10);
+    scene(&mut frame);
+    layer_over(&mut frame, &layer);
+    for (&d, &c) in direct.pixels().iter().zip(frame.pixels()) {
+        for shift in [16, 8, 0] {
+            let apart = ((d >> shift) & 255).abs_diff((c >> shift) & 255);
+            assert!(apart <= 2, "{d:08x} drawn, {c:08x} composited");
+        }
+    }
+    assert!(
+        direct.pixels().iter().all(|p| p >> 24 == 255),
+        "a frame stays opaque"
+    );
+}

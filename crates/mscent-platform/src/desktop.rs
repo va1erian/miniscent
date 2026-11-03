@@ -1,5 +1,5 @@
-//! The desktop backend: a winit window presented through softbuffer.
-//! Behind the `desktop` cargo feature.
+//! The desktop backend: a winit window presented through softbuffer, or handed
+//! to a GPU renderer to present itself. Behind the `desktop` cargo feature.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -13,9 +13,9 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::platform::pump_events::{EventLoopExtPumpEvents, PumpStatus};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
-use crate::Platform;
 use crate::key::{Event, Key, MouseButton};
 use crate::scale::blit_fit;
+use crate::{GpuWindow, Platform};
 
 /// Window settings.
 #[derive(Clone, Debug)]
@@ -26,12 +26,17 @@ pub struct DesktopConfig {
     pub height: u32,
 }
 
+/// The softbuffer surface on the window.
+type WindowSurface = Surface<Arc<Window>, Arc<Window>>;
+
 /// The window, its softbuffer surface and the events collected since the
 /// last poll.
 struct App {
     config: DesktopConfig,
     window: Option<Arc<Window>>,
-    surface: Option<Surface<Arc<Window>, Arc<Window>>>,
+    /// Made at the first `present`, so that a GPU's surface, which the window
+    /// may be given instead, never shares it.
+    surface: Option<WindowSurface>,
     events: Vec<Event>,
     size: (u32, u32),
     focused: bool,
@@ -123,13 +128,20 @@ impl App {
             .with_title(self.config.title.clone())
             .with_inner_size(PhysicalSize::new(self.config.width, self.config.height));
         let window = Arc::new(el.create_window(attrs).map_err(|e| e.to_string())?);
-        let context = Context::new(window.clone()).map_err(|e| e.to_string())?;
-        let surface = Surface::new(&context, window.clone()).map_err(|e| e.to_string())?;
         let s = window.inner_size();
         self.size = (s.width, s.height);
         self.window = Some(window);
-        self.surface = Some(surface);
         Ok(())
+    }
+
+    /// The softbuffer surface, made the first time. `None` if it cannot be.
+    fn surface(&mut self) -> Option<(&Window, &mut WindowSurface)> {
+        let window = self.window.as_ref()?;
+        if self.surface.is_none() {
+            let context = Context::new(window.clone()).ok()?;
+            self.surface = Some(Surface::new(&context, window.clone()).ok()?);
+        }
+        Some((window, self.surface.as_mut()?))
     }
 }
 
@@ -257,7 +269,7 @@ impl Platform for DesktopPlatform {
     }
 
     fn present(&mut self, pixels: &[u32], width: u32, height: u32) {
-        let (Some(window), Some(surface)) = (&self.app.window, &mut self.app.surface) else {
+        let Some((window, surface)) = self.app.surface() else {
             return;
         };
         let s = window.inner_size();
@@ -306,5 +318,10 @@ impl Platform for DesktopPlatform {
 
     fn should_quit(&self) -> bool {
         self.app.quit
+    }
+
+    fn gpu_window(&self) -> Option<Arc<dyn GpuWindow>> {
+        let window = self.app.window.clone()?;
+        Some(window)
     }
 }

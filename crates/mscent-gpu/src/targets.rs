@@ -63,7 +63,7 @@ fn read_buffer(gpu: &Gpu, bytes: u64) -> wgpu::Buffer {
 }
 
 /// Waits for `buffer` to map. `None` when the device has gone.
-fn map(gpu: &Gpu, buffer: &wgpu::Buffer) -> Option<()> {
+pub(crate) fn map(gpu: &Gpu, buffer: &wgpu::Buffer) -> Option<()> {
     let (done, finished) = std::sync::mpsc::channel();
     buffer.map_async(wgpu::MapMode::Read, .., move |result| {
         let _ = done.send(result);
@@ -149,6 +149,11 @@ impl Targets {
 
     pub(crate) fn size(&self) -> (u32, u32) {
         self.size
+    }
+
+    /// The finished colour, one sample a pixel, as a shader reads it.
+    pub(crate) fn finished(&self) -> &wgpu::TextureView {
+        &self.color_view
     }
 
     /// Where a frame draws its colour: into the samples, resolved into the

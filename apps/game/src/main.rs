@@ -90,6 +90,25 @@ fn world(o: &Options) -> Result<Box<dyn app::World>, String> {
     }
 }
 
+/// What draws the world in a window: the GPU, showing frames there itself where
+/// the platform gives it the window.
+#[cfg(feature = "desktop")]
+fn desktop_world(
+    o: &Options,
+    platform: &mscent_platform::DesktopPlatform,
+) -> Result<Box<dyn app::World>, String> {
+    #[cfg(feature = "hardware")]
+    if o.renderer() != Renderer::Software
+        && let Some(window) = mscent_platform::Platform::gpu_window(platform)
+    {
+        let strict = o.renderer() == Renderer::Hardware;
+        let world = miniscent_game::gpu_world::GpuWorld::new(strict).in_window(window);
+        return Ok(Box::new(world));
+    }
+    let _ = platform;
+    world(o)
+}
+
 /// `report`, or why the run stopped short.
 fn finished(report: RunReport) -> Result<RunReport, String> {
     match &report.stopped {
@@ -141,7 +160,7 @@ fn run_desktop(o: &Options, session: &mut GameSession) -> Result<RunReport, Stri
         watch: o.level.as_deref().map(ScriptWatcher::new),
         ..run_options(o, true)
     };
-    let mut world = world(o)?;
+    let mut world = desktop_world(o, &platform)?;
     finished(app::run_with(&mut platform, session, &opts, world.as_mut()))
 }
 

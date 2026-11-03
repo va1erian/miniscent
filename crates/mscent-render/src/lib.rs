@@ -42,7 +42,7 @@ pub mod voxel;
 
 pub use alpha::AlphaSampler;
 pub use camera::{Camera, Frustum, ScreenPoint};
-pub use draw2d::{Sprite, blit, draw_text, fill_rect, stroke_rect, text_size};
+pub use draw2d::{Sprite, blit, draw_text, fill_rect, layer_over, stroke_rect, text_size};
 pub use dynlight::{DynLight, MAX_DYN_LIGHTS};
 pub use framebuffer::Framebuffer;
 pub use jobs::JobPool;

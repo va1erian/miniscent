@@ -12,5 +12,9 @@ mscent-world.workspace = true
 # nothing but Vulkan, is in docs/hardware-renderer.md.
 wgpu = { version = "30", default-features = false, features = ["std", "vulkan", "wgsl"] }
 
+[dev-dependencies]
+# Only the present test, whose reference is the platform's own blit_fit.
+mscent-platform.workspace = true
+
 [lints]
 workspace = true

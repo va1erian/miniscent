@@ -20,6 +20,7 @@ mod holes;
 mod lightmap;
 mod particle_data;
 mod particles;
+mod present;
 mod resolve;
 mod sky;
 mod targets;
@@ -31,6 +32,7 @@ mod voxels;
 
 pub use device::{Gpu, GpuError};
 pub use finish::Finish;
+pub use present::{Overlay, Presenter};
 
 use mscent_render::scene::SceneStats;
 use mscent_render::{
@@ -159,10 +161,48 @@ impl GpuRenderer {
         fb: &mut Framebuffer,
         frame: &FrameInput,
     ) -> Option<SceneStats> {
+        let size = (fb.width(), fb.height());
+        let (stats, cam, mut encoder) = self.encode(assets, size, frame)?;
+        let (targets, resolve) = (self.targets.as_ref()?, self.resolve.as_ref());
+        targets.copy_for_reading(&mut encoder, frame.wants_depth, resolve);
+        self.gpu.queue.submit([encoder.finish()]);
+        targets.read_into(&self.gpu, &cam, fb, frame.wants_depth)?;
+        Some(stats)
+    }
+
+    /// Draws a frame of `assets` at `size` and shows it in `presenter`'s window
+    /// with `overlay` over it, reading nothing back. `None` as for [`Self::draw`],
+    /// and for a window that cannot take the frame.
+    pub fn draw_and_present(
+        &mut self,
+        assets: &LevelAssets,
+        size: (u32, u32),
+        frame: &FrameInput,
+        to: (&mut Presenter, &Overlay),
+    ) -> Option<SceneStats> {
+        let (stats, _, mut encoder) = self.encode(assets, size, frame)?;
+        let targets = self.targets.as_ref()?;
+        let (presenter, overlay) = to;
+        let scene = (targets.finished(), size);
+        let shown = presenter.encode(&self.gpu, &mut encoder, scene, overlay);
+        let shown = self.reported(shown)?;
+        self.gpu.queue.submit([encoder.finish()]);
+        if let Some(texture) = shown {
+            self.gpu.queue.present(texture);
+        }
+        Some(stats)
+    }
+
+    /// Lists and encodes a frame of `size`, up to where it is read or shown.
+    fn encode(
+        &mut self,
+        assets: &LevelAssets,
+        (width, height): (u32, u32),
+        frame: &FrameInput,
+    ) -> Option<(SceneStats, Camera, wgpu::CommandEncoder)> {
         if let Some(why) = self.gpu.lost() {
             return self.reported(Err(GpuError::Lost(why)));
         }
-        let (width, height) = (fb.width(), fb.height());
         let cam = assets.camera(frame.view, width, height)?;
         let (scene, chunks) = (assets.scene(), self.voxels.candidates());
         let mut stats = match self.vistas.as_mut() {
@@ -252,9 +292,6 @@ impl GpuRenderer {
             self.particles
                 .draw(&self.gpu, &mut encoder, targets, resolve);
         }
-        targets.copy_for_reading(&mut encoder, frame.wants_depth, self.resolve.as_ref());
-        self.gpu.queue.submit([encoder.finish()]);
-        targets.read_into(&self.gpu, &cam, fb, frame.wants_depth)?;
-        Some(stats)
+        Some((stats, cam, encoder))
     }
 }
