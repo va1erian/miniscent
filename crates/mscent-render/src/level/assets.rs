@@ -11,6 +11,7 @@ use super::setup::{mesh_lighting, spec_tables};
 use super::vista;
 use super::{Actor, BuildConfig, FAR, NEAR, View, VoxelChange, compiled, movers, overlay};
 use crate::camera::Camera;
+use crate::dynlight::{DynLight, MAX_DYN_LIGHTS};
 use crate::lighting_shader::UvToLuxel;
 use crate::lightmap_mips::LightMips;
 use crate::material::MaterialTable;
@@ -175,14 +176,29 @@ impl LevelAssets {
 
     /// Each triangle of `actors` that faces `eye`: its corners in world space
     /// with their light factors (see [`MeshLighting::at`]), and its flat colour.
+    /// The first [`MAX_DYN_LIGHTS`] of `lights` light the actors they reach, as
+    /// in a software frame.
     pub fn actor_triangles(
         &self,
         actors: &[Actor],
         eye: Vec3,
+        lights: &[DynLight],
         visit: impl FnMut([(Vec3, f32); 3], u32),
     ) {
-        self.meshes
-            .each_triangle(actors, &self.lighting, eye, visit);
+        let lights = &lights[..lights.len().min(MAX_DYN_LIGHTS)];
+        if !lights.iter().any(DynLight::is_lit) {
+            self.meshes
+                .each_triangle(actors, &self.lighting, eye, visit);
+            return;
+        }
+        let mut lighting = self.lighting.clone();
+        let lit = overlay::LitActors {
+            scene: &self.scene,
+            lights,
+            base: lighting.points.len(),
+            lighting: &mut lighting,
+        };
+        self.meshes.each_triangle_lit(actors, lit, eye, visit);
     }
 
     /// The camera a frame uses for this view and target size.

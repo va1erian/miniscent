@@ -49,11 +49,6 @@ fn main() -> Result<(), String> {
     let side = |i: usize, default: u32| args.get(i).and_then(|s| s.parse().ok()).unwrap_or(default);
     let (width, height) = (side(1, 1280), side(2, 720));
     let reference = args.get(3).is_some_and(|a| a == "reference");
-    let finish = if reference {
-        Finish::Reference
-    } else {
-        Finish::of(Quality::High)
-    };
     let rest = if reference { 4 } else { 3 };
     let (level, view) = scene(args.get(rest..).unwrap_or(&[]))?;
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures");
@@ -61,6 +56,11 @@ fn main() -> Result<(), String> {
     let software = LevelRenderer::from_level(&level, materials, &BuildConfig::default())
         .map_err(|e| format!("{e:?}"))?;
     let gpu = mscent_gpu::Gpu::new().map_err(|e| e.to_string())?;
+    let finish = if reference {
+        Finish::Reference
+    } else {
+        Finish::of(Quality::High, &gpu)
+    };
     println!("adapter: {}", gpu.adapter());
     let assets = software.assets();
     let start = Instant::now();

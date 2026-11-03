@@ -139,8 +139,29 @@ fn texel_coords(pos: vec3f, axis: u32) -> vec2f {
     return vec2f(dot(pos, voxels.axes[a].xyz), dot(pos, voxels.axes[a + 1u].xyz)) * TEXELS_PER_UNIT;
 }
 
+// add_dynamic in voxel/fill.rs: `light` and the lights of `mask` at a corner.
+fn with_dynamic(light: vec3f, pos: vec3f, normal: vec3f, mask: u32) -> vec3f {
+    var out = light;
+    var left = mask;
+    while left != 0u {
+        let i = firstTrailingBit(left);
+        left &= left - 1u;
+        let l = frame.lights[i];
+        let to = l.xyz - pos;
+        let d = length(to);
+        if d >= l.w || d <= 0.0 {
+            continue;
+        }
+        let fall = 1.0 - d / l.w;
+        let lambert = max(dot(normal, to) / d, 0.0);
+        out += frame.light_colors[i].rgb * (256.0 * fall * fall * lambert);
+    }
+    return out;
+}
+
+// The instance is the chunk's light mask.
 @vertex
-fn vs(@builtin(vertex_index) at: u32) -> Corner {
+fn vs(@builtin(vertex_index) at: u32, @builtin(instance_index) lights: u32) -> Corner {
     let first = at - at % 3u;
     var clip: array<vec4f, 3>;
     var looks: array<u32, 3>;
@@ -165,7 +186,8 @@ fn vs(@builtin(vertex_index) at: u32) -> Corner {
     let tangent = vec3f(me.tangent_x, me.tangent_y, me.tangent_z);
     let all = vec4u(looks[0], looks[1], looks[2], u32(plain));
     let here = clip[corner];
-    return Corner(here, me.pos, me.normal, me.light, me.dir, tangent, weight, all, rate, here.w);
+    let light = with_dynamic(me.light, me.pos, me.normal, lights);
+    return Corner(here, me.pos, me.normal, light, me.dir, tangent, weight, all, rate, here.w);
 }
 
 // lerp_texel in texture.rs: two channels at a time, as the CPU does.

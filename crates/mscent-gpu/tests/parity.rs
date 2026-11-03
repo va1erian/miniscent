@@ -19,6 +19,7 @@ use compare::{Frame, compare};
 use gpu::gpu;
 use mscent_gpu::{Gpu, GpuRenderer};
 use mscent_math::Vec3;
+use mscent_render::particles::{ParticleDraws, SpriteBank};
 use mscent_render::png_encode::encode_png;
 use mscent_render::{Effects, FrameInput, Framebuffer, LevelRenderer, Quality};
 use scenes::{Framing, Pose, Scene, Taken};
@@ -32,6 +33,17 @@ struct Case {
     pose: Pose,
     quality: Quality,
     without: Taken,
+    /// How far ahead of the eye a dynamic light stands, if the case has one.
+    light: Option<f32>,
+}
+
+impl Case {
+    fn lit(self, ahead: f32) -> Self {
+        Self {
+            light: Some(ahead),
+            ..self
+        }
+    }
 }
 
 fn cases() -> Vec<Case> {
@@ -42,12 +54,13 @@ fn cases() -> Vec<Case> {
         pose,
         quality,
         without,
+        light: None,
     };
     vec![
         case("sky", OutsideTheLevel, High, Taken::SkyColors),
         case("fog", FarFromMaterial("floor"), Low, Taken::Fog),
         case("texture", AtMaterial("brick"), Low, Taken::Textures),
-        case("mips", FarFromMaterial("floor"), Low, Taken::Textures),
+        case("mips", FarFromMaterial("metal"), Low, Taken::Textures),
         case("lightmap", DownTheHall, Low, Taken::Lamps),
         case("light_mips", AtTheFloor, Low, Taken::Lamps),
         case("emissive", AtMaterial("lightpanel"), High, Taken::Textures),
@@ -60,6 +73,23 @@ fn cases() -> Vec<Case> {
         ),
         case("actor", AtActor, High, Taken::Actors),
         case("mover", AtDoor, High, Taken::MoverPose),
+        case("mover_turned", AtTurnedDoor, High, Taken::MoverPose),
+        case("dyn_light", AtMaterial("metal"), Low, Taken::DynLights).lit(1.5),
+        case(
+            "dyn_light_bump",
+            AtMaterial("metal"),
+            Medium,
+            Taken::DynLights,
+        )
+        .lit(1.5),
+        case(
+            "dyn_light_specular",
+            AtMaterial("metal"),
+            High,
+            Taken::DynLights,
+        )
+        .lit(1.5),
+        case("dyn_light_actor", AtActor, High, Taken::DynLights).lit(2.5),
         case(
             "voxel",
             look(0.0, -6.0, 1.0, 0.0, 5.0, -2.0),
@@ -103,6 +133,13 @@ fn cases() -> Vec<Case> {
             Taken::Voxels,
         ),
         case(
+            "voxel_dyn_light",
+            look(0.0, -6.0, 1.0, 0.0, 5.0, -2.0),
+            Low,
+            Taken::DynLights,
+        )
+        .lit(7.5),
+        case(
             "voxel_mips",
             look(6.5, -14.0, 0.0, 6.5, 2.0, -2.75),
             Low,
@@ -134,8 +171,13 @@ fn software(scene: &Scene, frame: &Framing, quality: Quality, without: Option<Ta
         Some(Taken::MoverPose) => &[][..],
         _ => &frame.poses[..],
     };
+    let lights = match without {
+        Some(Taken::DynLights) => &[][..],
+        _ => &frame.lights[..],
+    };
     let effects = Effects {
         poses,
+        lights,
         ..Effects::default()
     };
     renderer
@@ -152,6 +194,7 @@ fn hardware(on_gpu: &mut OnGpu, frame: &Framing, case: &Case) -> Frame {
         actors: &frame.actors,
         effects: Effects {
             poses: &frame.poses,
+            lights: &frame.lights,
             ..Effects::default()
         },
         wants_depth: true,
@@ -219,7 +262,7 @@ fn the_renderers_draw_the_same_frames() {
         // does, so each voxel case starts a level of its own on both.
         let mut voxel_gpu;
         let (scene, renderer) = match (case.name, case.pose) {
-            (_, Pose::AtDoor) => (&door, &mut door_gpu),
+            (_, Pose::AtDoor | Pose::AtTurnedDoor) => (&door, &mut door_gpu),
             ("light_mips", _) => (&hard, &mut hard_gpu),
             (name, _) if name.starts_with("voxel") => {
                 let scene = match name {
@@ -231,7 +274,10 @@ fn the_renderers_draw_the_same_frames() {
             }
             _ => (&showcase, &mut showcase_gpu),
         };
-        let framing = scene.framing(case.pose);
+        let mut framing = scene.framing(case.pose);
+        if let Some(ahead) = case.light {
+            scene.light(&mut framing, ahead);
+        }
         let reference = software(scene, &framing, case.quality, None);
         let drawn = hardware(renderer, &framing, &case);
         let report = compare(&reference, &drawn);
@@ -256,4 +302,31 @@ fn the_sky_case_sees_only_sky() {
     let framing = showcase.framing(Pose::OutsideTheLevel);
     let frame = software(&showcase, &framing, Quality::High, None);
     assert!(frame.depth.iter().all(|&d| d == 0.0));
+}
+
+/// Particles are not drawn on the GPU yet, so a frame with them is refused rather
+/// than drawn without them.
+#[test]
+fn a_frame_with_particles_is_refused() {
+    let Some(gpu) = gpu() else { return };
+    let showcase = Scene::showcase();
+    let OnGpu {
+        level,
+        mut renderer,
+    } = on_gpu(gpu, &showcase);
+    let framing = showcase.framing(Pose::DownTheHall);
+    let (draws, bank) = (ParticleDraws::default(), SpriteBank::new());
+    let mut fb = Framebuffer::new(WIDTH, HEIGHT).expect("a framebuffer");
+    let input = FrameInput {
+        view: &framing.view,
+        quality: Quality::High,
+        actors: &[],
+        effects: Effects {
+            particles: Some((&draws, &bank)),
+            ..Effects::default()
+        },
+        wants_depth: false,
+    };
+    assert!(renderer.draw(level.assets(), &mut fb, &input).is_none());
+    assert_eq!(renderer.take_error(), None);
 }

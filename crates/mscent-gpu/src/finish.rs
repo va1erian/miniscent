@@ -2,6 +2,8 @@
 
 use mscent_render::Quality;
 
+use crate::device::Gpu;
+
 /// Samples per pixel in a fine frame.
 const FINE_SAMPLES: u32 = 4;
 /// The most texels a fine frame's textures are filtered over along a slant.
@@ -30,9 +32,13 @@ impl Finish {
         }
     }
 
-    /// What a frame of `quality` gets: [`Finish::Fine`] for the highest.
-    pub fn of(quality: Quality) -> Self {
-        if quality == Quality::High {
+    /// What a frame of `quality` gets on `gpu`: [`Finish::Fine`] for the highest,
+    /// on a GPU. A CPU driver (Mesa's llvmpipe) gets the reference: multisampling
+    /// costs it what it costs software, and its anisotropic filtering does not
+    /// sharpen, so a fine frame there is further from the truth than the
+    /// reference (5.70 levels against 5.49 down the showcase's hall, in CI).
+    pub fn of(quality: Quality, gpu: &Gpu) -> Self {
+        if quality == Quality::High && !gpu.is_cpu() {
             Self::Fine
         } else {
             Self::Reference

@@ -46,6 +46,22 @@ pub(super) struct LitActors<'a> {
     pub base: usize,
 }
 
+impl LitActors<'_> {
+    /// The lighting of `a`: the level's, and the lights that reach the leaf it
+    /// stands in, so a flash behind a wall does not light it.
+    fn of(&mut self, a: &Actor) -> &MeshLighting {
+        self.lighting.points.truncate(self.base);
+        let leaf = self.scene.bsp().leaf_at_f32(a.pos);
+        let reaching = self
+            .lights
+            .iter()
+            .filter(|l| l.is_lit() && l.reaches_leaf(leaf))
+            .map(DynLight::mesh_light);
+        self.lighting.points.extend(reaching);
+        self.lighting
+    }
+}
+
 fn pose_of(a: &Actor) -> Pose {
     Pose {
         pos: a.pos,
@@ -108,6 +124,22 @@ impl ActorMeshes {
         }
     }
 
+    /// Like [`Self::each_triangle`], with each actor also lit by the dynamic
+    /// lights of `lit`, as [`Self::list_lit`] lights it.
+    pub(super) fn each_triangle_lit(
+        &self,
+        actors: &[Actor],
+        mut lit: LitActors,
+        eye: Vec3,
+        mut visit: impl FnMut([(Vec3, f32); 3], u32),
+    ) {
+        for a in actors {
+            let pose = pose_of(a);
+            let lighting = lit.of(a);
+            each_lit_triangle(self.mesh_of(a.kind), &pose, lighting, eye, &mut visit);
+        }
+    }
+
     /// Replaces `list` with this frame's actor triangles.
     pub(super) fn list(
         &self,
@@ -141,21 +173,10 @@ impl ActorMeshes {
         list: &mut PolyList,
     ) {
         list.clear();
-        let LitActors {
-            scene,
-            lights,
-            lighting,
-            base,
-        } = lit;
+        let mut lit = lit;
         for a in actors {
-            lighting.points.truncate(base);
-            let leaf = scene.bsp().leaf_at_f32(a.pos);
-            let reaching = lights
-                .iter()
-                .filter(|l| l.is_lit() && l.reaches_leaf(leaf))
-                .map(DynLight::mesh_light);
-            lighting.points.extend(reaching);
             let pose = pose_of(a);
+            let lighting = lit.of(a);
             list_mesh(
                 cam,
                 self.mesh_of(a.kind),

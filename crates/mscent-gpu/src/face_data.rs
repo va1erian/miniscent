@@ -1,6 +1,8 @@
 //! What the face shader reads about each face and material, as the bytes of its
 //! storage buffers. Which shading a face gets is `face_shader` in `level/fill.rs`.
 
+use std::collections::HashMap;
+
 use mscent_render::scene::Scene;
 use mscent_render::specular::SpecTable;
 use mscent_render::{EMISSIVE, LevelAssets, SELF_LIT, UNLIT};
@@ -64,22 +66,24 @@ pub(crate) fn build(assets: &LevelAssets, atlas: &LightAtlas) -> FaceData {
         levels: Vec::new(),
         tables: Vec::new(),
     };
-    let (mut level_count, mut rows) = (0u32, Vec::<u16>::new());
+    // By table, its row: a level's unknown materials all share the last table,
+    // so a row a material would make thousands of the same rows.
+    let mut level_count = 0u32;
+    let mut rows = HashMap::<Option<*const SpecTable>, usize>::new();
     for (index, face) in scene.faces().iter().enumerate() {
         let rects = atlas.faces.get(index);
         let texture = scene.texture_of(face.material);
         let table = assets.spec_table(face.material);
-        let row = rows
-            .iter()
-            .position(|&m| m == face.material)
-            .unwrap_or_else(|| {
-                rows.push(face.material);
+        let next = rows.len();
+        let row = *rows
+            .entry(table.map(std::ptr::from_ref))
+            .or_insert_with(|| {
                 if let Some(table) = table {
                     push_table(&mut out.tables, table);
                 } else {
                     out.tables.resize(out.tables.len() + TABLE_LEN * 4, 0);
                 }
-                rows.len() - 1
+                next
             });
         let flat = flat_light(assets, index, face.material, rects);
         let map = assets.uv_map(index);

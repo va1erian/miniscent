@@ -10,7 +10,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 use mscent_gpu::{Finish, Gpu, GpuRenderer};
-use mscent_render::{FrameInput, Framebuffer, LevelAssets};
+use mscent_render::camera::MAX_SIDE;
+use mscent_render::{FrameInput, Framebuffer, LevelAssets, Quality};
 
 static WANTED: AtomicBool = AtomicBool::new(false);
 /// Whether the last frame came from the GPU, which sets how large the pane draws.
@@ -61,10 +62,13 @@ fn device() -> Result<&'static Gpu, &'static str> {
 }
 
 /// The internal render size for a pane of `pane` pixels: the pane divided by
-/// the smallest whole factor that brings the width to `max_width` or less.
+/// the smallest whole factor that brings the width to `max_width` or less, and
+/// both sides to the most a framebuffer may have, which a pane wider than two
+/// monitors would pass.
 pub fn frame_size(pane: (u32, u32), max_width: u32) -> (u32, u32) {
     let (w, h) = (pane.0.max(1), pane.1.max(1));
-    let factor = w.div_ceil(max_width.max(1)).max(1);
+    let width_factor = w.div_ceil(max_width.clamp(1, MAX_SIDE));
+    let factor = width_factor.max(h.div_ceil(MAX_SIDE)).max(1);
     ((w / factor).max(16), (h / factor).max(16))
 }
 
@@ -110,17 +114,18 @@ impl GpuView {
         self.say(format!("3D view: software renderer, because {why}"));
     }
 
-    /// The level on the GPU with `finish`, made if it has to be. `None` leaves it
-    /// to software.
-    fn level(&mut self, assets: &LevelAssets, finish: Finish) -> Option<&mut GpuRenderer> {
+    /// The level on the GPU with the finish `quality` gets there, made if it has
+    /// to be. `None` leaves it to software.
+    fn level(&mut self, assets: &LevelAssets, quality: Quality) -> Option<&mut GpuRenderer> {
+        let gpu = match device() {
+            Ok(gpu) => gpu,
+            Err(why) => {
+                self.give_up(why);
+                return None;
+            }
+        };
+        let finish = Finish::of(quality, gpu);
         if self.level.as_ref().map(GpuRenderer::finish) != Some(finish) {
-            let gpu = match device() {
-                Ok(gpu) => gpu,
-                Err(why) => {
-                    self.give_up(why);
-                    return None;
-                }
-            };
             match GpuRenderer::with_finish(gpu.clone(), assets, finish) {
                 Ok(level) => self.level = Some(level),
                 Err(why) => {
@@ -151,7 +156,7 @@ impl GpuView {
             ));
             return false;
         }
-        let Some(level) = self.level(assets, Finish::of(frame.quality)) else {
+        let Some(level) = self.level(assets, frame.quality) else {
             return false;
         };
         let drawn = level.draw(assets, fb, frame).is_some();

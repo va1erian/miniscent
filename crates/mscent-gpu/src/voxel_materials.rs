@@ -17,6 +17,9 @@ use crate::face_data::TABLE_LEN;
 pub(crate) const MATERIALS: usize = 256;
 /// Albedo levels a material may have: up to a 32768-texel side.
 const MAX_LEVELS: usize = 16;
+// `Material.levels` in voxel.wgsl holds this many: a storage struct's array
+// cannot take its length from an override.
+const _: () = assert!(MAX_LEVELS == 16);
 /// The words of a `Material` of `voxel.wgsl`.
 const MATERIAL_WORDS: usize = 8 + MAX_LEVELS;
 /// Where a material with no normal map points its normals.

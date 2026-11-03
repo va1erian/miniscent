@@ -189,6 +189,14 @@ fn frame_size_keeps_the_aspect_and_caps_the_width() {
     assert_eq!(frame_size((0, 0), 480), (16, 16));
 }
 
+#[test]
+fn a_frame_never_passes_the_largest_framebuffer() {
+    let (w, h) = frame_size((10_240, 1440), 10_240);
+    assert_eq!((w, h), (5120, 720));
+    let (w, h) = frame_size((1200, 9000), 1200);
+    assert!(Framebuffer::new(w, h).is_some(), "{w}x{h}");
+}
+
 /// How long a gated frame waits to be let go: far beyond any run of ticks,
 /// however busy the machine, so only a UI thread that really waits sees it end.
 const PATIENCE: Duration = Duration::from_secs(30);

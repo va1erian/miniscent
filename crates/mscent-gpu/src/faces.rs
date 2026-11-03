@@ -4,6 +4,7 @@
 use std::ops::Range;
 
 use mscent_math::Vec3;
+use mscent_math::epsilon::MIN_LENGTH_F32;
 use mscent_render::bump::{MAX_GAIN, MIN_FLAT, MIN_GAIN, RELIEF};
 use mscent_render::clip::MAX_POLYGON_VERTICES;
 use mscent_render::light_sampler::MIN_BLEND;
@@ -11,9 +12,11 @@ use mscent_render::lighting_shader::{BUMP_FULL, BUMP_GONE};
 use mscent_render::raster::{LONG_AXIS_LIMIT, SHARP_RATE};
 use mscent_render::scene::{Scene, eye_of};
 use mscent_render::texel_light::{KNEE, MIN_SPEC, ROLL, SPEC_GAIN};
-use mscent_render::{Camera, LevelAssets, MoverPose, Vertex};
+use mscent_render::{Camera, DynLight, LevelAssets, MoverPose, Vertex};
 
+use crate::common::with_common;
 use crate::device::{Gpu, GpuError};
+use crate::dyn_lights::FaceMasks;
 use crate::face_data::{self, TABLE_LEN};
 use crate::finish::Finish;
 use crate::lightmap::LightAtlas;
@@ -47,6 +50,7 @@ pub(crate) struct FacePass {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     poses: wgpu::Buffer,
+    lights: FaceMasks,
     /// By face: its vertices, empty for one the rasterizer would refuse.
     corners: Vec<Range<u32>>,
     /// By material, this frame's visible faces, kept so a frame does not
@@ -159,11 +163,12 @@ fn pipeline(gpu: &Gpu, finish: Finish) -> wgpu::RenderPipeline {
         ("ROLL", f64::from(ROLL)),
         ("SPEC_GAIN", f64::from(SPEC_GAIN)),
         ("MIN_SPEC", f64::from(MIN_SPEC)),
+        ("MIN_LENGTH", f64::from(MIN_LENGTH_F32)),
         ("TABLE_LEN", TABLE_LEN as f64),
         ("FINE", f64::from(u8::from(finish == Finish::Fine))),
     ];
     let options = wgpu::PipelineCompilationOptions {
-        constants: &constants,
+        constants: &with_common(&constants),
         ..Default::default()
     };
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -280,6 +285,7 @@ impl FacePass {
             .checked_mul(POSE_BYTES as u64)
             .ok_or(GpuError::TooLarge("movers"))?;
         let poses = buffer(gpu, "poses", pose_size, wgpu::BufferUsages::STORAGE)?;
+        let lights = FaceMasks::new(gpu, scene.faces().len())?;
         let (vertex_data, corners) = vertex_bytes(scene)?;
         let vertices = buffer(
             gpu,
@@ -332,6 +338,10 @@ impl FacePass {
                     binding: 7,
                     resource: wgpu::BindingResource::Sampler(&repeat),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: lights.buffer.as_entire_binding(),
+                },
             ],
         });
         let (material_groups, material_of) =
@@ -345,6 +355,7 @@ impl FacePass {
             vertices,
             indices,
             poses,
+            lights,
             corners,
             by_material,
             listed: Vec::new(),
@@ -435,6 +446,7 @@ impl FacePass {
         cam: &Camera,
         visible: &[u32],
         poses: &[MoverPose],
+        lights: &[DynLight],
     ) {
         self.listed.clear();
         self.draws.clear();
@@ -444,6 +456,7 @@ impl FacePass {
         self.list_world(visible);
         gpu.queue.write_buffer(&self.poses, 0, &self.pose_bytes);
         gpu.queue.write_buffer(&self.indices, 0, &self.listed);
+        self.lights.write(gpu, lights);
     }
 
     pub(crate) fn draw(&self, pass: &mut wgpu::RenderPass) {

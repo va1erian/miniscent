@@ -138,6 +138,12 @@ pub const PARITY_EDGE_DEPTH: f32 = 0.02;
 /// filtering move edges and texels, not the shading. Measured: up to 1.9.
 pub const FINE_MEAN_LEVELS: f64 = 3.0;
 
+/// The same, in the worst 8x8 block the parity test reads, away from silhouettes:
+/// a shading change on one surface shows here when the mean would average it away.
+/// Measured: 1.1 to 6.7, the most where anisotropic filtering sharpens a far
+/// floor; half as much specular again, in the fine finish only, gives 11.1.
+pub const FINE_BLOCK_LEVELS: f32 = 8.0;
+
 /// How much of the reference finish's distance from the truth (a frame drawn four
 /// times larger and averaged down) a fine frame may keep. Anisotropic filtering
 /// is most of the gain: without it a fine frame is further from the truth than

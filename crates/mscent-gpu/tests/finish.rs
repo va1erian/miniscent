@@ -1,8 +1,9 @@
 //! `Finish::Fine` against `Finish::Reference` on the GPU: the same picture, and
 //! nearer what the scene looks like, which is a fine frame drawn four times larger
-//! each way and averaged down. One no nearer has lost the finish; one that is not
-//! the same picture in the mean has changed the shading, which only the reference
-//! is held to, in `tests/parity.rs`.
+//! each way and averaged down. One no nearer has lost the finish. One that is not
+//! the same picture, in the mean or in its worst block, has changed the shading,
+//! which only the reference is held to, in `tests/parity.rs`: the truth is fine
+//! too, so it moves with any change to the fine finish and cannot see one.
 //!
 //! A machine with no GPU skips this, unless `MSCENT_REQUIRE_GPU` is set.
 
@@ -17,8 +18,8 @@ use compare::Frame;
 use mscent_gpu::{Finish, Gpu, GpuError, GpuRenderer};
 use mscent_math::Vec3;
 use mscent_math::epsilon::{
-    FINE_DEPTH_AGREEMENT, FINE_EDGES_NEARER, FINE_MEAN_LEVELS, FINE_NEARER, PARITY_DEPTH_RELATIVE,
-    PARITY_EDGE_DEPTH,
+    FINE_BLOCK_LEVELS, FINE_DEPTH_AGREEMENT, FINE_EDGES_NEARER, FINE_MEAN_LEVELS, FINE_NEARER,
+    PARITY_DEPTH_RELATIVE, PARITY_EDGE_DEPTH,
 };
 use mscent_render::{Effects, FrameInput, Framebuffer, Quality};
 use scenes::{Framing, Pose, Scene};
@@ -163,17 +164,27 @@ fn holds_fine(gpu: &Gpu, scene: &Scene, pose: Pose) {
         mean_error_among(&fine, &truth, &edges),
     );
     let agreement = depth_agreement(&reference, &fine);
-    eprintln!("apart {error:.2}; from the truth {was:.2} to {now:.2}");
+    let block = compare::compare(&reference, &fine).worst_block;
+    eprintln!("apart {error:.2}, worst block {block:.2}; from the truth {was:.2} to {now:.2}");
     eprintln!("  on edges {edge_was:.2} to {edge_now:.2}; depth agrees {agreement:.3}");
     assert!(error < FINE_MEAN_LEVELS, "the same picture: {error}");
-    assert!(now < was * FINE_NEARER, "nearer the truth: {was} to {now}");
     assert!(
-        edge_now < edge_was * FINE_EDGES_NEARER,
-        "on edges: {edge_was} to {edge_now}"
+        block < FINE_BLOCK_LEVELS,
+        "the same shading: worst block {block}"
     );
     assert!(
         agreement > FINE_DEPTH_AGREEMENT,
         "the same depth: {agreement}"
+    );
+    // A CPU driver draws the fine finish too, to hold its picture and its
+    // pipelines, but gives the reference to its users: it does not sharpen.
+    if gpu.is_cpu() {
+        return;
+    }
+    assert!(now < was * FINE_NEARER, "nearer the truth: {was} to {now}");
+    assert!(
+        edge_now < edge_was * FINE_EDGES_NEARER,
+        "on edges: {edge_was} to {edge_now}"
     );
 }
 

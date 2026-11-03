@@ -13,9 +13,11 @@ use mscent_render::voxel::{
     AXES, BAYER, ChunkLook, IN_SEAM, LodLook, MATERIAL_BAND, SEAM_BAND, TEXELS_PER_UNIT, VoxelList,
     VoxelScene, spot_field,
 };
-use mscent_render::{Camera, LevelAssets};
+use mscent_render::{Camera, DynLight, LevelAssets};
 
+use crate::common::with_common;
 use crate::device::{Gpu, GpuError};
+use crate::dyn_lights;
 use crate::face_data::TABLE_LEN;
 use crate::faces::storage;
 use crate::finish::Finish;
@@ -58,9 +60,14 @@ pub(crate) struct VoxelPass {
     /// only those of materials in use, made again when a sculpt brings another.
     pipeline: Option<wgpu::RenderPipeline>,
     shared: Option<Shared>,
+    /// By material id: whether a chunk on the GPU, or one that failed on its way
+    /// there, uses it. Kept apart from `shared`, so that a sync that fails half
+    /// way still asks for the materials of the chunks it did put there.
+    wanted: [bool; MATERIALS],
     chunks: Vec<Option<GpuChunk>>,
     list: VoxelList,
-    draws: Vec<(usize, Range<u32>)>,
+    /// A chunk, its corners at the level in view, and the lights that reach it.
+    draws: Vec<(usize, Range<u32>, u32)>,
 }
 
 fn push_vec3(out: &mut Vec<u8>, v: mscent_math::Vec3, w: [u8; 4]) {
@@ -131,7 +138,7 @@ fn pipeline(gpu: &Gpu, finish: Finish) -> wgpu::RenderPipeline {
         ("TABLE_LEN", TABLE_LEN as f64),
     ];
     let options = wgpu::PipelineCompilationOptions {
-        constants: &constants,
+        constants: &with_common(&constants),
         ..Default::default()
     };
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -211,6 +218,7 @@ impl VoxelPass {
             finish,
             pipeline: None,
             shared: None,
+            wanted: [false; MATERIALS],
             chunks: Vec::new(),
             list: VoxelList::unprojected(),
             draws: Vec::new(),
@@ -323,8 +331,6 @@ impl VoxelPass {
         let pipeline = self
             .pipeline
             .get_or_insert_with(|| compiled.get_or_init(|| pipeline(gpu, finish)).clone());
-        let mut held = self.shared.as_ref().map_or([false; MATERIALS], |s| s.held);
-        let mut more = self.shared.is_none();
         for (c, slot) in self.chunks.iter_mut().enumerate() {
             if slot.as_ref().is_some_and(|g| voxels.chunk_is(c, &g.look)) {
                 continue;
@@ -334,14 +340,14 @@ impl VoxelPass {
             };
             for level in 0..3 {
                 for &m in look.lod(level).material {
-                    more |= !std::mem::replace(&mut held[usize::from(m)], true);
+                    self.wanted[usize::from(m)] = true;
                 }
             }
             *slot = Some(Self::upload(gpu, pipeline, look)?);
         }
-        if more {
+        if self.shared.as_ref().map(|s| s.held) != Some(self.wanted) {
             let pipeline = pipeline.clone();
-            self.shared = Some(self.make_shared(gpu, assets, &pipeline, held)?);
+            self.shared = Some(self.make_shared(gpu, assets, &pipeline, self.wanted)?);
         }
         Ok(())
     }
@@ -353,13 +359,14 @@ impl VoxelPass {
         gpu: &Gpu,
         assets: &LevelAssets,
         cam: &Camera,
+        lights: &[DynLight],
         stats: &mut SceneStats,
     ) -> Result<(), GpuError> {
         self.draws.clear();
         self.sync(gpu, assets)?;
-        // Dynamic lights reach voxels with M14.6, as they do faces.
+        let reaching = |leaf| dyn_lights::mask(lights, |l| l.reaches_leaf(leaf)) as u8;
         self.list
-            .prepare(assets.scene().voxels(), cam, eye_of(cam), |_| 0);
+            .prepare(assets.scene().voxels(), cam, eye_of(cam), reaching);
         stats.voxel_triangles = self.list.triangles;
         for listed in self.list.chunks() {
             let c = listed.chunk as usize;
@@ -368,7 +375,7 @@ impl VoxelPass {
             };
             let range = chunk.lods[usize::from(listed.lod.min(2))].clone();
             if chunk.group.is_some() && !range.is_empty() {
-                self.draws.push((c, range));
+                self.draws.push((c, range, u32::from(listed.lights)));
             }
         }
         if !self.draws.is_empty() {
@@ -384,11 +391,12 @@ impl VoxelPass {
         };
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &shared.bind_group, &[]);
-        for (c, range) in &self.draws {
+        for (c, range, lights) in &self.draws {
             let group = self.chunks.get(*c).and_then(Option::as_ref);
             if let Some(group) = group.and_then(|g| g.group.as_ref()) {
                 pass.set_bind_group(1, group, &[]);
-                pass.draw(range.clone(), 0..1);
+                // The instance is the chunk's light mask, for its corners.
+                pass.draw(range.clone(), *lights..lights + 1);
             }
         }
     }

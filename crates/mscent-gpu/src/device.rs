@@ -48,6 +48,8 @@ pub struct Gpu {
     pub(crate) device: wgpu::Device,
     pub(crate) queue: wgpu::Queue,
     adapter: String,
+    /// The adapter is a driver that draws on the CPU.
+    cpu: bool,
     first_error: Arc<Mutex<Option<String>>>,
     /// Compiled once for the device, one for each finish: the editor makes a
     /// scene on every edit, and this pipeline is a fifth of a voxel scene's first
@@ -83,9 +85,15 @@ impl Gpu {
             device,
             queue,
             adapter: adapter.get_info().name,
+            cpu: adapter.get_info().device_type == wgpu::DeviceType::Cpu,
             first_error,
             voxel_pipelines: Arc::default(),
         })
+    }
+
+    /// Whether the adapter draws on the CPU, as Mesa's llvmpipe does.
+    pub fn is_cpu(&self) -> bool {
+        self.cpu
     }
 
     /// The adapter's name, for reports.

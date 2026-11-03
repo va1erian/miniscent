@@ -11,6 +11,10 @@ struct Frame {
     bump_on: u32,
     spec_on: u32,
     atlas_size: vec2f,
+    // The dynamic lights, a position and radius each, then a colour; a light of
+    // radius 0 reaches nothing.
+    lights: array<vec4f, 4>,
+    light_colors: array<vec4f, 4>,
 }
 
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -41,12 +45,20 @@ fn with_fog(color: vec3f, view_depth: f32) -> vec3f {
     return lerp_rgb(color, unpack(frame.fog_color), floor(clamp(along, 0.0, 1.0) * 256.0));
 }
 
+override DITHER_X: u32;
+override DITHER_Y: u32;
+override DITHER_MIX: u32;
+override DITHER_FOLD: u32;
+override DITHER_DROP: u32;
+override DITHER_BITS: u32;
+
 fn dither_of(at: vec2f) -> f32 {
-    let x = u32(at.x) * 0x9E3779B1u;
-    let y = u32(at.y) * 0x85EBCA6Bu;
+    let x = u32(at.x) * DITHER_X;
+    let y = u32(at.y) * DITHER_Y;
     var h = x ^ y;
-    h = (h ^ (h >> 15u)) * 0x2C1B3C6Du;
-    return f32((h >> 8u) & 0xffffu) / 65536.0;
+    h = (h ^ (h >> DITHER_FOLD)) * DITHER_MIX;
+    let bits = 1u << DITHER_BITS;
+    return f32((h >> DITHER_DROP) & (bits - 1u)) / f32(bits);
 }
 
 fn finished(color: vec3f) -> vec4f {

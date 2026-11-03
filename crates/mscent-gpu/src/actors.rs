@@ -4,8 +4,9 @@
 use mscent_render::Camera;
 use mscent_render::mesh::MAX_LIGHT;
 use mscent_render::scene::eye_of;
-use mscent_render::{Actor, LevelAssets};
+use mscent_render::{Actor, DynLight, LevelAssets};
 
+use crate::common::with_common;
 use crate::device::Gpu;
 use crate::finish::Finish;
 use crate::targets::{COLOR, DEPTH};
@@ -33,7 +34,7 @@ impl ActorPass {
         });
         let constants = [("MAX_LIGHT", f64::from(MAX_LIGHT))];
         let options = wgpu::PipelineCompilationOptions {
-            constants: &constants,
+            constants: &with_common(&constants),
             ..Default::default()
         };
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -92,10 +93,11 @@ impl ActorPass {
         assets: &LevelAssets,
         cam: &Camera,
         actors: &[Actor],
+        lights: &[DynLight],
     ) {
         self.listed.clear();
         let listed = &mut self.listed;
-        assets.actor_triangles(actors, eye_of(cam), |corners, color| {
+        assets.actor_triangles(actors, eye_of(cam), lights, |corners, color| {
             for (pos, light) in corners {
                 for axis in [pos.x, pos.y, pos.z] {
                     listed.extend_from_slice(&axis.to_le_bytes());

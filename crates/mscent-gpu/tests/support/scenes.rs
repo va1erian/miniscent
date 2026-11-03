@@ -5,10 +5,10 @@
 use std::cell::RefCell;
 use std::path::Path;
 
-use mscent_math::{Vec3, Vec3d};
+use mscent_math::{Quat, Vec3, Vec3d};
 use mscent_render::{
-    Actor, BakeCache, BuildConfig, LevelRenderer, Material, MaterialTable, MoverPose, Quality,
-    Texture, View,
+    Actor, BakeCache, BuildConfig, DynLight, LevelRenderer, Material, MaterialTable, MoverPose,
+    Quality, Texture, View,
 };
 use mscent_world::materials::{BRICK, CAP, METAL, ROCK, WAX};
 use mscent_world::voxel::{CellSize, Context, DabOp, Prim, Volume, apply_dab};
@@ -18,6 +18,10 @@ use mscent_world::{Brush, Entity, Level, MoverGroup, Op, materials, showcase_lev
 const NEAR_A_SURFACE: f32 = 3.0;
 /// How far `Pose::FarFromMaterial` stands, where mips and bump fades show.
 const FAR_FROM_A_SURFACE: f32 = 22.0;
+/// A case's dynamic light: how far it reaches, and its colour, warm and past
+/// full so that it shows over the baked light.
+const LIGHT_RADIUS: f32 = 10.0;
+const LIGHT_COLOR: Vec3 = Vec3::new(1.6, 1.0, 0.5);
 
 /// What a case takes out of its software frame, to prove it can fail.
 #[derive(Clone, Copy)]
@@ -33,6 +37,8 @@ pub enum Taken {
     Voxels,
     /// The spotted material, painted as rock instead.
     Spots,
+    /// The frame's dynamic lights.
+    DynLights,
 }
 
 /// Where a case stands.
@@ -48,6 +54,8 @@ pub enum Pose {
     FarFromMaterial(&'static str),
     AtActor,
     AtDoor,
+    /// At the door swung open about its hinge, so a mover's pose turns it.
+    AtTurnedDoor,
     /// From `eye`, looking at `at`.
     Looking {
         eye: Vec3,
@@ -60,6 +68,7 @@ pub struct Framing {
     pub view: View,
     pub actors: Vec<Actor>,
     pub poses: Vec<MoverPose>,
+    pub lights: Vec<DynLight>,
 }
 
 /// A level, and its bake shared by all the frames of it.
@@ -275,7 +284,7 @@ impl Scene {
                     Vec3::new(0.0, 1.0, 0.0),
                 )
             }
-            Pose::AtDoor => looking(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0)),
+            Pose::AtDoor | Pose::AtTurnedDoor => looking(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0)),
             Pose::Looking { eye, at } => looking(eye, (at - eye).normalized().expect("apart")),
         };
         let poses = match pose {
@@ -283,13 +292,31 @@ impl Scene {
                 offset: Vec3::new(2.0, 0.0, 0.0),
                 ..MoverPose::AUTHORED
             }],
+            Pose::AtTurnedDoor => vec![MoverPose {
+                rot: Quat::from_axis_angle(Vec3::new(0.0, 0.0, 1.0), 0.35),
+                pivot: Vec3::new(-3.0, 8.0, 0.0),
+                offset: Vec3::ZERO,
+            }],
             _ => Vec::new(),
         };
         Framing {
             view,
             actors: renderer.actors().to_vec(),
             poses,
+            lights: Vec::new(),
         }
+    }
+
+    /// Adds to `framing` a light `ahead` units in front of its eye, a little
+    /// to the right and up, so that it falls on what the case looks at.
+    pub fn light(&self, framing: &mut Framing, ahead: f32) {
+        let renderer = self.software(None);
+        let view = &framing.view;
+        let pos = view.pos + view.forward() * ahead + Vec3::new(0.4, 0.0, 0.3);
+        let mut light = DynLight::new();
+        let placed = light.place(renderer.scene(), pos, LIGHT_RADIUS, LIGHT_COLOR);
+        assert!(placed, "a light at {pos:?}");
+        framing.lights.push(light);
     }
 }
 

@@ -1,14 +1,16 @@
 //! The hardware renderer: the same frames as [`mscent_render::LevelRenderer`],
 //! drawn on a GPU through wgpu and read back into a [`Framebuffer`].
 //!
-//! So far it draws the sky, faces, movers, voxel surfaces and actors, and a frame's
-//! dynamic lights and particles are not drawn. A level with viewports must not come
-//! here ([`GpuRenderer::cannot_draw`]). These arrive item by item
+//! So far it draws the sky, faces, movers, voxel surfaces and actors, with the
+//! frame's dynamic lights. A frame with particles is refused, and a level with
+//! viewports must not come here ([`GpuRenderer::cannot_draw`]). These arrive item by item
 //! (`docs/hardware-renderer.md`), each with a case in `tests/parity.rs`, which holds
 //! the two renderers to the same picture.
 
 mod actors;
+mod common;
 mod device;
+mod dyn_lights;
 mod face_data;
 mod faces;
 mod finish;
@@ -34,7 +36,7 @@ use targets::Targets;
 use voxels::VoxelPass;
 
 /// The `Frame` of `common.wgsl`.
-const FRAME_BYTES: u64 = 96;
+const FRAME_BYTES: u64 = 96 + dyn_lights::BYTES;
 
 /// A level on a GPU. It keeps what it uploaded and borrows the level to draw it,
 /// so the level can stay with its owner and with the software renderer.
@@ -52,7 +54,13 @@ pub struct GpuRenderer {
 }
 
 /// What every shader reads about a frame, as the bytes of `Frame`.
-fn frame_bytes(assets: &LevelAssets, cam: &Camera, quality: Quality, atlas: (u32, u32)) -> Vec<u8> {
+fn frame_bytes(
+    assets: &LevelAssets,
+    cam: &Camera,
+    frame: &FrameInput,
+    atlas: (u32, u32),
+) -> Vec<u8> {
+    let quality = frame.quality;
     let mut bytes = Vec::with_capacity(FRAME_BYTES as usize);
     let matrix = cam.gpu_clip_matrix();
     for c in &matrix.cols {
@@ -71,6 +79,7 @@ fn frame_bytes(assets: &LevelAssets, cam: &Camera, quality: Quality, atlas: (u32
     bytes.extend_from_slice(&u32::from(quality == Quality::High).to_le_bytes());
     bytes.extend_from_slice(&(atlas.0 as f32).to_le_bytes());
     bytes.extend_from_slice(&(atlas.1 as f32).to_le_bytes());
+    dyn_lights::push(&mut bytes, frame.effects.lights);
     bytes
 }
 
@@ -122,13 +131,18 @@ impl GpuRenderer {
     /// Draws a frame of `assets`, the level this was made from, into `fb`. The
     /// stats have no `pixels` or `spans`, which a GPU does not count. `None` when
     /// the view or the size cannot make a camera, the device has gone, or the
-    /// level's voxels have changed into more than this GPU can hold.
+    /// level's voxels have changed into more than this GPU can hold. `None` too
+    /// for a frame with particles, which this does not draw yet, rather than a
+    /// frame without them.
     pub fn draw(
         &mut self,
         assets: &LevelAssets,
         fb: &mut Framebuffer,
         frame: &FrameInput,
     ) -> Option<SceneStats> {
+        if frame.effects.particles.is_some() {
+            return None;
+        }
         let (width, height) = (fb.width(), fb.height());
         let cam = assets.camera(frame.view, width, height)?;
         let mut stats = assets.scene().visible_set(&cam, self.voxels.candidates());
@@ -138,16 +152,19 @@ impl GpuRenderer {
             self.targets = Some(targets);
         }
         let targets = self.targets.as_ref()?;
-        let uniform = frame_bytes(assets, &cam, frame.quality, self.faces.atlas_size);
+        let uniform = frame_bytes(assets, &cam, frame, self.faces.atlas_size);
         self.gpu
             .queue
             .write_buffer(&self.frame_uniform, 0, &uniform);
         self.sky.prepare(&self.gpu, height);
-        let poses = frame.effects.poses;
+        let (poses, lights) = (frame.effects.poses, frame.effects.lights);
         self.faces
-            .prepare(&self.gpu, assets, &cam, &stats.drawn, poses);
-        self.actors.prepare(&self.gpu, assets, &cam, frame.actors);
-        let voxels = self.voxels.prepare(&self.gpu, assets, &cam, &mut stats);
+            .prepare(&self.gpu, assets, &cam, &stats.drawn, poses, lights);
+        self.actors
+            .prepare(&self.gpu, assets, &cam, frame.actors, lights);
+        let voxels = self
+            .voxels
+            .prepare(&self.gpu, assets, &cam, lights, &mut stats);
         voxels.ok()?;
         let mut encoder = self.gpu.device.create_command_encoder(&Default::default());
         {

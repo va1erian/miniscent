@@ -88,14 +88,25 @@ pub(crate) fn add_highlight(out: u32, k: Vec3, s: f32, mask: impl FnOnce() -> f3
     }
 }
 
+/// What [`dither_of`] multiplies a column by, then a row, then their mix.
+pub const DITHER_X: u32 = 0x9E37_79B1;
+pub const DITHER_Y: u32 = 0x85EB_CA6B;
+pub const DITHER_MIX: u32 = 0x2C1B_3C6D;
+/// How far [`dither_of`] folds the hash onto itself, and how many low bits it
+/// drops before keeping [`DITHER_BITS`] of it.
+pub const DITHER_FOLD: u32 = 15;
+pub const DITHER_DROP: u32 = 8;
+pub const DITHER_BITS: u32 = 16;
+
 /// Cheap noise in `[0, 1)` from the screen position. It is fixed on the
 /// screen, so it cannot crawl across surfaces as the camera moves (noise
 /// keyed by span index or texel does, since both shift every frame).
 #[inline(always)]
 pub fn dither_of(x: i32, y: i32) -> f32 {
-    let h = (x as u32).wrapping_mul(0x9E37_79B1) ^ (y as u32).wrapping_mul(0x85EB_CA6B);
-    let h = (h ^ (h >> 15)).wrapping_mul(0x2C1B_3C6D);
-    ((h >> 8) & 0xffff) as f32 * (1.0 / 65536.0)
+    let h = (x as u32).wrapping_mul(DITHER_X) ^ (y as u32).wrapping_mul(DITHER_Y);
+    let h = (h ^ (h >> DITHER_FOLD)).wrapping_mul(DITHER_MIX);
+    let bits = (1u32 << DITHER_BITS) as f32;
+    ((h >> DITHER_DROP) & ((1 << DITHER_BITS) - 1)) as f32 * (1.0 / bits)
 }
 
 /// The light arriving at one texel, in the texture frame.
