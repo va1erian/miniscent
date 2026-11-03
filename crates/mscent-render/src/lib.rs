@@ -49,7 +49,7 @@ pub use jobs::JobPool;
 pub use level::{
     Actor, ActorKind, BakeCache, BakeReport, BakedLight, BuildConfig, BuildError, Compiled,
     EMISSIVE, Effects, FrameInput, FrameRenderer, LevelAssets, LevelRenderer, MoverFaces,
-    MoverPose, Overlay, Quality, SELF_LIT, Source, UNLIT, View, VoxelChange,
+    MoverPose, Overlay, Quality, SELF_LIT, Source, UNLIT, View, VistaView, VoxelChange,
 };
 pub use lighting_shader::{FaceLight, LightingShader, UvToLuxel};
 pub use lightmap_mips::LightMips;

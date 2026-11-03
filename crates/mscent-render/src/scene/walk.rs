@@ -5,6 +5,7 @@ use mscent_math::{Aabb, Vec3};
 use mscent_world::{Child, LeafId};
 
 use super::Scene;
+use super::holes::HoleList;
 use super::pan::Pan;
 use crate::camera::{Camera, Frustum};
 use crate::raster::PolyList;
@@ -17,7 +18,7 @@ pub(super) struct Walk<'a> {
     chunks: &'a mut Vec<u32>,
     /// Where viewport faces go. A vista has none, so one seen from inside a
     /// layer is not drawn and the layer behind shows through it.
-    holes: Option<&'a mut PolyList>,
+    holes: Option<&'a mut HoleList>,
     pan: Option<Pan<'a>>,
     hole_drawn: Vec<bool>,
     cam: &'a Camera,
@@ -33,7 +34,7 @@ pub(super) struct Walk<'a> {
 pub(super) struct Lists<'a> {
     pub(super) faces: Option<&'a mut PolyList>,
     pub(super) chunks: &'a mut Vec<u32>,
-    pub(super) holes: Option<&'a mut PolyList>,
+    pub(super) holes: Option<&'a mut HoleList>,
     /// Scrolls the self-lit faces of a vista layer; `None` lists them as they are.
     pub(super) pan: Option<Pan<'a>>,
 }
@@ -163,7 +164,7 @@ impl<'a> Walk<'a> {
             }
             *done = true;
             if plane.signed_distance(self.eye.to_f64()) > 0.0 {
-                out.push(self.cam, poly, &self.scene.fallback, u32::from(slot));
+                out.push(self.cam, poly, &self.scene.fallback, (hi, slot));
             }
         }
     }

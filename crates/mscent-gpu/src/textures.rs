@@ -1,5 +1,6 @@
-//! Material textures on the GPU: the albedo with the mips `mips.rs` made, and
-//! the normal map with the specular mask in its alpha.
+//! Material textures on the GPU: the albedo with the mips `mips.rs` made and a
+//! cutout's coverage in its alpha, and the normal map with the specular mask in
+//! its alpha.
 
 use mscent_render::Texture;
 
@@ -63,8 +64,11 @@ fn albedo(gpu: &Gpu, source: &Texture) -> wgpu::Texture {
     for level in 0..=top {
         let (lw, lh) = ((w >> level).max(1), (h >> level).max(1));
         let shift = level.min(31);
+        let coverage = source.alpha_sampler(level);
         let bytes = bytes_of(lw, lh, |x, y| {
-            source.texel_lod(x << shift, y << shift, level)
+            let (x, y) = (x << shift, y << shift);
+            let alpha = coverage.as_ref().map_or(u8::MAX, |c| c.nearest(x, y));
+            source.texel_lod(x, y, level) & 0x00ff_ffff | u32::from(alpha) << 24
         });
         write_level(gpu, &texture, level, lw, lh, &bytes);
     }

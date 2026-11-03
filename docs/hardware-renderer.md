@@ -1,6 +1,6 @@
 # Hardware renderer: plan
 
-Status: accepted, M14.1 to M14.5, M14.10 and M14.12 done, M14.6 begun (dynamic lights) and the rest not started ([status.md](status.md)). Figures
+Status: accepted, M14.1 to M14.5, M14.10 to M14.12 done, M14.6 begun (dynamic lights) and the rest not started ([status.md](status.md)). Figures
 under "Measured" were run for this plan; all others are targets to measure. The work
 items are in [work-items.md](work-items.md) as M14.
 
@@ -212,6 +212,7 @@ fn draw(&mut self, fb: &mut Framebuffer, frame: &FrameInput) -> Option<SceneStat
 | `voxels.rs` | `voxel/` | `voxel.wgsl` |
 | `actors.rs` | `mesh.rs` | `mesh.wgsl` |
 | `particles.rs` | `particles/` | `sprite.wgsl`, `decal.wgsl` |
+| `vistas.rs`, `holes.rs` | `level/vista.rs`, `scene/holes.rs` | `face.wgsl` per layer, `hole.wgsl` |
 | `overlay.rs` (M14.7 only) | `draw2d.rs` (used, not replaced) | `blit.wgsl` |
 
 Target: under 3,000 lines of Rust and 800 of WGSL, no file over 300 lines.
@@ -293,9 +294,8 @@ unscaled path for the image.
 
 **Fallback.** Hardware is on by default in the editor, with `--software` and a View menu
 command to switch, which is not remembered between runs. No adapter or a failed device
-means software with the reason in the log panel. Until they are ported, a level with
-viewports takes the software path and says so, rather than showing a picture with
-holes. Voxel levels draw on the GPU from M14.5. Until particles land (M14.6), Play stays software. Tests stay on
+means software with the reason in the log panel. Viewports, vistas and cutouts draw on
+the GPU from M14.11. Voxel levels draw on the GPU from M14.5. Until particles land (M14.6), Play stays software. Tests stay on
 software unless they ask, as they read exact pixels.
 
 **The paint (M14.10).** The UI thread paints each frame through xui's software canvas.
@@ -354,6 +354,27 @@ with smoothed edges. On four voxel views its silhouettes come 22% to 31% nearer 
 truth (`tests/finish.rs`). The room's wide view, whose edges are mostly brick walls,
 comes 9% nearer, and 5% with the voxels taken out, so there the faces' edges gain
 less than elsewhere, not the voxels'. Filtering voxel texels in a texture is not done.
+
+**Viewports (M14.11).** Software draws a vista last, through a mask of the viewport
+faces' pixels, on a second depth plane. The GPU draws it first: each slot in view gets a
+picture of its own, the gradient and then its layers far to near, each layer a render
+pass with its depth cleared, scissored to the screen rectangle its faces cover. The
+viewport faces then draw last of the level's solid things, at their true depth, each
+showing its slot's picture at its pixel. That leaves the same pixels, and a slot hidden
+behind a nearer one's face loses to it the same way. Which layers, with which camera,
+fog and pan, and which faces each lists, is software's own (`LevelAssets::vista_views`),
+so the two cannot disagree. A layer's faces are the face shader with a `Frame` and pose
+of its own: its camera and fog, no dynamic lights, and the pan, which slides a self-lit
+face's texels in the vertex shader as `scene/pan.rs` slides them. A cutout's coverage
+sits in its albedo's alpha, with the alpha plane's own mips, and the material draws
+twice: its soft texels first, blended without depth, then its solid ones with depth.
+Soft first, as software draws front to back, so a face behind a soft texel covers it in
+both; two soft texels over each other can still blend in another order. A layer's
+voxels are the level's chunks listed from its eye, with the budgets and detail levels
+software gives them (`LevelAssets::vista_voxels`), drawn before its faces with its
+frame. The face, cutout and viewport pipelines are compiled once per device, as the
+voxels' are: without that, a new scene of a vista level cost the editor's pane more than
+its 12 ms and the adaptive scale shrank its frame.
 
 ## Two traps in the game path
 
@@ -556,7 +577,7 @@ As everywhere: read real pixels.
 - The parity cases, as above. Each shader term is broken by hand once during M14 to see
   its case fail, recorded in the PR, as M10.3 did with its deliberate bugs.
 - Editor: `--selftest` passes with hardware on and on the software fallback. A pick, a
-  highlight, an edit, a viewport level taking the software path, a sculpt, and Play.
+  highlight, an edit, a viewport level, a sculpt, and Play.
 - Hostile levels through the GPU build: errors, no panic. A forced device loss, and a
   forced limit below the level's atlas, both reach software with the reason logged.
 - Resize, minimize and a monitor move in a real window: only the owner can run these,

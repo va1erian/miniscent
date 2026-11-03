@@ -1,55 +1,52 @@
 //! The level's faces and movers: one vertex buffer for all of them, and each
 //! frame an index list of those in view, grouped into one draw per material.
+//! The level's own camera is the first view; each vista layer in the frame is
+//! another, with its own frame and eye.
 
 use std::ops::Range;
 
-use mscent_math::Vec3;
-use mscent_math::epsilon::MIN_LENGTH_F32;
-use mscent_render::bump::{MAX_GAIN, MIN_FLAT, MIN_GAIN, RELIEF};
 use mscent_render::clip::MAX_POLYGON_VERTICES;
-use mscent_render::light_sampler::MIN_BLEND;
-use mscent_render::lighting_shader::{BUMP_FULL, BUMP_GONE};
-use mscent_render::raster::{LONG_AXIS_LIMIT, SHARP_RATE};
 use mscent_render::scene::{Scene, eye_of};
-use mscent_render::texel_light::{KNEE, MIN_SPEC, ROLL, SPEC_GAIN};
-use mscent_render::{Camera, DynLight, LevelAssets, MoverPose, Vertex};
+use mscent_render::{Camera, DynLight, LevelAssets, MoverPose, Vertex, VistaView};
 
-use crate::common::with_common;
 use crate::device::{Gpu, GpuError};
 use crate::dyn_lights::FaceMasks;
 use crate::face_data::{self, TABLE_LEN};
+use crate::face_pipeline::{Compiled, VERTEX_BYTES, sampler};
+use crate::face_views::{FaceView, POSE_BYTES, Shared, layer_view, push_pose};
 use crate::finish::Finish;
 use crate::lightmap::LightAtlas;
-use crate::targets::{COLOR, DEPTH};
 use crate::textures;
 
-/// Position, texel coordinates, face.
-const VERTEX_BYTES: usize = 24;
 const INDEX_BYTES: usize = 4;
-/// A `Pose` of the shader: a matrix and the eye.
-const POSE_BYTES: usize = 80;
-const SHADER: &str = concat!(
-    include_str!("../shaders/common.wgsl"),
-    include_str!("../shaders/shading.wgsl"),
-    include_str!("../shaders/face.wgsl"),
-);
+/// The most vista layers a level may put on the GPU: every slot full.
+const MAX_LAYERS: usize =
+    mscent_world::materials::VIEW_SLOTS as usize * mscent_world::MAX_VISTA_LAYERS as usize;
 
 /// A run of the index list, with one material and one pose.
-struct Draw {
-    material: usize,
-    pose: u32,
-    indices: Range<u32>,
+pub(crate) struct Draw {
+    pub(crate) material: usize,
+    pub(crate) pose: u32,
+    pub(crate) indices: Range<u32>,
+}
+
+/// The pipelines of a cutout material's two draws, made only for a level that
+/// has one.
+struct Cutout {
+    solid: wgpu::RenderPipeline,
+    soft: wgpu::RenderPipeline,
 }
 
 pub(crate) struct FacePass {
-    pipeline: wgpu::RenderPipeline,
-    bind_group: wgpu::BindGroup,
+    opaque: wgpu::RenderPipeline,
+    cutout: Option<Cutout>,
     material_groups: Vec<wgpu::BindGroup>,
+    /// By material group: whether it is a cutout.
+    masked: Vec<bool>,
     /// By face: which of `material_groups` draws it.
     material_of: Vec<usize>,
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
-    poses: wgpu::Buffer,
     lights: FaceMasks,
     /// By face: its vertices, empty for one the rasterizer would refuse.
     corners: Vec<Range<u32>>,
@@ -58,7 +55,8 @@ pub(crate) struct FacePass {
     by_material: Vec<Vec<u32>>,
     listed: Vec<u8>,
     pose_bytes: Vec<u8>,
-    draws: Vec<Draw>,
+    /// The level's view first, then one for each vista layer of the level.
+    views: Vec<FaceView>,
     pub(crate) atlas_size: (u32, u32),
 }
 
@@ -97,7 +95,7 @@ fn vertex_bytes(scene: &Scene) -> Result<(Vec<u8>, Vec<Range<u32>>), GpuError> {
     Ok((bytes, corners))
 }
 
-/// The most index bytes a frame can list: every face in view.
+/// The most index bytes a view can list: every face in view.
 fn most_index_bytes(corners: &[Range<u32>]) -> Result<u64, GpuError> {
     corners
         .iter()
@@ -108,7 +106,7 @@ fn most_index_bytes(corners: &[Range<u32>]) -> Result<u64, GpuError> {
         .ok_or(GpuError::TooLarge("indices"))
 }
 
-fn buffer(
+pub(crate) fn buffer(
     gpu: &Gpu,
     label: &str,
     size: u64,
@@ -143,81 +141,16 @@ pub(crate) fn storage(
     Ok(buffer)
 }
 
-fn pipeline(gpu: &Gpu, finish: Finish) -> wgpu::RenderPipeline {
-    let device = &gpu.device;
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("faces"),
-        source: wgpu::ShaderSource::Wgsl(SHADER.into()),
-    });
-    let constants = [
-        ("SHARP_RATE", f64::from(SHARP_RATE)),
-        ("LONG_AXIS_LIMIT", f64::from(LONG_AXIS_LIMIT)),
-        ("MIN_BLEND", f64::from(MIN_BLEND)),
-        ("BUMP_FULL", f64::from(BUMP_FULL)),
-        ("BUMP_GONE", f64::from(BUMP_GONE)),
-        ("MIN_FLAT", f64::from(MIN_FLAT)),
-        ("MIN_GAIN", f64::from(MIN_GAIN)),
-        ("MAX_GAIN", f64::from(MAX_GAIN)),
-        ("RELIEF", f64::from(RELIEF)),
-        ("KNEE", f64::from(KNEE)),
-        ("ROLL", f64::from(ROLL)),
-        ("SPEC_GAIN", f64::from(SPEC_GAIN)),
-        ("MIN_SPEC", f64::from(MIN_SPEC)),
-        ("MIN_LENGTH", f64::from(MIN_LENGTH_F32)),
-        ("TABLE_LEN", TABLE_LEN as f64),
-        ("FINE", f64::from(u8::from(finish == Finish::Fine))),
-    ];
-    let options = wgpu::PipelineCompilationOptions {
-        constants: &with_common(&constants),
-        ..Default::default()
-    };
-    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("faces"),
-        layout: None,
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: None,
-            compilation_options: options.clone(),
-            buffers: &[Some(wgpu::VertexBufferLayout {
-                array_stride: VERTEX_BYTES as u64,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &wgpu::vertex_attr_array![
-                    0 => Float32x3, 1 => Float32x2, 2 => Uint32
-                ],
-            })],
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: None,
-            compilation_options: options,
-            targets: &[Some(COLOR.into())],
-        }),
-        // The walk has already dropped faces that point away.
-        primitive: Default::default(),
-        // Depth is linear in `1/z` as in software: larger is nearer, 0.0 is nothing.
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format: DEPTH,
-            depth_write_enabled: Some(true),
-            depth_compare: Some(wgpu::CompareFunction::Greater),
-            stencil: Default::default(),
-            bias: Default::default(),
-        }),
-        multisample: finish.multisample(),
-        multiview_mask: None,
-        cache: None,
-    })
-}
-
-/// The bind group of each material in use, and which each face takes. Unknown
-/// material ids all share the grey fallback, so a hostile level cannot make a
-/// texture per id.
+/// The bind group of each material in use, whether it is a cutout, and which
+/// each face takes. Unknown material ids all share the grey fallback, so a
+/// hostile level cannot make a texture per id.
 fn materials(
     gpu: &Gpu,
     layout: &wgpu::BindGroupLayout,
     scene: &Scene,
-) -> (Vec<wgpu::BindGroup>, Vec<usize>) {
+) -> (Vec<wgpu::BindGroup>, Vec<bool>, Vec<usize>) {
     let mut seen: Vec<*const mscent_render::Texture> = Vec::new();
-    let mut groups = Vec::new();
+    let (mut groups, mut masked) = (Vec::new(), Vec::new());
     let mut material_of = Vec::with_capacity(scene.faces().len());
     for face in scene.faces() {
         let texture = scene.texture_of(face.material);
@@ -225,47 +158,11 @@ fn materials(
         material_of.push(at.unwrap_or_else(|| {
             seen.push(texture);
             groups.push(textures::bind_group(gpu, layout, texture));
+            masked.push(texture.is_masked());
             groups.len() - 1
         }));
     }
-    (groups, material_of)
-}
-
-fn sampler(gpu: &Gpu, address: wgpu::AddressMode, finish: Finish) -> wgpu::Sampler {
-    // Software takes one whole level per span; a fine frame blends two, which
-    // anisotropic filtering needs.
-    let mipmap_filter = match finish {
-        Finish::Reference => wgpu::MipmapFilterMode::Nearest,
-        Finish::Fine => wgpu::MipmapFilterMode::Linear,
-    };
-    gpu.device.create_sampler(&wgpu::SamplerDescriptor {
-        address_mode_u: address,
-        address_mode_v: address,
-        mag_filter: wgpu::FilterMode::Linear,
-        min_filter: wgpu::FilterMode::Linear,
-        mipmap_filter,
-        anisotropy_clamp: finish.anisotropy(),
-        ..Default::default()
-    })
-}
-
-/// A pose's matrix and eye, as the shader reads them.
-fn push_pose(out: &mut Vec<u8>, pose: MoverPose, eye: Vec3) {
-    let origin = pose.to_world(Vec3::ZERO);
-    let axis = |v: Vec3| pose.to_world(v) - origin;
-    let (x, y, z) = (
-        axis(Vec3::new(1.0, 0.0, 0.0)),
-        axis(Vec3::new(0.0, 1.0, 0.0)),
-        axis(Vec3::new(0.0, 0.0, 1.0)),
-    );
-    let authored = pose.to_authored(eye);
-    let values = [
-        x.x, x.y, x.z, 0.0, y.x, y.y, y.z, 0.0, z.x, z.y, z.z, 0.0, origin.x, origin.y, origin.z,
-        1.0, authored.x, authored.y, authored.z, 0.0,
-    ];
-    for value in values {
-        out.extend_from_slice(&value.to_le_bytes());
-    }
+    (groups, masked, material_of)
 }
 
 impl FacePass {
@@ -276,11 +173,11 @@ impl FacePass {
         finish: Finish,
     ) -> Result<Self, GpuError> {
         let scene = assets.scene();
+        if assets.vista_layer_count() > MAX_LAYERS {
+            return Err(GpuError::TooLarge("vista layers"));
+        }
         let atlas = LightAtlas::new(gpu, assets)?;
         let data = face_data::build(assets, &atlas);
-        let faces = storage(gpu, "face data", &data.faces, 144)?;
-        let levels = storage(gpu, "light levels", &data.levels, 16)?;
-        let tables = storage(gpu, "spec tables", &data.tables, 4 * TABLE_LEN as u64)?;
         let pose_size = (assets.movers().len() as u64 + 1)
             .checked_mul(POSE_BYTES as u64)
             .ok_or(GpuError::TooLarge("movers"))?;
@@ -296,71 +193,44 @@ impl FacePass {
         gpu.queue.write_buffer(&vertices, 0, &vertex_data);
         let index_bytes = most_index_bytes(&corners)?.max(INDEX_BYTES as u64);
         let indices = buffer(gpu, "faces", index_bytes, wgpu::BufferUsages::INDEX)?;
-        let pipeline = pipeline(gpu, finish);
-        // The atlas is read at its top level, so only the materials are filtered.
-        let (clamped, repeat) = (
-            sampler(gpu, wgpu::AddressMode::ClampToEdge, Finish::Reference),
-            sampler(gpu, wgpu::AddressMode::Repeat, finish),
-        );
-        let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("faces"),
-            layout: &pipeline.get_bind_group_layout(0),
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: frame_uniform.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: faces.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: levels.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: poses.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: tables.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: wgpu::BindingResource::TextureView(&atlas.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: wgpu::BindingResource::Sampler(&clamped),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 7,
-                    resource: wgpu::BindingResource::Sampler(&repeat),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 8,
-                    resource: lights.buffer.as_entire_binding(),
-                },
-            ],
+        let compiled =
+            gpu.face_pipelines[finish.index()].get_or_init(|| Compiled::new(gpu, finish));
+        let layouts = &compiled.layouts;
+        let (material_groups, masked, material_of) = materials(gpu, &layouts.material, scene);
+        let cutout = masked.contains(&true).then(|| {
+            let [solid, soft] = compiled.cutout(gpu, finish).clone();
+            Cutout { solid, soft }
         });
-        let (material_groups, material_of) =
-            materials(gpu, &pipeline.get_bind_group_layout(1), scene);
+        // The atlas is read at its top level, so only the materials are filtered.
+        let shared = Shared {
+            layout: &layouts.frame,
+            faces: storage(gpu, "face data", &data.faces, 144)?,
+            levels: storage(gpu, "light levels", &data.levels, 16)?,
+            tables: storage(gpu, "spec tables", &data.tables, 4 * TABLE_LEN as u64)?,
+            atlas: &atlas.view,
+            clamped: sampler(gpu, wgpu::AddressMode::ClampToEdge, Finish::Reference),
+            repeat: sampler(gpu, wgpu::AddressMode::Repeat, finish),
+            lights: &lights.buffer,
+        };
+        let mut views = vec![shared.view(gpu, frame_uniform, poses)];
+        for _ in 0..assets.vista_layer_count() {
+            views.push(layer_view(gpu, &shared)?);
+        }
         let by_material = vec![Vec::new(); material_groups.len()];
         Ok(Self {
-            pipeline,
-            bind_group,
+            opaque: compiled.opaque.clone(),
+            cutout,
             material_groups,
+            masked,
             material_of,
             vertices,
             indices,
-            poses,
             lights,
             corners,
             by_material,
             listed: Vec::new(),
             pose_bytes: Vec::new(),
-            draws: Vec::new(),
+            views,
             atlas_size: atlas.size,
         })
     }
@@ -382,8 +252,8 @@ impl FacePass {
         (self.listed.len() / INDEX_BYTES) as u32
     }
 
-    /// The faces in `visible`, one draw per material.
-    fn list_world(&mut self, visible: &[u32]) {
+    /// The faces in `visible`, one draw per material, into view `view`.
+    fn list_world(&mut self, view: usize, visible: &[u32]) {
         for faces in &mut self.by_material {
             faces.clear();
         }
@@ -394,16 +264,26 @@ impl FacePass {
             }
         }
         let by_material = std::mem::take(&mut self.by_material);
+        let mut draws = self
+            .views
+            .get_mut(view)
+            .map(|v| std::mem::take(&mut v.draws));
         for (material, faces) in by_material.iter().enumerate() {
             let start = self.list_so_far();
             for &face in faces {
                 self.list_face(face);
             }
-            self.draws.push(Draw {
-                material,
-                pose: 0,
-                indices: start..self.list_so_far(),
-            });
+            let indices = start..self.list_so_far();
+            if let Some(draws) = draws.as_mut().filter(|_| !indices.is_empty()) {
+                draws.push(Draw {
+                    material,
+                    pose: 0,
+                    indices,
+                });
+            }
+        }
+        if let (Some(v), Some(draws)) = (self.views.get_mut(view), draws) {
+            v.draws = draws;
         }
         self.by_material = by_material;
     }
@@ -412,9 +292,10 @@ impl FacePass {
     /// authored: `list_movers` in `level/movers.rs`.
     fn list_movers(&mut self, assets: &LevelAssets, cam: &Camera, poses: &[MoverPose]) {
         let eye = eye_of(cam);
+        let mut draws = Vec::new();
         for (i, mover) in assets.movers().iter().enumerate() {
             let pose = poses.get(i).copied().unwrap_or(MoverPose::AUTHORED);
-            push_pose(&mut self.pose_bytes, pose, eye);
+            push_pose(&mut self.pose_bytes, pose, eye, [0.0; 2]);
             // View is along -Z, so all of it is behind the eye past this.
             if cam.world_to_camera(pose.to_world(mover.centre)).z > mover.radius {
                 continue;
@@ -429,47 +310,133 @@ impl FacePass {
                 }
                 let start = self.list_so_far();
                 self.list_face(index as u32);
-                self.draws.push(Draw {
+                draws.push(Draw {
                     material: self.material_of.get(index).copied().unwrap_or(0),
                     pose: i as u32 + 1,
                     indices: start..self.list_so_far(),
                 });
             }
         }
+        if let Some(view) = self.views.first_mut() {
+            view.draws = draws;
+        }
     }
 
-    /// Lists this frame's faces and writes what the shader reads for them.
+    /// Lists each vista layer's faces in a view of its own, with its frame from
+    /// `frame_of` and its eye and pan in its one pose. Layers past those the
+    /// level has, which cannot be, are left out.
+    fn list_layers(
+        &mut self,
+        gpu: &Gpu,
+        layers: &[VistaView],
+        frame_of: impl Fn(&VistaView) -> Vec<u8>,
+    ) {
+        for (i, layer) in layers.iter().enumerate() {
+            let Some(view) = self.views.get_mut(i + 1) else {
+                return;
+            };
+            view.draws.clear();
+            let mut pose = Vec::with_capacity(POSE_BYTES);
+            push_pose(
+                &mut pose,
+                MoverPose::AUTHORED,
+                eye_of(&layer.cam),
+                layer.pan,
+            );
+            gpu.queue.write_buffer(&view.poses, 0, &pose);
+            if let Some(uniform) = &view.uniform {
+                gpu.queue.write_buffer(uniform, 0, &frame_of(layer));
+            }
+            self.list_world(i + 1, &layer.faces);
+        }
+    }
+
+    /// The `Frame` of this frame's `i`th vista layer.
+    pub(crate) fn layer_frame(&self, i: usize) -> Option<&wgpu::Buffer> {
+        self.views.get(i + 1)?.uniform.as_ref()
+    }
+
+    /// Writes this frame's index list, on a larger buffer when the layers have
+    /// made it longer than any before.
+    fn write_indices(&mut self, gpu: &Gpu) -> Result<(), GpuError> {
+        let needed = self.listed.len() as u64;
+        if needed > self.indices.size() {
+            let size = needed.checked_next_power_of_two().unwrap_or(needed);
+            self.indices = buffer(gpu, "faces", size, wgpu::BufferUsages::INDEX)?;
+        }
+        gpu.queue.write_buffer(&self.indices, 0, &self.listed);
+        Ok(())
+    }
+
+    /// Lists this frame's faces, the level's and then each of `layers`', and
+    /// writes what the shader reads for them. `cam` sees `visible`.
     pub(crate) fn prepare(
         &mut self,
         gpu: &Gpu,
         assets: &LevelAssets,
-        cam: &Camera,
-        visible: &[u32],
-        poses: &[MoverPose],
-        lights: &[DynLight],
-    ) {
+        (cam, visible): (&Camera, &[u32]),
+        (poses, lights): (&[MoverPose], &[DynLight]),
+        layers: &[VistaView],
+        frame_of: impl Fn(&VistaView) -> Vec<u8>,
+    ) -> Result<(), GpuError> {
         self.listed.clear();
-        self.draws.clear();
         self.pose_bytes.clear();
-        push_pose(&mut self.pose_bytes, MoverPose::AUTHORED, eye_of(cam));
+        push_pose(
+            &mut self.pose_bytes,
+            MoverPose::AUTHORED,
+            eye_of(cam),
+            [0.0; 2],
+        );
         self.list_movers(assets, cam, poses);
-        self.list_world(visible);
-        gpu.queue.write_buffer(&self.poses, 0, &self.pose_bytes);
-        gpu.queue.write_buffer(&self.indices, 0, &self.listed);
+        self.list_world(0, visible);
+        self.list_layers(gpu, layers, frame_of);
+        if let Some(view) = self.views.first() {
+            gpu.queue.write_buffer(&view.poses, 0, &self.pose_bytes);
+        }
         self.lights.write(gpu, lights);
+        self.write_indices(gpu)
     }
 
-    pub(crate) fn draw(&self, pass: &mut wgpu::RenderPass) {
-        pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &self.bind_group, &[]);
+    fn bind(&self, pass: &mut wgpu::RenderPass, pipeline: &wgpu::RenderPipeline, view: &FaceView) {
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &view.bind_group, &[]);
         pass.set_vertex_buffer(0, self.vertices.slice(..));
         pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-        for draw in self.draws.iter().filter(|d| !d.indices.is_empty()) {
-            let Some(group) = self.material_groups.get(draw.material) else {
-                continue;
-            };
-            pass.set_bind_group(1, group, &[]);
-            pass.draw_indexed(draw.indices.clone(), 0, draw.pose..draw.pose + 1);
+    }
+
+    /// The draws of `view` whose material is a cutout or not, by `masked`.
+    fn run(&self, pass: &mut wgpu::RenderPass, view: &FaceView, masked: bool) {
+        for draw in &view.draws {
+            let group = self.material_groups.get(draw.material);
+            let is_masked = self.masked.get(draw.material).copied().unwrap_or(false);
+            if let Some(group) = group.filter(|_| is_masked == masked) {
+                pass.set_bind_group(1, group, &[]);
+                pass.draw_indexed(draw.indices.clone(), 0, draw.pose..draw.pose + 1);
+            }
+        }
+    }
+
+    /// The soft texels of view `view`'s cutouts: before everything else of the
+    /// faces, so that a face drawn behind one later covers it, as the software
+    /// renderer's front-to-back order has it. View 0 is the level's own.
+    pub(crate) fn draw_soft(&self, pass: &mut wgpu::RenderPass, view: usize) {
+        let (Some(cutout), Some(view)) = (&self.cutout, self.views.get(view)) else {
+            return;
+        };
+        self.bind(pass, &cutout.soft, view);
+        self.run(pass, view, true);
+    }
+
+    /// The faces of view `view`, all but the soft texels of cutouts.
+    pub(crate) fn draw(&self, pass: &mut wgpu::RenderPass, view: usize) {
+        let Some(view) = self.views.get(view) else {
+            return;
+        };
+        self.bind(pass, &self.opaque, view);
+        self.run(pass, view, false);
+        if let Some(cutout) = &self.cutout {
+            self.bind(pass, &cutout.solid, view);
+            self.run(pass, view, true);
         }
     }
 }

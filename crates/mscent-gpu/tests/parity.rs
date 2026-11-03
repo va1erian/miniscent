@@ -145,6 +145,13 @@ fn cases() -> Vec<Case> {
             Low,
             Taken::Textures,
         ),
+        case("vista", AtVista, High, Taken::Vistas),
+        case("vista_parallax", AtVistaAside, Low, Taken::Parallax),
+        case("vista_spin", AtVista, Low, Taken::Spin),
+        case("vista_pan", AtVista, Low, Taken::Pan),
+        case("vista_fog", AtVista, Low, Taken::VistaFog),
+        case("cutout", AtVista, Low, Taken::Cutouts),
+        case("vista_voxels", AtVista, Low, Taken::Voxels),
     ]
 }
 
@@ -178,6 +185,7 @@ fn software(scene: &Scene, frame: &Framing, quality: Quality, without: Option<Ta
     let effects = Effects {
         poses,
         lights,
+        vista_time: frame.time,
         ..Effects::default()
     };
     renderer
@@ -195,6 +203,7 @@ fn hardware(on_gpu: &mut OnGpu, frame: &Framing, case: &Case) -> Frame {
         effects: Effects {
             poses: &frame.poses,
             lights: &frame.lights,
+            vista_time: frame.time,
             ..Effects::default()
         },
         wants_depth: true,
@@ -253,9 +262,11 @@ fn the_renderers_draw_the_same_frames() {
     eprintln!("adapter: {}", first.adapter());
     let (showcase, door, hard) = (Scene::showcase(), Scene::door(), Scene::hard_shadows());
     let (voxel_room, voxel_distance) = (Scene::voxel_room(), Scene::voxel_distance());
+    let vista = Scene::vista();
     let mut showcase_gpu = on_gpu(first.clone(), &showcase);
     let mut door_gpu = on_gpu(second, &door);
     let mut hard_gpu = on_gpu(third, &hard);
+    let mut vista_gpu = on_gpu(first.clone(), &vista);
     let mut failures = Vec::new();
     for case in cases() {
         // A voxel frame's detail depends on the frames before it, as software's
@@ -263,6 +274,11 @@ fn the_renderers_draw_the_same_frames() {
         let mut voxel_gpu;
         let (scene, renderer) = match (case.name, case.pose) {
             (_, Pose::AtDoor | Pose::AtTurnedDoor) => (&door, &mut door_gpu),
+            ("vista_voxels", _) => {
+                voxel_gpu = on_gpu(first.clone(), &vista);
+                (&vista, &mut voxel_gpu)
+            }
+            (_, Pose::AtVista | Pose::AtVistaAside) => (&vista, &mut vista_gpu),
             ("light_mips", _) => (&hard, &mut hard_gpu),
             (name, _) if name.starts_with("voxel") => {
                 let scene = match name {

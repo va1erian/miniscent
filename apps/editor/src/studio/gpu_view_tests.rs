@@ -112,24 +112,32 @@ fn a_highlight_on_the_gpu_is_cut_by_what_is_in_front() {
     );
 }
 
-/// What the GPU cannot draw yet must not reach it: this has to be software's own
-/// bytes, not a level with holes in it.
+/// A level with viewports draws on the GPU too, vistas and cutouts and all, and
+/// shows what software shows.
 #[test]
-fn a_level_with_viewports_stays_on_the_software_renderer() {
+fn a_level_with_viewports_draws_on_the_gpu() {
+    if !has_gpu() {
+        return;
+    }
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../assets/levels/facing.msl"
     );
     let bytes = std::fs::read(path).expect("the demo level");
     let level = mscent_world::format::read(&bytes).expect("it loads");
+    let start = level.player_start().expect("a player start");
     let doc = Document::from_level(&level);
-    let req = request(160, 90, Vec::new());
+    let mut req = request(320, 180, Vec::new());
+    // Out over the edge, up into the sky, which is all vista.
+    req.view = View::from_angles(start + Vec3::new(0.0, 0.0, 1.0), 0.0, 0.3, 0.0);
     let a = LevelScene::new(built(&doc))
         .render(&req)
         .expect("a frame")
         .clone();
     let mut gpu = LevelScene::on_gpu(built(&doc));
-    assert_eq!(gpu.render(&req).expect("a frame").pixels(), a.pixels());
+    let b = gpu.render(&req).expect("a frame");
+    assert!(mean_error(&a, b) < 3.0, "{}", mean_error(&a, b));
+    assert_ne!(a.pixels(), b.pixels(), "this frame did come from the GPU");
 }
 
 /// `cargo test --release -p mscent-editor pane_cost -- --ignored --nocapture`

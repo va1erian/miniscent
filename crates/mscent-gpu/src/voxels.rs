@@ -25,7 +25,7 @@ use crate::targets::{COLOR, DEPTH};
 use crate::voxel_materials::{self, MATERIALS};
 
 /// The `Voxels` uniform of `voxel.wgsl`.
-const UNIFORM_BYTES: u64 = 192;
+pub(crate) const UNIFORM_BYTES: u64 = 192;
 /// A `Vertex` of `voxel.wgsl`.
 const VERTEX_BYTES: u64 = 64;
 const SHADER: &str = concat!(
@@ -44,12 +44,17 @@ struct GpuChunk {
 }
 
 /// What every chunk shares: the materials, the texels of those in use, and the
-/// spots.
+/// spots, bound with the level's frame.
 struct Shared {
     bind_group: wgpu::BindGroup,
+    /// The buffers bound beside a frame, for a vista layer to bind with its own.
+    buffers: [wgpu::Buffer; 4],
     /// By material id: whether its texels are in the buffer.
     held: [bool; MATERIALS],
 }
+
+/// A chunk, its corners at the level in view, and the lights that reach it.
+pub(crate) type VoxelDraw = (usize, Range<u32>, u32);
 
 pub(crate) struct VoxelPass {
     uniform: wgpu::Buffer,
@@ -66,8 +71,7 @@ pub(crate) struct VoxelPass {
     wanted: [bool; MATERIALS],
     chunks: Vec<Option<GpuChunk>>,
     list: VoxelList,
-    /// A chunk, its corners at the level in view, and the lights that reach it.
-    draws: Vec<(usize, Range<u32>, u32)>,
+    draws: Vec<VoxelDraw>,
 }
 
 fn push_vec3(out: &mut Vec<u8>, v: mscent_math::Vec3, w: [u8; 4]) {
@@ -176,7 +180,7 @@ fn pipeline(gpu: &Gpu, finish: Finish) -> wgpu::RenderPipeline {
 }
 
 /// What the shader reads about this frame beyond `Frame`.
-fn uniform_bytes(cam: &Camera) -> Vec<u8> {
+pub(crate) fn uniform_bytes(cam: &Camera) -> Vec<u8> {
     let mut out = Vec::with_capacity(UNIFORM_BYTES as usize);
     let eye = eye_of(cam);
     let size = [cam.width() as f32, cam.height() as f32];
@@ -202,6 +206,30 @@ fn uniform_bytes(cam: &Camera) -> Vec<u8> {
         }
     }
     out
+}
+
+/// The shared bind group of `pipeline`, with a view's `frame` and `uniform`.
+fn bind(
+    gpu: &Gpu,
+    pipeline: &wgpu::RenderPipeline,
+    (frame, uniform): (&wgpu::Buffer, &wgpu::Buffer),
+    buffers: &[wgpu::Buffer; 4],
+) -> wgpu::BindGroup {
+    let [table, texels, tables, spots] = buffers;
+    let entries = [
+        (0, frame.as_entire_binding()),
+        (1, uniform.as_entire_binding()),
+        (2, table.as_entire_binding()),
+        (3, texels.as_entire_binding()),
+        (4, tables.as_entire_binding()),
+        (5, spots.as_entire_binding()),
+    ]
+    .map(|(binding, resource)| wgpu::BindGroupEntry { binding, resource });
+    gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("voxels"),
+        layout: &pipeline.get_bind_group_layout(0),
+        entries: &entries,
+    })
 }
 
 impl VoxelPass {
@@ -248,21 +276,45 @@ impl VoxelPass {
         let texels = storage(gpu, "voxel texels", &built.texels, 4)?;
         let tables = storage(gpu, "voxel spec", &built.tables, 4 * TABLE_LEN as u64)?;
         let spots = storage(gpu, "spots", &spot_bytes, 4)?;
-        let entries = [
-            (0, self.frame_uniform.as_entire_binding()),
-            (1, self.uniform.as_entire_binding()),
-            (2, table.as_entire_binding()),
-            (3, texels.as_entire_binding()),
-            (4, tables.as_entire_binding()),
-            (5, spots.as_entire_binding()),
-        ]
-        .map(|(binding, resource)| wgpu::BindGroupEntry { binding, resource });
-        let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("voxels"),
-            layout: &pipeline.get_bind_group_layout(0),
-            entries: &entries,
-        });
-        Ok(Shared { bind_group, held })
+        let buffers = [table, texels, tables, spots];
+        let bind_group = bind(
+            gpu,
+            pipeline,
+            (&self.frame_uniform, &self.uniform),
+            &buffers,
+        );
+        Ok(Shared {
+            bind_group,
+            buffers,
+            held,
+        })
+    }
+
+    /// The shared bind group for a view with `frame` and `uniform` of its own,
+    /// once a chunk has made the pipeline. A sync can remake what it binds, so
+    /// it is made for the frame that asks.
+    pub(crate) fn bind_view(
+        &self,
+        gpu: &Gpu,
+        frame: &wgpu::Buffer,
+        uniform: &wgpu::Buffer,
+    ) -> Option<wgpu::BindGroup> {
+        let (pipeline, shared) = (self.pipeline.as_ref()?, self.shared.as_ref()?);
+        Some(bind(gpu, pipeline, (frame, uniform), &shared.buffers))
+    }
+
+    /// The draws of the chunks in `list`, at the level it chose for each.
+    pub(crate) fn draws_of(&self, list: &VoxelList, out: &mut Vec<VoxelDraw>) {
+        for listed in list.chunks() {
+            let c = listed.chunk as usize;
+            let Some(chunk) = self.chunks.get(c).and_then(Option::as_ref) else {
+                continue;
+            };
+            let range = chunk.lods[usize::from(listed.lod.min(2))].clone();
+            if chunk.group.is_some() && !range.is_empty() {
+                out.push((c, range, u32::from(listed.lights)));
+            }
+        }
     }
 
     fn upload(
@@ -368,16 +420,9 @@ impl VoxelPass {
         self.list
             .prepare(assets.scene().voxels(), cam, eye_of(cam), reaching);
         stats.voxel_triangles = self.list.triangles;
-        for listed in self.list.chunks() {
-            let c = listed.chunk as usize;
-            let Some(chunk) = self.chunks.get(c).and_then(Option::as_ref) else {
-                continue;
-            };
-            let range = chunk.lods[usize::from(listed.lod.min(2))].clone();
-            if chunk.group.is_some() && !range.is_empty() {
-                self.draws.push((c, range, u32::from(listed.lights)));
-            }
-        }
+        let mut draws = std::mem::take(&mut self.draws);
+        self.draws_of(&self.list, &mut draws);
+        self.draws = draws;
         if !self.draws.is_empty() {
             gpu.queue
                 .write_buffer(&self.uniform, 0, &uniform_bytes(cam));
@@ -386,12 +431,24 @@ impl VoxelPass {
     }
 
     pub(crate) fn draw(&self, pass: &mut wgpu::RenderPass) {
-        let (Some(pipeline), Some(shared)) = (&self.pipeline, &self.shared) else {
+        if let Some(shared) = &self.shared {
+            self.draw_with(pass, &shared.bind_group, &self.draws);
+        }
+    }
+
+    /// `draws`, with `group` as the shared bind group.
+    pub(crate) fn draw_with(
+        &self,
+        pass: &mut wgpu::RenderPass,
+        group: &wgpu::BindGroup,
+        draws: &[VoxelDraw],
+    ) {
+        let Some(pipeline) = &self.pipeline else {
             return;
         };
         pass.set_pipeline(pipeline);
-        pass.set_bind_group(0, &shared.bind_group, &[]);
-        for (c, range, lights) in &self.draws {
+        pass.set_bind_group(0, group, &[]);
+        for (c, range, lights) in draws {
             let group = self.chunks.get(*c).and_then(Option::as_ref);
             if let Some(group) = group.and_then(|g| g.group.as_ref()) {
                 pass.set_bind_group(1, group, &[]);

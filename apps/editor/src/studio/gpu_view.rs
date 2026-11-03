@@ -150,12 +150,6 @@ impl GpuView {
         if !self.is_wanted() || self.failed {
             return false;
         }
-        if let Some(why) = GpuRenderer::cannot_draw(assets) {
-            self.say(format!(
-                "3D view: software renderer for this level, as it has {why}"
-            ));
-            return false;
-        }
         let Some(level) = self.level(assets, frame.quality) else {
             return false;
         };
