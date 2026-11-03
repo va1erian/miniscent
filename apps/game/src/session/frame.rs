@@ -5,7 +5,7 @@ use mscent_collide::STEP_HZ;
 use mscent_game::Screen;
 use mscent_game::fx::combat::ViewKick;
 use mscent_math::{Quat, Vec3};
-use mscent_render::{Effects, FrameInput, FrameRenderer, Framebuffer, View, simd};
+use mscent_render::{Effects, FrameInput, FrameRenderer, Framebuffer, LevelAssets, View, simd};
 
 use super::GameSession;
 use crate::drawn::{actors_of, mover_poses_of};
@@ -57,6 +57,19 @@ impl GameSession {
     /// Draws the current state at `width` x `height`: world, HUD, feedback
     /// and menus. `None` when the size is zero or the pose is invalid.
     pub fn render(&mut self, width: u32, height: u32) -> Option<&Framebuffer> {
+        self.render_through(width, height, &mut |_, _, _| false)
+    }
+
+    /// [`Self::render`], with the world drawn by `other` where it can, from the
+    /// session's own level: another renderer, which says whether it drew the
+    /// frame, its depth too, as the particle budget reads it. Where it does not,
+    /// software draws it.
+    pub fn render_through(
+        &mut self,
+        width: u32,
+        height: u32,
+        other: &mut dyn FnMut(&LevelAssets, &mut Framebuffer, &FrameInput) -> bool,
+    ) -> Option<&Framebuffer> {
         if self.fb.as_ref().map(|f| (f.width(), f.height())) != Some((width, height)) {
             self.fb = Some(Framebuffer::new(width, height)?);
         }
@@ -100,7 +113,11 @@ impl GameSession {
             // The particle budget reads it, next frame.
             wants_depth: true,
         };
-        let drawn = self.renderer.draw(&mut fb, &input);
+        let drawn = if other(self.renderer.assets(), &mut fb, &input) {
+            Some(())
+        } else {
+            self.renderer.draw(&mut fb, &input).map(|_| ())
+        };
         if drawn.is_some() {
             if self.kick.white > 0 {
                 simd::lerp_toward(fb.pixels_mut(), WHITE, self.kick.white);

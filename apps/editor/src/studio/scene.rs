@@ -98,7 +98,11 @@ impl Scene for LevelScene {
     fn render(&mut self, req: &Request) -> Option<&Framebuffer> {
         if req.play {
             gpu_view::set_inactive();
-            return self.built.session_mut()?.render(req.w, req.h);
+            let gpu = &mut self.gpu;
+            let session = self.built.session_mut()?;
+            return session.render_through(req.w, req.h, &mut |assets, fb, frame| {
+                gpu.draw(assets, fb, frame)
+            });
         }
         // The editor shows the level, not what the last run did to it.
         if let Some(session) = self.built.session_mut() {

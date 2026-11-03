@@ -1,6 +1,6 @@
 # Hardware renderer: plan
 
-Status: accepted, M14.1 to M14.5, M14.10 and M14.12 done, M14.6 begun (dynamic lights) and the rest not started ([status.md](status.md)). Figures
+Status: accepted, M14.1 to M14.5, M14.10 and M14.12 done, M14.6 done but for one test (see status.md) and the rest not started ([status.md](status.md)). Figures
 under "Measured" were run for this plan; all others are targets to measure. The work
 items are in [work-items.md](work-items.md) as M14.
 

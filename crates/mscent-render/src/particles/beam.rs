@@ -80,13 +80,25 @@ fn lift(p: &ScreenPoint) -> Option<P3> {
 }
 
 pub(super) fn draw_streak(fb: &mut Framebuffer, st: &StreakDraw) {
+    walk(st, fb.width(), fb.row_range(), |x, y, inv_z, cover| {
+        plot(fb, x, y, inv_z, cover, st.tint);
+    });
+}
+
+/// Each pixel `st` covers in `columns` columns and the screen rows `rows`, with
+/// its `1/z` and coverage, though it may fall outside them by a little.
+pub(super) fn walk(
+    st: &StreakDraw,
+    columns: u32,
+    (rows0, rows1): (i32, i32),
+    mut plot: impl FnMut(i64, i64, f32, u8),
+) {
     let (Some(a), Some(b)) = (lift(&st.a), lift(&st.b)) else {
         return;
     };
     let width = usize::from(st.width.clamp(1, 5));
-    let (rows0, rows1) = fb.row_range();
     let screen = (
-        (0.0, f64::from(fb.width())),
+        (0.0, f64::from(columns)),
         (f64::from(rows0), f64::from(rows1)),
     );
     let x_major = (b.0 - a.0).abs() >= (b.1 - a.1).abs();
@@ -134,7 +146,7 @@ pub(super) fn draw_streak(fb: &mut Framebuffer, st: &StreakDraw) {
         for (k, &cover) in PROFILE[width - 1][..width].iter().enumerate() {
             let c = start.saturating_add(k as i64);
             let (x, y) = if x_major { (cell, c) } else { (c, cell) };
-            plot(fb, x, y, inv_z, cover, st.tint);
+            plot(x, y, inv_z, cover);
         }
     }
 }

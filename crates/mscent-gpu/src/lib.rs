@@ -2,8 +2,8 @@
 //! drawn on a GPU through wgpu and read back into a [`Framebuffer`].
 //!
 //! So far it draws the sky, faces, movers, voxel surfaces and actors, with the
-//! frame's dynamic lights. A frame with particles is refused, and a level with
-//! viewports must not come here ([`GpuRenderer::cannot_draw`]). These arrive item by item
+//! frame's dynamic lights, and its particles over them. A level with viewports
+//! must not come here ([`GpuRenderer::cannot_draw`]). These arrive item by item
 //! (`docs/hardware-renderer.md`), each with a case in `tests/parity.rs`, which holds
 //! the two renderers to the same picture.
 
@@ -15,6 +15,8 @@ mod face_data;
 mod faces;
 mod finish;
 mod lightmap;
+mod particle_data;
+mod particles;
 mod resolve;
 mod sky;
 mod targets;
@@ -30,6 +32,7 @@ use mscent_render::{Camera, FrameInput, Framebuffer, LevelAssets, Quality};
 
 use actors::ActorPass;
 use faces::FacePass;
+use particles::ParticlePass;
 use resolve::DepthResolve;
 use sky::SkyPass;
 use targets::Targets;
@@ -50,6 +53,7 @@ pub struct GpuRenderer {
     faces: FacePass,
     voxels: VoxelPass,
     actors: ActorPass,
+    particles: ParticlePass,
     targets: Option<Targets>,
 }
 
@@ -104,6 +108,7 @@ impl GpuRenderer {
             sky: SkyPass::new(&gpu, assets.config(), finish),
             voxels,
             actors: ActorPass::new(&gpu, &frame_uniform, finish),
+            particles: ParticlePass::new(&gpu, finish),
             resolve: (finish.samples() > 1).then(|| DepthResolve::new(&gpu)),
             finish,
             frame_uniform,
@@ -131,18 +136,13 @@ impl GpuRenderer {
     /// Draws a frame of `assets`, the level this was made from, into `fb`. The
     /// stats have no `pixels` or `spans`, which a GPU does not count. `None` when
     /// the view or the size cannot make a camera, the device has gone, or the
-    /// level's voxels have changed into more than this GPU can hold. `None` too
-    /// for a frame with particles, which this does not draw yet, rather than a
-    /// frame without them.
+    /// level's voxels or the frame's particles are more than this GPU can hold.
     pub fn draw(
         &mut self,
         assets: &LevelAssets,
         fb: &mut Framebuffer,
         frame: &FrameInput,
     ) -> Option<SceneStats> {
-        if frame.effects.particles.is_some() {
-            return None;
-        }
         let (width, height) = (fb.width(), fb.height());
         let cam = assets.camera(frame.view, width, height)?;
         let mut stats = assets.scene().visible_set(&cam, self.voxels.candidates());
@@ -166,6 +166,10 @@ impl GpuRenderer {
             .voxels
             .prepare(&self.gpu, assets, &cam, lights, &mut stats);
         voxels.ok()?;
+        let particles = self
+            .particles
+            .prepare(&self.gpu, &cam, frame.effects.particles)
+            .ok()?;
         let mut encoder = self.gpu.device.create_command_encoder(&Default::default());
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -188,6 +192,11 @@ impl GpuRenderer {
             self.voxels.draw(&mut pass);
             self.faces.draw(&mut pass);
             self.actors.draw(&mut pass);
+        }
+        if particles {
+            let resolve = self.resolve.as_ref();
+            self.particles
+                .draw(&self.gpu, &mut encoder, targets, resolve);
         }
         targets.copy_for_reading(&mut encoder, frame.wants_depth, self.resolve.as_ref());
         self.gpu.queue.submit([encoder.finish()]);

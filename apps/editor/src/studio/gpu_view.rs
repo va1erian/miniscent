@@ -38,7 +38,8 @@ pub fn active() -> bool {
     ACTIVE.load(Ordering::Relaxed)
 }
 
-/// For a frame drawn some other way, as Play's is.
+/// For a frame the GPU has not drawn yet: Play's, which software draws where
+/// the GPU cannot.
 pub fn set_inactive() {
     ACTIVE.store(false, Ordering::Relaxed);
 }

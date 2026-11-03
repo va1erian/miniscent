@@ -10,6 +10,9 @@
 #[path = "support/compare.rs"]
 #[allow(dead_code, reason = "shared with the parity test")]
 mod compare;
+#[path = "support/particles.rs"]
+#[allow(dead_code, reason = "shared with the parity test")]
+mod particles;
 #[path = "support/scenes.rs"]
 #[allow(dead_code, reason = "shared with the parity test")]
 mod scenes;
@@ -21,7 +24,9 @@ use mscent_math::epsilon::{
     FINE_BLOCK_LEVELS, FINE_DEPTH_AGREEMENT, FINE_EDGES_NEARER, FINE_MEAN_LEVELS, FINE_NEARER,
     PARITY_DEPTH_RELATIVE, PARITY_EDGE_DEPTH,
 };
+use mscent_render::particles::SpriteBank;
 use mscent_render::{Effects, FrameInput, Framebuffer, Quality};
+use particles::Sparks;
 use scenes::{Framing, Pose, Scene};
 
 const WIDTH: u32 = 320;
@@ -44,6 +49,12 @@ fn gpu() -> Option<Gpu> {
     }
 }
 
+/// The sprite masks, made once.
+fn bank() -> &'static SpriteBank {
+    static BANK: std::sync::OnceLock<SpriteBank> = std::sync::OnceLock::new();
+    BANK.get_or_init(SpriteBank::new)
+}
+
 fn draw(gpu: &Gpu, scene: &Scene, framing: &Framing, finish: Finish, scale: u32) -> Frame {
     let level = scene.software(None);
     let mut renderer =
@@ -55,6 +66,7 @@ fn draw(gpu: &Gpu, scene: &Scene, framing: &Framing, finish: Finish, scale: u32)
         actors: &framing.actors,
         effects: Effects {
             poses: &framing.poses,
+            particles: framing.particles.as_ref().map(|p| (p, bank())),
             ..Effects::default()
         },
         wants_depth: true,
@@ -216,5 +228,34 @@ fn fine_voxels_are_the_same_picture_smoother() {
         (Vec3::new(2.5, 0.5, 0.5), Vec3::new(0.0, 5.0, -1.0)),
     ] {
         holds_fine(&gpu, &room, Pose::Looking { eye, at });
+    }
+}
+
+/// A fine frame's particles read its depth resolved from its samples, where the
+/// reference reads its depth as it is: the same particles over the same scene,
+/// and there at all.
+#[test]
+fn fine_particles_are_the_same_picture() {
+    let Some(gpu) = gpu() else { return };
+    let showcase = Scene::showcase();
+    let bare = showcase.framing(Pose::DownTheHall);
+    let without = draw(&gpu, &showcase, &bare, Finish::Fine, 1);
+    // Streaks draw through the additive sprites' pipeline, and barely show here.
+    for sparks in [Sparks::Added, Sparks::Over] {
+        let mut framing = showcase.framing(Pose::DownTheHall);
+        let level = showcase.software(None);
+        let cam = level.assets().camera(&framing.view, WIDTH, HEIGHT);
+        let cam = cam.expect("a camera");
+        framing.particles = Some(particles::draws(sparks, &cam, &framing.view));
+        let reference = draw(&gpu, &showcase, &framing, Finish::Reference, 1);
+        let fine = draw(&gpu, &showcase, &framing, Finish::Fine, 1);
+        let apart = compare::compare(&reference, &fine);
+        eprintln!("{apart:?}");
+        assert!(f64::from(apart.mean) < FINE_MEAN_LEVELS, "{apart:?}");
+        assert!(apart.worst_block < FINE_BLOCK_LEVELS, "{apart:?}");
+        assert!(
+            !compare::compare(&without, &fine).alike(),
+            "the particles drew"
+        );
     }
 }

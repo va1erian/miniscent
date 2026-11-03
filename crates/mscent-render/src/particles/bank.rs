@@ -68,12 +68,26 @@ impl SpriteBank {
 
     /// Mip `level` (clamped to the largest) of a mask, row-major, and its side.
     /// Empty only if the bank were malformed, which `new` cannot produce.
+    #[cfg(test)]
     pub(super) fn mip(&self, mask: Mask, level: usize) -> (&[u8], usize) {
-        let level = level.min(MIPS - 1);
-        let side = MIN_SIDE << level;
-        let start = mask.index() * MASK_BYTES + MIP_START[level];
+        let (start, side) = Self::mip_at(mask, level);
         let bytes = self.data.get(start..start + side * side);
         (bytes.unwrap_or_default(), side)
+    }
+
+    /// Where mip `level` (clamped to the largest) of `mask` starts in
+    /// [`Self::bytes`], and its side.
+    pub(super) fn mip_at(mask: Mask, level: usize) -> (usize, usize) {
+        let level = level.min(MIPS - 1);
+        (
+            mask.index() * MASK_BYTES + MIP_START[level],
+            MIN_SIDE << level,
+        )
+    }
+
+    /// Every mask's mips, one after another, for another renderer to hold.
+    pub fn bytes(&self) -> &[u8] {
+        &self.data
     }
 }
 

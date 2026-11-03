@@ -10,6 +10,8 @@
 mod compare;
 #[path = "support/gpu.rs"]
 mod gpu;
+#[path = "support/particles.rs"]
+mod particles;
 #[path = "support/scenes.rs"]
 mod scenes;
 
@@ -19,9 +21,10 @@ use compare::{Frame, compare};
 use gpu::gpu;
 use mscent_gpu::{Gpu, GpuRenderer};
 use mscent_math::Vec3;
-use mscent_render::particles::{ParticleDraws, SpriteBank};
+use mscent_render::particles::SpriteBank;
 use mscent_render::png_encode::encode_png;
 use mscent_render::{Effects, FrameInput, Framebuffer, LevelRenderer, Quality};
+use particles::Sparks;
 use scenes::{Framing, Pose, Scene, Taken};
 
 const WIDTH: u32 = 320;
@@ -35,9 +38,17 @@ struct Case {
     without: Taken,
     /// How far ahead of the eye a dynamic light stands, if the case has one.
     light: Option<f32>,
+    sparks: Option<Sparks>,
 }
 
 impl Case {
+    fn with(self, sparks: Sparks) -> Self {
+        Self {
+            sparks: Some(sparks),
+            ..self
+        }
+    }
+
     fn lit(self, ahead: f32) -> Self {
         Self {
             light: Some(ahead),
@@ -55,6 +66,12 @@ fn cases() -> Vec<Case> {
         quality,
         without,
         light: None,
+        sparks: None,
+    };
+    let metal = Scene::showcase().surface("metal");
+    let decal = Sparks::Decal {
+        centre: metal.0,
+        normal: metal.1,
     };
     vec![
         case("sky", OutsideTheLevel, High, Taken::SkyColors),
@@ -74,6 +91,10 @@ fn cases() -> Vec<Case> {
         case("actor", AtActor, High, Taken::Actors),
         case("mover", AtDoor, High, Taken::MoverPose),
         case("mover_turned", AtTurnedDoor, High, Taken::MoverPose),
+        case("sprite_add", DownTheHall, Low, Taken::Particles).with(Sparks::Added),
+        case("sprite_over", DownTheHall, Low, Taken::Particles).with(Sparks::Over),
+        case("streak", DownTheHall, Low, Taken::Particles).with(Sparks::Streaks),
+        case("decal", AtMaterial("metal"), High, Taken::Particles).with(decal),
         case("dyn_light", AtMaterial("metal"), Low, Taken::DynLights).lit(1.5),
         case(
             "dyn_light_bump",
@@ -156,6 +177,12 @@ fn look(x: f32, y: f32, z: f32, ax: f32, ay: f32, az: f32) -> Pose {
     }
 }
 
+/// The sprite masks, made once.
+fn bank() -> &'static SpriteBank {
+    static BANK: std::sync::OnceLock<SpriteBank> = std::sync::OnceLock::new();
+    BANK.get_or_init(SpriteBank::new)
+}
+
 fn software(scene: &Scene, frame: &Framing, quality: Quality, without: Option<Taken>) -> Frame {
     let renderer = scene.software(without);
     let mut fb = Framebuffer::new(WIDTH, HEIGHT).expect("a framebuffer");
@@ -175,9 +202,14 @@ fn software(scene: &Scene, frame: &Framing, quality: Quality, without: Option<Ta
         Some(Taken::DynLights) => &[][..],
         _ => &frame.lights[..],
     };
+    let particles = match without {
+        Some(Taken::Particles) => None,
+        _ => frame.particles.as_ref().map(|p| (p, bank())),
+    };
     let effects = Effects {
         poses,
         lights,
+        particles,
         ..Effects::default()
     };
     renderer
@@ -195,6 +227,7 @@ fn hardware(on_gpu: &mut OnGpu, frame: &Framing, case: &Case) -> Frame {
         effects: Effects {
             poses: &frame.poses,
             lights: &frame.lights,
+            particles: frame.particles.as_ref().map(|p| (p, bank())),
             ..Effects::default()
         },
         wants_depth: true,
@@ -278,6 +311,12 @@ fn the_renderers_draw_the_same_frames() {
         if let Some(ahead) = case.light {
             scene.light(&mut framing, ahead);
         }
+        if let Some(kind) = case.sparks {
+            let level = scene.software(None);
+            let cam = level.assets().camera(&framing.view, WIDTH, HEIGHT);
+            let cam = cam.expect("a camera");
+            framing.particles = Some(particles::draws(kind, &cam, &framing.view));
+        }
         let reference = software(scene, &framing, case.quality, None);
         let drawn = hardware(renderer, &framing, &case);
         let report = compare(&reference, &drawn);
@@ -302,31 +341,4 @@ fn the_sky_case_sees_only_sky() {
     let framing = showcase.framing(Pose::OutsideTheLevel);
     let frame = software(&showcase, &framing, Quality::High, None);
     assert!(frame.depth.iter().all(|&d| d == 0.0));
-}
-
-/// Particles are not drawn on the GPU yet, so a frame with them is refused rather
-/// than drawn without them.
-#[test]
-fn a_frame_with_particles_is_refused() {
-    let Some(gpu) = gpu() else { return };
-    let showcase = Scene::showcase();
-    let OnGpu {
-        level,
-        mut renderer,
-    } = on_gpu(gpu, &showcase);
-    let framing = showcase.framing(Pose::DownTheHall);
-    let (draws, bank) = (ParticleDraws::default(), SpriteBank::new());
-    let mut fb = Framebuffer::new(WIDTH, HEIGHT).expect("a framebuffer");
-    let input = FrameInput {
-        view: &framing.view,
-        quality: Quality::High,
-        actors: &[],
-        effects: Effects {
-            particles: Some((&draws, &bank)),
-            ..Effects::default()
-        },
-        wants_depth: false,
-    };
-    assert!(renderer.draw(level.assets(), &mut fb, &input).is_none());
-    assert_eq!(renderer.take_error(), None);
 }

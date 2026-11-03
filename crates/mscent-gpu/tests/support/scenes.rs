@@ -6,6 +6,7 @@ use std::cell::RefCell;
 use std::path::Path;
 
 use mscent_math::{Quat, Vec3, Vec3d};
+use mscent_render::particles::ParticleDraws;
 use mscent_render::{
     Actor, BakeCache, BuildConfig, DynLight, LevelRenderer, Material, MaterialTable, MoverPose,
     Quality, Texture, View,
@@ -39,6 +40,8 @@ pub enum Taken {
     Spots,
     /// The frame's dynamic lights.
     DynLights,
+    /// The frame's particles.
+    Particles,
 }
 
 /// Where a case stands.
@@ -69,6 +72,7 @@ pub struct Framing {
     pub actors: Vec<Actor>,
     pub poses: Vec<MoverPose>,
     pub lights: Vec<DynLight>,
+    pub particles: Option<ParticleDraws>,
 }
 
 /// A level, and its bake shared by all the frames of it.
@@ -239,6 +243,15 @@ impl Scene {
     }
 
     fn at_material(&self, name: &str, distance: f32) -> View {
+        let (centre, normal) = self.surface(name);
+        // A little off square, so the specular lobe and the mips have a slope.
+        let eye = centre + normal * distance + Vec3::new(0.7, 0.4, 0.3);
+        let along = (centre - eye).normalized().expect("not at the face");
+        looking(eye, along)
+    }
+
+    /// The centre and front of the largest face of a stock material.
+    pub fn surface(&self, name: &str) -> (Vec3, Vec3) {
         let id = materials::NAMES
             .iter()
             .position(|&n| n == name)
@@ -260,11 +273,7 @@ impl Scene {
             .expect("a face of that material");
         let centre = poly.iter().fold(Vec3::ZERO, |sum, v| sum + v.pos) * (1.0 / poly.len() as f32);
         let n = face.plane.normal;
-        let normal = Vec3::new(n.x as f32, n.y as f32, n.z as f32);
-        // A little off square, so the specular lobe and the mips have a slope.
-        let eye = centre + normal * distance + Vec3::new(0.7, 0.4, 0.3);
-        let along = (centre - eye).normalized().expect("not at the face");
-        looking(eye, along)
+        (centre, Vec3::new(n.x as f32, n.y as f32, n.z as f32))
     }
 
     pub fn framing(&self, pose: Pose) -> Framing {
@@ -304,6 +313,7 @@ impl Scene {
             actors: renderer.actors().to_vec(),
             poses,
             lights: Vec::new(),
+            particles: None,
         }
     }
 

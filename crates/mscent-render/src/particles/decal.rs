@@ -181,11 +181,11 @@ fn on_screen(d: &DecalDraw, w: f32, h: f32) -> bool {
 
 /// Screen-linear attributes as a plane: `value = base + gx * dx + gy * dy`
 /// from the first point.
-struct Planes {
-    origin: (f32, f32),
-    base: [f32; 3],
-    gx: [f32; 3],
-    gy: [f32; 3],
+pub(super) struct Planes {
+    pub origin: (f32, f32),
+    pub base: [f32; 3],
+    pub gx: [f32; 3],
+    pub gy: [f32; 3],
 }
 
 impl Planes {
@@ -235,9 +235,17 @@ impl Planes {
     }
 }
 
-/// Darken the pixels of `d` that lie in the rows `fb` holds and are not
-/// behind the scene. A decal with bad values draws nothing.
-pub(super) fn draw_decal(fb: &mut Framebuffer, d: &DecalDraw, bank: &SpriteBank) {
+/// How a decal reads its mask: its planes, where its mip starts in the bank's
+/// bytes and its side, and how hard it darkens (`0..=256`).
+pub(super) struct Layout {
+    pub planes: Planes,
+    pub start: usize,
+    pub side: usize,
+    pub darkness: u32,
+}
+
+/// The layout of `d`. `None` for a decal with bad values, which draws nothing.
+pub(super) fn layout(d: &DecalDraw) -> Option<Layout> {
     let pts = d.points();
     let sane = |p: &DecalPoint| {
         let near = |v: f32| v.abs() <= COORD_LIMIT;
@@ -245,9 +253,33 @@ pub(super) fn draw_decal(fb: &mut Framebuffer, d: &DecalDraw, bank: &SpriteBank)
         near(p.x) && near(p.y) && p.inv_z.is_finite() && p.inv_z > 0.0 && unit(p.s) && unit(p.t)
     };
     if pts.len() < 3 || !pts.iter().all(sane) {
-        return;
+        return None;
     }
-    let Some(planes) = Planes::fit(pts) else {
+    let planes = Planes::fit(pts)?;
+    let extent = pts.iter().fold(0.0f32, |m, p| {
+        m.max((p.x - planes.origin.0).abs())
+            .max((p.y - planes.origin.1).abs())
+    });
+    let (start, side) = SpriteBank::mip_at(d.mask, mip_for(2.0 * extent));
+    Some(Layout {
+        planes,
+        start,
+        side,
+        darkness: u32::from(d.darkness).min(OPAQUE),
+    })
+}
+
+/// Darken the pixels of `d` that lie in the rows `fb` holds and are not
+/// behind the scene. A decal with bad values draws nothing.
+pub(super) fn draw_decal(fb: &mut Framebuffer, d: &DecalDraw, bank: &SpriteBank) {
+    let pts = d.points();
+    let Some(Layout {
+        planes,
+        start,
+        side,
+        darkness,
+    }) = layout(d)
+    else {
         return;
     };
     let (rows0, rows1) = fb.row_range();
@@ -255,18 +287,13 @@ pub(super) fn draw_decal(fb: &mut Framebuffer, d: &DecalDraw, bank: &SpriteBank)
         (lo.min(p.y), hi.max(p.y))
     });
     let edge = |v: f32| (v - 0.5).ceil().clamp(rows0 as f32, rows1 as f32) as i32;
-    let extent = pts.iter().fold(0.0f32, |m, p| {
-        m.max((p.x - planes.origin.0).abs())
-            .max((p.y - planes.origin.1).abs())
-    });
-    let (mask, side) = bank.mip(d.mask, mip_for(2.0 * extent));
-    if mask.len() != side * side {
+    let Some(mask) = bank.bytes().get(start..start + side * side) else {
         return;
-    }
+    };
     let tex = Texels {
         mask,
         side,
-        darkness: u32::from(d.darkness).min(OPAQUE),
+        darkness,
     };
     let width = fb.width() as usize;
     for y in edge(ymin)..edge(ymax) {

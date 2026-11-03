@@ -35,10 +35,11 @@ fn target(
     samples: u32,
 ) -> wgpu::Texture {
     // A multisampled texture cannot be copied; its depth is read by a shader.
+    // Particles read a frame's depth through a shader too.
     let read = if samples > 1 {
         wgpu::TextureUsages::TEXTURE_BINDING
     } else {
-        wgpu::TextureUsages::COPY_SRC
+        wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING
     };
     gpu.device.create_texture(&wgpu::TextureDescriptor {
         label: None,
@@ -147,6 +148,36 @@ impl Targets {
                 load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                 store,
             },
+        }
+    }
+
+    /// Where particles draw, over the finished colour: they cover whole pixels,
+    /// so they need no samples.
+    pub(crate) fn finished_attachment(&self) -> wgpu::RenderPassColorAttachment<'_> {
+        wgpu::RenderPassColorAttachment {
+            view: &self.color_view,
+            depth_slice: None,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: wgpu::StoreOp::Store,
+            },
+        }
+    }
+
+    /// The frame's depth, one value a pixel, as a shader reads it: the depth
+    /// itself, or a multisampled one resolved first with `resolve`.
+    pub(crate) fn pixel_depth(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        resolve: Option<&DepthResolve>,
+    ) -> &wgpu::TextureView {
+        match (&self.resolved_depth, resolve) {
+            (Some((_, view, source)), Some(resolve)) => {
+                resolve.run(encoder, source, view);
+                view
+            }
+            _ => &self.depth_view,
         }
     }
 

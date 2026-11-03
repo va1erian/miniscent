@@ -156,7 +156,7 @@ impl Camera {
     }
 
     /// `a` and `k` of `depth = a / z - k`, which meets 1 at near and 0 at far.
-    fn gpu_depth_terms(&self) -> (f32, f32) {
+    pub fn gpu_depth_terms(&self) -> (f32, f32) {
         let range = self.far - self.near;
         (self.near * self.far / range, self.near / range)
     }
