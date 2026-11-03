@@ -104,6 +104,8 @@ pub struct GameSession {
     fb: Option<Framebuffer>,
     /// What goes over the world, for a renderer that shows the frame itself.
     layer: Option<Framebuffer>,
+    /// The particle budget's depth, from the last frame drawn.
+    estimate: Option<Framebuffer>,
     hit: u32,
     kill: u32,
     feedback: Feedback,
@@ -180,6 +182,7 @@ impl GameSession {
             stats: FrameStats::default(),
             fb: None,
             layer: None,
+            estimate: None,
             hit: 0,
             kill: 0,
             feedback: Feedback::default(),
