@@ -14,7 +14,7 @@ pub const DEFAULT_DEPTH: u8 = 0;
 /// Texels per pixel up to which relief keeps its full depth, and the rate at which
 /// it has faded out (the height map aliases beyond that).
 pub const PARALLAX_FULL: f32 = 0.75;
-pub const PARALLAX_GONE: f32 = 2.0;
+pub const PARALLAX_GONE: f32 = 3.0;
 /// The steps a march takes looking straight on, and edge on.
 pub const MIN_STEPS: f32 = 8.0;
 pub const MAX_STEPS: f32 = 32.0;
