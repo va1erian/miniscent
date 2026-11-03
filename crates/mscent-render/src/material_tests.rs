@@ -95,8 +95,8 @@ fn only_brick_and_rock_ask_for_relief() {
     for (_, m) in table.iter() {
         let depth = m.texture.height_plane().map(|p| p.depth());
         let want = match m.name.as_str() {
-            "brick" => Some(4),
-            "rock" => Some(5),
+            "brick" => Some(14),
+            "rock" => Some(16),
             name if is_sky(name) => None,
             _ => Some(0),
         };

@@ -8,11 +8,11 @@
 #
 # Add new materials at the end. Never delete a line or reuse an id: to remove a
 # material, turn its line into `id retired`.
-0 brick 25 4
+0 brick 25 14
 1 floor 90
 2 lightpanel 120
 3 metal 200
-4 rock 10 5
+4 rock 10 16
 5 bark 8
 6 cap 70
 7 coral 30
