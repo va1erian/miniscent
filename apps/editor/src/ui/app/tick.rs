@@ -4,10 +4,12 @@ use super::{Editor, Mode};
 
 impl Editor {
     /// Moves the 3D camera's mark in the 2D views when the camera moved. Only
-    /// the views on show repaint, and only then.
+    /// the views on show repaint, and only then: a camera the render thread is
+    /// holding is read next tick, as falling back to an older pose would move
+    /// the mark back and forth and repaint the views every time.
     fn follow_eye(&mut self) {
-        let eye = Some(self.studio.fly_camera().eye());
-        if self.state.borrow().eye == eye {
+        let eye = self.studio.shown_camera().map(|c| c.eye());
+        if eye.is_none() || self.state.borrow().eye == eye {
             return;
         }
         self.state.borrow_mut().eye = eye;

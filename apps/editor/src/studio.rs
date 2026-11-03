@@ -223,6 +223,15 @@ impl Studio {
             .unwrap_or_else(|| self.camera.clone())
     }
 
+    /// The camera the 3D pane draws from, when it can be read without
+    /// waiting: while the render thread holds it, `None`, not an older pose.
+    pub fn shown_camera(&self) -> Option<FlyCam> {
+        match &self.worker {
+            Some(w) => w.current_camera(),
+            None => Some(self.camera.clone()),
+        }
+    }
+
     /// Sets the faces to mark in the 3D view. Nothing is sent when they are
     /// the ones already shown.
     pub fn set_highlights(&mut self, marks: crate::model::facetex::Marks) {
