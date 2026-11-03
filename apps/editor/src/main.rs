@@ -16,6 +16,7 @@ mod files;
 mod materials;
 mod model;
 mod script;
+#[cfg(feature = "canvas")]
 mod selftest;
 mod studio;
 mod texbake;
@@ -28,6 +29,7 @@ use ui::Editor;
 fn main() -> xui::backend::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     studio::gpu_view::set_wanted(!args.iter().any(|a| a == "--software"));
+    #[cfg(feature = "canvas")]
     if let Some(i) = args.iter().position(|a| a == "--selftest") {
         let Some(dir) = args.get(i + 1) else {
             eprintln!("--selftest needs an output directory");
@@ -46,6 +48,7 @@ fn main() -> xui::backend::Result<()> {
         }
         return Ok(());
     }
+    #[cfg(feature = "canvas")]
     if let Some(i) = args.iter().position(|a| a == "--ui-timing") {
         let dir = args
             .get(i + 1)
@@ -78,7 +81,7 @@ fn main() -> xui::backend::Result<()> {
         })
         .map(|(_, a)| a)
         .map(std::path::PathBuf::from);
-    xui::app("miniscent editor").size(1280, 800).run(move |ui| {
+    let make = move |ui: &mut xui::app::Ui<ui::Msg>| {
         if let Some(p) = &path {
             return match files::load(p) {
                 Ok(doc) => Editor::build_from(ui, doc, Some(p.clone()), None),
@@ -91,5 +94,27 @@ fn main() -> xui::backend::Result<()> {
             Document::new()
         };
         Editor::build(ui, doc)
-    })
+    };
+    launch(make)
+}
+
+/// Opens the editor window on the Direct2D backend.
+#[cfg(feature = "d2d")]
+fn launch<F>(make: F) -> xui::backend::Result<()>
+where
+    F: FnOnce(&mut xui::app::Ui<ui::Msg>) -> xui::backend::Result<Editor>,
+{
+    xui::app("miniscent editor")
+        .size(1280, 800)
+        .backend(std::rc::Rc::new(xui_d2d::D2dBackend::new()))
+        .run(make)
+}
+
+/// Opens the editor window on the software backend.
+#[cfg(all(feature = "canvas", not(feature = "d2d")))]
+fn launch<F>(make: F) -> xui::backend::Result<()>
+where
+    F: FnOnce(&mut xui::app::Ui<ui::Msg>) -> xui::backend::Result<Editor>,
+{
+    xui::app("miniscent editor").size(1280, 800).run(make)
 }

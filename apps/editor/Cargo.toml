@@ -18,11 +18,21 @@ mscent-game.workspace = true
 mscent-script.workspace = true
 mscent-platform = { workspace = true }
 miniscent-game = { path = "../game", default-features = false }
-xui = { git = "https://github.com/va1erian/xui", rev = "876803f680803e629a40de07017f8fcd45fad903" }
-xui-code-editor = { git = "https://github.com/va1erian/xui", rev = "876803f680803e629a40de07017f8fcd45fad903" }
+xui = { path = "C:/repos/xui/.claude/worktrees/win32-xui-core-port-0c0ffa/crates/xui", default-features = false }
+xui-code-editor = { path = "C:/repos/xui/.claude/worktrees/win32-xui-core-port-0c0ffa/crates/xui-code-editor" }
 # The guide is an HTML page: it replaces a pile of text widgets (docs/scripting.md). Blitz over
 # xui-litehtml, which measures text at 96 dpi and paints it at the display's, so words drift when scaled.
-xui-blitz = { git = "https://github.com/va1erian/xui", rev = "876803f680803e629a40de07017f8fcd45fad903" }
+xui-blitz = { path = "C:/repos/xui/.claude/worktrees/win32-xui-core-port-0c0ffa/crates/xui-blitz" }
+
+[target.'cfg(windows)'.dependencies]
+xui-d2d = { path = "C:/repos/xui/.claude/worktrees/win32-xui-core-port-0c0ffa/crates/xui-d2d", optional = true }
+
+[features]
+# The software backend (winit + tiny-skia) and the headless selftest harness.
+default = ["canvas"]
+canvas = ["xui/canvas"]
+# The lightweight Windows backend: Direct2D and DirectWrite, native file dialogs.
+d2d = ["dep:xui-d2d"]
 
 [lints]
 workspace = true
