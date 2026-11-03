@@ -1,6 +1,6 @@
 # Hardware renderer: plan
 
-Status: accepted, M14.1 to M14.6, M14.8 and M14.10 to M14.12 done, M14.7 done but for the particle depth estimate (see status.md) and the rest not started ([status.md](status.md)). Figures
+Status: done. M14.1 to M14.12 are built, the GPU draws the editor, Instant Play and the game, and what was not verified is listed per item in [status.md](status.md); costs are in [perf/hardware.md](perf/hardware.md). Figures
 under "Measured" were run for this plan; all others are targets to measure. The work
 items are in [work-items.md](work-items.md) as M14.
 
