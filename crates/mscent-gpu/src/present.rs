@@ -6,15 +6,17 @@
 use crate::device::{Gpu, GpuError};
 
 /// `Show` of `present.wgsl`.
-const UNIFORM_BYTES: u64 = 32;
+const UNIFORM_BYTES: u64 = 48;
 /// The layer's texels, `0xAARRGGBB` little-endian as a `Framebuffer` holds them.
 const LAYER: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
 
 /// What goes over a frame and where it lands in the window.
 pub struct Overlay<'a> {
-    /// The 2D layer, the frame's size, its colour premultiplied by its alpha as
-    /// `draw2d` leaves a layer cleared to nothing.
+    /// The 2D layer, its colour premultiplied by its alpha as `draw2d` leaves a
+    /// layer cleared to nothing, and its size: the frame's, or smaller, for 2D
+    /// drawn at a lower resolution than the world and shown by whole pixels.
     pub layer: &'a [u32],
+    pub layer_size: (u32, u32),
     /// The white flash over the scene and under the layer, `0..=256`.
     pub white: u32,
     /// The window's inner size, and where the frame lands in it: `x, y, width,
@@ -240,7 +242,7 @@ impl Compositor {
         overlay: &Overlay,
         target: &wgpu::TextureView,
     ) -> Result<(), GpuError> {
-        let layer = self.layer(gpu, size, overlay.layer)?.clone();
+        let layer = self.layer(gpu, overlay.layer_size, overlay.layer)?.clone();
         let (x, y, w, h) = overlay.rect;
         let whole = w > 0 && w % size.0 == 0 && h % size.1 == 0 && w / size.0 == h / size.1;
         let floats = [
@@ -254,6 +256,10 @@ impl Compositor {
         let mut bytes: Vec<u8> = floats.iter().flat_map(|v| v.to_le_bytes()).collect();
         bytes.extend_from_slice(&(overlay.white.min(256) as f32).to_le_bytes());
         bytes.extend_from_slice(&u32::from(whole).to_le_bytes());
+        let (lw, lh) = overlay.layer_size;
+        for value in [lw as f32, lh as f32, 0.0, 0.0] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
         gpu.queue.write_buffer(&self.uniform, 0, &bytes);
         let entries = [
             wgpu::BindGroupEntry {

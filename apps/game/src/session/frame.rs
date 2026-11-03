@@ -5,9 +5,10 @@ use mscent_collide::STEP_HZ;
 use mscent_game::Screen;
 use mscent_game::fx::combat::ViewKick;
 use mscent_math::{Quat, Vec3};
+use mscent_render::particles::{ParticleDraws, SpriteBank};
 use mscent_render::{
-    Actor, Effects, FrameInput, FrameRenderer, Framebuffer, LevelAssets, MoverPose, View,
-    layer_over, simd,
+    Actor, DynLight, Effects, FrameInput, FrameRenderer, Framebuffer, LevelAssets, MoverPose,
+    Quality, View, layer_over, simd,
 };
 
 use super::GameSession;
@@ -109,38 +110,31 @@ impl GameSession {
     }
 
     /// [`Self::render`] for a renderer that shows the frame itself: `show` gets
-    /// the world to draw, the layer the HUD, feedback, menus and notices are
-    /// drawn into, and the white flash to put between them, and says whether it
-    /// showed them. Where it did not, software draws the world and the layer goes
-    /// over it, and that frame is returned to be presented. The particle budget
-    /// has no depth here: nothing is read back.
+    /// the world to draw at `world` pixels, the layer of `layer` pixels the HUD,
+    /// feedback, menus and notices are drawn into, and the white flash to put
+    /// between them, and says whether it showed them. Where it did not, software
+    /// draws the world at the layer's size and the layer goes over it, and that
+    /// frame is returned to be presented. The particle budget has no depth here:
+    /// nothing is read back.
     pub fn render_layered(
         &mut self,
-        (width, height): (u32, u32),
+        (world, layer_size): ((u32, u32), (u32, u32)),
         show: &mut dyn FnMut(&LevelAssets, &FrameInput, &Framebuffer, u32) -> bool,
     ) -> Option<Option<&Framebuffer>> {
-        let mut layer = take_sized(&mut self.layer, (width, height))?;
+        let mut layer = take_sized(&mut self.layer, layer_size)?;
         layer.clear(0);
-        let at = self.prepare((width, height), None);
+        let at = self.prepare(world, None);
         self.draw_over(&mut layer, &at.view);
-        let effects = Effects {
-            particles: Some((&self.draws, &self.bank)),
-            lights: self.fx.lights(self.renderer.scene()),
-            poses: &at.poses,
-            vista_time: at.vista_time,
-            models: None,
-        };
-        let input = FrameInput {
-            view: &at.view,
-            quality: self.quality,
-            actors: &at.actors,
-            effects,
-            wants_depth: false,
-        };
+        let lights = self.fx.lights(self.renderer.scene());
+        let input = frame_input(&at, (&self.draws, &self.bank), lights, self.quality);
         let shown = show(self.renderer.assets(), &input, &layer, self.kick.white);
         let mut fb = None;
         if !shown {
-            let mut frame = take_sized(&mut self.fb, (width, height))?;
+            // The particles were placed on a screen of the world's size.
+            let at = self.prepare(layer_size, None);
+            let lights = self.fx.lights(self.renderer.scene());
+            let input = frame_input(&at, (&self.draws, &self.bank), lights, self.quality);
+            let mut frame = take_sized(&mut self.fb, layer_size)?;
             if self.renderer.draw(&mut frame, &input).is_some() {
                 if self.kick.white > 0 {
                     simd::lerp_toward(frame.pixels_mut(), WHITE, self.kick.white);
@@ -220,5 +214,27 @@ fn take_sized(slot: &mut Option<Framebuffer>, (width, height): (u32, u32)) -> Op
     match slot.take() {
         Some(fb) if (fb.width(), fb.height()) == (width, height) => Some(fb),
         _ => Framebuffer::new(width, height),
+    }
+}
+
+/// The world of a frame `at` describes, with nothing read back after it.
+fn frame_input<'a>(
+    at: &'a Prepared,
+    particles: (&'a ParticleDraws, &'a SpriteBank),
+    lights: &'a [DynLight],
+    quality: Quality,
+) -> FrameInput<'a> {
+    FrameInput {
+        view: &at.view,
+        quality,
+        actors: &at.actors,
+        effects: Effects {
+            particles: Some(particles),
+            lights,
+            poses: &at.poses,
+            vista_time: at.vista_time,
+            models: None,
+        },
+        wants_depth: false,
     }
 }

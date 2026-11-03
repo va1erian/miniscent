@@ -324,6 +324,7 @@ impl Studio {
         }
         w.mode(Mode::Play);
         self.mode = Mode::Play;
+        gpu_view::set_inactive();
         Ok(())
     }
 
