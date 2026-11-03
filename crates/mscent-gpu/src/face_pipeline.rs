@@ -5,6 +5,8 @@
 use std::sync::OnceLock;
 
 use mscent_math::epsilon::MIN_LENGTH_F32;
+
+use crate::dyn_lights::SET_SHIFT;
 use mscent_render::bump::{MAX_GAIN, MIN_FLAT, MIN_GAIN, RELIEF};
 use mscent_render::light_sampler::MIN_BLEND;
 use mscent_render::lighting_shader::{BUMP_FULL, BUMP_GONE};
@@ -158,6 +160,7 @@ fn pipeline(gpu: &Gpu, layouts: &Layouts, finish: Finish, texels: Texels) -> wgp
         ("SPEC_GAIN", f64::from(SPEC_GAIN)),
         ("MIN_SPEC", f64::from(MIN_SPEC)),
         ("MIN_LENGTH", f64::from(MIN_LENGTH_F32)),
+        ("SET_SHIFT", f64::from(SET_SHIFT)),
         ("TABLE_LEN", TABLE_LEN as f64),
         ("FINE", f64::from(u8::from(finish == Finish::Fine))),
         ("MASK", texels.mask()),

@@ -436,6 +436,14 @@ Design in [enemies.md](enemies.md).
 | M15.2 | Done | `mscent-render/src/model/`; `model::tests` (texture rides on a model that moves and turns, no pinholes, levels, budget, glow, tint, hostile poses), `tests/model_frame.rs` (same picture for any bands), `tests/model_alloc.rs`; `examples/model_shot.rs` holds the cost table |
 | M15.11 | Done | `mscent-gpu/src/models.rs`; `tests/parity.rs` cases `model`, `model_texture`, `model_turned`, `model_bump`, `model_specular`, `model_lod`, `model_dyn_light`, each failing with its feature taken out, and 8 seeded GPU bugs caught; `model::list_tests`; `examples/model_gpu_shot.rs` holds the cost. Not run on lavapipe yet |
 
+## M17 Many dynamic lights
+
+Design in [dynamic-lights.md](dynamic-lights.md).
+
+| ID | Status | Evidence |
+|---|---|---|
+| M17.2 | Done | `mscent-world/src/rooms.rs` (rooms from open portals, a table of the smallest worst portal gap between rooms, `from_parts` refusing forged tables), `scene/{reach,rooms}.rs` (a light's reach is a row read, no flood), `mscent-gpu/src/dyn_lights.rs` (masks by set of rooms, not by face; the set is in the face's flags). Tests: `rooms_tests` and `tests/rooms_levels.rs` (table size and build time on every shipped level), `scene/reach_tests.rs` (reaches everything the old flood did, 7,900 lights), `tests/room_lights.rs` in `mscent-render` and `mscent-gpu` (a wall leaves the far room dark, a doorway lights both, a moved light lights the other room). Each wall test fails with the room test taken out. Table 30 KB and 10 ms for 64 generated rooms. Not verified: frame cost with `light_bench` or on the GPU against before |
+
 ## Deviations from the plan
 
 - Platform layer: the game does not use xui. `mscent-platform` is a small trait with a desktop (winit + softbuffer) and a headless backend; xui is used only by `apps/editor`. A LazyOS backend is not written.

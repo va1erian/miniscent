@@ -10,7 +10,7 @@ use mscent_render::scene::{Scene, eye_of};
 use mscent_render::{Camera, DynLight, LevelAssets, MoverPose, Vertex, VistaView};
 
 use crate::device::{Gpu, GpuError};
-use crate::dyn_lights::FaceMasks;
+use crate::dyn_lights::SetMasks;
 use crate::face_data::{self, TABLE_LEN};
 use crate::face_pipeline::{Compiled, VERTEX_BYTES, sampler};
 use crate::face_views::{FaceView, POSE_BYTES, Shared, layer_view, push_pose};
@@ -47,7 +47,7 @@ pub(crate) struct FacePass {
     material_of: Vec<usize>,
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
-    lights: FaceMasks,
+    lights: SetMasks,
     /// By face: its vertices, empty for one the rasterizer would refuse.
     corners: Vec<Range<u32>>,
     /// By material, this frame's visible faces, kept so a frame does not
@@ -186,13 +186,14 @@ impl FacePass {
         if assets.vista_layer_count() > MAX_LAYERS {
             return Err(GpuError::TooLarge("vista layers"));
         }
+        // Before any face names its set, so that a set the flags cannot hold is refused first.
+        let lights = SetMasks::new(gpu, scene.rooms().set_count())?;
         let atlas = LightAtlas::new(gpu, assets)?;
         let data = face_data::build(assets, &atlas);
         let pose_size = (assets.movers().len() as u64 + 1)
             .checked_mul(POSE_BYTES as u64)
             .ok_or(GpuError::TooLarge("movers"))?;
         let poses = buffer(gpu, "poses", pose_size, wgpu::BufferUsages::STORAGE)?;
-        let lights = FaceMasks::new(gpu, scene.faces().len())?;
         let (vertex_data, corners) = vertex_bytes(scene)?;
         let vertices = buffer(
             gpu,
