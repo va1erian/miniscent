@@ -23,7 +23,8 @@ replays.
 - Gameplay is hitscan. A bolt (`fx/combat.rs`, 32 at most) is a cosmetic streak and glow.
 - `examples/light_bench.rs` (software, 640x360 High, one thread) reads 5.64, 5.96, 6.61 and
   6.92 ms for 0, 1, 2 and 4 lights, about 23 ns a span per light and linear. The GPU
-  cost per light has not been measured.
+  cost per light is measured in [perf/dynamic-lights.md](perf/dynamic-lights.md): about 20 us at
+  4K and 5 us at 1080p for the face loop, linear in lights and in pixels.
 - A light's reach is a portal flood by distance only (`scene/reach.rs`). It tests no
   occlusion inside a room: a pillar does not stop a light.
 
