@@ -7,7 +7,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use super::{Actor, Effects, LevelRenderer, Quality, View};
 use crate::dynlight::MAX_DYN_LIGHTS;
 use crate::framebuffer::Framebuffer;
+use crate::model::{ModelFill, fill_models};
 use crate::particles::draw_particles;
+use crate::raster::DrawStats;
 use crate::scene::{SceneStats, eye_of};
 use crate::voxel::fill::{FillContext, fill_voxels};
 
@@ -83,15 +85,24 @@ impl LevelRenderer {
         stats.vista_triangles = frame.layers.iter().map(|l| l.voxel_triangles()).sum();
         self.list_movers(&cam, effects.poses, &mut frame.movers);
         self.list_actors(&cam, actors, lights, frame);
+        assets.list_models(&mut frame.models, effects.models, &cam, lights);
+        stats.model_triangles = frame.models.triangles;
         let (faces, meshes, movers) = (&frame.faces, &frame.actors, &frame.movers);
-        let voxels = &frame.voxels;
+        let (voxels, models) = (&frame.voxels, &frame.models);
         let (holes, layers) = (&frame.holes, &frame.layers);
         let (pixels, spans) = (AtomicU32::new(0), AtomicU32::new(0));
         let vista_pixels = AtomicU32::new(0);
         let eye = eye_of(&cam);
         let texture_of = |id: u16| assets.scene.texture_of(id);
+        let model_fill = ModelFill {
+            cam: &cam,
+            fog: assets.fog(),
+            bump: quality != Quality::Low,
+            specular: quality == Quality::High,
+            spec: &assets.spec,
+            texture_of: &texture_of,
+        };
         let voxel_fill = FillContext {
-            scene: assets.scene.voxels(),
             cam: &cam,
             eye,
             fog: assets.fog(),
@@ -106,8 +117,13 @@ impl LevelRenderer {
             band.clear_sky(cfg.sky_top, cfg.sky_bottom);
             // First, so the z-buffer saves shading whatever a door covers.
             let moved = self.fill_movers(band, movers, quality);
+            // Next, for the same reason: what stands in a room covers its walls.
+            let held = effects.models.map(|(table, _)| table);
+            let modelled = held.map_or_else(DrawStats::default, |table| {
+                fill_models(band, models, table, &model_fill)
+            });
             // Next, for the same reason: a voxel pixel costs less than a wall's.
-            let vox = fill_voxels(band, voxels, &voxel_fill);
+            let vox = fill_voxels(band, voxels, assets.scene.voxels(), &voxel_fill);
             let st = self.fill_level(band, faces, quality, eye, lights);
             assets.meshes.fill(band, meshes, assets.fog());
             // Last of the solid things, so it shades only what they left showing.
@@ -116,12 +132,10 @@ impl LevelRenderer {
                 draw_particles(band, draws, bank);
             }
             vista_pixels.fetch_add(sky.pixels, Ordering::Relaxed);
-            let drawn = moved.pixels + vox.pixels + st.pixels + sky.pixels;
+            let drawn = moved.pixels + modelled.pixels + vox.pixels + st.pixels + sky.pixels;
             pixels.fetch_add(drawn, Ordering::Relaxed);
-            spans.fetch_add(
-                moved.spans + vox.spans + st.spans + sky.spans,
-                Ordering::Relaxed,
-            );
+            let runs = moved.spans + modelled.spans + vox.spans + st.spans + sky.spans;
+            spans.fetch_add(runs, Ordering::Relaxed);
         });
         frame.tiles.composite(fb).ok()?;
         stats.pixels = pixels.into_inner();

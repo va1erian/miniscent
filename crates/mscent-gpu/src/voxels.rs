@@ -22,12 +22,12 @@ use crate::face_data::TABLE_LEN;
 use crate::faces::storage;
 use crate::finish::Finish;
 use crate::targets::{COLOR, DEPTH};
-use crate::voxel_materials::{self, MATERIALS};
+use crate::voxel_materials::{self, MATERIALS, VoxelMaterials};
 
 /// The `Voxels` uniform of `voxel.wgsl`.
 pub(crate) const UNIFORM_BYTES: u64 = 192;
 /// A `Vertex` of `voxel.wgsl`.
-const VERTEX_BYTES: u64 = 64;
+pub(crate) const VERTEX_BYTES: u64 = 64;
 const SHADER: &str = concat!(
     include_str!("../shaders/common.wgsl"),
     include_str!("../shaders/shading.wgsl"),
@@ -74,7 +74,7 @@ pub(crate) struct VoxelPass {
     draws: Vec<VoxelDraw>,
 }
 
-fn push_vec3(out: &mut Vec<u8>, v: mscent_math::Vec3, w: [u8; 4]) {
+pub(crate) fn push_vec3(out: &mut Vec<u8>, v: mscent_math::Vec3, w: [u8; 4]) {
     for value in [v.x, v.y, v.z] {
         out.extend_from_slice(&value.to_le_bytes());
     }
@@ -108,7 +108,7 @@ fn push_lod(vertices: &mut Vec<u8>, corners: &mut Vec<u8>, lod: &LodLook, base: 
     written
 }
 
-fn pipeline(gpu: &Gpu, finish: Finish) -> wgpu::RenderPipeline {
+pub(crate) fn pipeline(gpu: &Gpu, finish: Finish) -> wgpu::RenderPipeline {
     let device = &gpu.device;
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("voxels"),
@@ -181,8 +181,12 @@ fn pipeline(gpu: &Gpu, finish: Finish) -> wgpu::RenderPipeline {
 
 /// What the shader reads about this frame beyond `Frame`.
 pub(crate) fn uniform_bytes(cam: &Camera) -> Vec<u8> {
+    uniform_bytes_at(cam, eye_of(cam))
+}
+
+/// The same, seen from `eye`, in whatever units the vertices are in.
+pub(crate) fn uniform_bytes_at(cam: &Camera, eye: mscent_math::Vec3) -> Vec<u8> {
     let mut out = Vec::with_capacity(UNIFORM_BYTES as usize);
-    let eye = eye_of(cam);
     let size = [cam.width() as f32, cam.height() as f32];
     for value in [
         eye.x,
@@ -232,6 +236,47 @@ fn bind(
     })
 }
 
+/// The `materials`, `texels`, `spec_tables` and `spots` buffers of `voxel.wgsl`.
+pub(crate) fn material_buffers(
+    gpu: &Gpu,
+    built: &VoxelMaterials,
+) -> Result<[wgpu::Buffer; 4], GpuError> {
+    let field = spot_field();
+    let spot_bytes: Vec<u8> = field
+        .distance
+        .iter()
+        .flat_map(|&d| i32::from(d).to_le_bytes())
+        .collect();
+    let table = storage(gpu, "voxel materials", &built.table, 4)?;
+    let texels = storage(gpu, "voxel texels", &built.texels, 4)?;
+    let tables = storage(gpu, "voxel spec", &built.tables, 4 * TABLE_LEN as u64)?;
+    let spots = storage(gpu, "spots", &spot_bytes, 4)?;
+    Ok([table, texels, tables, spots])
+}
+
+/// The second bind group of `pipeline`: a mesh's vertices, and its corners.
+pub(crate) fn bind_mesh(
+    gpu: &Gpu,
+    pipeline: &wgpu::RenderPipeline,
+    vertices: &wgpu::Buffer,
+    corners: &wgpu::Buffer,
+) -> wgpu::BindGroup {
+    gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("voxel mesh"),
+        layout: &pipeline.get_bind_group_layout(1),
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: vertices.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: corners.as_entire_binding(),
+            },
+        ],
+    })
+}
+
 impl VoxelPass {
     pub(crate) fn new(gpu: &Gpu, frame_uniform: &wgpu::Buffer, finish: Finish) -> Self {
         let uniform = gpu.device.create_buffer(&wgpu::BufferDescriptor {
@@ -266,17 +311,7 @@ impl VoxelPass {
         held: [bool; MATERIALS],
     ) -> Result<Shared, GpuError> {
         let built = voxel_materials::build(assets, &held)?;
-        let field = spot_field();
-        let spot_bytes: Vec<u8> = field
-            .distance
-            .iter()
-            .flat_map(|&d| i32::from(d).to_le_bytes())
-            .collect();
-        let table = storage(gpu, "voxel materials", &built.table, 4)?;
-        let texels = storage(gpu, "voxel texels", &built.texels, 4)?;
-        let tables = storage(gpu, "voxel spec", &built.tables, 4 * TABLE_LEN as u64)?;
-        let spots = storage(gpu, "spots", &spot_bytes, 4)?;
-        let buffers = [table, texels, tables, spots];
+        let buffers = material_buffers(gpu, &built)?;
         let bind_group = bind(
             gpu,
             pipeline,
@@ -349,20 +384,7 @@ impl VoxelPass {
         }
         let vertices = storage(gpu, "voxel vertices", &vertices, VERTEX_BYTES)?;
         let corners = storage(gpu, "voxel corners", &corners, 4)?;
-        let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("voxel chunk"),
-            layout: &pipeline.get_bind_group_layout(1),
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: vertices.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: corners.as_entire_binding(),
-                },
-            ],
-        });
+        let group = bind_mesh(gpu, pipeline, &vertices, &corners);
         Ok(GpuChunk {
             look,
             group: Some(group),

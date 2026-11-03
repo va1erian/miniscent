@@ -20,12 +20,14 @@ use std::path::{Path, PathBuf};
 use compare::{Frame, compare};
 use gpu::gpu;
 use mscent_gpu::{Gpu, GpuRenderer};
+use mscent_math::Quat;
 use mscent_math::Vec3;
+use mscent_render::model::ModelInstance;
 use mscent_render::particles::SpriteBank;
 use mscent_render::png_encode::encode_png;
 use mscent_render::{Effects, FrameInput, Framebuffer, LevelRenderer, Quality};
 use particles::Sparks;
-use scenes::{Framing, Pose, Scene, Taken};
+use scenes::{Framing, Pose, Scene, Taken, models};
 
 const WIDTH: u32 = 320;
 const HEIGHT: u32 = 180;
@@ -39,9 +41,18 @@ struct Case {
     /// How far ahead of the eye a dynamic light stands, if the case has one.
     light: Option<f32>,
     sparks: Option<Sparks>,
+    /// How far ahead of the eye enemy models stand, if the case has them.
+    models: Option<f32>,
 }
 
 impl Case {
+    fn models(self, ahead: f32) -> Self {
+        Self {
+            models: Some(ahead),
+            ..self
+        }
+    }
+
     fn with(self, sparks: Sparks) -> Self {
         Self {
             sparks: Some(sparks),
@@ -67,6 +78,7 @@ fn cases() -> Vec<Case> {
         without,
         light: None,
         sparks: None,
+        models: None,
     };
     let metal = Scene::showcase().surface("metal");
     let decal = Sparks::Decal {
@@ -173,6 +185,54 @@ fn cases() -> Vec<Case> {
         case("vista_fog", AtVista, Low, Taken::VistaFog),
         case("cutout", AtVista, Low, Taken::Cutouts),
         case("vista_voxels", AtVista, Low, Taken::Voxels),
+        case("model", AtModels { ahead: 3.0 }, Low, Taken::Models).models(3.0),
+        case(
+            "model_texture",
+            AtModels { ahead: 3.0 },
+            High,
+            Taken::Textures,
+        )
+        .models(3.0),
+        case(
+            "model_turned",
+            AtModels { ahead: 3.0 },
+            Low,
+            Taken::ModelTurns,
+        )
+        .models(3.0),
+        // A light before the probes, so that their fronts catch bump and highlight.
+        case(
+            "model_bump",
+            AtModels { ahead: 2.0 },
+            Medium,
+            Taken::Quality(Low),
+        )
+        .models(2.0)
+        .lit(1.0),
+        case(
+            "model_specular",
+            AtModels { ahead: 3.0 },
+            High,
+            Taken::Quality(Medium),
+        )
+        .models(3.0)
+        .lit(1.5),
+        // In the long voxel room, whose far wall is square on.
+        case(
+            "model_lod",
+            look(0.0, -18.0, 2.0, 0.0, 6.0, -2.0),
+            Low,
+            Taken::Models,
+        )
+        .models(14.0),
+        case(
+            "model_dyn_light",
+            AtModels { ahead: 3.0 },
+            Low,
+            Taken::DynLights,
+        )
+        .models(3.0)
+        .lit(2.0),
     ]
 }
 
@@ -213,11 +273,25 @@ fn software(scene: &Scene, frame: &Framing, quality: Quality, without: Option<Ta
         Some(Taken::Particles) => None,
         _ => frame.particles.as_ref().map(|p| (p, bank())),
     };
+    let turned: Vec<ModelInstance>;
+    let instances = match without {
+        Some(Taken::Models) => &[][..],
+        Some(Taken::ModelTurns) => {
+            let still = |m: &ModelInstance| ModelInstance {
+                rot: Quat::IDENTITY,
+                ..*m
+            };
+            turned = frame.models.iter().map(still).collect();
+            &turned[..]
+        }
+        _ => &frame.models[..],
+    };
     let effects = Effects {
         poses,
         lights,
         particles,
         vista_time: frame.time,
+        models: Some((&models::table().0, instances)),
     };
     renderer
         .render_with_effects(&mut fb, &frame.view, quality, actors, None, &effects)
@@ -236,6 +310,7 @@ fn hardware(on_gpu: &mut OnGpu, frame: &Framing, case: &Case) -> Frame {
             lights: &frame.lights,
             particles: frame.particles.as_ref().map(|p| (p, bank())),
             vista_time: frame.time,
+            models: Some((&models::table().0, &frame.models)),
         },
         wants_depth: true,
     };
@@ -311,6 +386,15 @@ fn the_renderers_draw_the_same_frames() {
             }
             (_, Pose::AtVista | Pose::AtVistaAside) => (&vista, &mut vista_gpu),
             ("light_mips", _) => (&hard, &mut hard_gpu),
+            // A model's detail also depends on the frames before it.
+            (name, _) if name.starts_with("model") => {
+                let scene = match name {
+                    "model_lod" => &voxel_distance,
+                    _ => &showcase,
+                };
+                voxel_gpu = on_gpu(first.clone(), scene);
+                (scene, &mut voxel_gpu)
+            }
             (name, _) if name.starts_with("voxel") => {
                 let scene = match name {
                     "voxel_lod" | "voxel_mips" => &voxel_distance,
@@ -322,6 +406,9 @@ fn the_renderers_draw_the_same_frames() {
             _ => (&showcase, &mut showcase_gpu),
         };
         let mut framing = scene.framing(case.pose);
+        if let Some(ahead) = case.models {
+            framing.models = models::ahead_of(&framing.view, ahead);
+        }
         if let Some(ahead) = case.light {
             scene.light(&mut framing, ahead);
         }
@@ -343,7 +430,13 @@ fn the_renderers_draw_the_same_frames() {
         let stripped = software(scene, &framing, case.quality, Some(case.without));
         let report = compare(&reference, &stripped);
         if report.alike() {
-            failures.push(format!("{}: cannot fail, {report:?}", case.name));
+            // The "hw" picture is the stripped software frame.
+            let dir = write_pictures(&format!("{}-stripped", case.name), &reference, &stripped);
+            let where_ = dir.display();
+            failures.push(format!(
+                "{}: cannot fail, {report:?}, pictures in {where_}",
+                case.name
+            ));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));

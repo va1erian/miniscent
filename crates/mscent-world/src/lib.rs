@@ -55,6 +55,7 @@ pub mod level_builder;
 pub mod level_text;
 pub mod lightmap;
 pub mod materials;
+pub mod model;
 pub mod polytope;
 pub mod portals;
 pub mod showcase;

@@ -22,7 +22,7 @@ pub use list::{ListedChunk, MAX_VOXEL_TRIS, VoxelList};
 pub(crate) mod shader;
 mod solid;
 pub use solid::{SpotField, has_spots, spot_field};
-mod tri;
+pub(crate) mod tri;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -94,7 +94,7 @@ pub(crate) fn seam_of(n: Vec3) -> (u8, u8, f32) {
 }
 
 /// The axis that textures a surface facing `n`.
-fn dominant_axis(n: Vec3) -> u8 {
+pub(crate) fn dominant_axis(n: Vec3) -> u8 {
     let (ax, ay, az) = (n.x.abs(), n.y.abs(), n.z.abs());
     if ax > az && ax >= ay {
         0
@@ -119,8 +119,20 @@ fn vertex_materials(mesh: &ChunkMesh) -> Vec<u8> {
 }
 
 fn tangent_dir(v: &VoxelVertex, axis: u8, dir: Vec3) -> Vec3 {
+    tangent_of(v.normal, axis, dir)
+}
+
+/// The direction `dir` in the frame normal maps are authored in, on a surface
+/// facing `normal` and textured along `axis`.
+pub(crate) fn tangent_of(normal: Vec3, axis: u8, dir: Vec3) -> Vec3 {
     let (u, w) = axis_map(axis);
-    Vec3::new(dir.dot(u), -dir.dot(w), dir.dot(v.normal))
+    Vec3::new(dir.dot(u), -dir.dot(w), dir.dot(normal))
+}
+
+/// Which axis textures a vertex facing `normal`, or [`IN_SEAM`] between two.
+pub(crate) fn vertex_axis(normal: Vec3) -> u8 {
+    let (first, _, lead) = seam_of(normal);
+    if lead < SEAM_BAND { IN_SEAM } else { first }
 }
 
 impl LodData {
@@ -128,10 +140,7 @@ impl LodData {
         let axis: Vec<u8> = mesh
             .vertices
             .iter()
-            .map(|v| {
-                let (first, _, lead) = seam_of(v.normal);
-                if lead < SEAM_BAND { IN_SEAM } else { first }
-            })
+            .map(|v| vertex_axis(v.normal))
             .collect();
         let dir_t = mesh
             .vertices

@@ -18,7 +18,6 @@ use crate::texture::Texture;
 
 /// Everything a frame's triangles share.
 pub(crate) struct FillContext<'a> {
-    pub scene: &'a VoxelScene,
     pub cam: &'a Camera,
     pub eye: Vec3,
     pub fog: Option<Fog>,
@@ -33,14 +32,19 @@ pub(crate) struct FillContext<'a> {
 }
 
 /// Fills every listed chunk touching the rows `fb` holds.
-pub(crate) fn fill_voxels(fb: &mut Framebuffer, list: &VoxelList, ctx: &FillContext) -> DrawStats {
+pub(crate) fn fill_voxels(
+    fb: &mut Framebuffer,
+    list: &VoxelList,
+    scene: &VoxelScene,
+    ctx: &FillContext,
+) -> DrawStats {
     let mut stats = DrawStats::default();
     let band = fb.row_range();
     for listed in &list.chunks {
         if listed.first >= band.1 || listed.last <= band.0 {
             continue;
         }
-        fill_chunk(fb, list, listed, ctx, band, &mut stats);
+        fill_chunk(fb, list, listed, scene, ctx, band, &mut stats);
     }
     stats
 }
@@ -49,13 +53,14 @@ fn fill_chunk(
     fb: &mut Framebuffer,
     list: &VoxelList,
     listed: &ListedChunk,
+    scene: &VoxelScene,
     ctx: &FillContext,
     band: (i32, i32),
     stats: &mut DrawStats,
 ) {
     let c = listed.chunk as usize;
     let lod = usize::from(listed.lod);
-    let (Some(chunk), Some(data)) = (ctx.scene.world.chunks.get(c), ctx.scene.lods.get(c)) else {
+    let (Some(chunk), Some(data)) = (scene.world.chunks.get(c), scene.lods.get(c)) else {
         return;
     };
     let (mesh, data) = (&chunk.lods[lod], &data[lod]);
@@ -161,17 +166,45 @@ fn add_dynamic(color: Vec3, pos: Vec3, normal: Vec3, mask: u8, lights: &[DynLigh
     out
 }
 
-/// The same texture and axis at all three of the triangle's own vertices.
-fn plain_look(tri: &Tri) -> Option<(u8, u8)> {
-    let d = tri.data;
-    let [a, b, c] = tri.index;
-    let axis = d.axis.get(a).copied().filter(|&x| x != IN_SEAM)?;
-    let material = d.material.get(a).copied().filter(|&m| !has_spots(m))?;
-    (d.axis.get(b) == Some(&axis)
-        && d.axis.get(c) == Some(&axis)
-        && d.material.get(b) == Some(&material)
-        && d.material.get(c) == Some(&material))
+/// The axis and material of a triangle, if it has the same of each at all three
+/// of its vertices and nothing that needs the blended way.
+fn plain_look(axes: &[u8], materials: &[u8], index: [usize; 3]) -> Option<(u8, u8)> {
+    let [a, b, c] = index;
+    let axis = axes.get(a).copied().filter(|&x| x != IN_SEAM)?;
+    let material = materials.get(a).copied().filter(|&m| !has_spots(m))?;
+    (axes.get(b) == Some(&axis)
+        && axes.get(c) == Some(&axis)
+        && materials.get(b) == Some(&material)
+        && materials.get(c) == Some(&material))
     .then_some((axis, material))
+}
+
+/// Draws a triangle facing the eye and covering a pixel, by the look of the
+/// vertices `index` in `axes` and `materials`.
+pub(crate) fn draw_look(
+    fb: &mut Framebuffer,
+    c: &[Corner; 3],
+    (axes, materials, index): (&[u8], &[u8], [usize; 3]),
+    ctx: &FillContext,
+    stats: &mut DrawStats,
+) {
+    let det = area(c);
+    if det >= 0.0 || !covers_a_pixel(c, fb.row_range(), fb.width() as i32) {
+        return;
+    }
+    let grad = Gradient::new(c, det);
+    match plain_look(axes, materials, index) {
+        Some((axis, material)) => fill_plain(fb, c, &grad, axis, material, ctx, stats),
+        None => {
+            let corners = index.map(|i| {
+                (
+                    axes.get(i).copied().unwrap_or(2),
+                    materials.get(i).copied().unwrap_or(0),
+                )
+            });
+            fill_blended(fb, c, &grad, corners, ctx, stats);
+        }
+    }
 }
 
 fn draw_corners(
@@ -181,23 +214,12 @@ fn draw_corners(
     ctx: &FillContext,
     stats: &mut DrawStats,
 ) {
-    let det = area(c);
-    if det >= 0.0 || !covers_a_pixel(c, fb.row_range(), fb.width() as i32) {
-        return;
-    }
-    let grad = Gradient::new(c, det);
-    match plain_look(tri) {
-        Some((axis, material)) => fill_plain(fb, c, &grad, axis, material, ctx, stats),
-        None => {
-            let corners = tri.index.map(|i| {
-                (
-                    tri.data.axis.get(i).copied().unwrap_or(2),
-                    tri.data.material.get(i).copied().unwrap_or(0),
-                )
-            });
-            fill_blended(fb, c, &grad, corners, ctx, stats);
-        }
-    }
+    let look = (
+        tri.data.axis.as_slice(),
+        tri.data.material.as_slice(),
+        tri.index,
+    );
+    draw_look(fb, c, look, ctx, stats);
 }
 
 /// `value / depth` at each corner.

@@ -68,6 +68,8 @@ pub struct SceneStats {
     pub vista_faces: u32,
     /// Voxel triangles submitted for the layers of the vistas in view.
     pub vista_triangles: u32,
+    /// Model triangles submitted.
+    pub model_triangles: u32,
 }
 
 /// A compiled level ready to draw.

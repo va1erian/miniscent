@@ -17,7 +17,7 @@ use crate::camera::Camera;
 
 /// A triangle corner with everything that is interpolated across it.
 #[derive(Clone, Copy, Debug, Default)]
-pub(super) struct Corner {
+pub(crate) struct Corner {
     pub x: i32,
     pub y: i32,
     pub iz: f32,
@@ -35,7 +35,7 @@ pub(super) struct Corner {
 /// Change of a screen-linear value per pixel, and its value at the screen's
 /// origin, so the arithmetic of a far-off vertex stays out of the rows drawn.
 #[derive(Clone, Copy, Debug, Default)]
-pub(super) struct Gradient {
+pub(crate) struct Gradient {
     x0: f64,
     y0: f64,
     /// `y1 - y0` and so on, in pixels.
@@ -45,7 +45,7 @@ pub(super) struct Gradient {
 }
 
 impl Gradient {
-    pub(super) fn new(c: &[Corner; 3], det: f64) -> Self {
+    pub(crate) fn new(c: &[Corner; 3], det: f64) -> Self {
         let px = |v: i32| f64::from(v) / f64::from(SUBPIXEL);
         Self {
             x0: px(c[0].x),
@@ -134,7 +134,7 @@ impl Rows {
 
 /// Whether the triangle covers any pixel centre of the band. A far triangle is
 /// often smaller than a pixel and falls between them, and its setup can be spared.
-pub(super) fn covers_a_pixel(corners: &[Corner; 3], band: (i32, i32), width: i32) -> bool {
+pub(crate) fn covers_a_pixel(corners: &[Corner; 3], band: (i32, i32), width: i32) -> bool {
     let rows = Rows::new(corners);
     let (first, end) = rows.range(band);
     (first..end).any(|y| {
@@ -162,7 +162,7 @@ pub(super) fn each_row(
 
 /// Twice the signed area in square pixels; negative for a triangle whose air side
 /// faces the eye, as the screen's Y points down.
-pub(super) fn area(c: &[Corner; 3]) -> f64 {
+pub(crate) fn area(c: &[Corner; 3]) -> f64 {
     let px = |v: i32| f64::from(v) / f64::from(SUBPIXEL);
     let (ax, ay) = (px(c[1].x - c[0].x), px(c[1].y - c[0].y));
     let (bx, by) = (px(c[2].x - c[0].x), px(c[2].y - c[0].y));
@@ -171,6 +171,16 @@ pub(super) fn area(c: &[Corner; 3]) -> f64 {
 
 /// A triangle in front of the near plane, in up to two pieces.
 pub(super) fn clip_near(cam: &Camera, c: &[Corner; 3]) -> [Option<[Corner; 3]>; 2] {
+    clip_near_of(cam, c, |p| p)
+}
+
+/// [`clip_near`] for corners whose `pos` is in another space, which `to_world`
+/// takes to the world. Everything else about a corner is interpolated as it is.
+pub(crate) fn clip_near_of(
+    cam: &Camera,
+    c: &[Corner; 3],
+    to_world: impl Fn(Vec3) -> Vec3,
+) -> [Option<[Corner; 3]>; 2] {
     let mut out = [Corner::default(); 4];
     let mut n = 0;
     for k in 0..3 {
@@ -182,7 +192,7 @@ pub(super) fn clip_near(cam: &Camera, c: &[Corner; 3]) -> [Option<[Corner; 3]>; 
         if (a.iz > 0.0) != (b.iz > 0.0) {
             // Always from the inside end, so a neighbour gets the same bits.
             let (i, o) = if a.iz > 0.0 { (a, b) } else { (b, a) };
-            if let Some(v) = cut(cam, i, o) {
+            if let Some(v) = cut(cam, i, o, &to_world) {
                 out[n] = v;
                 n += 1;
             }
@@ -199,10 +209,15 @@ pub(super) fn clip_near(cam: &Camera, c: &[Corner; 3]) -> [Option<[Corner; 3]>; 
 }
 
 /// The point where the edge from `inside` to `outside` meets the near plane.
-fn cut(cam: &Camera, inside: &Corner, outside: &Corner) -> Option<Corner> {
+fn cut(
+    cam: &Camera,
+    inside: &Corner,
+    outside: &Corner,
+    to_world: &impl Fn(Vec3) -> Vec3,
+) -> Option<Corner> {
     let (ci, co) = (
-        cam.world_to_camera(inside.pos),
-        cam.world_to_camera(outside.pos),
+        cam.world_to_camera(to_world(inside.pos)),
+        cam.world_to_camera(to_world(outside.pos)),
     );
     let (di, do_) = (-ci.z, -co.z);
     let t = (di - cam.near()) / (di - do_);

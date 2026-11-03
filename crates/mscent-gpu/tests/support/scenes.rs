@@ -2,6 +2,8 @@
 //! taking a feature out of a software frame. Every removal is ordinary input, so
 //! no test hook ships in a renderer.
 
+#[path = "models.rs"]
+pub mod models;
 #[path = "vista_scene.rs"]
 mod vista_scene;
 
@@ -9,6 +11,7 @@ use std::cell::RefCell;
 use std::path::Path;
 
 use mscent_math::{Quat, Vec3, Vec3d};
+use mscent_render::model::ModelInstance;
 use mscent_render::particles::ParticleDraws;
 use mscent_render::{
     Actor, BakeCache, BuildConfig, DynLight, LevelRenderer, Material, MaterialTable, MoverPose,
@@ -25,6 +28,8 @@ const FAR_FROM_A_SURFACE: f32 = 22.0;
 /// A case's dynamic light: how far it reaches, and its colour, warm and past
 /// full so that it shows over the baked light.
 const LIGHT_RADIUS: f32 = 10.0;
+/// How far behind a case's enemy models the wall is.
+const MODELS_BEFORE_A_WALL: f32 = 4.0;
 const LIGHT_COLOR: Vec3 = Vec3::new(1.6, 1.0, 0.5);
 
 /// What a case takes out of its software frame, to prove it can fail.
@@ -57,6 +62,10 @@ pub enum Taken {
     VistaFog,
     /// The cutouts' coverage, so they draw solid.
     Cutouts,
+    /// The frame's enemy models.
+    Models,
+    /// The models' turns, so they face along the world's axes.
+    ModelTurns,
 }
 
 /// Where a case stands.
@@ -79,6 +88,12 @@ pub enum Pose {
     /// At the same window from aside, where parallax moves the near layer. Still
     /// square on: the stars are where a slant parts the two renderers' spans.
     AtVistaAside,
+    /// Facing the brick wall, with room for enemy models `ahead` units in front.
+    /// Not down the hall: its walls are steep, where the two renderers' spans
+    /// part past the limit at Medium and High whatever stands before them.
+    AtModels {
+        ahead: f32,
+    },
     /// From `eye`, looking at `at`.
     Looking {
         eye: Vec3,
@@ -93,6 +108,7 @@ pub struct Framing {
     pub poses: Vec<MoverPose>,
     pub lights: Vec<DynLight>,
     pub particles: Option<ParticleDraws>,
+    pub models: Vec<ModelInstance>,
     /// Seconds of game time, for a vista's spin and pan.
     pub time: f32,
 }
@@ -307,6 +323,7 @@ impl Scene {
                 looking(Vec3::new(-500.0, 0.0, 0.0), Vec3::new(-1.0, 0.0, 0.0))
             }
             Pose::DownTheHall => View::from_angles(Vec3::new(3.0, 3.0, 2.5), -0.78, 0.0, 0.0),
+            Pose::AtModels { ahead } => self.at_material("brick", ahead + MODELS_BEFORE_A_WALL),
             Pose::AtTheFloor => View::from_angles(Vec3::new(3.0, 3.0, 5.0), -0.78, -0.75, 0.0),
             Pose::AtMaterial(name) => self.at_material(name, NEAR_A_SURFACE),
             Pose::FarFromMaterial(name) => self.at_material(name, FAR_FROM_A_SURFACE),
@@ -344,6 +361,7 @@ impl Scene {
             poses,
             lights: Vec::new(),
             particles: None,
+            models: Vec::new(),
             time,
         }
     }
