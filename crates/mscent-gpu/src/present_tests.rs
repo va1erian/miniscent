@@ -43,12 +43,17 @@ fn texture(gpu: &Gpu, (w, h): (u32, u32), usage: wgpu::TextureUsages) -> wgpu::T
 /// A scene with every colour different, and a layer of translucent and solid
 /// marks over part of it.
 fn frame() -> (Framebuffer, Framebuffer) {
-    let mut scene = Framebuffer::new(FRAME.0, FRAME.1).expect("a frame");
+    frame_with(FRAME, FRAME)
+}
+
+/// [`frame`] with the scene at `scene_size` pixels and the layer at `layer_size`.
+fn frame_with(scene_size: (u32, u32), layer_size: (u32, u32)) -> (Framebuffer, Framebuffer) {
+    let mut scene = Framebuffer::new(scene_size.0, scene_size.1).expect("a frame");
     for (i, p) in scene.pixels_mut().iter_mut().enumerate() {
         let i = i as u32;
         *p = 0xff00_0000 | (i * 37 % 256) << 16 | (i * 91 % 256) << 8 | (i * 13 % 256);
     }
-    let mut layer = Framebuffer::new(FRAME.0, FRAME.1).expect("a layer");
+    let mut layer = Framebuffer::new(layer_size.0, layer_size.1).expect("a layer");
     layer.clear(0);
     fill_rect(&mut layer, 2, 2, 20, 12, 0x80ff_2010);
     fill_rect(&mut layer, 12, 8, 20, 12, 0x4010_ff40);
@@ -65,7 +70,8 @@ fn composited(
     window: (u32, u32),
 ) -> Vec<u32> {
     let usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
-    let source = texture(gpu, FRAME, usage);
+    let size = (scene.width(), scene.height());
+    let source = texture(gpu, size, usage);
     let bytes: Vec<u8> = scene
         .pixels()
         .iter()
@@ -73,7 +79,7 @@ fn composited(
         .collect();
     let layout = wgpu::TexelCopyBufferLayout {
         offset: 0,
-        bytes_per_row: Some(FRAME.0 * 4),
+        bytes_per_row: Some(size.0 * 4),
         rows_per_image: None,
     };
     gpu.queue
@@ -82,16 +88,17 @@ fn composited(
     let target = texture(gpu, window, usage);
     let overlay = Overlay {
         layer: layer.pixels(),
+        layer_size: (layer.width(), layer.height()),
         white,
         window,
-        rect: fit_rect(FRAME.0, FRAME.1, window.0, window.1),
+        rect: fit_rect(size.0, size.1, window.0, window.1),
     };
     let mut compositor = Compositor::new(gpu, COLOR);
     let mut encoder = gpu.device.create_command_encoder(&Default::default());
     let view = source.create_view(&Default::default());
     let into = target.create_view(&Default::default());
     compositor
-        .encode(gpu, &mut encoder, (&view, FRAME), &overlay, &into)
+        .encode(gpu, &mut encoder, (&view, size), &overlay, &into)
         .expect("composited");
     let row = (window.0 * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
     let read = gpu.device.create_buffer(&wgpu::BufferDescriptor {
@@ -169,6 +176,68 @@ fn the_composite_is_what_the_cpu_path_shows() {
         assert!(
             worst <= 2,
             "white {white} window {window:?}: {worst} levels apart"
+        );
+        assert_eq!(gpu.take_error(), None);
+    }
+}
+
+/// What the GPU shows of a layer smaller than the scene: the flashed scene as
+/// the platform scales it, and the layer over it by whole pixels.
+fn expected_smaller(
+    scene: &Framebuffer,
+    layer: &Framebuffer,
+    white: u32,
+    window: (u32, u32),
+) -> Vec<u32> {
+    let mut flashed = scene.clone();
+    simd::lerp_toward(flashed.pixels_mut(), 0xffff_ffff, white);
+    let mut shown = Framebuffer::new(window.0, window.1).expect("a window");
+    let (sw, sh) = (scene.width(), scene.height());
+    blit_fit(
+        flashed.pixels(),
+        sw,
+        sh,
+        shown.pixels_mut(),
+        window.0,
+        window.1,
+    );
+    let (x0, y0, w, h) = fit_rect(sw, sh, window.0, window.1);
+    let mut over = Framebuffer::new(window.0, window.1).expect("a window");
+    over.clear(0);
+    let (lw, lh) = (layer.width(), layer.height());
+    for y in 0..h {
+        for x in 0..w {
+            let (lx, ly) = ((x * lw / w).min(lw - 1), (y * lh / h).min(lh - 1));
+            let from = layer.pixels()[(ly * lw + lx) as usize];
+            over.pixels_mut()[((y0 + y) * window.0 + x0 + x) as usize] = from;
+        }
+    }
+    layer_over(&mut shown, &over);
+    shown.pixels().to_vec()
+}
+
+#[test]
+fn a_smaller_layer_goes_over_the_scaled_scene_by_whole_pixels() {
+    let Some(gpu) = gpu() else { return };
+    // The world at the window's size and scaled up to it; the HUD at a half and
+    // at a third of the window.
+    for (scene, layer, window, white) in [
+        ((80, 48), (40, 24), (80, 48), 0),
+        ((80, 48), (40, 24), (120, 72), 90),
+        ((120, 72), (40, 24), (120, 72), 0),
+    ] {
+        let (scene, layer) = frame_with(scene, layer);
+        let got = composited(&gpu, &scene, &layer, white, window);
+        let want = expected_smaller(&scene, &layer, white, window);
+        let worst = (got.iter().zip(&want))
+            .flat_map(|(&a, &b)| [16, 8, 0].map(|s| ((a >> s) & 255).abs_diff((b >> s) & 255)))
+            .max()
+            .unwrap_or(0);
+        let lsize = (layer.width(), layer.height());
+        eprintln!("layer {lsize:?} window {window:?}: worst channel {worst}");
+        assert!(
+            worst <= 2,
+            "layer {lsize:?} window {window:?}: {worst} levels apart"
         );
         assert_eq!(gpu.take_error(), None);
     }

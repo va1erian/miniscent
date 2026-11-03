@@ -118,9 +118,10 @@ impl GpuWorld {
         let (Some(level), Some(presenter)) = (self.level.as_mut(), self.presenter.as_mut()) else {
             return Err("no level".into());
         };
-        let size = (over.layer.width(), over.layer.height());
+        let size = over.world;
         let overlay = Overlay {
             layer: over.layer.pixels(),
+            layer_size: (over.layer.width(), over.layer.height()),
             white: over.white,
             window: over.window,
             rect: fit_rect(size.0, size.1, over.window.0, over.window.1),
