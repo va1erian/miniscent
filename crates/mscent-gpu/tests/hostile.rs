@@ -2,7 +2,8 @@
 //! an error or a frame, never a panic (debug builds also trap overflow) and never
 //! a wgpu error nobody asked about. The inputs are those of `mscent-render`'s
 //! `tests/hostile_level.rs`, and the sizes a GPU adds: large atlases, many faces,
-//! materials and movers, dense voxels, degenerate brushes and odd frames.
+//! materials and movers, dense voxels, degenerate brushes and odd frames. Not on
+//! a CPU driver: see [`hardware`].
 
 #[path = "support/gpu.rs"]
 mod gpu;
@@ -20,6 +21,22 @@ use mscent_world::voxel::{CellSize, Context, Volume, fill};
 use mscent_world::{Entity, Level, LevelBuilder, MoverGroup, Op};
 
 const NAN: f32 = f32::NAN;
+
+/// The GPU, or `None` on a CPU driver: these tests are skipped there. Mesa's
+/// llvmpipe in CI ended this binary with a segfault twice in a row while its
+/// tests ran together, after the first passed, on the head of PR #54. The same
+/// tests pass on a GPU, which is where they still run.
+fn hardware() -> Option<Gpu> {
+    let gpu = gpu::gpu()?;
+    if gpu.is_cpu() {
+        eprintln!(
+            "skipped on a CPU driver ({}): it crashes under these",
+            gpu.adapter()
+        );
+        return None;
+    }
+    Some(gpu)
+}
 
 fn materials() -> MaterialTable {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures");
@@ -117,7 +134,7 @@ fn through_the_gpu(device: &Gpu, level: &Level, cfg: &BuildConfig, views: &[View
 
 #[test]
 fn empty_and_light_free_levels_build_and_draw() {
-    let Some(device) = gpu::gpu() else { return };
+    let Some(device) = hardware() else { return };
     let dark = Level {
         entities: vec![],
         ..room()
@@ -129,7 +146,7 @@ fn empty_and_light_free_levels_build_and_draw() {
 
 #[test]
 fn hostile_lights_and_build_configs_build_and_draw() {
-    let Some(device) = gpu::gpu() else { return };
+    let Some(device) = hardware() else { return };
     let lights = [
         (Vec3::new(NAN, 0.0, 0.0), 5.0, 1.0),
         (eye(), -3.0, 1.0),
@@ -194,7 +211,7 @@ fn hostile_lights_and_build_configs_build_and_draw() {
 
 #[test]
 fn hostile_views_frame_sizes_actors_and_poses_draw() {
-    let Some(device) = gpu::gpu() else { return };
+    let Some(device) = hardware() else { return };
     let level = LevelRenderer::from_level(&room(), materials(), &quick()).expect("builds");
     let views = [
         plain_view(),
@@ -262,7 +279,7 @@ fn crowded(count: u16, material: impl Fn(u16) -> u16, movers: bool) -> Level {
 
 #[test]
 fn many_faces_materials_and_movers_build_and_draw() {
-    let Some(device) = gpu::gpu() else { return };
+    let Some(device) = hardware() else { return };
     let cfg = BuildConfig {
         luxel_size: 2.0,
         ..quick()
@@ -292,7 +309,7 @@ fn sliver() -> Vec<DPlane> {
 /// not finite or flat, are skipped by the builder as a level file's are.
 #[test]
 fn slivers_and_far_brushes_build_and_draw() {
-    let Some(device) = gpu::gpu() else { return };
+    let Some(device) = hardware() else { return };
     let mut b = LevelBuilder::new();
     b.room([0.0, 0.0, 0.0], [10.0, 10.0, 6.0], (0, 1, 2));
     b.solid([6.0, 1.0, 0.0], [6.125, 1.125, 6.0], 3);
@@ -325,7 +342,7 @@ fn foam(p: Vec3d) -> f64 {
 
 #[test]
 fn dense_voxel_chunks_build_and_draw() {
-    let Some(device) = gpu::gpu() else { return };
+    let Some(device) = hardware() else { return };
     let Ok(mut volume) = Volume::new(Op::Subtract, 0, CellSize::Quarter, [0; 3], [3, 3, 2]) else {
         panic!("a volume");
     };
