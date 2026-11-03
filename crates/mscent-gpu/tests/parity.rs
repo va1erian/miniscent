@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use compare::{Frame, compare};
 use gpu::gpu;
-use mscent_gpu::{Gpu, GpuRenderer};
+use mscent_gpu::{Gpu, GpuEffects, GpuRenderer};
 use mscent_math::Quat;
 use mscent_math::Vec3;
 use mscent_render::model::ModelInstance;
@@ -357,7 +357,10 @@ struct OnGpu {
 
 fn on_gpu(gpu: Gpu, scene: &Scene) -> OnGpu {
     let level = scene.software(None);
-    let renderer = GpuRenderer::new(gpu, level.assets()).expect("the level fits on the GPU");
+    let mut renderer = GpuRenderer::new(gpu, level.assets()).expect("the level fits on the GPU");
+    // These rows hold the shading to software's; relief and shadows are looks only
+    // the GPU draws (docs/hardware-effects.md), held to their own truths elsewhere.
+    renderer.set_effects(Some(GpuEffects::OFF));
     OnGpu { level, renderer }
 }
 

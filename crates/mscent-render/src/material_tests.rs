@@ -90,6 +90,21 @@ fn assets_load_and_texels_read_back() {
 }
 
 #[test]
+fn only_brick_and_rock_ask_for_relief() {
+    let table = MaterialTable::load_dir(&textures_dir()).unwrap();
+    for (_, m) in table.iter() {
+        let depth = m.texture.height_plane().map(|p| p.depth());
+        let want = match m.name.as_str() {
+            "brick" => Some(4),
+            "rock" => Some(5),
+            name if is_sky(name) => None,
+            _ => Some(0),
+        };
+        assert_eq!(depth, want, "{}", m.name);
+    }
+}
+
+#[test]
 fn normal_maps_decode_to_unit_vectors() {
     let table = MaterialTable::load_dir(&textures_dir()).unwrap();
     for (_, m) in table.iter() {

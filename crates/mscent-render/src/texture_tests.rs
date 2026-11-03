@@ -159,3 +159,44 @@ fn the_colour_path_stays_opaque_whatever_the_coverage() {
     assert_eq!(t.sample_bilinear(0x8000, 0x8000) >> 24, 255);
     assert_eq!(t.sample_bilinear_lod(0x8000, 0x8000, 1) >> 24, 255);
 }
+
+#[test]
+fn a_height_map_of_another_size_is_refused_and_relief_needs_one() {
+    let t = Texture::new(4, 4, vec![0xff00_0000; 16]).unwrap();
+    for len in [0, 15, 17] {
+        assert!(matches!(
+            t.clone().with_heights(vec![0; len]),
+            Err(TextureError::SizeMismatch)
+        ));
+    }
+    assert!(t.height_plane().is_none());
+    assert!(t.with_relief(5).height_plane().is_none(), "nothing to set");
+}
+
+#[test]
+fn relief_depth_is_kept_to_the_most_and_the_plane_knows_its_top_and_chain() {
+    let heights: Vec<u8> = (0..16).map(|i| 100 + i as u8).collect();
+    let t = Texture::new(4, 4, vec![0xff00_0000; 16])
+        .unwrap()
+        .with_heights(heights.clone())
+        .unwrap();
+    assert_eq!(
+        t.height_plane().unwrap().depth(),
+        crate::relief::DEFAULT_DEPTH
+    );
+    let deep = t.clone().with_relief(u8::MAX);
+    assert_eq!(
+        deep.height_plane().unwrap().depth(),
+        crate::relief::MAX_DEPTH
+    );
+    let late = t.clone().with_relief(4).filtered();
+    let early = t.filtered().with_relief(4);
+    for tex in [&late, &early] {
+        let plane = tex.height_plane().unwrap();
+        assert_eq!((plane.top(), plane.depth()), (115, 4));
+        assert_eq!(plane.level(0), heights.as_slice());
+        assert_eq!(plane.level(1).len(), 4);
+        assert_eq!(plane.level(2).len(), 1);
+        assert_eq!(plane.level(9).len(), 1, "clamped to the chain");
+    }
+}

@@ -2,14 +2,15 @@
 //! against software's at the same size:
 //! `cargo run --release -p mscent-gpu --example gpu_shot -- out.png 3840 2160`
 //! draws the showcase with the finish High gets, `reference` after the size draws
-//! software's, and
+//! software's, `plain` after that (or after the size) switches the GPU-only looks
+//! (parallax, shadows) off, and
 //! `... -- out.png 3840 2160 assets/levels/voxel-cave.msl 8 8 4 0.5 -0.2`
 //! a level file from an eye at x y z, turned by yaw and pitch.
 
 use std::path::Path;
 use std::time::Instant;
 
-use mscent_gpu::{Finish, GpuRenderer};
+use mscent_gpu::{Finish, GpuEffects, GpuRenderer};
 use mscent_math::Vec3;
 use mscent_render::png_encode::encode_png;
 use mscent_render::{
@@ -48,8 +49,10 @@ fn main() -> Result<(), String> {
         .ok_or("usage: gpu_shot <out.png> [width height [reference] [level x y z yaw pitch]]")?;
     let side = |i: usize, default: u32| args.get(i).and_then(|s| s.parse().ok()).unwrap_or(default);
     let (width, height) = (side(1, 1280), side(2, 720));
-    let reference = args.get(3).is_some_and(|a| a == "reference");
-    let rest = if reference { 4 } else { 3 };
+    let word = |i: usize, w: &str| args.get(i).is_some_and(|a| a == w);
+    let reference = word(3, "reference");
+    let plain = word(3 + usize::from(reference), "plain");
+    let rest = 3 + usize::from(reference) + usize::from(plain);
     let (level, view) = scene(args.get(rest..).unwrap_or(&[]))?;
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures");
     let materials = MaterialTable::load_dir(&dir).map_err(|e| format!("{e:?}"))?;
@@ -66,6 +69,7 @@ fn main() -> Result<(), String> {
     let start = Instant::now();
     let mut renderer =
         GpuRenderer::with_finish(gpu, assets, finish).map_err(|why| why.to_string())?;
+    renderer.set_effects(plain.then_some(GpuEffects::OFF));
     println!("upload: {:.2} ms", start.elapsed().as_secs_f64() * 1000.0);
     let mut fb = Framebuffer::new(width, height).ok_or("bad size")?;
     let frame = FrameInput {

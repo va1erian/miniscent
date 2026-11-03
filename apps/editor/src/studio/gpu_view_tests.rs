@@ -135,7 +135,7 @@ fn a_level_with_viewports_draws_on_the_gpu() {
         .render(&req)
         .expect("a frame")
         .clone();
-    let mut gpu = LevelScene::on_gpu(built(&doc));
+    let mut gpu = LevelScene::on_plain_gpu(built(&doc));
     let b = gpu.render(&req).expect("a frame");
     assert!(mean_error(&a, b) < 3.0, "{}", mean_error(&a, b));
     assert_ne!(a.pixels(), b.pixels(), "this frame did come from the GPU");

@@ -14,12 +14,12 @@ use mscent_render::model::{ListedPart, ModelInstance, ModelList, ModelTable};
 use mscent_render::scene::SceneStats;
 use mscent_render::{Camera, DynLight, LevelAssets, Quality};
 
-use crate::FRAME_BYTES;
 use crate::device::{Gpu, GpuError};
 use crate::faces::buffer;
 use crate::finish::Finish;
 use crate::voxel_materials::{self, MATERIALS};
 use crate::voxels::{self, UNIFORM_BYTES, VERTEX_BYTES, push_vec3};
+use crate::{FRAME_BYTES, GpuEffects};
 
 /// Bytes a part takes in the uniform buffer: a frame lit, a frame glowing and the
 /// voxel uniform, each in a slot of `stride` bytes.
@@ -223,7 +223,8 @@ impl ModelPass {
         let clip = frame.cam.gpu_clip_matrix() * listed.to_world();
         // Low has neither bump nor highlight, as a glowing triangle has neither.
         for quality in [frame.quality, Quality::Low] {
-            let bytes = crate::frame_bytes(clip, (frame.fog, &[]), quality, (0, 0));
+            let looks = (quality, GpuEffects::at(quality));
+            let bytes = crate::frame_bytes(clip, (frame.fog, &[]), looks, (0, 0));
             self.push_slot(&bytes, frame.stride);
         }
         let bytes = voxels::uniform_bytes_at(frame.cam, listed.eye);
