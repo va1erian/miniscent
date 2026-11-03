@@ -9,6 +9,7 @@ use mscent_render::bump::{MAX_GAIN, MIN_FLAT, MIN_GAIN, RELIEF};
 use mscent_render::light_sampler::MIN_BLEND;
 use mscent_render::lighting_shader::{BUMP_FULL, BUMP_GONE};
 use mscent_render::raster::{LONG_AXIS_LIMIT, SHARP_RATE};
+use mscent_render::relief::{MAX_STEPS, MIN_STEPS, PARALLAX_FULL, PARALLAX_GONE};
 use mscent_render::texel_light::{KNEE, MIN_SPEC, ROLL, SPEC_GAIN};
 
 use crate::common::with_common;
@@ -122,7 +123,11 @@ impl Layouts {
         });
         let material = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("material"),
-            entries: &[entry(0, texture()), entry(1, texture())],
+            entries: &[
+                entry(0, texture()),
+                entry(1, texture()),
+                entry(2, texture()),
+            ],
         });
         let pipeline = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("faces"),
@@ -147,6 +152,10 @@ fn pipeline(gpu: &Gpu, layouts: &Layouts, finish: Finish, texels: Texels) -> wgp
         ("SHARP_RATE", f64::from(SHARP_RATE)),
         ("LONG_AXIS_LIMIT", f64::from(LONG_AXIS_LIMIT)),
         ("MIN_BLEND", f64::from(MIN_BLEND)),
+        ("PARALLAX_FULL", f64::from(PARALLAX_FULL)),
+        ("PARALLAX_GONE", f64::from(PARALLAX_GONE)),
+        ("PARALLAX_MIN_STEPS", f64::from(MIN_STEPS)),
+        ("PARALLAX_MAX_STEPS", f64::from(MAX_STEPS)),
         ("BUMP_FULL", f64::from(BUMP_FULL)),
         ("BUMP_GONE", f64::from(BUMP_GONE)),
         ("MIN_FLAT", f64::from(MIN_FLAT)),

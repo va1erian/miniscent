@@ -52,6 +52,15 @@ impl LevelScene {
         scene
     }
 
+    /// Draws on the GPU with its own looks (relief, shadows) off, for a test that
+    /// holds the picture to software's, which draws none.
+    #[cfg(test)]
+    pub fn on_plain_gpu(built: Built) -> LevelScene {
+        let mut scene = LevelScene::on_gpu(built);
+        scene.gpu.effects = Some(mscent_gpu::GpuEffects::OFF);
+        scene
+    }
+
     /// Draws on `device`, a test's own, which it may lose.
     #[cfg(test)]
     pub fn on_own_gpu(built: Built, device: mscent_gpu::Gpu) -> LevelScene {

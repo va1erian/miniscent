@@ -20,7 +20,8 @@ fn stock_texture<'a>(table: &'a MaterialTable, name: &str) -> &'a Texture {
     &table.get(table.find(name).unwrap()).unwrap().texture
 }
 
-/// The four sky materials, which are self-lit cutouts and make no height or normals.
+/// The four sky materials, which are self-lit cutouts: they have a height map and normals
+/// like the rest, but draw no relief, as a self-lit face is not lit.
 fn is_sky(name: &str) -> bool {
     name.starts_with("sky-")
 }
@@ -61,8 +62,7 @@ fn assets_load_and_texels_read_back() {
         let (tex, maps) = (stock_texture(&table, name), baked(name));
         let (w, h) = (maps.width, maps.height);
         assert_eq!((tex.width(), tex.height()), (w, h), "{name}");
-        // The sky materials are self-lit and have no relief to read back.
-        assert_eq!(tex.has_heights(), !is_sky(name), "{name}");
+        assert!(tex.has_heights(), "{name}");
         // Corners, an interior texel and a texel on the other side of a tile.
         for (x, y) in [(0, 0), (5, 7), (w - 1, h - 1), (64, 3), (3, 64)] {
             let i = (y * w + x) as usize;
@@ -90,14 +90,24 @@ fn assets_load_and_texels_read_back() {
 }
 
 #[test]
+fn only_brick_and_rock_ask_for_relief() {
+    let table = MaterialTable::load_dir(&textures_dir()).unwrap();
+    for (_, m) in table.iter() {
+        let depth = m.texture.height_plane().map(|p| p.depth());
+        let want = match m.name.as_str() {
+            "brick" => Some(14),
+            "rock" => Some(16),
+            _ => Some(0),
+        };
+        assert_eq!(depth, want, "{}", m.name);
+    }
+}
+
+#[test]
 fn normal_maps_decode_to_unit_vectors() {
     let table = MaterialTable::load_dir(&textures_dir()).unwrap();
     for (_, m) in table.iter() {
         let tex = &m.texture;
-        if is_sky(&m.name) {
-            assert!(!tex.has_normals() && !tex.has_heights(), "{}", m.name);
-            continue;
-        }
         assert!(tex.has_normals() && tex.has_heights(), "{}", m.name);
         let mut tilted = false;
         for y in 0..128 {

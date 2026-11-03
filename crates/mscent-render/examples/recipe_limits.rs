@@ -35,7 +35,11 @@ fn write_dir(dir: &Path, rows: usize, recipe: &str) -> Vec<Entry> {
         let name = format!("m{row}");
         std::fs::write(dir.join(format!("{name}.mst")), recipe).expect("write");
         manifest.push_str(&format!("{row} {name} 1\n"));
-        entries.push(Entry::Material { name, gloss: 1 });
+        entries.push(Entry::Material {
+            name,
+            gloss: 1,
+            depth: None,
+        });
     }
     std::fs::write(dir.join("materials.txt"), manifest).expect("write");
     entries

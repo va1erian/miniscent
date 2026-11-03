@@ -37,3 +37,8 @@ op 1 8 1 noise freq_x=60 freq_y=0 octaves=2 seed=74 color0=0.02,0.03,0.07 color1
 op 2 8 1 load name=near
 op 0 9 3 mask
 op 0 10 1 out-albedo
+# Height: both lines, so the ridges stand over the sky.
+op 10 0 1 load name=far
+op 11 0 1 load name=near
+op 10 1 2 merge mode=max
+op 10 2 1 out-height normal_strength=2

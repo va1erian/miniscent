@@ -3,9 +3,10 @@
 
 use std::collections::HashMap;
 
+use mscent_math::epsilon::MIN_LENGTH_F32;
 use mscent_render::scene::Scene;
 use mscent_render::specular::SpecTable;
-use mscent_render::{EMISSIVE, LevelAssets, SELF_LIT, UNLIT};
+use mscent_render::{EMISSIVE, LevelAssets, SELF_LIT, Texture, UNLIT, UvToLuxel};
 use mscent_world::materials::{LIGHTPANEL, is_self_lit};
 
 use crate::lightmap::{FaceRects, LightAtlas};
@@ -14,6 +15,8 @@ const HAS_NORMALS: u32 = 1;
 const SPEC_VISIBLE: u32 = 2;
 /// A vista layer's pan slides its texture.
 const PANS: u32 = 4;
+/// The material has a height map to march, and the face a texel map to march in.
+const HAS_HEIGHT: u32 = 8;
 /// Entries of a [`SpecTable`], and the row of them a material gets.
 pub(crate) const TABLE_LEN: usize = 256;
 
@@ -44,6 +47,28 @@ fn flat_light(
     }
     let lit = assets.uv_map(index).is_some() && rects.is_some_and(|r| !r.levels.is_empty());
     (!lit).then_some(UNLIT)
+}
+
+/// Texels a march slides along the face, for each unit of its view's slope, at the
+/// full depth of `texture`'s relief, as the matrix `[m00, m01, m10, m11]`: the face's
+/// texel-to-luxel map undone, scaled to the relief's depth in texels. The luxel
+/// size cancels (a depth in texels is `luxels_per_texel` luxels of it). `None` for
+/// a face or material with no relief to draw.
+fn relief_matrix(texture: &Texture, map: Option<&UvToLuxel>) -> Option<[f32; 4]> {
+    let plane = texture
+        .height_plane()
+        .filter(|p| p.depth() > 0 && p.top() > 0)?;
+    let map = map?;
+    let [a, b, _, d, e, _] = map.coefficients();
+    let det = a * e - b * d;
+    let scale = map.luxels_per_texel();
+    if !det.is_finite() || !scale.is_finite() || scale <= MIN_LENGTH_F32 {
+        return None;
+    }
+    let k = f32::from(plane.depth()) * scale / det;
+    let matrix = [e * k, -b * k, -d * k, a * k];
+    // A map that is nearly singular overflows here, and draws no relief.
+    matrix.iter().all(|v| v.is_finite()).then_some(matrix)
 }
 
 /// The `Face` records, the `levels` they point into, and the table rows.
@@ -113,7 +138,16 @@ pub(crate) fn build(assets: &LevelAssets, atlas: &LightAtlas) -> FaceData {
         push_floats(&mut out.faces, &[nx, ny, nz, texture.spec_mean()]);
         push_floats(&mut out.faces, &dir);
         let visible = table.is_some_and(SpecTable::is_visible);
+        // Only a face the lightmap lights is marched: a flat one is a panel or a
+        // vista's, and a cutout keeps its coverage where the texels are.
+        let relief = relief_matrix(
+            texture,
+            map.as_ref()
+                .filter(|_| flat.is_none() && !texture.is_masked()),
+        );
+        push_floats(&mut out.faces, &relief.unwrap_or([0.0; 4]));
         let flags = u32::from(texture.has_normals()) * HAS_NORMALS
+            + u32::from(relief.is_some()) * HAS_HEIGHT
             + u32::from(visible) * SPEC_VISIBLE
             + u32::from(is_self_lit(face.material)) * PANS;
         let count = rects.map_or(0, |r| r.levels.len() as u32);

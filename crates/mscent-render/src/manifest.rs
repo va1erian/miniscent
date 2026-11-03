@@ -1,9 +1,12 @@
 //! `materials.txt`: which materials exist and which id each one has.
 //!
 //! One line per id, in order, starting at 0: `id name gloss`, or `id retired`
-//! for an id whose material was deleted. Levels store ids, so ids never move and
-//! are never reused; new materials go at the end. Blank lines and lines starting
-//! with `#` are skipped. Names become file names, and the file comes from disk,
+//! for an id whose material was deleted. A material line may end with a fourth
+//! field, the depth in texels of the relief the hardware renderer draws from its
+//! height map (`id name gloss depth`, see [`crate::relief`]).
+//!
+//! Levels store ids, so ids never move and are never reused; new materials go at
+//! the end. Blank lines and lines starting with `#` are skipped. Names become file names, and the file comes from disk,
 //! so all of this is checked and every failure is an error.
 //!
 //! A directory with no manifest (a test fixture, or an `--assets` directory that
@@ -19,6 +22,7 @@ use std::path::Path;
 
 use mscent_world::materials::NAMES as STOCK;
 
+use crate::relief::MAX_DEPTH;
 use crate::texture::TextureError;
 
 /// The manifest's file name in a texture directory.
@@ -42,7 +46,12 @@ const DEVICES: [&str; 22] = [
 /// One id of the manifest; the id is its position in the list.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Entry {
-    Material { name: String, gloss: u8 },
+    Material {
+        name: String,
+        gloss: u8,
+        /// Depth of the relief, if the line gives one.
+        depth: Option<u8>,
+    },
     Retired,
 }
 
@@ -78,6 +87,8 @@ pub enum LineError {
     DuplicateName,
     /// Not a plain decimal number from 0 to 255.
     BadGloss,
+    /// Not a plain decimal number from 0 to [`MAX_DEPTH`].
+    BadDepth,
 }
 
 /// A name is 1 to 48 of `[a-z0-9-]`, starting and ending with a letter or digit,
@@ -101,10 +112,18 @@ fn number<T: std::str::FromStr + ToString>(text: &str) -> Option<T> {
     (n.to_string() == text).then_some(n)
 }
 
+/// A relief depth: a plain number, 0 to [`MAX_DEPTH`].
+fn read_depth(text: &str) -> Result<u8, LineError> {
+    number::<u8>(text)
+        .filter(|&d| d <= MAX_DEPTH)
+        .ok_or(LineError::BadDepth)
+}
+
 /// The entry of one line that is not blank or a comment, which must be id `next`.
 fn parse_line(text: &str, next: usize) -> Result<Entry, LineError> {
     let mut fields = text.split_ascii_whitespace();
-    let (id, name, gloss, extra) = (fields.next(), fields.next(), fields.next(), fields.next());
+    let (id, name, gloss) = (fields.next(), fields.next(), fields.next());
+    let (depth, extra) = (fields.next(), fields.next());
     let (Some(id), Some(name), None) = (id, name, extra) else {
         return Err(LineError::BadFields);
     };
@@ -116,12 +135,14 @@ fn parse_line(text: &str, next: usize) -> Result<Entry, LineError> {
         return Err(LineError::Gap);
     }
     match gloss {
+        None if depth.is_some() => Err(LineError::BadFields),
         None if name == RETIRED && id < STOCK.len() => Err(LineError::RetiredStock),
         None if name == RETIRED => Ok(Entry::Retired),
         None => Err(LineError::BadFields),
         Some(gloss) if name_is_valid(name) => Ok(Entry::Material {
             name: name.to_string(),
             gloss: number(gloss).ok_or(LineError::BadGloss)?,
+            depth: depth.map(read_depth).transpose()?,
         }),
         Some(_) => Err(LineError::BadName),
     }
@@ -182,7 +203,10 @@ pub fn with_material(text: &str, name: &str, gloss: u8) -> Result<(String, u16),
         if is_row(line) {
             if line.split_ascii_whitespace().nth(1) == Some(name) {
                 found = Some(rows);
-                out.push_str(&format!("{rows} {name} {gloss}\n"));
+                // The relief is the material's own, whatever the studio changes.
+                let depth = line.split_ascii_whitespace().nth(3);
+                let depth = depth.map_or(String::new(), |d| format!(" {d}"));
+                out.push_str(&format!("{rows} {name} {gloss}{depth}\n"));
                 rows += 1;
                 continue;
             }
@@ -204,7 +228,10 @@ pub fn text_of(entries: &[Entry]) -> String {
     let mut out = String::new();
     for (id, entry) in entries.iter().enumerate() {
         match entry {
-            Entry::Material { name, gloss } => out.push_str(&format!("{id} {name} {gloss}\n")),
+            Entry::Material { name, gloss, depth } => {
+                let depth = depth.map_or(String::new(), |d| format!(" {d}"));
+                out.push_str(&format!("{id} {name} {gloss}{depth}\n"));
+            }
             Entry::Retired => out.push_str(&format!("{id} {RETIRED}\n")),
         }
     }
@@ -317,6 +344,7 @@ pub fn from_listing(dir: &Path) -> Result<Vec<Entry>, TextureError> {
         .into_iter()
         .map(|name| Entry::Material {
             gloss: listed_gloss(&name),
+            depth: None,
             name,
         })
         .collect())

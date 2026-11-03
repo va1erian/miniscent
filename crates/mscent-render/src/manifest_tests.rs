@@ -14,6 +14,7 @@ fn entry(name: &str, gloss: u8) -> Entry {
     Entry::Material {
         name: name.to_string(),
         gloss,
+        depth: None,
     }
 }
 
@@ -244,7 +245,13 @@ fn stock_ids_cannot_be_retired() {
 
 #[test]
 fn lines_must_have_the_right_fields() {
-    for line in ["0", "0 brick", "0 brick 25 extra", "0 retired 25 x", "0 25"] {
+    for line in [
+        "0",
+        "0 brick",
+        "0 brick 25 4 extra",
+        "0 retired 25 4 x",
+        "0 25",
+    ] {
         assert_eq!(
             line_error(&format!("{line}\n")),
             LineError::BadFields,
@@ -253,6 +260,37 @@ fn lines_must_have_the_right_fields() {
     }
     // Comments only work on their own line.
     assert_eq!(line_error("0 brick 25 # shiny\n"), LineError::BadFields);
+}
+
+#[test]
+fn a_line_may_end_with_a_relief_depth_and_old_lines_read_as_before() {
+    let text = format!("{STOCK_LINES}5 brick 25 4\n6 floor 90\n7 rock 10 0\n8 retired\n");
+    let entries = parse(text.as_bytes()).expect("parses");
+    let depth = |i: usize| match &entries[i] {
+        Entry::Material { depth, .. } => *depth,
+        Entry::Retired => panic!("retired"),
+    };
+    assert_eq!((depth(5), depth(6), depth(7)), (Some(4), None, Some(0)));
+    // Written back, the depths survive, and a line without one gets none.
+    assert_eq!(text_of(&entries), text);
+}
+
+#[test]
+fn a_depth_is_a_plain_number_within_the_most_and_only_a_material_has_one() {
+    let bad = |text: &str| line_error(&format!("0 a 1\n{text}"));
+    assert_eq!(bad("1 b 2 33\n"), LineError::BadDepth);
+    assert_eq!(bad("1 b 2 -1\n"), LineError::BadDepth);
+    assert_eq!(bad("1 b 2 04\n"), LineError::BadDepth);
+    assert_eq!(bad("1 b 2 x\n"), LineError::BadDepth);
+    assert_eq!(bad("1 b 2 3 4\n"), LineError::BadFields);
+    assert_eq!(bad("1 retired 3\n"), LineError::BadName);
+    assert!(parse(b"0 a 1 32\n").is_ok());
+}
+
+#[test]
+fn changing_a_gloss_keeps_the_materials_depth() {
+    let (text, id) = with_material("0 a 1 7\n1 b 2\n", "a", 9).expect("changes");
+    assert_eq!((text.as_str(), id), ("0 a 9 7\n1 b 2\n", 0));
 }
 
 #[test]
