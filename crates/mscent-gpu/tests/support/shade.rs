@@ -114,16 +114,33 @@ pub fn room(spec: Room) -> LevelRenderer {
     LevelRenderer::from_level(&level, grey(), &cfg).expect("the room builds")
 }
 
-/// The box, built once.
-pub fn boxes() -> &'static (ModelTable, ModelId) {
-    static TABLE: OnceLock<(ModelTable, ModelId)> = OnceLock::new();
+/// The player's ship, as the game loads it.
+const SHIP: &str = include_str!("../../../../assets/ship/player.msb");
+
+/// The box and the ship, built once.
+pub fn boxes() -> &'static (ModelTable, ModelId, ModelId) {
+    static TABLE: OnceLock<(ModelTable, ModelId, ModelId)> = OnceLock::new();
     TABLE.get_or_init(|| {
         let blueprint = read(BOX.as_bytes()).expect("the box reads");
         let model = build(&blueprint).expect("the box builds");
         let mut table = ModelTable::new();
         let id = table.add(&blueprint, &model, &grey());
-        (table, id)
+        let ship = read(SHIP.as_bytes()).expect("the ship reads");
+        let built = build(&ship).expect("the ship builds");
+        let ship_id = table.add(&ship, &built, &grey());
+        (table, id, ship_id)
     })
+}
+
+/// The ship at `pos` turned as a player facing `yaw` is, which is how the game turns
+/// it, and `scale` times its size; `cast_only` is what first person is.
+pub fn ship_at(pos: Vec3, yaw: f32, scale: f32, cast_only: bool) -> ModelInstance {
+    let orientation = View::from_angles(Vec3::ZERO, yaw, 0.0, 0.0).orientation;
+    ModelInstance {
+        scale,
+        cast_only,
+        ..ModelInstance::new(boxes().2, pos, orientation)
+    }
 }
 
 /// The box with its centre at `pos`, upright.
@@ -178,7 +195,7 @@ impl Shot {
     pub fn frame(&mut self, view: &View, effects: GpuEffects, contents: &Contents) -> Vec<u32> {
         self.renderer.set_effects(Some(effects));
         let mut fb = Framebuffer::new(self.size.0, self.size.1).expect("a framebuffer");
-        let (table, _) = boxes();
+        let (table, ..) = boxes();
         let input = FrameInput {
             view,
             quality: Quality::High,

@@ -48,6 +48,12 @@ struct Materials {
 
 pub(crate) struct ModelPass {
     finish: Finish,
+    /// Lists what casts shadows, wherever the camera looks, and draws nothing: it
+    /// writes the vertices and matrices a shadow map reads and no frames or
+    /// materials.
+    casting: bool,
+    /// Whether this frame's parts are written, for `casters`.
+    ready: bool,
     pipeline: Option<wgpu::RenderPipeline>,
     materials: Option<Materials>,
     wanted: [bool; MATERIALS],
@@ -85,13 +91,19 @@ fn corner_count(bytes: &[u8]) -> Result<u32, GpuError> {
 }
 
 impl ModelPass {
-    pub(crate) fn new(finish: Finish) -> Self {
+    pub(crate) fn new(finish: Finish, casting: bool) -> Self {
         Self {
             finish,
+            casting,
+            ready: false,
             pipeline: None,
             materials: None,
             wanted: [false; MATERIALS],
-            list: ModelList::unprojected(),
+            list: if casting {
+                ModelList::casters_unprojected()
+            } else {
+                ModelList::unprojected()
+            },
             held: None,
             vertices: Vec::new(),
             corners: Vec::new(),
@@ -115,8 +127,13 @@ impl ModelPass {
         stats: &mut SceneStats,
     ) -> Result<(), GpuError> {
         self.draws.clear();
-        assets.list_models(&mut self.list, models, cam, lights);
-        stats.model_triangles = self.list.triangles;
+        self.ready = false;
+        if self.casting {
+            assets.list_model_casters(&mut self.list, models, cam);
+        } else {
+            assets.list_models(&mut self.list, models, cam, lights);
+            stats.model_triangles = self.list.triangles;
+        }
         let Some((table, _)) = models else {
             return Ok(());
         };
@@ -144,9 +161,14 @@ impl ModelPass {
                     .clone()
             })
             .clone();
-        self.sync_materials(gpu, assets)?;
+        if !self.casting {
+            self.sync_materials(gpu, assets)?;
+        }
         self.upload(gpu, &pipeline)?;
-        self.bind_draws(gpu, &pipeline, stride);
+        if !self.casting {
+            self.bind_draws(gpu, &pipeline, stride);
+        }
+        self.ready = true;
         Ok(())
     }
 
@@ -165,7 +187,9 @@ impl ModelPass {
             };
             self.write_caster(listed, table.level_of(listed), &ranges);
             self.ranges.push(ranges);
-            self.write_uniforms(listed, frame);
+            if !self.casting {
+                self.write_uniforms(listed, frame);
+            }
             Ok(())
         });
         self.list = parts;
@@ -272,7 +296,7 @@ impl ModelPass {
 
     /// The parts, for a light's shadow map; none when a frame has no models.
     pub(crate) fn casters(&self) -> Option<ModelCasters<'_>> {
-        let held = self.held.as_ref().filter(|_| !self.draws.is_empty())?;
+        let held = self.held.as_ref().filter(|_| self.ready)?;
         Some(ModelCasters {
             vertices: &held.vertices,
             corners: &held.corners,

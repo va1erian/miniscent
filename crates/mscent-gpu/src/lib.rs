@@ -75,6 +75,8 @@ pub struct GpuRenderer {
     faces: FacePass,
     voxels: VoxelPass,
     models: ModelPass,
+    /// What casts shadows: every model, in view or not, and those not drawn.
+    casters: ModelPass,
     actors: ActorPass,
     shadows: ShadowPass,
     particles: ParticlePass,
@@ -141,7 +143,8 @@ impl GpuRenderer {
             shadows,
             sky: SkyPass::new(&gpu, assets.config(), finish),
             voxels,
-            models: ModelPass::new(finish),
+            models: ModelPass::new(finish, false),
+            casters: ModelPass::new(finish, true),
             actors: ActorPass::new(&gpu, &frame_uniform, finish),
             particles: ParticlePass::new(&gpu, finish),
             vistas: VistaPass::new(&gpu, assets, &frame_uniform, finish)?,
@@ -314,6 +317,14 @@ impl GpuRenderer {
             let layered = vistas.prepare_voxels(&self.gpu, assets, &self.voxels, &self.faces);
             stats.vista_triangles = self.reported(layered)?;
         }
+        if holders.iter().any(Option::is_some) {
+            let seen = (frame.effects.models, lights);
+            let listed = self.gpu.checked(|| {
+                let mut unused = SceneStats::default();
+                (self.casters).prepare(&self.gpu, assets, (&cam, quality), seen, &mut unused)
+            });
+            self.reported(listed)?;
+        }
         let particles = self
             .particles
             .prepare(&self.gpu, &cam, frame.effects.particles);
@@ -322,7 +333,7 @@ impl GpuRenderer {
         if holders.iter().any(Option::is_some) {
             let casters = Casters {
                 actors: self.actors.casters(),
-                models: self.models.casters(),
+                models: self.casters.casters(),
                 movers: self.faces.casters(),
             };
             self.shadows

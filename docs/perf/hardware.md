@@ -89,16 +89,19 @@ the GPU is done, in milliseconds, RTX 5070 Ti, the other 239 frames after the fi
 
 | Level | Shadows on | `noshadows` | `plain` | Cost of shadows |
 |---|---|---|---|---|
-| showcase | 1.89 (p95 2.19) | 0.76 (0.99) | 0.67 | 1.13 |
-| facility | 1.91 (p95 2.23) | 0.66 (0.98) | 0.67 | 1.25 |
-| voxel-cave | 0.58 (p95 0.80) | 0.42 (0.62) | | 0.16 |
+| showcase | 1.85 (p95 2.13) | 0.76 (0.98) | 0.67 | 1.09 |
+| facility | 1.86 (p95 2.29) | 0.66 (0.97) | 0.67 | 1.20 |
+| voxel-cave | 0.81 (p95 1.08) | 0.45 (0.69) | | 0.36 |
 
 The budget in [hardware-effects.md](../hardware-effects.md) is 1.5 ms or less for two lights
-(it said 1024 a side; this is 512). It is met, with the lights near the eye and so over the
-most of the screen; the cost is nearly all in the receivers (a blocker search of 12 taps and
-a filter of 32 on each lit pixel that a light with a map reaches), not in the six passes. The
-CPU side is 0.1 ms more. Medium, which has no shadows, is unchanged (0.53 against 0.54).
-Memory: the maps are 2 lights x 6 faces x 512 x 512 x 4 bytes, 12.6 MB, and a 1 MB depth.
+(it said 1024 a side; this is 768). It is met, with the lights near the eye and so over the
+most of the screen; the cost is nearly all in the receivers (a blocker search of 8 taps and
+a filter of 24 on each lit pixel that a light with a map reaches), not in the six passes or in
+the map's size (1024 measured 2.2 ms against 2.1 at 768, 512 about 1.9 at 32 taps). The
+models are listed twice with shadows on, once for the camera and once for the maps, which
+is most of the 0.1 to 0.3 ms that this has grown since the first slice. Medium, which has no
+shadows, is unchanged. Memory: the maps are 2 lights x 6 faces x 768 x 768 x 4 bytes, 28 MB,
+and a 2.4 MB depth.
 
 Cheaper receivers are the first thing to reach for if this has to come down: fewer taps
 where the kernel is under 3 texels, or a map that is kept while its light and casters do

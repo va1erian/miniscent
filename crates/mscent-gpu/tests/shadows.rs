@@ -271,8 +271,8 @@ fn the_edge_is_soft_and_steady_as_the_light_moves_by_less_than_a_texel() {
     with_gpu!();
     let (mut shot, mut lights, boxes) = scene(Room::default());
     shot.size = (960, 540);
-    // A texel of the map where the box's top is, 3 from the light, is 3 * 2 / 512.
-    let texel = 3.0 * 2.0 / 512.0;
+    // A texel of the map where the box's top is, 3 from the light, is 3 * 2 / 1024.
+    let texel = 3.0 * 2.0 / 1024.0;
     let cam = shot.camera(&view());
     let edge: Vec<(usize, usize)> = (-8..=8)
         .map(|i| pixel_of(&cam, v(i as f32 * 0.15, -SHADOW_HALF, FLOOR)))

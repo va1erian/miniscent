@@ -20,7 +20,7 @@ use crate::shadow_lights::{Candidate, FACES, Pick, SHADOW_LIGHTS, Slots, cube_by
 use crate::targets::DEPTH;
 
 /// A side of a cube face, in texels.
-pub(crate) const SIDE: u32 = 512;
+pub(crate) const SIDE: u32 = 768;
 /// Beyond the map, which is lit.
 const NOTHING: f64 = 2.0;
 const MAP: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
@@ -41,10 +41,10 @@ const SLOPE_BIAS: f32 = 0.5;
 /// receiver's distance from what blocks it.
 const LIGHT_SIZE: f32 = 0.5;
 /// The narrowest and the widest kernel of the filter, in texels.
-const MIN_KERNEL: f32 = 1.5;
-const MAX_KERNEL: f32 = 12.0;
-const BLOCKER_TAPS: u32 = 12;
-const TAPS: u32 = 32;
+const MIN_KERNEL: f32 = 2.0;
+const MAX_KERNEL: f32 = 16.0;
+const BLOCKER_TAPS: u32 = 8;
+const TAPS: u32 = 24;
 
 /// The sampling's overrides, for the faces' shader.
 pub(crate) fn sample_constants() -> [(&'static str, f64); 10] {
