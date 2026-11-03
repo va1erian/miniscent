@@ -202,7 +202,7 @@ Design in [hardware-renderer.md](hardware-renderer.md).
 
 ## M15 Enemy foundry
 
-Design and what was built in [enemies.md](enemies.md). M15.1, M15.2 and M15.11 are done. Shading changes from M15.3 on go into both renderers, held by the parity cases.
+Design and what was built in [enemies.md](enemies.md). M15.1, M15.2 and M15.11 are done. From M15.3 on, the GPU may shade models its own way; software has to look good enough on LazyOS ([hardware-renderer.md](hardware-renderer.md), Two renderers).
 
 | ID | Item | Deps | Size | Done when |
 |---|---|---|---|---|
