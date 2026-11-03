@@ -222,6 +222,11 @@ impl GameSession {
         self.menu.screen()
     }
 
+    /// The particles the last frame drew, which the frame's depth thinned.
+    pub fn particle_draws(&self) -> &ParticleDraws {
+        &self.draws
+    }
+
     pub fn renderer(&self) -> &LevelRenderer {
         &self.renderer
     }

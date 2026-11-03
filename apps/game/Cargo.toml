@@ -12,8 +12,11 @@ name = "miniscent"
 path = "src/main.rs"
 
 [features]
-default = ["desktop"]
+default = ["desktop", "hardware"]
 desktop = ["mscent-platform/desktop"]
+# The world drawn on the GPU (`--renderer`). Without it the game is software
+# only, as LazyOS builds it, and that build keeps the original size budget.
+hardware = ["dep:mscent-gpu"]
 
 [dependencies]
 mscent-math.workspace = true
@@ -23,6 +26,7 @@ mscent-render.workspace = true
 mscent-game.workspace = true
 mscent-platform.workspace = true
 mscent-script.workspace = true
+mscent-gpu = { workspace = true, optional = true }
 
 [lints]
 workspace = true

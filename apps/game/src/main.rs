@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use miniscent_game::agent::{self, TestOutput};
 use miniscent_game::app::{self, RunOptions, RunReport};
-use miniscent_game::cli::{self, Options, USAGE};
+use miniscent_game::cli::{self, Options, Renderer, USAGE};
 use miniscent_game::scripts::ScriptWatcher;
 use miniscent_game::{GameSession, SessionConfig, assets, levels, lightcache, scripts};
 use mscent_platform::{HeadlessPlatform, Script};
@@ -75,6 +75,29 @@ fn run_options(o: &Options, cap: bool) -> RunOptions {
     }
 }
 
+/// What draws the world in this run, as `--renderer` and the build say.
+fn world(o: &Options) -> Result<Box<dyn app::World>, String> {
+    match o.renderer() {
+        Renderer::Software => Ok(Box::new(app::Software)),
+        #[cfg(feature = "hardware")]
+        choice => Ok(Box::new(miniscent_game::gpu_world::GpuWorld::new(
+            choice == Renderer::Hardware,
+        ))),
+        #[cfg(not(feature = "hardware"))]
+        Renderer::Auto => Ok(Box::new(app::Software)),
+        #[cfg(not(feature = "hardware"))]
+        Renderer::Hardware => Err("built without the `hardware` feature".into()),
+    }
+}
+
+/// `report`, or why the run stopped short.
+fn finished(report: RunReport) -> Result<RunReport, String> {
+    match &report.stopped {
+        Some(why) => Err(format!("the GPU cannot draw this: {why}")),
+        None => Ok(report),
+    }
+}
+
 fn run_headless(o: &Options, session: &mut GameSession) -> Result<RunReport, String> {
     let script = script_of(o)?;
     // Without --frames a script runs to its last action (plus a margin).
@@ -90,7 +113,9 @@ fn run_headless(o: &Options, session: &mut GameSession) -> Result<RunReport, Str
     let frames = o.frames.unwrap_or(default_frames);
     let mut platform =
         HeadlessPlatform::new(o.res.0, o.res.1, HEADLESS_DT, script).with_frame_limit(frames);
-    let report = app::run(&mut platform, session, &run_options(o, false));
+    let mut world = world(o)?;
+    let opts = run_options(o, false);
+    let report = finished(app::run_with(&mut platform, session, &opts, world.as_mut()))?;
     if let (Some(path), Some(frame)) = (&o.screenshot, platform.last_frame()) {
         let png = encode_png(frame.width, frame.height, &frame.pixels)
             .ok_or("could not encode the screenshot")?;
@@ -116,7 +141,8 @@ fn run_desktop(o: &Options, session: &mut GameSession) -> Result<RunReport, Stri
         watch: o.level.as_deref().map(ScriptWatcher::new),
         ..run_options(o, true)
     };
-    Ok(app::run(&mut platform, session, &opts))
+    let mut world = world(o)?;
+    finished(app::run_with(&mut platform, session, &opts, world.as_mut()))
 }
 
 #[cfg(not(feature = "desktop"))]

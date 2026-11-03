@@ -25,6 +25,11 @@ miniscent [options]
   --script <file>          headless: scripted input (see mscent-platform)
   --bench                  headless: print ms/frame for the run
   --no-adaptive            keep the internal resolution fixed
+  --renderer auto|software|hardware
+                           what draws the world: the GPU where it can (auto,
+                           the default in a window), software (the default
+                           headless, whose pictures are the same everywhere),
+                           or the GPU and nothing else, failing with why
   --autoclose-ms <n>       desktop: quit after n milliseconds
   --check                  with --level: compile the level's script, run its top
                            level and list every name; fails on any error
@@ -37,6 +42,27 @@ miniscent [options]
   --pack-level <in> <out>  read a level as text and write it as a .msl
   --help
 ";
+
+/// What draws the world.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Renderer {
+    /// The GPU, and software where it cannot.
+    Auto,
+    Software,
+    /// The GPU only: a run it cannot draw stops with the reason.
+    Hardware,
+}
+
+fn renderer(s: &str) -> Result<Renderer, String> {
+    match s {
+        "auto" => Ok(Renderer::Auto),
+        "software" => Ok(Renderer::Software),
+        "hardware" => Ok(Renderer::Hardware),
+        _ => Err(format!(
+            "unknown renderer `{s}` (auto, software or hardware)"
+        )),
+    }
+}
 
 /// Parsed command line.
 #[derive(Clone, Debug)]
@@ -65,9 +91,22 @@ pub struct Options {
     pub script_api: bool,
     pub dump_level: Option<PathBuf>,
     pub pack_level: Option<(PathBuf, PathBuf)>,
+    /// `None` for the default: `auto` in a window, `software` headless.
+    pub renderer: Option<Renderer>,
 }
 
 impl Options {
+    /// What draws the world: as asked, or `auto` in a window and software
+    /// headless, where a run is to give the same pictures on every machine.
+    pub fn renderer(&self) -> Renderer {
+        let default = if self.headless() {
+            Renderer::Software
+        } else {
+            Renderer::Auto
+        };
+        self.renderer.unwrap_or(default)
+    }
+
     /// Whether the run uses the headless backend instead of a window.
     pub fn headless(&self) -> bool {
         self.screenshot.is_some()
@@ -122,6 +161,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
         script_api: false,
         dump_level: None,
         pack_level: None,
+        renderer: None,
     };
     let mut it = args.into_iter();
     while let Some(arg) = it.next() {
@@ -164,6 +204,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
             "--no-cache" => o.no_cache = true,
             "--rebake" => o.rebake = true,
             "--no-adaptive" => o.adaptive = false,
+            "--renderer" => o.renderer = Some(renderer(&value("--renderer")?)?),
             "--autoclose-ms" => {
                 o.autoclose_ms = Some(
                     value("--autoclose-ms")?
@@ -251,8 +292,20 @@ mod tests {
             &["--shots-at", "nan"],
             &["--shots-at", "-1"],
             &["--shots-at", "inf"],
+            &["--renderer", "vulkan"],
+            &["--renderer"],
         ] {
             assert!(p(args).is_err(), "{args:?}");
         }
+    }
+
+    #[test]
+    fn the_renderer_is_the_gpu_in_a_window_and_software_headless_unless_asked() {
+        assert_eq!(p(&[]).unwrap().renderer(), Renderer::Auto);
+        assert_eq!(p(&["--bench"]).unwrap().renderer(), Renderer::Software);
+        let asked = p(&["--bench", "--renderer", "hardware"]).unwrap();
+        assert_eq!(asked.renderer(), Renderer::Hardware);
+        let soft = p(&["--renderer", "software"]).unwrap();
+        assert_eq!(soft.renderer(), Renderer::Software);
     }
 }
