@@ -18,6 +18,8 @@ struct Frame {
     // radius 0 reaches nothing.
     lights: array<vec4f, 4>,
     light_colors: array<vec4f, 4>,
+    // The shadow map each light has, by light, or 0xffffffff for none.
+    shadow_slots: vec4u,
 }
 
 @group(0) @binding(0) var<uniform> frame: Frame;

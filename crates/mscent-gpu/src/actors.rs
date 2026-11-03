@@ -12,7 +12,7 @@ use crate::finish::Finish;
 use crate::targets::{COLOR, DEPTH};
 
 /// Position, colour, light.
-const VERTEX_BYTES: u64 = 20;
+pub(crate) const VERTEX_BYTES: u64 = 20;
 const SHADER: &str = concat!(
     include_str!("../shaders/common.wgsl"),
     include_str!("../shaders/mesh.wgsl"),
@@ -129,6 +129,12 @@ impl ActorPass {
                 listed.extend_from_slice(&light.to_le_bytes());
             }
         });
+    }
+
+    /// The vertex buffer and its count, for the shadow maps to draw from.
+    pub(crate) fn casters(&self) -> Option<(&wgpu::Buffer, u32)> {
+        let count = u32::try_from(self.listed.len() as u64 / VERTEX_BYTES).ok()?;
+        Some((self.vertices.as_ref()?, count))
     }
 
     pub(crate) fn draw(&self, pass: &mut wgpu::RenderPass) {

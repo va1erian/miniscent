@@ -16,6 +16,8 @@ use crate::face_pipeline::{Compiled, VERTEX_BYTES, sampler};
 use crate::face_views::{FaceView, POSE_BYTES, Shared, layer_view, push_pose};
 use crate::finish::Finish;
 use crate::lightmap::LightAtlas;
+use crate::mover_casters::{MoverList, push_fan};
+use crate::shadows::{self, ShadowMaps};
 use crate::textures;
 
 const INDEX_BYTES: usize = 4;
@@ -48,6 +50,7 @@ pub(crate) struct FacePass {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     lights: SetMasks,
+    movers: MoverList,
     /// By face: its vertices, empty for one the rasterizer would refuse.
     corners: Vec<Range<u32>>,
     /// By material, this frame's visible faces, kept so a frame does not
@@ -180,7 +183,7 @@ impl FacePass {
         gpu: &Gpu,
         assets: &LevelAssets,
         frame_uniform: &wgpu::Buffer,
-        finish: Finish,
+        (finish, shadows): (Finish, &ShadowMaps),
     ) -> Result<Self, GpuError> {
         let scene = assets.scene();
         if assets.vista_layer_count() > MAX_LAYERS {
@@ -222,6 +225,7 @@ impl FacePass {
             clamped: sampler(gpu, wgpu::AddressMode::ClampToEdge, Finish::Reference),
             repeat: sampler(gpu, wgpu::AddressMode::Repeat, finish),
             lights: &lights.buffer,
+            shadows,
         };
         let mut views = vec![shared.view(gpu, frame_uniform, poses)];
         for _ in 0..assets.vista_layer_count() {
@@ -237,6 +241,7 @@ impl FacePass {
             vertices,
             indices,
             lights,
+            movers: MoverList::new(gpu, assets, &corners)?,
             corners,
             by_material,
             listed: Vec::new(),
@@ -252,11 +257,7 @@ impl FacePass {
             return;
         };
         // A convex polygon, as a fan from its first corner.
-        for i in corners.start.saturating_add(1)..corners.end.saturating_sub(1) {
-            for index in [corners.start, i, i + 1] {
-                self.listed.extend_from_slice(&index.to_le_bytes());
-            }
-        }
+        push_fan(corners, &mut self.listed);
     }
 
     fn list_so_far(&self) -> u32 {
@@ -405,7 +406,18 @@ impl FacePass {
             gpu.queue.write_buffer(&view.poses, 0, &self.pose_bytes);
         }
         self.lights.write(gpu, lights);
+        self.movers.list(assets, poses);
         self.write_indices(gpu)
+    }
+
+    /// The movers, for a light's shadow map.
+    pub(crate) fn casters(&self) -> Option<shadows::MoverCasters<'_>> {
+        Some(shadows::MoverCasters {
+            vertices: &self.vertices,
+            indices: &self.movers.indices,
+            poses: &self.views.first()?.poses,
+            draws: &self.movers.draws,
+        })
     }
 
     fn bind(&self, pass: &mut wgpu::RenderPass, pipeline: &wgpu::RenderPipeline, view: &FaceView) {

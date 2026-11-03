@@ -1,9 +1,11 @@
 # Hardware renderer: projected shadows and parallax mapping
 
 Status: accepted plan. M16.1 (the switches) and M16.2 (parallax) are built, with what was
-measured in [status.md](status.md), M16; shadows (M16.3 to M16.4) and the View menu
-toggles (M16.5) are not. Work items are M16 in [work-items.md](work-items.md) once
-accepted. Builds on [hardware-renderer.md](hardware-renderer.md).
+measured in [status.md](status.md), M16. Shadows are built as a first slice (M16.3, and the
+casters of M16.4 that are enemy models, actors and movers): see "Shadows as built" below
+for what is there and what is left. The View menu toggles (M16.5) are not. Work items are
+M16 in [work-items.md](work-items.md) once accepted. Builds on
+[hardware-renderer.md](hardware-renderer.md).
 
 Where parallax as built differs from the plan below: a material's depth defaults to 0, so
 only a `materials.txt` line that gives one (brick 4, rock 5) draws relief; a map is lifted
@@ -119,6 +121,65 @@ sky, movers, voxels, faces, actors, particles ... as now
    through walls and pillars. It costs the most.
 2. Cutout texels (leaves, grilles) cast solid in v1.
 3. Shadows at High only.
+
+### Shadows as built (first slice)
+
+`crates/mscent-gpu/src/shadows.rs`, `shadow_lights.rs`, `mover_casters.rs`,
+`shaders/shadow.wgsl` and `shaders/shadow_sample.wgsl`, with `face.wgsl` calling the
+lookup. Tests are `tests/shadows.rs` and `tests/shadow_off.rs`; numbers are in
+[status.md](status.md), M16.3, and [perf/hardware.md](perf/hardware.md).
+
+What is built, as planned unless said:
+
+- **Maps.** `SHADOW_LIGHTS` (2, in Rust, given to the shader as an override) cube maps of 512
+  a side in one `R32Float` array, holding distance over the light's reach, with a shared
+  depth buffer, six passes a light before the scene pass. Made with the renderer (13 MB); a
+  GPU too small to hold them has maps of a texel and draws no shadows. The caster pipelines
+  are compiled once per device.
+- **Which lights.** The brightest over their distance to the eye among the frame's lit
+  lights; a light keeps its map until another is 1.25 times stronger, so a tie does not swap
+  frame to frame (`shadow_lights.rs`, unit tests). A light that is dark, or whose position or
+  radius is not finite, is never a candidate.
+- **Casters.** Enemy models (their part's storage as the voxel pipeline reads it, one
+  matrix a part, parts culled by a sphere against the light's sphere), actors (their triangle
+  list, all of it, in each light's passes) and movers (every face, not just those that face
+  the camera, at their poses, culled by a sphere). Both sides of a triangle cast.
+- **Receivers.** Lit brush faces in `face.wgsl`: each light's term in `dynamic_light()` is
+  multiplied by its visibility, and the baked term is not. A mover's own faces are not
+  looked up, as their dynamic light is already taken in their authored frame.
+- **Sampling.** `shadow_visibility`: the receiver moved off its plane along its normal; its
+  depth taken on its own plane at each tap, not at one point; a small slope-scaled bias left
+  over; ten blocker taps find the nearest occluder, the penumbra width comes from the light's
+  size (0.5 units) over that distance and clamps to 1.5 to 12 texels of radius; 32 taps of a
+  fixed Vogel disc. The taps are not turned per pixel: a turned pattern left grain that
+  measured ten times the stair-step of the fixed one (0.28 against 0.03 px).
+- **Off.** With shadows off, or no light with a map, the frame is the frame before this
+  work, byte for byte (`tests/shadow_off.rs` holds hashes taken at b3c0e6d).
+
+What differs from the plan above, and what is left:
+
+1. **Static faces and voxel chunks are not casters yet** (decision 1, the costliest). A
+   pillar or a wall does not shadow a dynamic light, so a lamp behind a pillar still lights
+   what is behind it, as today, and a model's shadow does not reach a surface the model's
+   own light cannot. Adding them is a list in `shadows::Casters` and a draw in
+   `ShadowPass::draw_casters`: faces take the movers' pipeline with pose 0 and an index
+   list culled by `reaches_face`; chunks take the voxel vertex buffer. The follow-up also
+   owns the light-through-a-wall-corner test, which this slice can only run on two boxes that
+   touch (`light_does_not_pass_between_two_boxes_that_touch`).
+2. **Voxel faces and enemy models do not receive.** Their dynamic light is a vertex
+   property computed on the CPU (models, actors) or per chunk (voxels), so neither darkens in
+   a shadow. A model in another model's shadow is lit as before.
+3. **Models cast only when the camera lists them**, as the model list is cut by the camera's
+   frustum: an enemy behind the player casts no shadow on what the player sees. The fix is
+   to list casters for a light's sphere and not the view. Actors are not culled per light.
+4. **Actors cast the triangles that face the camera**, as `actor_triangles` drops the others,
+   so a shadow from the camera's own side of an actor is a little short at its edge.
+5. **Cutouts cast solid**, as decided. Models' voxel levels of detail follow the camera, not
+   the light.
+6. **A still map is redrawn every frame.** The cache is the first optimisation if the
+   measured cost (about 1.1 to 1.3 ms in a room with two lights and six enemies, 4K) needs
+   it; a cheaper receiver (fewer taps where the kernel is small) is the other.
+7. The View menu toggle and a game flag are M16.5.
 
 ## Parallax mapping
 

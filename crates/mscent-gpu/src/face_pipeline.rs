@@ -25,6 +25,7 @@ pub(crate) const VERTEX_BYTES: usize = 24;
 const SHADER: &str = concat!(
     include_str!("../shaders/common.wgsl"),
     include_str!("../shaders/shading.wgsl"),
+    include_str!("../shaders/shadow_sample.wgsl"),
     include_str!("../shaders/face.wgsl"),
 );
 
@@ -121,6 +122,18 @@ impl Layouts {
                 entry(6, filtering),
                 entry(7, filtering),
                 entry(8, read_only()),
+                entry(
+                    9,
+                    wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::CubeArray,
+                        multisampled: false,
+                    },
+                ),
+                entry(
+                    10,
+                    wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                ),
             ],
         });
         let material = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -174,6 +187,10 @@ fn pipeline(gpu: &Gpu, layouts: &Layouts, finish: Finish, texels: Texels) -> wgp
         ("FINE", f64::from(u8::from(finish == Finish::Fine))),
         ("MASK", texels.mask()),
     ];
+    let constants: Vec<_> = constants
+        .into_iter()
+        .chain(crate::shadows::sample_constants())
+        .collect();
     let options = wgpu::PipelineCompilationOptions {
         constants: &with_common(&constants),
         ..Default::default()

@@ -223,8 +223,10 @@ fn material(t: texture_2d<f32>, at: vec2f, grad: mat2x2f, level: f32) -> vec4f {
 }
 
 // FacePoints::at in face_points.rs, in the face's tangent frame, at the pixel
-// rather than stepped along a span.
-fn dynamic_light(face: Face, mask: u32, luxel: vec2f) -> vec3f {
+// rather than stepped along a span. A light that has a shadow map is multiplied by
+// how much of it reaches the point; the baked light is not, as the bake has its own
+// shadows. A mover's faces are not looked up: they are authored elsewhere.
+fn dynamic_light(face: Face, mask: u32, luxel: vec2f, corner: Corner) -> vec3f {
     let at = vec2f(face.tangent.w + luxel.x * face.origin.w, face.bitangent.w + luxel.y * face.origin.w);
     var sum = vec3f(0.0);
     var left = mask;
@@ -237,7 +239,13 @@ fn dynamic_light(face: Face, mask: u32, luxel: vec2f) -> vec3f {
         let dist = length(to);
         if dist < l.w && dist > MIN_LENGTH {
             let fall = 1.0 - dist / l.w;
-            sum += frame.light_colors[i].rgb * 256.0 * (max(to.z / dist, 0.0) * fall * fall);
+            var seen = 1.0;
+            let slot = frame.shadow_slots[i];
+            if frame.shadows_on != 0u && corner.pose == 0u && slot < SHADOW_LIGHTS {
+                let world = face.origin.xyz + face.tangent.xyz * at.x + face.bitangent.xyz * at.y;
+                seen = shadow_visibility(slot, l, world, face.normal.xyz);
+            }
+            sum += frame.light_colors[i].rgb * 256.0 * (max(to.z / dist, 0.0) * fall * fall * seen);
         }
     }
     return sum;
@@ -249,7 +257,7 @@ fn lit(face: Face, corner: Corner, texel: vec3f, rate: f32, grad: mat2x2f, shift
     var k = light_color(face, luxel, rate) * 256.0;
     let mask = set_lights[face.flags >> SET_SHIFT];
     if mask != 0u {
-        k += dynamic_light(face, mask, luxel);
+        k += dynamic_light(face, mask, luxel, corner);
     }
     let baked_dir = fetch(face.dir_rect, luxel);
     let relief = clamp((BUMP_GONE - rate) / (BUMP_GONE - BUMP_FULL), 0.0, 1.0);
