@@ -5,7 +5,9 @@ accepted. Builds on [hardware-renderer.md](hardware-renderer.md).
 
 ## Goal
 
-Two looks that only the GPU draws, by the owner's decision of 2026-11-03:
+Two looks that only the GPU draws. Parity between the renderers is dropped by the
+owner's decision of 2026-11-03: the game must play identically on either, but need not
+look identical.
 
 - **Projected shadows** from the frame's dynamic lights, cast by what moves and what
   stands in the light's way.
@@ -13,7 +15,7 @@ Two looks that only the GPU draws, by the owner's decision of 2026-11-03:
   shifts with the eye, where bump only changes the light.
 
 The software renderer gets neither. It stays the fallback and LazyOS's renderer, and
-its pictures do not change.
+its pictures do not change; it only has to look good enough for what a LazyOS box can do.
 
 ## What is there today
 
@@ -34,24 +36,22 @@ its pictures do not change.
 
 ## The parity policy
 
-Both of these are new looks on one side, which `AGENTS.md` forbids today. The owner has
-lifted it for these two. The smallest change that keeps the gate honest:
+Dropped outright by the owner (2026-11-03). The gate is gameplay: the simulation,
+collision and replays are bit-exact whichever renderer runs. Lights, shadows and relief
+are cosmetic and never reach them. What this plan does about it:
 
-1. **No limit moves.** `PARITY_MEAN_LEVELS`, `PARITY_BLOCK_LEVELS` and the others in
-   `mscent_math::epsilon` stay as they are, and no existing row changes.
-2. **The effects live behind the finish.** They are drawn only under `Finish::Fine`
-   (so at High, through `Finish::of`) and never under `Finish::Reference`. Parity cases
-   run at Reference, so every row keeps comparing the same picture. A new test holds
-   `Reference` byte-equal before and after the work: the effects off must be a no-op.
-3. **The effects get their own tests, not parity rows.** Like `tests/finish.rs`, they are
-   held to a truth that needs no software frame (see Tests).
-4. **Words change in four places**: `AGENTS.md` (the exception now names shadows and
-   parallax as GPU-only looks, still only under `Fine`), the "Not in scope" bullet of
-   [hardware-renderer.md](hardware-renderer.md), and the two `.claude/agents/` definitions,
-   so the reviewer stops flagging them and the porter does not port them.
-   The memory note "GPU may look better" is extended to match.
-
-An effect that is not behind `Fine` is a new look on one side and still breaks the rule.
+1. **No parity rows, no limit moves.** Neither effect gets a row in
+   `crates/mscent-gpu/tests/parity.rs`. Rows that exist stay while they pass, and are
+   not edited to make room for these looks. A limit in `mscent_math::epsilon` is not
+   loosened to pass anything.
+2. **The effects follow quality, not the finish.** They draw at High, and a switch in the
+   View menu and for tests turns each off. They need not hide behind `Finish::Fine`.
+3. **Truth tests instead.** Each effect is held to a truth that needs no software frame
+   (see Tests), and to its own earlier output with it switched off.
+4. **Words change.** `AGENTS.md`, the "Not in scope" bullet of
+   [hardware-renderer.md](hardware-renderer.md) and the two `.claude/agents/`
+   definitions are rewritten by the owner's separate change that drops parity; this plan
+   adds nothing to them. Until it merges, those texts still describe the old rule.
 
 ## Projected shadows
 
@@ -75,7 +75,7 @@ after the visible set is known:
 
 ```
 visible = assets.visible(view)
-shadows::draw(encoder, lights, casters)   // NEW, Fine only
+shadows::draw(encoder, lights, casters)   // NEW, High only
 sky, movers, voxels, faces, actors, particles ... as now
 ```
 
@@ -110,7 +110,7 @@ sky, movers, voxels, faces, actors, particles ... as now
 1. Static geometry casts into the dynamic light's map, as otherwise a lamp lights
    through walls and pillars. It costs the most.
 2. Cutout texels (leaves, grilles) cast solid in v1.
-3. Shadows at High only, which is `Fine`.
+3. Shadows at High only.
 
 ## Parallax mapping
 
@@ -156,7 +156,7 @@ sky, movers, voxels, faces, actors, particles ... as now
 
 | ID | Item | Deps | Size | Done when |
 |---|---|---|---|---|
-| M16.1 | Policy and seam: update `AGENTS.md`, the hardware-renderer doc and both agents; add the GPU-only look switch under `Finish::Fine`; no shader change | | S | The parity suite passes untouched; a test reads Reference frames byte-equal to before; reviewer agent no longer flags the switch |
+| M16.1 | Seam: a per-effect switch (shadows, parallax) in the GPU renderer's settings and the View menu, on at High; no shader change | the owner's parity change merged | S | A frame with both off equals the frame before the switch, byte for byte; the switch is read by the editor and the game |
 | M16.2 | Parallax: check the height bake, upload heights, `HAS_HEIGHT`, the march, the fade, the per-material depth | M16.1 | M | Tests below; `facing.msl` and `showcase` draw; a hostile height map (wrong size, no mips) is refused |
 | M16.3 | Shadows, faces: cube pass, light choice with hysteresis, faces as casters and receivers, PCF | M16.1 | L | Tests below; a lamp behind a pillar leaves its far side dark |
 | M16.4 | Shadows, the rest: movers, voxels, actors and models as casters, voxels as receivers | M16.3 | M | A moving actor's shadow crosses a floor and a wall; voxels shadow and are shadowed |
@@ -169,8 +169,9 @@ M16.2 and M16.3 are independent and can run side by side.
 As everywhere: real pixels. Neither effect has a software frame to compare with, so each
 is held to a truth.
 
-- **Off is a no-op.** `Finish::Reference` frames equal their former bytes, and
-  `Fine` with both effects switched off equals `Fine` before the work.
+- **Off is a no-op.** A frame with both effects switched off equals the frame from before
+  this work, byte for byte. This is a regression check on the GPU's own output, not a
+  comparison with software.
 - **Shadow, geometry.** A flat grey room, a point light and a box of known size. The pixel
   on the floor where the box's shadow falls by hand computation is under 10% of the lit
   value; a pixel beside it is lit; fails with the caster dropped from the map.
@@ -200,8 +201,8 @@ is held to a truth.
 
 Targets on the dev machine at 3840x2160, High, over the 5.1 ms of today's frame with
 readback: shadows 1.5 ms or less for two lights at 1024, parallax 1 ms or less on the
-showcase, to be measured and recorded in `docs/perf/`. `Finish::Reference` and
-software cost nothing more. Memory: two cube maps of 1024 at `R32Float` is 48 MB, so
+showcase, to be measured and recorded in `docs/perf/`. Software and the effects
+switched off cost nothing more. Memory: two cube maps of 1024 at `R32Float` is 48 MB, so
 the default is 512 at first, 12 MB, with 1024 behind the measurement.
 
 ## Risks
@@ -209,9 +210,8 @@ the default is 512 at first, 12 MB, with 1024 behind the measurement.
 - **Looking like shadow maps.** The owner has rejected crawling and jagged shadow maps
   on the static light. Dynamic shadows move anyway, so crawl is less visible, but the
   soft kernel and the stability test are what stand between this and the complaint.
-- **Parity blind spot.** These looks have no software twin. A bug in the shared shading
-  that hides in a case with them on is caught only by their own tests, so the
-  Reference-is-unchanged test is the one thing to keep strict.
+- **No software check.** These looks have no software twin, and parity is dropped, so
+  only their own tests and the off-is-a-no-op check catch a bug in the shared shading.
 - **Wasted work if the software fallback is used.** A machine that falls back to
   software shows a plainer picture. That is the decision, and the log says so.
 - **Static casters make the biggest cost.** Decision 1 above; the cache of a still map is
