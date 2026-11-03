@@ -6,6 +6,7 @@ use std::pin::pin;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::task::{Context, Poll, Waker};
 
+use crate::face_pipeline::Compiled;
 use crate::finish::Finish;
 
 /// Why a GPU cannot draw, in words for a log.
@@ -70,6 +71,9 @@ pub struct Gpu {
     /// scene on every edit, and this pipeline is a fifth of a voxel scene's first
     /// frame.
     pub(crate) voxel_pipelines: Arc<[OnceLock<wgpu::RenderPipeline>; Finish::COUNT]>,
+    /// The same for the faces' pipelines and the viewport faces'.
+    pub(crate) face_pipelines: Arc<[OnceLock<Compiled>; Finish::COUNT]>,
+    pub(crate) hole_pipelines: Arc<[OnceLock<wgpu::RenderPipeline>; Finish::COUNT]>,
 }
 
 impl Gpu {
@@ -116,6 +120,8 @@ impl Gpu {
             first_error,
             lost,
             voxel_pipelines: Arc::default(),
+            face_pipelines: Arc::default(),
+            hole_pipelines: Arc::default(),
         })
     }
 

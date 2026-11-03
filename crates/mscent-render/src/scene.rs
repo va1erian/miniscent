@@ -25,6 +25,7 @@ mod surface;
 mod visible;
 mod walk;
 
+pub use holes::HoleList;
 pub use reach::LightReach;
 pub use surface::Surface;
 
@@ -248,7 +249,7 @@ impl Scene {
         cam: &Camera,
         list: &mut PolyList,
         chunks: &mut Vec<u32>,
-        holes: &mut PolyList,
+        holes: &mut HoleList,
     ) -> SceneStats {
         holes.clear();
         let lists = walk::Lists {
@@ -269,6 +270,23 @@ impl Scene {
             faces: None,
             chunks,
             holes: None,
+            pan: None,
+        };
+        self.list_all(cam, None, lists)
+    }
+
+    /// [`Self::visible_set`], replacing `holes` with the viewport faces in view.
+    pub fn visible_set_with_holes(
+        &self,
+        cam: &Camera,
+        chunks: &mut Vec<u32>,
+        holes: &mut HoleList,
+    ) -> SceneStats {
+        holes.clear();
+        let lists = walk::Lists {
+            faces: None,
+            chunks,
+            holes: Some(holes),
             pan: None,
         };
         self.list_all(cam, None, lists)
@@ -310,10 +328,12 @@ impl Scene {
         islands: &Islands,
         island: u32,
         window: [f32; 4],
-        (list, chunks): (&mut PolyList, &mut Vec<u32>),
+        (mut list, chunks): (Option<&mut PolyList>, &mut Vec<u32>),
         pan: Option<([f32; 2], &mut Vec<Vertex>)>,
     ) -> SceneStats {
-        list.clear();
+        if let Some(list) = list.as_deref_mut() {
+            list.clear();
+        }
         chunks.clear();
         let eye = eye_of(cam);
         let leaf = self.bsp.leaf_at_f32(eye);
@@ -327,7 +347,7 @@ impl Scene {
             *seen = *seen && islands.island_of(LeafId(id)) == Some(island);
         }
         let lists = walk::Lists {
-            faces: Some(list),
+            faces: list,
             chunks,
             holes: None,
             pan: pan.map(|(texels, scratch)| pan::Pan { texels, scratch }),

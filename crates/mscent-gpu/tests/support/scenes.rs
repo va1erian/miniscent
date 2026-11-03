@@ -2,6 +2,9 @@
 //! taking a feature out of a software frame. Every removal is ordinary input, so
 //! no test hook ships in a renderer.
 
+#[path = "vista_scene.rs"]
+mod vista_scene;
+
 use std::cell::RefCell;
 use std::path::Path;
 
@@ -42,6 +45,18 @@ pub enum Taken {
     DynLights,
     /// The frame's particles.
     Particles,
+    /// The level's vista layers, so its viewports show the gradient.
+    Vistas,
+    /// The layers' parallax, so their eyes stay put.
+    Parallax,
+    /// The layers' spin.
+    Spin,
+    /// The layers' pan.
+    Pan,
+    /// The near layer's fog.
+    VistaFog,
+    /// The cutouts' coverage, so they draw solid.
+    Cutouts,
 }
 
 /// Where a case stands.
@@ -59,6 +74,11 @@ pub enum Pose {
     AtDoor,
     /// At the door swung open about its hinge, so a mover's pose turns it.
     AtTurnedDoor,
+    /// At the window of [`Scene::vista`], square on.
+    AtVista,
+    /// At the same window from aside, where parallax moves the near layer. Still
+    /// square on: the stars are where a slant parts the two renderers' spans.
+    AtVistaAside,
     /// From `eye`, looking at `at`.
     Looking {
         eye: Vec3,
@@ -73,6 +93,8 @@ pub struct Framing {
     pub poses: Vec<MoverPose>,
     pub lights: Vec<DynLight>,
     pub particles: Option<ParticleDraws>,
+    /// Seconds of game time, for a vista's spin and pan.
+    pub time: f32,
 }
 
 /// A level, and its bake shared by all the frames of it.
@@ -235,8 +257,10 @@ impl Scene {
                 .retain(|e| !matches!(e, Entity::Light { .. })),
             Some(Taken::Voxels) => level.volumes.clear(),
             Some(Taken::Spots) => level = self.spotless.clone().expect("a spotted level"),
+            Some(Taken::Cutouts) => materials = vista_scene::solid_cutouts,
             _ => {}
         }
+        let level = vista_scene::without(level, without);
         let mut bakes = self.bakes.borrow_mut();
         LevelRenderer::from_level_cached(&level, materials(), &cfg, &mut bakes)
             .expect("the level builds")
@@ -294,7 +318,13 @@ impl Scene {
                 )
             }
             Pose::AtDoor | Pose::AtTurnedDoor => looking(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0)),
+            Pose::AtVista => looking(Vec3::new(0.0, 16.0, 0.0), Vec3::new(0.0, 1.0, 0.0)),
+            Pose::AtVistaAside => looking(Vec3::new(3.0, 14.0, 1.0), Vec3::new(0.0, 1.0, 0.0)),
             Pose::Looking { eye, at } => looking(eye, (at - eye).normalized().expect("apart")),
+        };
+        let time = match pose {
+            Pose::AtVista | Pose::AtVistaAside => vista_scene::VISTA_TIME,
+            _ => 0.0,
         };
         let poses = match pose {
             Pose::AtDoor => vec![MoverPose {
@@ -314,6 +344,7 @@ impl Scene {
             poses,
             lights: Vec::new(),
             particles: None,
+            time,
         }
     }
 

@@ -12,9 +12,13 @@ override MIN_LENGTH: f32;
 // Finish::Fine: materials filtered trilinearly and anisotropically from the
 // pixel's own footprint, rather than one level a span as software takes.
 override FINE: bool;
+// Which texels this pipeline draws: 0 all, for a material with no cutout; 1 the
+// solid ones of a cutout; 2 its soft ones, blended by coverage (raster_masked.rs).
+override MASK: u32;
 
 const HAS_NORMALS: u32 = 1u;
 const SPEC_VISIBLE: u32 = 2u;
+const PANS: u32 = 4u;
 
 struct Face {
     to_luxel_x: vec4f, // a, b, c, and the luxels per texel
@@ -31,10 +35,12 @@ struct Face {
     spec_row: u32,
 }
 
-// World to where the mover is now, and the eye in the space it was authored in.
+// World to where the mover is now, the eye in the space it was authored in, and
+// the texels a vista layer's self-lit faces have scrolled.
 struct Pose {
     to_world: mat4x4f,
     eye: vec4f,
+    pan: vec4f,
 }
 
 @group(0) @binding(1) var<storage, read> faces: array<Face>;
@@ -65,7 +71,18 @@ fn vs(
 ) -> Corner {
     let world = poses[pose].to_world * vec4f(pos, 1.0);
     let clip = frame.world_to_clip * world;
-    return Corner(clip, texels, clip.w, face, pose);
+    return Corner(clip, panned(texels, face, poses[pose].pan.xy), clip.w, face, pose);
+}
+
+// A self-lit face's texels slid towards +U and +V by `pan`, whole textures
+// dropped: Pan::apply in scene/pan.rs.
+fn panned(texels: vec2f, face: u32, pan: vec2f) -> vec2f {
+    if (faces[face].flags & PANS) == 0u {
+        return texels;
+    }
+    let size = max(vec2f(textureDimensions(albedo)), vec2f(1.0));
+    let turns = pan / size;
+    return texels - (turns - floor(turns)) * size;
 }
 
 // The largest texel step per pixel, with the long axis held to a limit against
@@ -205,6 +222,10 @@ fn fs(corner: Corner) -> @location(0) vec4f {
     // Taken here, where every pixel of the quad runs alike, as derivatives must be.
     let grad = mat2x2f(dpdx(at), dpdy(at));
     let sampled = material(albedo, at, grad, albedo_level(rate));
+    let coverage = round(sampled.a * 255.0);
+    if (MASK == 1u && coverage < 255.0) || (MASK == 2u && (coverage == 0.0 || coverage == 255.0)) {
+        discard;
+    }
     let texel = round(sampled.rgb * 255.0);
     var out: vec3f;
     if face.to_luxel_y.w > 0.0 {
@@ -212,5 +233,10 @@ fn fs(corner: Corner) -> @location(0) vec4f {
     } else {
         out = lit(face, corner, texel, rate, grad);
     }
-    return finished(with_fog(out, corner.view_depth));
+    let color = finished(with_fog(out, corner.view_depth));
+    if MASK == 2u {
+        // 0..=255 onto 0..=256, as the software blend takes it.
+        return vec4f(color.rgb, (coverage + floor(coverage / 128.0)) / 256.0);
+    }
+    return color;
 }

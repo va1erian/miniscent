@@ -11,9 +11,11 @@ use mscent_math::{DPlane, Polygon};
 use mscent_world::{Face, LeafId};
 
 use super::{Scene, prep};
+use crate::camera::Camera;
 use crate::framebuffer::{Framebuffer, hole_mark};
 use crate::raster::{PolyList, Vertex};
 use crate::shade::{SpanEnd, SpanShader};
+use crate::texture::Texture;
 
 /// Where the viewport faces of a level are.
 #[derive(Clone, Debug, Default)]
@@ -22,6 +24,43 @@ pub(super) struct Holes {
     pub(super) planes: Vec<DPlane>,
     pub(super) slots: Vec<u8>,
     pub(super) leaf_holes: Vec<Vec<u32>>,
+}
+
+/// The viewport faces a frame sees: projected for the software fill, tagged with
+/// their slots, and by index for a renderer that draws them itself.
+#[derive(Default)]
+pub struct HoleList {
+    pub(crate) polys: PolyList,
+    ids: Vec<u32>,
+}
+
+impl HoleList {
+    pub(crate) fn clear(&mut self) {
+        self.polys.clear();
+        self.ids.clear();
+    }
+
+    pub(crate) fn push(
+        &mut self,
+        cam: &Camera,
+        poly: &[Vertex],
+        tex: &Texture,
+        (id, slot): (u32, u8),
+    ) {
+        self.polys.push(cam, poly, tex, u32::from(slot));
+        self.ids.push(id);
+    }
+
+    /// The listed faces, as indices into [`Scene::viewport_polys`], each facing
+    /// the eye in a visible leaf.
+    pub fn ids(&self) -> &[u32] {
+        &self.ids
+    }
+
+    /// Screen bounds `[x0, y0, x1, y1]` of the listed faces of `slot`.
+    pub fn window(&self, slot: u8) -> Option<[f32; 4]> {
+        self.polys.bounds_of(u32::from(slot))
+    }
 }
 
 /// Paints a hole's mark. The texel is ignored, so the faces carry no mapping.
@@ -64,9 +103,20 @@ impl Holes {
 }
 
 impl Scene {
+    /// Each viewport face's polygon, with no texture mapping.
+    pub fn viewport_polys(&self) -> &[Vec<Vertex>] {
+        &self.holes.polys
+    }
+
+    /// Each viewport face's slot, beside [`Self::viewport_polys`].
+    pub fn viewport_slots(&self) -> &[u8] {
+        &self.holes.slots
+    }
+
     /// Fills the listed viewport faces in the rows `fb` holds, and returns a bit
     /// for each slot that wrote a pixel. A tag in `list` is a slot.
-    pub(crate) fn fill_holes(&self, fb: &mut Framebuffer, list: &PolyList) -> u8 {
+    pub(crate) fn fill_holes(&self, fb: &mut Framebuffer, holes: &HoleList) -> u8 {
+        let list = &holes.polys;
         let mut seen = 0;
         for poly in list.in_rows(fb.row_range()) {
             let mut shader = MarkShader(hole_mark(poly.tag));

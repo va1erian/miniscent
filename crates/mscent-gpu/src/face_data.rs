@@ -12,6 +12,8 @@ use crate::lightmap::{FaceRects, LightAtlas};
 
 const HAS_NORMALS: u32 = 1;
 const SPEC_VISIBLE: u32 = 2;
+/// A vista layer's pan slides its texture.
+const PANS: u32 = 4;
 /// Entries of a [`SpecTable`], and the row of them a material gets.
 pub(crate) const TABLE_LEN: usize = 256;
 
@@ -111,8 +113,9 @@ pub(crate) fn build(assets: &LevelAssets, atlas: &LightAtlas) -> FaceData {
         push_floats(&mut out.faces, &[nx, ny, nz, texture.spec_mean()]);
         push_floats(&mut out.faces, &dir);
         let visible = table.is_some_and(SpecTable::is_visible);
-        let flags =
-            u32::from(texture.has_normals()) * HAS_NORMALS + u32::from(visible) * SPEC_VISIBLE;
+        let flags = u32::from(texture.has_normals()) * HAS_NORMALS
+            + u32::from(visible) * SPEC_VISIBLE
+            + u32::from(is_self_lit(face.material)) * PANS;
         let count = rects.map_or(0, |r| r.levels.len() as u32);
         push_uints(
             &mut out.faces,

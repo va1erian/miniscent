@@ -36,7 +36,7 @@ use crate::material::{MaterialId, MaterialTable};
 use crate::mesh::MeshLighting;
 use crate::particles::{ParticleDraws, SpriteBank};
 use crate::raster::PolyList;
-use crate::scene::{Scene, SceneStats};
+use crate::scene::{HoleList, Scene, SceneStats};
 use crate::shade::Fog;
 use crate::tiles::TileRenderer;
 use crate::voxel::list::VoxelList;
@@ -50,6 +50,7 @@ pub use frame::{FrameInput, FrameRenderer};
 pub use movers::{MoverFaces, MoverPose};
 pub use overlay::{Actor, ActorKind, Overlay};
 pub use view::View;
+pub use vista::VistaView;
 
 /// Light scale of emissive surfaces (256 is the plain texture colour).
 pub const EMISSIVE: u32 = 330;
@@ -112,7 +113,7 @@ struct FrameState {
     tiles: TileRenderer,
     faces: PolyList,
     /// The viewport faces in view, and the layers of the vistas they show.
-    holes: PolyList,
+    holes: HoleList,
     layers: Vec<vista::LayerList>,
     actors: PolyList,
     /// The level's mesh lighting plus this frame's dynamic lights, made on
@@ -310,7 +311,7 @@ impl LevelRenderer {
             *slot = Some(FrameState {
                 tiles: TileRenderer::new(width, height, self.tiling.0, self.tiling.1)?,
                 faces: PolyList::default(),
-                holes: PolyList::default(),
+                holes: HoleList::default(),
                 layers: Vec::new(),
                 actors: PolyList::default(),
                 lit: None,
