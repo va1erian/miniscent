@@ -11,6 +11,7 @@ mod actors;
 mod common;
 mod device;
 mod dyn_lights;
+mod effects;
 mod face_data;
 mod face_pipeline;
 mod face_views;
@@ -32,6 +33,7 @@ mod voxel_materials;
 mod voxels;
 
 pub use device::{Gpu, GpuError};
+pub use effects::GpuEffects;
 pub use finish::Finish;
 pub use present::{Overlay, Presenter};
 
@@ -51,14 +53,16 @@ use targets::Targets;
 use vistas::VistaPass;
 use voxels::VoxelPass;
 
-/// The `Frame` of `common.wgsl`.
-pub(crate) const FRAME_BYTES: u64 = 96 + dyn_lights::BYTES;
+/// The `Frame` of `common.wgsl`: its scalars, padded to the 16 its lights need.
+pub(crate) const FRAME_BYTES: u64 = 112 + dyn_lights::BYTES;
 
 /// A level on a GPU. It keeps what it uploaded and borrows the level to draw it,
 /// so the level can stay with its owner and with the software renderer.
 pub struct GpuRenderer {
     gpu: Gpu,
     finish: Finish,
+    /// What a caller has set for the GPU-only looks; `None` follows the quality.
+    effects: Option<GpuEffects>,
     /// For a multisampled finish, which needs its depth resolved to read it.
     resolve: Option<DepthResolve>,
     frame_uniform: wgpu::Buffer,
@@ -78,7 +82,7 @@ pub struct GpuRenderer {
 pub(crate) fn frame_bytes(
     clip: Mat4,
     (fog, lights): (Option<Fog>, &[DynLight]),
-    quality: Quality,
+    (quality, effects): (Quality, GpuEffects),
     atlas: (u32, u32),
 ) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(FRAME_BYTES as usize);
@@ -95,8 +99,10 @@ pub(crate) fn frame_bytes(
     bytes.extend_from_slice(&u32::from(fog.is_some()).to_le_bytes());
     bytes.extend_from_slice(&u32::from(quality != Quality::Low).to_le_bytes());
     bytes.extend_from_slice(&u32::from(quality == Quality::High).to_le_bytes());
+    effects.push(&mut bytes);
     bytes.extend_from_slice(&(atlas.0 as f32).to_le_bytes());
     bytes.extend_from_slice(&(atlas.1 as f32).to_le_bytes());
+    bytes.resize(112, 0);
     dyn_lights::push(&mut bytes, lights);
     bytes
 }
@@ -132,6 +138,7 @@ impl GpuRenderer {
             vistas: VistaPass::new(&gpu, assets, &frame_uniform, finish)?,
             resolve: (finish.samples() > 1).then(|| DepthResolve::new(&gpu)),
             finish,
+            effects: None,
             frame_uniform,
             gpu,
             targets: None,
@@ -141,6 +148,17 @@ impl GpuRenderer {
     /// How this draws its frames.
     pub fn finish(&self) -> Finish {
         self.finish
+    }
+
+    /// Sets which GPU-only looks (shadows, parallax) frames draw, whatever their
+    /// quality; `None` goes back to following it, on at High.
+    pub fn set_effects(&mut self, effects: Option<GpuEffects>) {
+        self.effects = effects;
+    }
+
+    /// The looks a frame of `quality` draws.
+    pub fn effects_at(&self, quality: Quality) -> GpuEffects {
+        self.effects.unwrap_or_else(|| GpuEffects::at(quality))
     }
 
     /// `made`, or `None` with why kept for [`Self::take_error`].
@@ -238,8 +256,9 @@ impl GpuRenderer {
         }
         let targets = self.targets.as_ref()?;
         let (quality, atlas) = (frame.quality, self.faces.atlas_size);
+        let looks = (quality, self.effects_at(quality));
         let clip = cam.gpu_clip_matrix();
-        let uniform = frame_bytes(clip, (assets.fog(), frame.effects.lights), quality, atlas);
+        let uniform = frame_bytes(clip, (assets.fog(), frame.effects.lights), looks, atlas);
         self.gpu
             .queue
             .write_buffer(&self.frame_uniform, 0, &uniform);
@@ -255,7 +274,7 @@ impl GpuRenderer {
         };
         // A layer's sealed room has its own fog, and no dynamic light reaches it.
         let layer_frame =
-            |v: &VistaView| frame_bytes(v.cam.gpu_clip_matrix(), (v.fog, &[]), quality, atlas);
+            |v: &VistaView| frame_bytes(v.cam.gpu_clip_matrix(), (v.fog, &[]), looks, atlas);
         let visible = (&cam, &stats.drawn[..]);
         let effects = (poses, lights);
         let faces = (self.faces).prepare(&self.gpu, assets, visible, effects, layers, layer_frame);

@@ -1,7 +1,15 @@
 # Hardware renderer: projected shadows and parallax mapping
 
-Status: accepted plan, not started. Work items are M16 in [work-items.md](work-items.md) once
+Status: accepted plan. M16.1 (the switches) and M16.2 (parallax) are built, with what was
+measured in [status.md](status.md), M16; shadows (M16.3 to M16.4) and the View menu
+toggles (M16.5) are not. Work items are M16 in [work-items.md](work-items.md) once
 accepted. Builds on [hardware-renderer.md](hardware-renderer.md).
+
+Where parallax as built differs from the plan below: a material's depth defaults to 0, so
+only a `materials.txt` line that gives one (brick 4, rock 5) draws relief; a map is lifted
+so that its highest texel is the face's plane, which makes a flat map no relief; the offset
+is not clamped to the face's rectangle; the effects are `GpuEffects`, set on a
+`GpuRenderer`, and follow the frame's quality when none is set.
 
 ## Goal
 

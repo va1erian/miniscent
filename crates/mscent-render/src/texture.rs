@@ -15,6 +15,7 @@ use crate::alpha::{AlphaPlane, AlphaSampler};
 use crate::manifest::ManifestError;
 use crate::mips;
 use crate::png::{self, Image, PngError};
+use crate::relief::HeightPlane;
 
 /// Why a texture could not be built or loaded.
 #[derive(Debug)]
@@ -60,7 +61,7 @@ pub struct Texture {
     filtered: bool,
     /// Packed normals, with the specular mask in their alpha.
     normals: Option<Vec<u32>>,
-    heights: Option<Vec<u8>>,
+    heights: Option<HeightPlane>,
     /// Coverage of a cutout texture; absent when every texel is solid.
     alpha: Option<AlphaPlane>,
     /// Mean of the specular mask, 0 to 255, for where it is not fetched.
@@ -116,6 +117,10 @@ impl Texture {
             .alpha
             .take()
             .map(|a| a.with_mips(self.width, self.height));
+        self.heights = self
+            .heights
+            .take()
+            .map(|h| h.with_mips(self.width, self.height));
         self.filtered = true;
         self
     }
@@ -164,8 +169,25 @@ impl Texture {
         if heights.len() != self.albedo.len() {
             return Err(TextureError::SizeMismatch);
         }
-        self.heights = Some(heights);
+        let plane = HeightPlane::new(heights);
+        self.heights = Some(match self.filtered {
+            true => plane.with_mips(self.width, self.height),
+            false => plane,
+        });
         Ok(self)
+    }
+
+    /// Sets the depth of the relief the hardware renderer draws from the height
+    /// map, in texels (see [`crate::relief`]). Past the most, it is the most; with
+    /// no height map it does nothing.
+    pub fn with_relief(mut self, depth: u8) -> Self {
+        self.heights = self.heights.take().map(|h| h.with_depth(depth));
+        self
+    }
+
+    /// The height map, if one is attached.
+    pub fn height_plane(&self) -> Option<&HeightPlane> {
+        self.heights.as_ref()
     }
 
     /// Attach coverage, one byte per texel, 255 solid. A plane with no texel
@@ -324,7 +346,7 @@ impl Texture {
 
     /// Height at a texel, if a height map is attached.
     pub fn height_at(&self, x: i32, y: i32) -> Option<u8> {
-        Some(self.heights.as_ref()?[self.index(x, y)])
+        Some(self.heights.as_ref()?.level(0)[self.index(x, y)])
     }
 
     pub fn has_normals(&self) -> bool {

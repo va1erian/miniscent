@@ -1,7 +1,8 @@
 //! What a frame costs on the GPU against the plan's budgets
 //! (`docs/hardware-renderer.md`, "Costs and budget"), turning a full circle in
 //! a level over 240 frames at 3840x2160:
-//! `cargo run --release -p mscent-gpu --example frame_cost`.
+//! `cargo run --release -p mscent-gpu --example frame_cost`, with `plain` after `--`
+//! for the same with the GPU-only looks (parallax, shadows) switched off.
 //!
 //! For each frame: the CPU side, which lists, encodes and submits it with nothing
 //! read back, as the direct route does before it presents, and the time until the
@@ -13,7 +14,7 @@
 use std::path::Path;
 use std::time::Instant;
 
-use mscent_gpu::{Finish, Gpu, GpuRenderer};
+use mscent_gpu::{Finish, Gpu, GpuEffects, GpuRenderer};
 use mscent_math::Vec3;
 use mscent_render::{
     BuildConfig, Effects, FrameInput, LevelRenderer, MaterialTable, Quality, View,
@@ -52,6 +53,8 @@ fn measure(name: &str, eye: Vec3, quality: Quality) -> Result<(), String> {
     let mut renderer =
         GpuRenderer::with_finish(gpu.clone(), assets, finish).map_err(|e| e.to_string())?;
     let upload = start.elapsed().as_secs_f64() * 1000.0;
+    let plain = std::env::args().any(|a| a == "plain");
+    renderer.set_effects(plain.then_some(GpuEffects::OFF));
     let (mut cpu, mut done) = (vec![], vec![]);
     for i in 0..FRAMES {
         let yaw = i as f32 / FRAMES as f32 * std::f32::consts::TAU;

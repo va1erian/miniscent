@@ -214,7 +214,7 @@ impl FacePass {
         // The atlas is read at its top level, so only the materials are filtered.
         let shared = Shared {
             layout: &layouts.frame,
-            faces: storage(gpu, "face data", &data.faces, 144)?,
+            faces: storage(gpu, "face data", &data.faces, 160)?,
             levels: storage(gpu, "light levels", &data.levels, 16)?,
             tables: storage(gpu, "spec tables", &data.tables, 4 * TABLE_LEN as u64)?,
             atlas: &atlas.view,

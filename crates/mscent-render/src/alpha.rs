@@ -106,7 +106,7 @@ impl AlphaSampler<'_> {
 }
 
 /// Levels below the base, halving each side down to 1x1 like [`crate::mips::build`].
-fn build(w: u32, h: u32, base: &[u8]) -> Vec<Vec<u8>> {
+pub(crate) fn build(w: u32, h: u32, base: &[u8]) -> Vec<Vec<u8>> {
     let mut levels: Vec<Vec<u8>> = Vec::new();
     let (mut cw, mut ch) = (w, h);
     while cw > 1 || ch > 1 {

@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use crate::manifest::{self, Entry};
 use crate::recipe_texture::check_directory_work;
+use crate::relief::DEFAULT_DEPTH;
 use crate::texture::{Texture, TextureError, load_texture};
 
 /// Index of a material in a [`MaterialTable`].
@@ -124,8 +125,9 @@ impl MaterialTable {
         for entry in entries {
             let added = match entry {
                 Entry::Retired => table.add_retired(),
-                Entry::Material { name, gloss } => {
+                Entry::Material { name, gloss, depth } => {
                     let texture = load_texture(dir, &name)?;
+                    let texture = texture.with_relief(depth.unwrap_or(DEFAULT_DEPTH));
                     table.add(Material {
                         name,
                         gloss,

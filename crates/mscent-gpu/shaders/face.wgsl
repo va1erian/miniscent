@@ -6,6 +6,12 @@ override LONG_AXIS_LIMIT: f32;
 override MIN_BLEND: f32;
 override BUMP_FULL: f32;
 override BUMP_GONE: f32;
+// Parallax relief: the texel rates it holds its depth up to and fades out by, and
+// the steps of its march looking square on and edge on (relief.rs).
+override PARALLAX_FULL: f32;
+override PARALLAX_GONE: f32;
+override PARALLAX_MIN_STEPS: f32;
+override PARALLAX_MAX_STEPS: f32;
 override SPEC_GAIN: f32;
 override MIN_SPEC: f32;
 override MIN_LENGTH: f32;
@@ -19,6 +25,7 @@ override MASK: u32;
 const HAS_NORMALS: u32 = 1u;
 const SPEC_VISIBLE: u32 = 2u;
 const PANS: u32 = 4u;
+const HAS_HEIGHT: u32 = 8u;
 
 struct Face {
     to_luxel_x: vec4f, // a, b, c, and the luxels per texel
@@ -29,6 +36,7 @@ struct Face {
     bitangent: vec4f,  // and v_min
     normal: vec4f,     // and the mean specular mask
     dir_rect: vec4f,   // where the directions are in the atlas
+    relief: vec4f,     // texels the relief slides per unit of slope, as a 2x2 matrix by rows
     first_level: u32,
     level_count: u32,
     flags: u32,
@@ -53,6 +61,7 @@ struct Pose {
 @group(0) @binding(8) var<storage, read> face_lights: array<u32>; // a bit a light
 @group(1) @binding(0) var albedo: texture_2d<f32>;
 @group(1) @binding(1) var normals: texture_2d<f32>;
+@group(1) @binding(2) var heights: texture_2d<f32>; // 255 is the face's plane
 
 struct Corner {
     @builtin(position) clip: vec4f,
@@ -135,6 +144,52 @@ fn to_texture_frame(face: Face, v: vec3f) -> vec3f {
     return vec3f(v.x * f.x + v.y * f.y, v.x * f.z + v.y * f.w, v.z);
 }
 
+// The face's height at `at` texels, from level `level` of its map.
+fn height_at(at: vec2f, level: f32) -> f32 {
+    let size = vec2f(textureDimensions(heights, 0));
+    return textureSampleLevel(heights, smooth_repeat, at / size, level).r;
+}
+
+// Where the eye's ray through this pixel meets the relief, in texels, by parallax
+// occlusion mapping. The ray enters at the face's plane and goes down by a fraction
+// `f` of the relief's depth, sliding `slide` texels over all of it; the surface is
+// at depth `1 - height`. Steps find the first below the surface, and a secant step
+// across the last refines it. `rate` fades the relief out as the map aliases, and
+// the light is taken at the unshifted point, not here.
+fn relieved(face: Face, corner: Corner, rate: f32) -> vec2f {
+    let fade = clamp((PARALLAX_GONE - rate) / (PARALLAX_GONE - PARALLAX_FULL), 0.0, 1.0);
+    let u_v = vec3f(corner.texels, 1.0);
+    let luxel = vec2f(dot(face.to_luxel_x.xyz, u_v), dot(face.to_luxel_y.xyz, u_v));
+    let eye = poses[corner.pose].eye.xyz - face.origin.xyz;
+    let on_face = vec2f(face.tangent.w + luxel.x * face.origin.w, face.bitangent.w + luxel.y * face.origin.w);
+    let to_eye = vec3f(dot(eye, face.tangent.xyz) - on_face.x, dot(eye, face.bitangent.xyz) - on_face.y, dot(eye, face.normal.xyz));
+    let length_to_eye = length(to_eye);
+    // An eye behind or in the plane sees none of the relief.
+    if fade <= 0.0 || to_eye.z <= MIN_LENGTH || length_to_eye <= MIN_LENGTH {
+        return corner.texels;
+    }
+    let slope = -to_eye.xy / to_eye.z;
+    let slide = vec2f(dot(face.relief.xy, slope), dot(face.relief.zw, slope)) * fade;
+    let steps = clamp(ceil(mix(PARALLAX_MIN_STEPS, PARALLAX_MAX_STEPS, 1.0 - to_eye.z / length_to_eye) * fade), 2.0, PARALLAX_MAX_STEPS);
+    let level = albedo_level(rate);
+    var above = 0.0; // how far above the surface the ray was at the last step
+    var last = 0.0;
+    var depth = 1.0;
+    for (var i = 1.0; i <= steps; i += 1.0) {
+        let f = i / steps;
+        let gap = height_at(corner.texels + slide * f, level) - (1.0 - f);
+        if gap >= 0.0 {
+            // The ray is above the surface by `above` at `last` and below it by
+            // `gap` at `f`; it crosses where the two meet.
+            depth = last + (f - last) * above / max(above + gap, MIN_LENGTH);
+            break;
+        }
+        above = -gap;
+        last = f;
+    }
+    return corner.texels + slide * depth;
+}
+
 // The highlight: `add_highlight` in texel_light.rs.
 fn with_highlight(out: vec3f, face: Face, corner: Corner, k: vec3f, n: vec3f, tilt: vec3f, luxel: vec2f, sampled_mask: f32, relief: f32) -> vec3f {
     let eye = poses[corner.pose].eye.xyz - face.origin.xyz;
@@ -185,7 +240,7 @@ fn dynamic_light(face: Face, mask: u32, luxel: vec2f) -> vec3f {
     return sum;
 }
 
-fn lit(face: Face, corner: Corner, texel: vec3f, rate: f32, grad: mat2x2f) -> vec3f {
+fn lit(face: Face, corner: Corner, texel: vec3f, rate: f32, grad: mat2x2f, shifted: vec2f) -> vec3f {
     let u_v = vec3f(corner.texels, 1.0);
     let luxel = vec2f(dot(face.to_luxel_x.xyz, u_v), dot(face.to_luxel_y.xyz, u_v));
     var k = light_color(face, luxel, rate) * 256.0;
@@ -199,8 +254,7 @@ fn lit(face: Face, corner: Corner, texel: vec3f, rate: f32, grad: mat2x2f) -> ve
     var sampled_mask = face.normal.w;
     let bumped = frame.bump_on != 0u && (face.flags & HAS_NORMALS) != 0u && relief > 0.0;
     if bumped {
-        let at = corner.texels / vec2f(textureDimensions(albedo));
-        let sampled = material(normals, at, grad, 0.0);
+        let sampled = material(normals, shifted / vec2f(textureDimensions(albedo)), grad, 0.0);
         sampled_mask = sampled.a;
         n = mix(vec3f(0.0, 0.0, 1.0), sampled.rgb * 2.0 - vec3f(1.0), relief);
         k *= bump_gain(n, to_texture_frame(face, baked_dir));
@@ -218,9 +272,15 @@ fn lit(face: Face, corner: Corner, texel: vec3f, rate: f32, grad: mat2x2f) -> ve
 fn fs(corner: Corner) -> @location(0) vec4f {
     let face = faces[corner.face];
     let rate = texel_rate(corner.texels);
-    let at = corner.texels / vec2f(textureDimensions(albedo));
-    // Taken here, where every pixel of the quad runs alike, as derivatives must be.
-    let grad = mat2x2f(dpdx(at), dpdy(at));
+    let unshifted = corner.texels / vec2f(textureDimensions(albedo));
+    // Taken here, where every pixel of the quad runs alike, as derivatives must be,
+    // and from the unshifted texels, so that the march's jumps do not pick the level.
+    let grad = mat2x2f(dpdx(unshifted), dpdy(unshifted));
+    var shifted = corner.texels;
+    if frame.parallax_on != 0u && (face.flags & HAS_HEIGHT) != 0u {
+        shifted = relieved(face, corner, rate);
+    }
+    let at = shifted / vec2f(textureDimensions(albedo));
     let sampled = material(albedo, at, grad, albedo_level(rate));
     let coverage = round(sampled.a * 255.0);
     if (MASK == 1u && coverage < 255.0) || (MASK == 2u && (coverage == 0.0 || coverage == 255.0)) {
@@ -231,7 +291,7 @@ fn fs(corner: Corner) -> @location(0) vec4f {
     if face.to_luxel_y.w > 0.0 {
         out = mul_rgb(texel, face.to_luxel_y.w);
     } else {
-        out = lit(face, corner, texel, rate, grad);
+        out = lit(face, corner, texel, rate, grad, shifted);
     }
     let color = finished(with_fog(out, corner.view_depth));
     if MASK == 2u {

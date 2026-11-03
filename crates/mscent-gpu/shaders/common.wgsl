@@ -10,6 +10,9 @@ struct Frame {
     fog_on: u32,
     bump_on: u32,
     spec_on: u32,
+    // The GPU-only looks, from the effects switches (effects.rs).
+    parallax_on: u32,
+    shadows_on: u32,
     atlas_size: vec2f,
     // The dynamic lights, a position and radius each, then a colour; a light of
     // radius 0 reaches nothing.

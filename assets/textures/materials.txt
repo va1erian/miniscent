@@ -1,15 +1,18 @@
 # Material ids. Levels store these numbers, so they never change.
 #
-#   id name gloss     gloss: specular power input, 0 (matte) to 255
+#   id name gloss [depth]
+#                     gloss: specular power input, 0 (matte) to 255
+#                     depth: relief in texels, 0 to 32, that the hardware renderer
+#                     draws from the height map; left out or 0 draws none
 #   id retired        the material is gone; levels using it draw grey
 #
 # Add new materials at the end. Never delete a line or reuse an id: to remove a
 # material, turn its line into `id retired`.
-0 brick 25
+0 brick 25 4
 1 floor 90
 2 lightpanel 120
 3 metal 200
-4 rock 10
+4 rock 10 5
 5 bark 8
 6 cap 70
 7 coral 30

@@ -18,7 +18,7 @@ mod particles;
 mod scenes;
 
 use compare::Frame;
-use mscent_gpu::{Finish, Gpu, GpuError, GpuRenderer};
+use mscent_gpu::{Finish, Gpu, GpuEffects, GpuError, GpuRenderer};
 use mscent_math::Vec3;
 use mscent_math::epsilon::{
     FINE_BLOCK_LEVELS, FINE_DEPTH_AGREEMENT, FINE_EDGES_NEARER, FINE_MEAN_LEVELS, FINE_NEARER,
@@ -59,6 +59,8 @@ fn draw(gpu: &Gpu, scene: &Scene, framing: &Framing, finish: Finish, scale: u32)
     let level = scene.software(None);
     let mut renderer =
         GpuRenderer::with_finish(gpu.clone(), level.assets(), finish).expect("it fits");
+    // The same picture, smoother: the GPU-only looks are not part of it.
+    renderer.set_effects(Some(GpuEffects::OFF));
     let mut fb = Framebuffer::new(WIDTH * scale, HEIGHT * scale).expect("a framebuffer");
     let input = FrameInput {
         view: &framing.view,
