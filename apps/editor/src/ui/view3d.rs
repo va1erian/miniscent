@@ -111,7 +111,10 @@ impl<M: 'static> View3d<M> {
     pub fn new(ui: &Ui<M>) -> Result<View3d<M>> {
         let control = Control::new(
             ui,
-            &NodeSpec::new(NodeKind::Custom, Rect::new(0, 0, 10, 10)).tab_stop(),
+            // Contained: a new frame repaints the pane and nothing around it.
+            &NodeSpec::new(NodeKind::Custom, Rect::new(0, 0, 10, 10))
+                .tab_stop()
+                .contained(),
         )?;
         let shared = Rc::new(Shared::default());
         *shared.placeholder.borrow_mut() = "3D view".into();

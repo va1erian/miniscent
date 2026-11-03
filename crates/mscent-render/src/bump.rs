@@ -12,18 +12,18 @@ use crate::texture::{NormalView, Texture};
 
 /// Lower bound on the flat response in the ratio, so grazing light (where the
 /// baked colour is already small) cannot blow the ratio up.
-const MIN_FLAT: f32 = 0.2;
+pub const MIN_FLAT: f32 = 0.2;
 
 /// Darkest the bump term may make a texel: a pit still catches ambient light,
 /// so mortar never goes pure black.
-const MIN_GAIN: f32 = 0.12;
+pub const MIN_GAIN: f32 = 0.12;
 
 /// Largest brightening the bump term may apply.
-const MAX_GAIN: f32 = 1.9;
+pub const MAX_GAIN: f32 = 1.9;
 
 /// Exaggeration of the normal map's tilt: the generated maps are subtle
 /// next to the baked light, so the relief is scaled up (1.0 flat stays flat).
-const RELIEF: f32 = 1.4;
+pub const RELIEF: f32 = 1.4;
 
 /// Decode a packed normal texel (`n * 0.5 + 0.5` per channel). Not
 /// renormalized: the generated maps are unit length to 8-bit precision, and a

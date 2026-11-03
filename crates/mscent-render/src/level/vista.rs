@@ -6,6 +6,10 @@
 //! never shifts, like a distant sky; at 1/16 a room reads as 16 times its size.
 //! See `docs/viewports.md`.
 
+#[path = "vista_views.rs"]
+mod views;
+pub use views::VistaView;
+
 use std::f64::consts::TAU;
 
 use mscent_math::{Quat, Vec3};
@@ -18,7 +22,7 @@ use super::{FAR_VISTA, LevelRenderer, NEAR, Quality, View};
 use crate::camera::Camera;
 use crate::framebuffer::Framebuffer;
 use crate::raster::{DrawStats, PolyList, Vertex};
-use crate::scene::eye_of;
+use crate::scene::{HoleList, eye_of};
 use crate::shade::Fog;
 use crate::voxel::fill::{FillContext, fill_voxels};
 use crate::voxel::list::VoxelList;
@@ -232,6 +236,35 @@ impl Vistas {
     }
 }
 
+impl super::LevelAssets {
+    /// The camera of `layer` for a player at `view`, `time` seconds in (already
+    /// cleaned), drawing `size`. `None` when that makes no camera.
+    fn layer_camera(
+        &self,
+        layer: &Layer,
+        view: &View,
+        time: f32,
+        size: (u32, u32),
+    ) -> Option<Camera> {
+        let eye = View {
+            pos: layer.pos + (view.pos - layer.centre) * layer.parallax,
+            orientation: match spin_rotation(layer.spin, time) {
+                Some(turn) => turn * view.orientation,
+                None => view.orientation,
+            },
+        };
+        eye.camera(self.config().fov_y, NEAR, FAR_VISTA, size.0, size.1)
+    }
+
+    /// Lists a layer's voxels, whose candidates `list` holds, seen by `cam`, within
+    /// a layer's share of the `left` triangles all layers have, and takes them off.
+    fn list_layer_voxels(&self, list: &mut VoxelList, cam: &Camera, left: &mut u32) {
+        list.budget = Some((*left).min(LAYER_VOXEL_TRIS));
+        list.prepare(self.scene.voxels(), cam, eye_of(cam), |_| 0);
+        *left = left.saturating_sub(list.triangles);
+    }
+}
+
 impl LevelRenderer {
     /// Lists every layer whose slot shows in `holes`, through the part of the
     /// screen those holes cover, as it looks `time` seconds in. Returns how many
@@ -240,41 +273,32 @@ impl LevelRenderer {
         &self,
         view: &View,
         (width, height): (u32, u32),
-        holes: &PolyList,
+        holes: &HoleList,
         time: f32,
         out: &mut Vec<LayerList>,
     ) -> u32 {
         let time = clean_time(time);
         let mut listed = 0;
         let mut left = VISTA_VOXEL_TRIS;
-        let layers = &self.vistas.layers;
+        let layers = &self.assets.vistas.layers;
         out.resize_with(layers.len(), LayerList::default);
         for (layer, list) in layers.iter().zip(out.iter_mut()) {
             list.cam = None;
             list.voxels.chunks.clear();
             list.voxels.triangles = 0;
-            let Some(window) = holes.bounds_of(u32::from(layer.slot)) else {
+            let Some(window) = holes.window(layer.slot) else {
                 continue;
             };
-            let eye = View {
-                pos: layer.pos + (view.pos - layer.centre) * layer.parallax,
-                orientation: match spin_rotation(layer.spin, time) {
-                    Some(turn) => turn * view.orientation,
-                    None => view.orientation,
-                },
-            };
-            let Some(cam) = eye.camera(self.cfg.fov_y, NEAR, FAR_VISTA, width, height) else {
+            let Some(cam) = self.assets.layer_camera(layer, view, time, (width, height)) else {
                 continue;
             };
-            let islands = &self.vistas.islands;
+            let islands = &self.assets.vistas.islands;
             let pan = pan_texels(layer.pan, time).map(|texels| (texels, &mut list.scratch));
-            let out = (&mut list.faces, &mut list.voxels.candidates);
-            let st = (self.scene).list_layer(&cam, islands, layer.island, window, out, pan);
+            let out = (Some(&mut list.faces), &mut list.voxels.candidates);
+            let st = (self.assets.scene).list_layer(&cam, islands, layer.island, window, out, pan);
             listed += st.drawn.len() as u32;
-            list.voxels.budget = Some(left.min(LAYER_VOXEL_TRIS));
-            let voxels = self.scene.voxels();
-            list.voxels.prepare(voxels, &cam, eye_of(&cam), |_| 0);
-            left = left.saturating_sub(list.voxels.triangles);
+            self.assets
+                .list_layer_voxels(&mut list.voxels, &cam, &mut left);
             list.cam = Some(cam);
         }
         listed
@@ -284,15 +308,19 @@ impl LevelRenderer {
     pub(super) fn fill_vistas(
         &self,
         fb: &mut Framebuffer,
-        holes: &PolyList,
+        holes: &HoleList,
         lists: &[LayerList],
         quality: Quality,
     ) -> DrawStats {
         let mut total = DrawStats::default();
-        let seen = self.scene.fill_holes(fb, holes);
+        let seen = self.assets.scene.fill_holes(fb, holes);
         for slot in (0..VIEW_SLOTS).filter(|s| seen >> s & 1 != 0) {
-            fb.open_view(u32::from(slot), self.cfg.sky_top, self.cfg.sky_bottom);
-            let of_slot = self.vistas.layers.iter().zip(lists);
+            fb.open_view(
+                u32::from(slot),
+                self.assets.config().sky_top,
+                self.assets.config().sky_bottom,
+            );
+            let of_slot = self.assets.vistas.layers.iter().zip(lists);
             let of_slot = of_slot.filter(|(layer, _)| layer.slot == slot);
             for (i, (layer, list)) in of_slot.enumerate() {
                 if i > 0 {
@@ -322,20 +350,20 @@ impl LevelRenderer {
             return DrawStats::default();
         };
         let eye = eye_of(cam);
-        let texture_of = |id: u16| self.scene.texture_of(id);
+        let texture_of = |id: u16| self.assets.scene.texture_of(id);
         let ctx = FillContext {
-            scene: self.scene.voxels(),
+            scene: self.assets.scene.voxels(),
             cam,
             eye,
             fog: layer.fog,
             bump: quality != Quality::Low,
             specular: quality == Quality::High,
             lights: &[],
-            spec: &self.spec,
+            spec: &self.assets.spec,
             texture_of: &texture_of,
         };
         let mut total = fill_voxels(fb, &list.voxels, &ctx);
-        let faces = (self.scene).fill_frame(fb, &list.faces, None, &mut |i, face| {
+        let faces = (self.assets.scene).fill_frame(fb, &list.faces, None, &mut |i, face| {
             self.face_shader(i, face, eye, quality, &[], layer.fog)
         });
         total.pixels += faces.pixels;

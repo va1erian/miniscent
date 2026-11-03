@@ -16,6 +16,7 @@ mod decal;
 mod kernels;
 mod layer;
 mod layer_kernels;
+pub mod plan;
 mod sprite;
 
 pub use bank::SpriteBank;

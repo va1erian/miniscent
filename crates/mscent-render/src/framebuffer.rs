@@ -111,8 +111,9 @@ impl Framebuffer {
         (self.y0 as i32, (self.y0 + self.height) as i32)
     }
 
-    /// Colour and depth planes together, for compositing tiles.
-    pub(crate) fn planes_mut(&mut self) -> (&mut [u32], &mut [f32]) {
+    /// Colour and depth planes together, for compositing tiles and for a
+    /// renderer that draws elsewhere and copies its frame here.
+    pub fn planes_mut(&mut self) -> (&mut [u32], &mut [f32]) {
         (&mut self.color, &mut self.depth)
     }
 

@@ -444,6 +444,16 @@ fn advance(st: &mut Loop, scene: &mut dyn Scene, sh: &Shared, dt: Duration, cost
     st.events = events;
 }
 
+/// A straight loop over fixed-size pixels, which the compiler can vectorize: at
+/// 4K this runs eight million times a frame.
+fn rgba_of(pixels: &[u32]) -> Vec<u8> {
+    let mut rgba = vec![255u8; pixels.len() * 4];
+    for (out, p) in rgba.as_chunks_mut::<4>().0.iter_mut().zip(pixels) {
+        *out = [(p >> 16) as u8, (p >> 8) as u8, *p as u8, 255];
+    }
+    rgba
+}
+
 fn publish(st: &Loop, scene: &mut dyn Scene, sh: &Shared, (w, h): (u32, u32)) {
     let req = Request {
         w,
@@ -454,10 +464,7 @@ fn publish(st: &Loop, scene: &mut dyn Scene, sh: &Shared, (w, h): (u32, u32)) {
         highlights: st.highlights.clone(),
     };
     let Some(fb) = scene.render(&req) else { return };
-    let mut rgba = Vec::with_capacity(fb.pixels().len() * 4);
-    for p in fb.pixels() {
-        rgba.extend_from_slice(&[(p >> 16) as u8, (p >> 8) as u8, *p as u8, 255]);
-    }
+    let rgba = rgba_of(fb.pixels());
     let frame = Frame {
         w: fb.width(),
         h: fb.height(),

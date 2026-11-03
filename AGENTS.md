@@ -12,6 +12,13 @@ Miniscent is a Rust workspace (see [docs/plan.md](docs/plan.md) and
 - Evidence over assertion: write tests that read real output and run them.
 - Performance is a feature; measure before and after.
 - Tolerances live only in `mscent_math::epsilon`.
+- The software and hardware renderers stay on par. A change to what a frame looks
+  like lands in both in one PR, with a row in `crates/mscent-gpu/tests/parity.rs`.
+  New looks go in both or neither. The one exception is drawing finer: the GPU may
+  add resolution, anti-aliasing and texture filtering (`Finish::Fine`), by the
+  owner's decision, as long as `Finish::Reference` stays on par with software.
+  Shared constants are never retyped in WGSL. Do not loosen a parity limit to pass
+  a test ([docs/hardware-renderer.md](docs/hardware-renderer.md)).
 
 Gate before pushing:
 
@@ -33,5 +40,5 @@ cargo run --release -p mscent-editor -- --selftest target/shots/editor
 ```
 
 Crate edges: world depends on math; collide on math and world; render on math
-and world; game on all of them; texgen on math, and render on texgen too (it makes materials from recipes); script depends on nothing, and game on script too; the game talks to the OS only through `mscent-platform` and never depends on xui (only `apps/editor` does). Do not add external dependencies without a
+and world; game on all of them; texgen on math, and render on texgen too (it makes materials from recipes); gpu on math, world and render, and on wgpu; script depends on nothing, and game on script too; the game talks to the OS only through `mscent-platform` and never depends on xui (only `apps/editor` does). Do not add external dependencies without a
 reason recorded in the PR.

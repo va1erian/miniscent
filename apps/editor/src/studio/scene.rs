@@ -5,8 +5,9 @@ use std::time::Duration;
 
 use miniscent_game::FrameStats;
 use mscent_platform::Event;
-use mscent_render::{Framebuffer, Quality, VoxelChange, draw_text};
+use mscent_render::{Effects, FrameInput, Framebuffer, Quality, VoxelChange, draw_text};
 
+use super::gpu_view::{self, GpuView};
 use super::highlight;
 use super::worker::{Request, Scene};
 use crate::build::Built;
@@ -17,6 +18,7 @@ const WATCH_EVERY: Duration = Duration::from_millis(250);
 pub struct LevelScene {
     built: Built,
     fb: Option<Framebuffer>,
+    gpu: GpuView,
     since_watch: Duration,
 }
 
@@ -25,6 +27,7 @@ impl LevelScene {
         LevelScene {
             built,
             fb: None,
+            gpu: GpuView::default(),
             since_watch: Duration::ZERO,
         }
     }
@@ -39,6 +42,28 @@ impl LevelScene {
         if let Err(problem) = watch.reload_if_changed(session) {
             session.show_script_problem(&problem);
         }
+    }
+
+    /// Draws on the GPU whatever `gpu_view::set_wanted` says, for a test.
+    #[cfg(test)]
+    pub fn on_gpu(built: Built) -> LevelScene {
+        let mut scene = LevelScene::new(built);
+        scene.gpu.forced = true;
+        scene
+    }
+
+    /// Draws on `device`, a test's own, which it may lose.
+    #[cfg(test)]
+    pub fn on_own_gpu(built: Built, device: mscent_gpu::Gpu) -> LevelScene {
+        let mut scene = LevelScene::on_gpu(built);
+        scene.gpu.own_device = Some(device);
+        scene
+    }
+
+    /// Why the GPU gave this scene up, if it has.
+    #[cfg(test)]
+    pub fn gpu_failure(&self) -> Option<&str> {
+        self.gpu.failure()
     }
 
     /// The running game, for tests that look inside.
@@ -72,19 +97,26 @@ impl Scene for LevelScene {
 
     /// The session keeps its running game; only what it draws with changes.
     fn relight(&mut self, lit: Built) {
+        self.gpu.level_changed();
         match self.built.session_mut() {
             Some(session) => session.set_renderer(lit.into_renderer()),
             None => self.built = lit,
         }
     }
 
+    /// The GPU's copy follows on its next frame, remaking only the changed chunks.
     fn apply_voxels(&mut self, change: VoxelChange) {
         self.built.renderer_mut().apply_voxels(change);
     }
 
     fn render(&mut self, req: &Request) -> Option<&Framebuffer> {
         if req.play {
-            return self.built.session_mut()?.render(req.w, req.h);
+            gpu_view::set_inactive();
+            let gpu = &mut self.gpu;
+            let session = self.built.session_mut()?;
+            return session.render_through(req.w, req.h, &mut |assets, fb, frame| {
+                gpu.draw(assets, fb, frame)
+            });
         }
         // The editor shows the level, not what the last run did to it.
         if let Some(session) = self.built.session_mut() {
@@ -95,7 +127,16 @@ impl Scene for LevelScene {
         }
         let fb = self.fb.as_mut()?;
         let renderer = self.built.renderer();
-        renderer.render(fb, &req.view, Quality::High, renderer.actors(), None)?;
+        let frame = FrameInput {
+            view: &req.view,
+            quality: Quality::High,
+            actors: renderer.actors(),
+            effects: Effects::default(),
+            wants_depth: !req.highlights.is_empty(),
+        };
+        if !self.gpu.draw(renderer.assets(), fb, &frame) {
+            renderer.render(fb, &req.view, Quality::High, renderer.actors(), None)?;
+        }
         if !req.highlights.is_empty()
             && let Some(cam) = req
                 .view

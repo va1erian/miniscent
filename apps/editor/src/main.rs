@@ -8,7 +8,8 @@
 //!   play 120 frames, return, edit, snapshot) and exits 0 on success.
 //! * `--bake-texture <recipe.mst> <dir>` writes a recipe's maps as PNG files, and
 //!   adds the material to `<dir>/materials.txt` if there is one.
-//! * `--ui-timing [dir]` prints what the UI thread's everyday work costs.
+//! * `--ui-timing [dir] [WxH]` prints what the UI thread's everyday work costs,
+//!   in a window of 1280x800 or `WxH` pixels.
 
 mod build;
 mod files;
@@ -26,6 +27,7 @@ use ui::Editor;
 
 fn main() -> xui::backend::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    studio::gpu_view::set_wanted(!args.iter().any(|a| a == "--software"));
     if let Some(i) = args.iter().position(|a| a == "--selftest") {
         let Some(dir) = args.get(i + 1) else {
             eprintln!("--selftest needs an output directory");
@@ -48,7 +50,11 @@ fn main() -> xui::backend::Result<()> {
         let dir = args
             .get(i + 1)
             .map_or("target/shots/timing", String::as_str);
-        std::process::exit(selftest::ui_timing(std::path::Path::new(dir)));
+        let Some(size) = selftest::window_size(args.get(i + 2).map(String::as_str)) else {
+            eprintln!("--ui-timing: the window size is WxH, as in 3840x2160");
+            std::process::exit(2);
+        };
+        std::process::exit(selftest::ui_timing(std::path::Path::new(dir), size));
     }
     // Hidden: make every frame take this many ms longer, to see that a slow
     // game does not slow the UI. MSCENT_SLOW_PLAY_MS does the same.

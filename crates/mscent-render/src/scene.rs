@@ -6,9 +6,10 @@
 //!    leaves that can be seen ([`visible`]).
 //! 2. Walk the BSP front to back from the eye, skipping subtrees whose
 //!    bounds are outside the view frustum.
-//! 3. At each visible leaf, list its faces that face the eye, each face at
-//!    most once per frame even when it borders several leaves.
-//! 4. Fill the listed faces. Only this step depends on the rows being drawn,
+//! 3. At each visible leaf, take its faces that face the eye, each face at
+//!    most once per frame even when it borders several leaves. This far is
+//!    [`Scene::visible_set`], which any renderer can use.
+//! 4. Clip and project those faces, and fill them. Only this step depends on the rows being drawn,
 //!    so a frame in parallel bands lists once and fills per band.
 //!
 //! Front-to-back order does not change the picture (the z-buffer decides) but
@@ -24,6 +25,7 @@ mod surface;
 mod visible;
 mod walk;
 
+pub use holes::HoleList;
 pub use reach::LightReach;
 pub use surface::Surface;
 
@@ -143,6 +145,11 @@ impl Scene {
     /// This scene with viewport faces, each paired with its slot. Like voxels,
     /// they count towards the bounds of their leaves: a room walled only by them
     /// has no faces of its own, and the walk would cull it.
+    /// Whether any face of the level is a viewport.
+    pub fn has_viewports(&self) -> bool {
+        !self.holes.polys.is_empty()
+    }
+
     pub(crate) fn with_holes(mut self, faces: &[(Face, u8)]) -> Self {
         self.holes = holes::Holes::new(self.bsp.leaves().len(), faces);
         self.refresh_bounds();
@@ -227,7 +234,7 @@ impl Scene {
         list: &mut PolyList,
     ) -> SceneStats {
         let lists = walk::Lists {
-            faces: list,
+            faces: Some(list),
             chunks: &mut Vec::new(),
             holes: None,
             pan: None,
@@ -242,11 +249,42 @@ impl Scene {
         cam: &Camera,
         list: &mut PolyList,
         chunks: &mut Vec<u32>,
-        holes: &mut PolyList,
+        holes: &mut HoleList,
     ) -> SceneStats {
         holes.clear();
         let lists = walk::Lists {
-            faces: list,
+            faces: Some(list),
+            chunks,
+            holes: Some(holes),
+            pan: None,
+        };
+        self.list_all(cam, None, lists)
+    }
+
+    /// What `cam` can see, with no rasterizer in it: the faces in the returned
+    /// `drawn`, front to back and facing the eye, and the voxel chunks of the
+    /// visible leaves in `chunks`, nearest first. A renderer does its own
+    /// clipping and projection from here.
+    pub fn visible_set(&self, cam: &Camera, chunks: &mut Vec<u32>) -> SceneStats {
+        let lists = walk::Lists {
+            faces: None,
+            chunks,
+            holes: None,
+            pan: None,
+        };
+        self.list_all(cam, None, lists)
+    }
+
+    /// [`Self::visible_set`], replacing `holes` with the viewport faces in view.
+    pub fn visible_set_with_holes(
+        &self,
+        cam: &Camera,
+        chunks: &mut Vec<u32>,
+        holes: &mut HoleList,
+    ) -> SceneStats {
+        holes.clear();
+        let lists = walk::Lists {
+            faces: None,
             chunks,
             holes: Some(holes),
             pan: None,
@@ -258,9 +296,11 @@ impl Scene {
         &self,
         cam: &Camera,
         texture: Option<&Texture>,
-        lists: walk::Lists<'_>,
+        mut lists: walk::Lists<'_>,
     ) -> SceneStats {
-        lists.faces.clear();
+        if let Some(faces) = lists.faces.as_deref_mut() {
+            faces.clear();
+        }
         lists.chunks.clear();
         let eye = eye_of(cam);
         let leaf = self.bsp.leaf_at_f32(eye);
@@ -288,10 +328,12 @@ impl Scene {
         islands: &Islands,
         island: u32,
         window: [f32; 4],
-        (list, chunks): (&mut PolyList, &mut Vec<u32>),
+        (mut list, chunks): (Option<&mut PolyList>, &mut Vec<u32>),
         pan: Option<([f32; 2], &mut Vec<Vertex>)>,
     ) -> SceneStats {
-        list.clear();
+        if let Some(list) = list.as_deref_mut() {
+            list.clear();
+        }
         chunks.clear();
         let eye = eye_of(cam);
         let leaf = self.bsp.leaf_at_f32(eye);
@@ -384,7 +426,7 @@ pub fn eye_of(cam: &Camera) -> Vec3 {
 
 /// Light scale (256 = full) from the face orientation: floors bright,
 /// ceilings dark, walls in between with a slight tilt by axis.
-fn orientation_light(face: &Face) -> u32 {
+pub fn orientation_light(face: &Face) -> u32 {
     let n = face.plane.normal;
     let v = 170.0 + n.z.max(0.0) * 86.0 + n.z.min(0.0) * 30.0 + n.x.abs() * 30.0;
     v.clamp(0.0, 512.0) as u32

@@ -181,6 +181,25 @@ Design in [viewports.md](viewports.md); status in [status.md](status.md#m13-view
 | M13.8 | Layers at the frame's quality, voxels in layers, scale in level text and the editor, `mountains`, New mountains | M13.7, M11.4 | L | Shadows read from pixels at every scale; a range at scale 16 bakes less than at scale 1; `default_workers` checked |
 | M13.9 | Sky materials as recipes, `out-alpha`, Studio preview of a mask; demo mountains in budget | M13.8, M12.11 | M | The sky PNGs are gone; masked recipes load, preview and save; the demo stays under `VISTA_VOXEL_TRIS` across its platform |
 
+## M14 Hardware renderer
+
+Design in [hardware-renderer.md](hardware-renderer.md).
+
+| ID | Item | Deps | Size | Done when |
+|---|---|---|---|---|
+| M14.1 | Seams: `FrameInput`, `FrameRenderer`, `LevelAssets`, visible set split from clipping. No GPU yet | | M | Render suite byte-identical; `frame_bench` before and after; software-only size unchanged |
+| M14.2 | `mscent-gpu`: device, targets, readback, sky, flat faces. **The gate**: parity test, CI lines, `AGENTS.md`, both agents. Size budgets, WGSL front-end trial | M14.1 | M | Parity passes on your GPU and on lavapipe, with the added CI time recorded; a seeded difference fails; budgets recorded |
+| M14.3 | Surfaces in the editor's view: textures, mips, lightmap, fog, emissive, TexInfo, bump, specular, movers, actors | M14.2 | L | Those rows pass, at each `Quality`; constants come from Rust |
+| M14.4 | **Editor pane on the GPU**: on by default for levels without voxels, thread-owned device, highlight depth, View toggle, fallback with a reason | M14.3 | M | `--selftest` passes both ways; edit-to-picture and 4K frame cost recorded, with the UI thread's paint measured; an owner has used it in a real window |
+| M14.5 | Voxels: plain, blended, spots, detail levels, remesh. Removes the pane's voxel exception | M14.4 | L | Rows pass; a sculpt updates the picture; no sky pixel over 1000 poses, as in `fill_tests` |
+| M14.6 | Dynamic lights, particles, decals. Play in the pane on the GPU, by readback | M14.4 | L | Rows pass; `ParticleDraws` byte-equal; Play in the selftest |
+| M14.7 | Game window, direct route: `gpu_window`, swapchain, `--renderer`, HUD layer, shared particle estimate | M14.6 | M | A real window at 4K with no readback; a forced failure reaches software; any software picture change recorded |
+| M14.8 | Failure paths: device loss, hostile corpus, limits | M14.4 | S | Tests above |
+| M14.9 | Speed and default: measure, resolution control on a slow GPU, `auto` by default | All | M | Numbers in `docs/perf/`; a person has played it |
+| M14.10 | The pane's paint: find why a new frame costs what the window costs, fix it in xui or give the pane a native surface | M14.4 | L | A new 4K frame painted in under 16 ms, in a real window |
+| M14.11 | Viewports on the GPU: viewport faces, vista layers, masked textures, removing the pane's viewport exception | M14.5 | L | Rows for vista, parallax and cutout pass; `facing.msl` draws on the GPU |
+| M14.12 | The fine finish: 4x multisampling and trilinear, anisotropic material filtering at High, with depth resolved for reading | M14.4 | M | `tests/finish.rs`: the same picture in the mean, nearer a supersampled truth, each half failing when taken out |
+
 ## Suggested order
 
 M0, then M1.1 through M1.4 in parallel with M2.1 through M2.3. The renderer

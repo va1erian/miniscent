@@ -33,18 +33,18 @@ impl MoverPose {
         offset: Vec3::ZERO,
     };
 
-    fn to_world(self, p: Vec3) -> Vec3 {
+    pub fn to_world(self, p: Vec3) -> Vec3 {
         self.rot.rotate(p - self.pivot) + self.pivot + self.offset
     }
 
-    fn to_authored(self, p: Vec3) -> Vec3 {
+    pub fn to_authored(self, p: Vec3) -> Vec3 {
         self.rot.conjugate().rotate(p - self.pivot - self.offset) + self.pivot
     }
 }
 
 /// One mover's faces, and a sphere around them for culling.
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct MoverFaces {
+pub struct MoverFaces {
     pub faces: std::ops::Range<usize>,
     pub centre: Vec3,
     pub radius: f32,
@@ -78,7 +78,7 @@ impl LevelRenderer {
     pub(super) fn list_movers(&self, cam: &Camera, poses: &[MoverPose], list: &mut MoverList) {
         list.polys.clear();
         list.faces.clear();
-        for (i, mover) in self.mover_faces.iter().enumerate() {
+        for (i, mover) in self.assets.mover_faces.iter().enumerate() {
             let pose = poses.get(i).copied().unwrap_or(MoverPose::AUTHORED);
             // View is along -Z, so all of it is behind the eye past this.
             if cam.world_to_camera(pose.to_world(mover.centre)).z > mover.radius {

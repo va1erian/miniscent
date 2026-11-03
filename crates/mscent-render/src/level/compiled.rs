@@ -22,7 +22,8 @@ use mscent_world::{Bsp, Face, Level, Portals, brush_faces, compile, extract_face
 use super::setup::{actors_of, lights_of, with_level_fog};
 use super::vista::Vistas;
 use super::{
-    Actor, BakeCache, BakedLight, BuildConfig, BuildError, LevelRenderer, check_materials,
+    Actor, BakeCache, BakedLight, BuildConfig, BuildError, LevelAssets, LevelRenderer,
+    check_materials,
 };
 use crate::material::MaterialTable;
 use crate::voxel::{VertexLight, VoxelScene};
@@ -289,7 +290,9 @@ impl Compiled {
         materials: MaterialTable,
     ) -> Result<LevelRenderer, BuildError> {
         check_materials(&materials)?;
-        Ok(LevelRenderer::assemble(self.parts, lightmap, materials))
+        Ok(LevelRenderer::from_assets(LevelAssets::assemble(
+            self.parts, lightmap, materials,
+        )))
     }
 }
 

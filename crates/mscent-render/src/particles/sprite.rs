@@ -50,6 +50,11 @@ struct Clip {
 
 /// `None` for a sprite the renderer refuses or one that misses `fb`.
 fn clip(s: &SpriteDraw, fb: &Framebuffer) -> Option<Clip> {
+    clip_to(s, fb.width(), fb.row_range())
+}
+
+/// [`clip`] to `width` columns and the screen rows `rows0..rows1`.
+fn clip_to(s: &SpriteDraw, width: u32, (rows0, rows1): (i32, i32)) -> Option<Clip> {
     // `inv_z > 0` also rejects NaN and anything at or behind the eye.
     let valid = s.x.is_finite() && s.y.is_finite() && s.radius.is_finite();
     if !valid || s.radius <= 0.0 || !s.inv_z.is_finite() || s.inv_z <= 0.0 {
@@ -57,8 +62,7 @@ fn clip(s: &SpriteDraw, fb: &Framebuffer) -> Option<Clip> {
     }
     let radius = s.radius.min(MAX_RADIUS);
     let origin = (s.x - radius, s.y - radius);
-    let (rows0, rows1) = fb.row_range();
-    let cols = span(origin.0, 2.0 * radius, 0.0, fb.width() as f32);
+    let cols = span(origin.0, 2.0 * radius, 0.0, width as f32);
     let rows = span(origin.1, 2.0 * radius, rows0 as f32, rows1 as f32);
     (cols.1 > cols.0 && rows.1 > rows.0).then_some(Clip {
         radius,
@@ -84,6 +88,37 @@ pub(super) struct Bounds {
     pub rows: (usize, usize),
 }
 
+/// What a sprite covers and how it reads its mask, as [`draw_sprite`] draws it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Layout {
+    /// Pixel columns and screen rows, each as `start..end`.
+    pub cols: (usize, usize),
+    pub rows: (usize, usize),
+    /// Top-left of the unclipped box, in pixels.
+    pub origin: (f32, f32),
+    /// Mask pixels per screen pixel.
+    pub scale: f32,
+    /// Where the mip starts in the bank's bytes, and its side.
+    pub start: usize,
+    pub side: usize,
+}
+
+/// The layout of `s` in `width` columns and the screen rows `rows`.
+pub(super) fn layout(s: &SpriteDraw, width: u32, rows: (i32, i32)) -> Option<Layout> {
+    let c = clip_to(s, width, rows)?;
+    let diameter = 2.0 * c.radius;
+    let (start, side) = SpriteBank::mip_at(s.mask, mip_for(diameter));
+    let scale = side as f32 / diameter;
+    scale.is_finite().then_some(Layout {
+        cols: (c.cols.0, c.cols.1.min(c.cols.0 + TABLE)),
+        rows: c.rows,
+        origin: c.origin,
+        scale,
+        start,
+        side,
+    })
+}
+
 pub(super) fn draw_sprite(
     level: Level,
     fb: &mut Framebuffer,
@@ -91,20 +126,19 @@ pub(super) fn draw_sprite(
     how: (Blend, Dest),
     bank: &SpriteBank,
 ) {
-    let Some(c) = clip(s, fb) else { return };
-    let diameter = 2.0 * c.radius;
-    let (mask, side) = bank.mip(s.mask, mip_for(diameter));
-    let scale = side as f32 / diameter;
-    if !scale.is_finite() || mask.len() != side * side {
+    let Some(l) = layout(s, fb.width(), fb.row_range()) else {
         return;
-    }
+    };
+    let Some(mask) = bank.bytes().get(l.start..l.start + l.side * l.side) else {
+        return;
+    };
     let plan = Plan {
-        cols: (c.cols.0, c.cols.1.min(c.cols.0 + TABLE)),
-        rows: c.rows,
-        origin: c.origin,
-        scale,
+        cols: l.cols,
+        rows: l.rows,
+        origin: l.origin,
+        scale: l.scale,
         mask,
-        side,
+        side: l.side,
     };
     // Stack scratch sized to the sprite: zeroing a full table would cost more
     // than drawing a small sprite.

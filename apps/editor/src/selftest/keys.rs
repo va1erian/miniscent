@@ -6,7 +6,7 @@ use xui::xui_canvas::snapshot::Stage;
 use xui::{Key, Modifiers};
 
 use super::{Run, pump, wait_for_preview};
-use crate::studio::Preview;
+use crate::studio::{Preview, gpu_view};
 use crate::ui::{Msg, Probe};
 
 fn press(stage: &Stage<'_, Msg>, key: Key) {
@@ -36,6 +36,10 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         probe.message().starts_with("Playing"),
         &format!("injected F5 KeyDown started play: {}", probe.message()),
     );
+    pump(stage, 10);
+    // A machine with no GPU has software to fall back on, and that is all.
+    let on_gpu = gpu_view::active() || !gpu_view::wanted() || mscent_gpu::Gpu::new().is_err();
+    run.check(on_gpu, "Play draws on the GPU when it can");
     press(stage, Key::ESCAPE);
     pump(stage, 5);
     run.check(

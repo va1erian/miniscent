@@ -15,16 +15,16 @@ use crate::specular::SpecTable;
 
 /// Highlight strength: the table peaks at gloss/255 of the light colour,
 /// which on dim baked light would be invisible.
-pub(crate) const SPEC_GAIN: f32 = 1.1;
+pub const SPEC_GAIN: f32 = 1.1;
 
 /// Table response below which a highlight adds nothing visible (the light
 /// level tops out near 300 of 256, so 1/300 is under one level).
-pub(crate) const MIN_SPEC: f32 = 1.0 / 300.0;
+pub const MIN_SPEC: f32 = 1.0 / 300.0;
 
 /// Light level (256 = full) above which [`soft_limit`] starts rolling off.
-pub(crate) const KNEE: f32 = 190.0;
+pub const KNEE: f32 = 190.0;
 /// Distance past the knee at which the roll-off reaches its ceiling.
-pub(crate) const ROLL: f32 = 110.0;
+pub const ROLL: f32 = 110.0;
 
 /// Multiply the colour channels by per-channel light `k` (256 = unchanged).
 /// Negative or NaN products saturate to zero in the float-to-int cast.
@@ -88,14 +88,25 @@ pub(crate) fn add_highlight(out: u32, k: Vec3, s: f32, mask: impl FnOnce() -> f3
     }
 }
 
+/// What [`dither_of`] multiplies a column by, then a row, then their mix.
+pub const DITHER_X: u32 = 0x9E37_79B1;
+pub const DITHER_Y: u32 = 0x85EB_CA6B;
+pub const DITHER_MIX: u32 = 0x2C1B_3C6D;
+/// How far [`dither_of`] folds the hash onto itself, and how many low bits it
+/// drops before keeping [`DITHER_BITS`] of it.
+pub const DITHER_FOLD: u32 = 15;
+pub const DITHER_DROP: u32 = 8;
+pub const DITHER_BITS: u32 = 16;
+
 /// Cheap noise in `[0, 1)` from the screen position. It is fixed on the
 /// screen, so it cannot crawl across surfaces as the camera moves (noise
 /// keyed by span index or texel does, since both shift every frame).
 #[inline(always)]
 pub fn dither_of(x: i32, y: i32) -> f32 {
-    let h = (x as u32).wrapping_mul(0x9E37_79B1) ^ (y as u32).wrapping_mul(0x85EB_CA6B);
-    let h = (h ^ (h >> 15)).wrapping_mul(0x2C1B_3C6D);
-    ((h >> 8) & 0xffff) as f32 * (1.0 / 65536.0)
+    let h = (x as u32).wrapping_mul(DITHER_X) ^ (y as u32).wrapping_mul(DITHER_Y);
+    let h = (h ^ (h >> DITHER_FOLD)).wrapping_mul(DITHER_MIX);
+    let bits = (1u32 << DITHER_BITS) as f32;
+    ((h >> DITHER_DROP) & ((1 << DITHER_BITS) - 1)) as f32 * (1.0 / bits)
 }
 
 /// The light arriving at one texel, in the texture frame.

@@ -87,3 +87,56 @@ fn rejects_invalid_parameters() {
     assert!(Camera::look_at(eye, t, up, 1.0, 0.0, 50.0, 10, 10).is_none());
     assert!(Camera::look_at(eye, eye, up, 1.0, 0.1, 50.0, 10, 10).is_none());
 }
+
+#[test]
+fn the_gpu_matrix_lands_where_project_does() {
+    let cam = Camera::look_at(
+        Vec3::new(1.0, 2.0, 3.0),
+        Vec3::new(4.0, 2.0, 3.0),
+        Vec3::new(0.0, 0.0, 1.0),
+        1.3,
+        0.1,
+        400.0,
+        320,
+        180,
+    )
+    .expect("a camera");
+    let matrix = cam.gpu_clip_matrix();
+    for point in [
+        Vec3::new(5.0, 2.0, 3.0),
+        Vec3::new(9.0, 4.0, 1.0),
+        Vec3::new(300.0, -20.0, 40.0),
+    ] {
+        let want = cam.project(cam.world_to_camera(point)).expect("in front");
+        let clip = matrix.transform_point(point);
+        let (x, y, depth) = (clip.x / clip.w, clip.y / clip.w, clip.z / clip.w);
+        assert!((160.0 + x * 160.0 - want.x).abs() < 1e-2);
+        assert!((90.0 - y * 90.0 - want.y).abs() < 1e-2);
+        assert!((0.0..=1.0).contains(&depth));
+        assert!((cam.inv_z_of_gpu_depth(depth) - want.inv_z).abs() < want.inv_z * 1e-4);
+    }
+    assert_eq!(cam.inv_z_of_gpu_depth(0.0), 0.0);
+}
+
+#[test]
+fn gpu_depth_meets_one_at_near_and_zero_at_far() {
+    let cam = Camera::look_at(
+        Vec3::ZERO,
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 0.0, 1.0),
+        1.3,
+        0.1,
+        400.0,
+        320,
+        180,
+    )
+    .expect("a camera");
+    let depth_at = |distance: f32| {
+        let clip = cam
+            .gpu_clip_matrix()
+            .transform_point(Vec3::new(distance, 0.0, 0.0));
+        clip.z / clip.w
+    };
+    assert!((depth_at(0.1) - 1.0).abs() < 1e-3);
+    assert!(depth_at(400.0).abs() < 1e-3);
+}

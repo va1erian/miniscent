@@ -85,6 +85,13 @@ impl Default for ScriptWatch {
 }
 
 impl Studio {
+    /// Draws the picture again, for something that changes it behind the worker's back.
+    pub fn redraw(&self) {
+        if let Some(w) = &self.worker {
+            w.banner(self.banner);
+        }
+    }
+
     /// Where the picture stands against `doc`.
     pub fn preview(&self, doc: &Document) -> Preview {
         if doc.brushes().is_empty() {

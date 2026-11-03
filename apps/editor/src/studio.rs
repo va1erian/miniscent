@@ -19,6 +19,8 @@ use crate::build::{BakeJob, Built, Job, Light, SharedCache};
 use crate::materials::SharedMaterials;
 use crate::model::{Document, FlyCam};
 
+pub mod gpu_view;
+pub use gpu_view::frame_size;
 mod highlight;
 mod live;
 mod preview;
@@ -117,14 +119,6 @@ pub struct Studio {
     /// The vista warnings last put in the log, so an edit that leaves them as
     /// they were does not repeat them.
     warned: Vec<String>,
-}
-
-/// The internal render size for a pane of `pane` pixels: the pane divided by
-/// the smallest whole factor that brings the width to `max_width` or less.
-pub fn frame_size(pane: (u32, u32), max_width: u32) -> (u32, u32) {
-    let (w, h) = (pane.0.max(1), pane.1.max(1));
-    let factor = w.div_ceil(max_width.max(1)).max(1);
-    ((w / factor).max(16), (h / factor).max(16))
 }
 
 impl Studio {
@@ -403,10 +397,13 @@ impl Studio {
         self.sync_preview(doc, &mut out);
         self.retired.retain(|h| !h.is_finished());
         self.sync_banner(doc);
+        out.log.extend(gpu_view::take_report());
+        // A GPU has the pixels to spare; on software a large pane costs resolution.
+        let max_width = if gpu_view::active() { pane.0 } else { 960 };
         let size = if pane.0 == 0 || pane.1 == 0 {
             (0, 0)
         } else {
-            frame_size(pane, 960)
+            frame_size(pane, max_width)
         };
         let Some(w) = self.worker.as_mut() else {
             return out;
@@ -477,6 +474,9 @@ Q/E: roll   Shift: fast";
 
 #[cfg(test)]
 mod cache_lock_tests;
+#[cfg(test)]
+#[path = "studio/gpu_view_tests.rs"]
+mod gpu_view_tests;
 #[cfg(test)]
 mod large_level_tests;
 #[cfg(test)]

@@ -305,6 +305,13 @@ fn vertical_gradient(pts: &[ScreenVert]) -> Option<Attr> {
     })
 }
 
+/// Texels per pixel up to which a surface stays on mip level 0, so nearby
+/// surfaces stay sharp.
+pub const SHARP_RATE: f32 = 1.5;
+/// How many times blurrier the long axis of a texel's footprint may be than the
+/// short one: a cheap anisotropy, so grazing floors keep detail.
+pub const LONG_AXIS_LIMIT: f32 = 4.0;
+
 /// Texels per pixel at a span centre, and the mip level that follows from it:
 /// the largest texel step per pixel along x or y, with level 0 kept up to 1.5
 /// texels per pixel so nearby surfaces stay sharp.
@@ -316,15 +323,16 @@ pub(crate) fn mip_level(tex: &Texture, centre: Attr, gx: Attr, gy: Option<Attr>)
         let dv = (g.vz - v * g.iz) * inv;
         du.abs().max(dv.abs())
     };
-    // Cheap anisotropy: the long axis may be up to 4x blurrier than the
-    // short one, so grazing floors keep detail instead of smearing.
     let (a, b) = (step(gx), gy.map_or(0.0, step));
-    let rate = a.max(b).min(a.min(b) * 4.0).max(a.max(b) * 0.25);
-    if tex.mip_count() == 0 || rate.is_nan() || rate <= 1.5 {
+    let rate = a
+        .max(b)
+        .min(a.min(b) * LONG_AXIS_LIMIT)
+        .max(a.max(b) / LONG_AXIS_LIMIT);
+    if tex.mip_count() == 0 || rate.is_nan() || rate <= SHARP_RATE {
         return (0, rate);
     }
     (
-        ((rate / 1.5).log2().ceil() as u32).min(tex.mip_count()),
+        ((rate / SHARP_RATE).log2().ceil() as u32).min(tex.mip_count()),
         rate,
     )
 }

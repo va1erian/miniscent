@@ -6,7 +6,7 @@ use crate::camera::Camera;
 use crate::draw2d::{draw_text, fill_rect, stroke_rect};
 use crate::dynlight::DynLight;
 use crate::framebuffer::Framebuffer;
-use crate::mesh::{Mesh, MeshLighting, Pose, fill_meshes, list_mesh};
+use crate::mesh::{Mesh, MeshLighting, Pose, each_lit_triangle, fill_meshes, list_mesh};
 use crate::raster::PolyList;
 use crate::scene::Scene;
 use crate::shade::Fog;
@@ -44,6 +44,22 @@ pub(super) struct LitActors<'a> {
     pub lights: &'a [DynLight],
     pub lighting: &'a mut MeshLighting,
     pub base: usize,
+}
+
+impl LitActors<'_> {
+    /// The lighting of `a`: the level's, and the lights that reach the leaf it
+    /// stands in, so a flash behind a wall does not light it.
+    fn of(&mut self, a: &Actor) -> &MeshLighting {
+        self.lighting.points.truncate(self.base);
+        let leaf = self.scene.bsp().leaf_at_f32(a.pos);
+        let reaching = self
+            .lights
+            .iter()
+            .filter(|l| l.is_lit() && l.reaches_leaf(leaf))
+            .map(DynLight::mesh_light);
+        self.lighting.points.extend(reaching);
+        self.lighting
+    }
 }
 
 fn pose_of(a: &Actor) -> Pose {
@@ -93,6 +109,37 @@ impl ActorMeshes {
         }
     }
 
+    /// Each triangle of `actors` that faces `eye`, lit by `lighting`: its corners
+    /// in world space with their light factors, and its flat colour.
+    pub(super) fn each_triangle(
+        &self,
+        actors: &[Actor],
+        lighting: &MeshLighting,
+        eye: Vec3,
+        mut visit: impl FnMut([(Vec3, f32); 3], u32),
+    ) {
+        for a in actors {
+            let pose = pose_of(a);
+            each_lit_triangle(self.mesh_of(a.kind), &pose, lighting, eye, &mut visit);
+        }
+    }
+
+    /// Like [`Self::each_triangle`], with each actor also lit by the dynamic
+    /// lights of `lit`, as [`Self::list_lit`] lights it.
+    pub(super) fn each_triangle_lit(
+        &self,
+        actors: &[Actor],
+        mut lit: LitActors,
+        eye: Vec3,
+        mut visit: impl FnMut([(Vec3, f32); 3], u32),
+    ) {
+        for a in actors {
+            let pose = pose_of(a);
+            let lighting = lit.of(a);
+            each_lit_triangle(self.mesh_of(a.kind), &pose, lighting, eye, &mut visit);
+        }
+    }
+
     /// Replaces `list` with this frame's actor triangles.
     pub(super) fn list(
         &self,
@@ -126,21 +173,10 @@ impl ActorMeshes {
         list: &mut PolyList,
     ) {
         list.clear();
-        let LitActors {
-            scene,
-            lights,
-            lighting,
-            base,
-        } = lit;
+        let mut lit = lit;
         for a in actors {
-            lighting.points.truncate(base);
-            let leaf = scene.bsp().leaf_at_f32(a.pos);
-            let reaching = lights
-                .iter()
-                .filter(|l| l.is_lit() && l.reaches_leaf(leaf))
-                .map(DynLight::mesh_light);
-            lighting.points.extend(reaching);
             let pose = pose_of(a);
+            let lighting = lit.of(a);
             list_mesh(
                 cam,
                 self.mesh_of(a.kind),

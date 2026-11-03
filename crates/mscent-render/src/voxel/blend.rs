@@ -32,10 +32,10 @@ use crate::texel_light::{KNEE, MIN_SPEC, SPEC_GAIN, add_spec, dither_of, mul_rgb
 use crate::texture::{LodSampler, NormalView, Texture};
 
 /// Thresholds of the ordered dither, as fractions of 16.
-const BAYER: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+pub const BAYER: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
 
 /// How close two corners' weights must be, for a dither to choose between them.
-const MATERIAL_BAND: f32 = 0.15;
+pub const MATERIAL_BAND: f32 = 0.15;
 
 /// One corner's material.
 struct Look<'a> {
