@@ -7,6 +7,7 @@ use mscent_render::scene::eye_of;
 use mscent_render::{Actor, LevelAssets};
 
 use crate::device::Gpu;
+use crate::finish::Finish;
 use crate::targets::{COLOR, DEPTH};
 
 /// Position, colour, light.
@@ -24,7 +25,7 @@ pub(crate) struct ActorPass {
 }
 
 impl ActorPass {
-    pub(crate) fn new(gpu: &Gpu, frame_uniform: &wgpu::Buffer) -> Self {
+    pub(crate) fn new(gpu: &Gpu, frame_uniform: &wgpu::Buffer, finish: Finish) -> Self {
         let device = &gpu.device;
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("actors"),
@@ -63,7 +64,7 @@ impl ActorPass {
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
-            multisample: Default::default(),
+            multisample: finish.multisample(),
             multiview_mask: None,
             cache: None,
         });

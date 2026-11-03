@@ -9,7 +9,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
-use mscent_gpu::{Gpu, GpuRenderer};
+use mscent_gpu::{Finish, Gpu, GpuRenderer};
 use mscent_render::{FrameInput, Framebuffer, LevelAssets};
 
 static WANTED: AtomicBool = AtomicBool::new(false);
@@ -110,9 +110,10 @@ impl GpuView {
         self.say(format!("3D view: software renderer, because {why}"));
     }
 
-    /// The level on the GPU, made if it has to be. `None` leaves it to software.
-    fn level(&mut self, assets: &LevelAssets) -> Option<&mut GpuRenderer> {
-        if self.level.is_none() {
+    /// The level on the GPU with `finish`, made if it has to be. `None` leaves it
+    /// to software.
+    fn level(&mut self, assets: &LevelAssets, finish: Finish) -> Option<&mut GpuRenderer> {
+        if self.level.as_ref().map(GpuRenderer::finish) != Some(finish) {
             let gpu = match device() {
                 Ok(gpu) => gpu,
                 Err(why) => {
@@ -120,7 +121,7 @@ impl GpuView {
                     return None;
                 }
             };
-            match GpuRenderer::new(gpu.clone(), assets) {
+            match GpuRenderer::with_finish(gpu.clone(), assets, finish) {
                 Ok(level) => self.level = Some(level),
                 Err(why) => {
                     self.give_up(&why.to_string());
@@ -150,7 +151,7 @@ impl GpuView {
             ));
             return false;
         }
-        let Some(level) = self.level(assets) else {
+        let Some(level) = self.level(assets, Finish::of(frame.quality)) else {
             return false;
         };
         let drawn = level.draw(assets, fb, frame).is_some();

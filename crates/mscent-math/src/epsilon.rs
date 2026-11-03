@@ -132,3 +132,23 @@ pub const PARITY_DEPTH_RELATIVE: f32 = 1.0e-3;
 /// How much `1/z` may jump between neighbouring pixels, relative to the nearer,
 /// before they count as an edge that the two renderers may fairly place apart.
 pub const PARITY_EDGE_DEPTH: f32 = 0.02;
+
+/// The most a GPU's fine finish may change a frame from its reference finish, as
+/// a mean over its pixels, in levels of 255 per colour channel: anti-aliasing and
+/// filtering move edges and texels, not the shading. Measured: up to 1.9.
+pub const FINE_MEAN_LEVELS: f64 = 3.0;
+
+/// How much of the reference finish's distance from the truth (a frame drawn four
+/// times larger and averaged down) a fine frame may keep. Anisotropic filtering
+/// is most of the gain: without it a fine frame is further from the truth than
+/// the reference, and with it 4% to 16% nearer.
+pub const FINE_NEARER: f64 = 1.0;
+
+/// The same over the pixels on a silhouette, where multisampling shows: with it a
+/// fine frame is 21% to 36% nearer there, without it 1% to 35%.
+pub const FINE_EDGES_NEARER: f64 = 0.85;
+
+/// The least share of a fine frame's pixels whose depth agrees with the
+/// reference's, to [`PARITY_DEPTH_RELATIVE`]: only silhouettes may differ, and
+/// 98% to 99% agree.
+pub const FINE_DEPTH_AGREEMENT: f64 = 0.95;

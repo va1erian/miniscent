@@ -3,6 +3,8 @@
 use mscent_render::{Camera, Framebuffer};
 
 use crate::device::Gpu;
+use crate::finish::Finish;
+use crate::resolve::{DepthResolve, RESOLVED};
 
 /// `0xAARRGGBB` little-endian, so a texel's bytes are a `Framebuffer` pixel's.
 pub(crate) const COLOR: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
@@ -12,24 +14,40 @@ const TEXEL_BYTES: u32 = 4;
 /// The colour and depth of a frame, and buffers to read them through.
 pub(crate) struct Targets {
     size: (u32, u32),
+    /// The finished colour, one sample a pixel, which is what is read.
     color: wgpu::Texture,
+    color_view: wgpu::TextureView,
+    /// Where a multisampled frame draws its colour before it is resolved.
+    samples_view: Option<wgpu::TextureView>,
     depth: wgpu::Texture,
-    pub(crate) color_view: wgpu::TextureView,
     pub(crate) depth_view: wgpu::TextureView,
+    /// A multisampled frame's depth, one value a pixel, and what reads it.
+    resolved_depth: Option<(wgpu::Texture, wgpu::TextureView, wgpu::BindGroup)>,
     color_read: wgpu::Buffer,
     depth_read: wgpu::Buffer,
     row_bytes: u32,
 }
 
-fn target(gpu: &Gpu, size: wgpu::Extent3d, format: wgpu::TextureFormat) -> wgpu::Texture {
+fn target(
+    gpu: &Gpu,
+    size: wgpu::Extent3d,
+    format: wgpu::TextureFormat,
+    samples: u32,
+) -> wgpu::Texture {
+    // A multisampled texture cannot be copied; its depth is read by a shader.
+    let read = if samples > 1 {
+        wgpu::TextureUsages::TEXTURE_BINDING
+    } else {
+        wgpu::TextureUsages::COPY_SRC
+    };
     gpu.device.create_texture(&wgpu::TextureDescriptor {
         label: None,
         size,
         mip_level_count: 1,
-        sample_count: 1,
+        sample_count: samples,
         dimension: wgpu::TextureDimension::D2,
         format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | read,
         view_formats: &[],
     })
 }
@@ -70,23 +88,40 @@ fn rows<'a, T>(
 
 impl Targets {
     /// `width` and `height` come from a [`Framebuffer`], which holds them to
-    /// 8192, so none of this arithmetic can overflow.
-    pub(crate) fn new(gpu: &Gpu, width: u32, height: u32) -> Self {
+    /// 8192, so none of this arithmetic can overflow. `resolve` is there when
+    /// `finish` multisamples.
+    pub(crate) fn new(
+        gpu: &Gpu,
+        (width, height): (u32, u32),
+        finish: Finish,
+        resolve: Option<&DepthResolve>,
+    ) -> Self {
         let size = wgpu::Extent3d {
             width,
             height,
             depth_or_array_layers: 1,
         };
-        let color = target(gpu, size, COLOR);
-        let depth = target(gpu, size, DEPTH);
+        let samples = finish.samples();
+        let color = target(gpu, size, COLOR, 1);
+        let depth = target(gpu, size, DEPTH, samples);
+        let depth_view = depth.create_view(&Default::default());
+        let samples_view = (samples > 1)
+            .then(|| target(gpu, size, COLOR, samples).create_view(&Default::default()));
+        let resolved_depth = resolve.filter(|_| samples > 1).map(|resolve| {
+            let texture = target(gpu, size, RESOLVED, 1);
+            let view = texture.create_view(&Default::default());
+            (texture, view, resolve.bind(gpu, &depth_view))
+        });
         let row_bytes = (width * TEXEL_BYTES).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
         let bytes = u64::from(row_bytes) * u64::from(height);
         Self {
             size: (width, height),
             color_view: color.create_view(&Default::default()),
-            depth_view: depth.create_view(&Default::default()),
+            samples_view,
             color,
             depth,
+            depth_view,
+            resolved_depth,
             color_read: read_buffer(gpu, bytes),
             depth_read: read_buffer(gpu, bytes),
             row_bytes,
@@ -95,6 +130,24 @@ impl Targets {
 
     pub(crate) fn size(&self) -> (u32, u32) {
         self.size
+    }
+
+    /// Where a frame draws its colour: into the samples, resolved into the
+    /// finished colour at the end of the pass, or straight into it.
+    pub(crate) fn color_attachment(&self) -> wgpu::RenderPassColorAttachment<'_> {
+        let (view, resolve_target, store) = match &self.samples_view {
+            Some(samples) => (samples, Some(&self.color_view), wgpu::StoreOp::Discard),
+            None => (&self.color_view, None, wgpu::StoreOp::Store),
+        };
+        wgpu::RenderPassColorAttachment {
+            view,
+            depth_slice: None,
+            resolve_target,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                store,
+            },
+        }
     }
 
     fn copy_out(
@@ -112,15 +165,27 @@ impl Targets {
         encoder.copy_texture_to_buffer(from, buffer, self.color.size());
     }
 
-    /// Records the copies [`Self::read_into`] will read.
-    pub(crate) fn copy_for_reading(&self, encoder: &mut wgpu::CommandEncoder, with_depth: bool) {
+    /// Records the copies [`Self::read_into`] will read, resolving a
+    /// multisampled depth first with `resolve`.
+    pub(crate) fn copy_for_reading(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        with_depth: bool,
+        resolve: Option<&DepthResolve>,
+    ) {
         self.copy_out(encoder, self.color.as_image_copy(), &self.color_read);
         if !with_depth {
             return;
         }
-        let depth = wgpu::TexelCopyTextureInfo {
-            aspect: wgpu::TextureAspect::DepthOnly,
-            ..self.depth.as_image_copy()
+        let depth = match (&self.resolved_depth, resolve) {
+            (Some((texture, view, source)), Some(resolve)) => {
+                resolve.run(encoder, source, view);
+                texture.as_image_copy()
+            }
+            _ => wgpu::TexelCopyTextureInfo {
+                aspect: wgpu::TextureAspect::DepthOnly,
+                ..self.depth.as_image_copy()
+            },
         };
         self.copy_out(encoder, depth, &self.depth_read);
     }

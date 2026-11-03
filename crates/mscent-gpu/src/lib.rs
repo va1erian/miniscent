@@ -11,18 +11,22 @@ mod actors;
 mod device;
 mod face_data;
 mod faces;
+mod finish;
 mod lightmap;
+mod resolve;
 mod sky;
 mod targets;
 mod textures;
 
 pub use device::{Gpu, GpuError};
+pub use finish::Finish;
 
 use mscent_render::scene::SceneStats;
 use mscent_render::{Camera, FrameInput, Framebuffer, LevelAssets, Quality};
 
 use actors::ActorPass;
 use faces::FacePass;
+use resolve::DepthResolve;
 use sky::SkyPass;
 use targets::Targets;
 
@@ -33,6 +37,9 @@ const FRAME_BYTES: u64 = 96;
 /// so the level can stay with its owner and with the software renderer.
 pub struct GpuRenderer {
     gpu: Gpu,
+    finish: Finish,
+    /// For a multisampled finish, which needs its depth resolved to read it.
+    resolve: Option<DepthResolve>,
     frame_uniform: wgpu::Buffer,
     sky: SkyPass,
     faces: FacePass,
@@ -66,8 +73,13 @@ fn frame_bytes(assets: &LevelAssets, cam: &Camera, quality: Quality, atlas: (u32
 }
 
 impl GpuRenderer {
-    /// Puts `assets` on `gpu`.
+    /// Puts `assets` on `gpu`, to draw the software renderer's picture.
     pub fn new(gpu: Gpu, assets: &LevelAssets) -> Result<Self, GpuError> {
+        Self::with_finish(gpu, assets, Finish::Reference)
+    }
+
+    /// Puts `assets` on `gpu`, to draw frames with `finish`.
+    pub fn with_finish(gpu: Gpu, assets: &LevelAssets, finish: Finish) -> Result<Self, GpuError> {
         let frame_uniform = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("frame"),
             size: FRAME_BYTES,
@@ -75,9 +87,11 @@ impl GpuRenderer {
             mapped_at_creation: false,
         });
         Ok(Self {
-            faces: FacePass::new(&gpu, assets, &frame_uniform)?,
-            sky: SkyPass::new(&gpu, assets.config()),
-            actors: ActorPass::new(&gpu, &frame_uniform),
+            faces: FacePass::new(&gpu, assets, &frame_uniform, finish)?,
+            sky: SkyPass::new(&gpu, assets.config(), finish),
+            actors: ActorPass::new(&gpu, &frame_uniform, finish),
+            resolve: (finish.samples() > 1).then(|| DepthResolve::new(&gpu)),
+            finish,
             frame_uniform,
             gpu,
             targets: None,
@@ -93,6 +107,11 @@ impl GpuRenderer {
             return Some("voxel volumes");
         }
         scene.has_viewports().then_some("viewports")
+    }
+
+    /// How this draws its frames.
+    pub fn finish(&self) -> Finish {
+        self.finish
     }
 
     /// The first GPU error since the last call, if any.
@@ -113,7 +132,9 @@ impl GpuRenderer {
         let cam = assets.camera(frame.view, width, height)?;
         let stats = assets.scene().visible_set(&cam, &mut self.chunks);
         if self.targets.as_ref().map(Targets::size) != Some((width, height)) {
-            self.targets = Some(Targets::new(&self.gpu, width, height));
+            let size = (width, height);
+            let targets = Targets::new(&self.gpu, size, self.finish, self.resolve.as_ref());
+            self.targets = Some(targets);
         }
         let targets = self.targets.as_ref()?;
         let uniform = frame_bytes(assets, &cam, frame.quality, self.faces.atlas_size);
@@ -129,15 +150,7 @@ impl GpuRenderer {
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &targets.color_view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
+                color_attachments: &[Some(targets.color_attachment())],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &targets.depth_view,
                     depth_ops: Some(wgpu::Operations {
@@ -154,7 +167,7 @@ impl GpuRenderer {
             self.faces.draw(&mut pass);
             self.actors.draw(&mut pass);
         }
-        targets.copy_for_reading(&mut encoder, frame.wants_depth);
+        targets.copy_for_reading(&mut encoder, frame.wants_depth, self.resolve.as_ref());
         self.gpu.queue.submit([encoder.finish()]);
         targets.read_into(&self.gpu, &cam, fb, frame.wants_depth)?;
         Some(stats)

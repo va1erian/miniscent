@@ -15,6 +15,7 @@ use mscent_render::{Camera, LevelAssets, MoverPose, Vertex};
 
 use crate::device::{Gpu, GpuError};
 use crate::face_data::{self, TABLE_LEN};
+use crate::finish::Finish;
 use crate::lightmap::LightAtlas;
 use crate::targets::{COLOR, DEPTH};
 use crate::textures;
@@ -128,7 +129,7 @@ fn storage(gpu: &Gpu, label: &str, bytes: &[u8], at_least: u64) -> Result<wgpu::
     Ok(buffer)
 }
 
-fn pipeline(gpu: &Gpu) -> wgpu::RenderPipeline {
+fn pipeline(gpu: &Gpu, finish: Finish) -> wgpu::RenderPipeline {
     let device = &gpu.device;
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("faces"),
@@ -149,6 +150,7 @@ fn pipeline(gpu: &Gpu) -> wgpu::RenderPipeline {
         ("SPEC_GAIN", f64::from(SPEC_GAIN)),
         ("MIN_SPEC", f64::from(MIN_SPEC)),
         ("TABLE_LEN", TABLE_LEN as f64),
+        ("FINE", f64::from(u8::from(finish == Finish::Fine))),
     ];
     let options = wgpu::PipelineCompilationOptions {
         constants: &constants,
@@ -185,7 +187,7 @@ fn pipeline(gpu: &Gpu) -> wgpu::RenderPipeline {
             stencil: Default::default(),
             bias: Default::default(),
         }),
-        multisample: Default::default(),
+        multisample: finish.multisample(),
         multiview_mask: None,
         cache: None,
     })
@@ -214,14 +216,20 @@ fn materials(
     (groups, material_of)
 }
 
-fn sampler(gpu: &Gpu, address: wgpu::AddressMode) -> wgpu::Sampler {
+fn sampler(gpu: &Gpu, address: wgpu::AddressMode, finish: Finish) -> wgpu::Sampler {
+    // Software takes one whole level per span; a fine frame blends two, which
+    // anisotropic filtering needs.
+    let mipmap_filter = match finish {
+        Finish::Reference => wgpu::MipmapFilterMode::Nearest,
+        Finish::Fine => wgpu::MipmapFilterMode::Linear,
+    };
     gpu.device.create_sampler(&wgpu::SamplerDescriptor {
         address_mode_u: address,
         address_mode_v: address,
         mag_filter: wgpu::FilterMode::Linear,
         min_filter: wgpu::FilterMode::Linear,
-        // Levels are whole numbers, as the software path takes one per span.
-        mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+        mipmap_filter,
+        anisotropy_clamp: finish.anisotropy(),
         ..Default::default()
     })
 }
@@ -250,6 +258,7 @@ impl FacePass {
         gpu: &Gpu,
         assets: &LevelAssets,
         frame_uniform: &wgpu::Buffer,
+        finish: Finish,
     ) -> Result<Self, GpuError> {
         let scene = assets.scene();
         let atlas = LightAtlas::new(gpu, assets)?;
@@ -271,10 +280,11 @@ impl FacePass {
         gpu.queue.write_buffer(&vertices, 0, &vertex_data);
         let index_bytes = most_index_bytes(&corners)?.max(INDEX_BYTES as u64);
         let indices = buffer(gpu, "faces", index_bytes, wgpu::BufferUsages::INDEX)?;
-        let pipeline = pipeline(gpu);
+        let pipeline = pipeline(gpu, finish);
+        // The atlas is read at its top level, so only the materials are filtered.
         let (clamped, repeat) = (
-            sampler(gpu, wgpu::AddressMode::ClampToEdge),
-            sampler(gpu, wgpu::AddressMode::Repeat),
+            sampler(gpu, wgpu::AddressMode::ClampToEdge, Finish::Reference),
+            sampler(gpu, wgpu::AddressMode::Repeat, finish),
         );
         let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("faces"),

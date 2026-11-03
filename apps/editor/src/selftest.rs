@@ -77,9 +77,21 @@ struct Holder {
     editor: Probe,
 }
 
-/// `--ui-timing`: prints what the UI thread's everyday work costs.
-pub fn ui_timing(dir: &Path) -> i32 {
-    run_theme(dir, Theme::light(), (1280.0, 800.0), timing::script)
+/// `--ui-timing`: prints what the UI thread's everyday work costs, in a window
+/// of `size` pixels.
+pub fn ui_timing(dir: &Path, size: (f32, f32)) -> i32 {
+    run_theme(dir, Theme::light(), size, timing::script)
+}
+
+/// The window size `WxH` names, 1280x800 when there is none, `None` when it
+/// is not two whole numbers from 64 to 16384.
+pub fn window_size(arg: Option<&str>) -> Option<(f32, f32)> {
+    let Some(arg) = arg else {
+        return Some((1280.0, 800.0));
+    };
+    let (w, h) = arg.split_once('x')?;
+    let side = |s: &str| s.parse::<u16>().ok().filter(|v| (64..=16384).contains(v));
+    Some((f32::from(side(w)?), f32::from(side(h)?)))
 }
 
 /// Runs the script; returns the process exit code.
@@ -457,4 +469,27 @@ fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     run.shot(stage, "07-edit-after-second-play.png");
     faces::script(run, stage, probe);
     keys::script(run, stage, probe);
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_window_size_is_two_whole_numbers_in_range() {
+        assert_eq!(super::window_size(None), Some((1280.0, 800.0)));
+        assert_eq!(
+            super::window_size(Some("3840x2160")),
+            Some((3840.0, 2160.0))
+        );
+        for bad in [
+            "3840",
+            "x2160",
+            "3840x",
+            "-1x10",
+            "20x20",
+            "99999x100",
+            "1e3x800",
+        ] {
+            assert_eq!(super::window_size(Some(bad)), None, "{bad}");
+        }
+    }
 }

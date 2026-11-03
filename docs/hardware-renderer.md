@@ -1,6 +1,6 @@
 # Hardware renderer: plan
 
-Status: accepted, M14.1 to M14.4 done and the rest not started ([status.md](status.md)). Figures
+Status: accepted, M14.1 to M14.4 and M14.12 done and the rest not started ([status.md](status.md)). Figures
 under "Measured" were run for this plan; all others are targets to measure. The work
 items are in [work-items.md](work-items.md) as M14.
 
@@ -289,6 +289,23 @@ costs was not found, and the windowed backend's own path was not run. Either fin
 cause in xui's repaint or a native surface for the pane (below) would remove it. A native
 surface also removes the readback, but needs a handle per node, and must deal with xui's
 tooltips and menus, which it would cover.
+
+**The finish (M14.12).** At High, the GPU draws more finely than software can afford:
+4x multisampling on edges and trilinear, 16x anisotropic filtering of the materials
+(`Finish::Fine`, `crates/mscent-gpu/src/finish.rs`). The shading is the same.
+`Finish::Reference` is software's picture, which the parity test holds the GPU to; the
+pane and `gpu_shot` use `Finish::of(quality)`. A multisampled depth is read back
+through a resolve pass, the mean of the samples that hit something, which on a surface
+is the pixel centre's depth as software stores it.
+
+`tests/finish.rs` holds the fine frame to the reference in the mean (1.9 levels at
+most, against a limit of 3), and to a truth, the same view drawn four times larger
+each way and averaged down. Fine is 4% to 16% nearer the truth over the frame, and 21%
+to 36% nearer on silhouettes. Without anisotropic filtering it is further from the
+truth than the reference, and without multisampling its silhouettes gain 1% to 8% on
+two of the three views, so each half of the finish fails the test when taken out. On
+the RTX 5070 Ti a 4K frame costs 5.12 ms fine against 4.92 ms reference, readback
+included.
 
 ## Two traps in the game path
 

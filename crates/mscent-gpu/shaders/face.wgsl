@@ -15,6 +15,9 @@ override ROLL: f32;
 override SPEC_GAIN: f32;
 override MIN_SPEC: f32;
 override TABLE_LEN: u32;
+// Finish::Fine: materials filtered trilinearly and anisotropically from the
+// pixel's own footprint, rather than one level a span as software takes.
+override FINE: bool;
 
 const HAS_NORMALS: u32 = 1u;
 const SPEC_VISIBLE: u32 = 2u;
@@ -165,7 +168,15 @@ fn with_highlight(out: vec3f, face: Face, corner: Corner, k: vec3f, n: vec3f, ti
     return min(out + floor(k * (s * mask * SPEC_GAIN)), vec3f(255.0));
 }
 
-fn lit(face: Face, corner: Corner, texel: vec3f, rate: f32) -> vec3f {
+// A material's texel at `at`, the derivatives of `at` across the pixel in `grad`.
+fn material(t: texture_2d<f32>, at: vec2f, grad: mat2x2f, level: f32) -> vec4f {
+    if FINE {
+        return textureSampleGrad(t, smooth_repeat, at, grad[0], grad[1]);
+    }
+    return textureSampleLevel(t, smooth_repeat, at, level);
+}
+
+fn lit(face: Face, corner: Corner, texel: vec3f, rate: f32, grad: mat2x2f) -> vec3f {
     let u_v = vec3f(corner.texels, 1.0);
     let luxel = vec2f(dot(face.to_luxel_x.xyz, u_v), dot(face.to_luxel_y.xyz, u_v));
     var k = light_color(face, luxel, rate) * 256.0;
@@ -176,7 +187,7 @@ fn lit(face: Face, corner: Corner, texel: vec3f, rate: f32) -> vec3f {
     let bumped = frame.bump_on != 0u && (face.flags & HAS_NORMALS) != 0u && relief > 0.0;
     if bumped {
         let at = corner.texels / vec2f(textureDimensions(albedo));
-        let sampled = textureSampleLevel(normals, smooth_repeat, at, 0.0);
+        let sampled = material(normals, at, grad, 0.0);
         sampled_mask = sampled.a;
         n = mix(vec3f(0.0, 0.0, 1.0), sampled.rgb * 2.0 - vec3f(1.0), relief);
         k *= bump_gain(n, to_texture_frame(face, baked_dir));
@@ -195,13 +206,15 @@ fn fs(corner: Corner) -> @location(0) vec4f {
     let face = faces[corner.face];
     let rate = texel_rate(corner.texels);
     let at = corner.texels / vec2f(textureDimensions(albedo));
-    let sampled = textureSampleLevel(albedo, smooth_repeat, at, albedo_level(rate));
+    // Taken here, where every pixel of the quad runs alike, as derivatives must be.
+    let grad = mat2x2f(dpdx(at), dpdy(at));
+    let sampled = material(albedo, at, grad, albedo_level(rate));
     let texel = round(sampled.rgb * 255.0);
     var out: vec3f;
     if face.to_luxel_y.w > 0.0 {
         out = mul_rgb(texel, face.to_luxel_y.w);
     } else {
-        out = lit(face, corner, texel, rate);
+        out = lit(face, corner, texel, rate, grad);
     }
     return finished(with_fog(out, corner.view_depth));
 }

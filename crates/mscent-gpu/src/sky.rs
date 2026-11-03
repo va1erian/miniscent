@@ -3,6 +3,7 @@
 use mscent_render::BuildConfig;
 
 use crate::device::Gpu;
+use crate::finish::Finish;
 use crate::targets::{COLOR, DEPTH};
 
 /// `top`, `bottom`, `last_row` and the padding a uniform block rounds up to.
@@ -16,7 +17,7 @@ pub(crate) struct SkyPass {
 }
 
 impl SkyPass {
-    pub(crate) fn new(gpu: &Gpu, cfg: &BuildConfig) -> Self {
+    pub(crate) fn new(gpu: &Gpu, cfg: &BuildConfig, finish: Finish) -> Self {
         let device = &gpu.device;
         let shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/sky.wgsl"));
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -43,7 +44,7 @@ impl SkyPass {
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
-            multisample: Default::default(),
+            multisample: finish.multisample(),
             multiview_mask: None,
             cache: None,
         });
