@@ -275,11 +275,13 @@ impl VoxelPass {
         let (mut base, mut end) = (0u32, 0u32);
         for (level, range) in lods.iter_mut().enumerate() {
             let lod = look.lod(level);
-            let written = push_lod(&mut vertices, &mut corners, &lod, base);
+            // Checked first, so that no corner `push_lod` writes can overflow.
             let count = u32::try_from(lod.mesh.vertices.len()).ok();
-            base = count
+            let next_base = count
                 .and_then(|n| base.checked_add(n))
                 .ok_or(GpuError::TooLarge("a voxel chunk"))?;
+            let written = push_lod(&mut vertices, &mut corners, &lod, base);
+            base = next_base;
             let next = end
                 .checked_add(written)
                 .ok_or(GpuError::TooLarge("a voxel chunk"))?;

@@ -3,7 +3,7 @@
 
 use mscent_render::Texture;
 
-use crate::device::Gpu;
+use crate::device::{Gpu, GpuError};
 
 /// `0xAARRGGBB` little-endian, the bytes a [`Texture`] holds.
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
@@ -85,15 +85,25 @@ fn normals(gpu: &Gpu, source: &Texture) -> wgpu::Texture {
     texture
 }
 
-/// A material's textures, bound for one draw.
+/// A material's textures, bound for one draw. One wider or taller than this GPU
+/// holds is an error: a texture file can be up to `png::MAX_DIMENSION` a side.
 pub(crate) fn bind_group(
     gpu: &Gpu,
     layout: &wgpu::BindGroupLayout,
     source: &Texture,
-) -> wgpu::BindGroup {
+) -> Result<wgpu::BindGroup, GpuError> {
+    let side = gpu.device.limits().max_texture_dimension_2d;
+    let longest = source.width().max(source.height());
+    if longest > side {
+        return Err(GpuError::TooLarge("a material's texture"));
+    }
+    // A texture has one level for each halving of its longest side, and no more.
+    if source.mip_count() >= u32::BITS - longest.leading_zeros() {
+        return Err(GpuError::TooLarge("a material's mip levels"));
+    }
     let albedo = albedo(gpu, source).create_view(&Default::default());
     let normals = normals(gpu, source).create_view(&Default::default());
-    gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+    Ok(gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("material"),
         layout,
         entries: &[
@@ -106,5 +116,5 @@ pub(crate) fn bind_group(
                 resource: wgpu::BindingResource::TextureView(&normals),
             },
         ],
-    })
+    }))
 }

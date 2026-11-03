@@ -114,8 +114,14 @@ fn buffer(
     size: u64,
     usage: wgpu::BufferUsages,
 ) -> Result<wgpu::Buffer, GpuError> {
-    if size > gpu.device.limits().max_buffer_size {
+    let limits = gpu.device.limits();
+    if size > limits.max_buffer_size {
         return Err(GpuError::TooLarge("a buffer"));
+    }
+    // A shader binds the whole of each storage buffer, as the poses are bound.
+    let bound = usage.contains(wgpu::BufferUsages::STORAGE);
+    if bound && size > limits.max_storage_buffer_binding_size {
+        return Err(GpuError::TooLarge("a storage buffer"));
     }
     Ok(gpu.device.create_buffer(&wgpu::BufferDescriptor {
         label: Some(label),
@@ -135,9 +141,6 @@ pub(crate) fn storage(
     at_least: u64,
 ) -> Result<wgpu::Buffer, GpuError> {
     let size = (bytes.len() as u64).max(at_least);
-    if size > gpu.device.limits().max_storage_buffer_binding_size {
-        return Err(GpuError::TooLarge("a storage buffer"));
-    }
     let buffer = buffer(gpu, label, size, wgpu::BufferUsages::STORAGE)?;
     gpu.queue.write_buffer(&buffer, 0, bytes);
     Ok(buffer)
@@ -215,20 +218,23 @@ fn materials(
     gpu: &Gpu,
     layout: &wgpu::BindGroupLayout,
     scene: &Scene,
-) -> (Vec<wgpu::BindGroup>, Vec<usize>) {
+) -> Result<(Vec<wgpu::BindGroup>, Vec<usize>), GpuError> {
     let mut seen: Vec<*const mscent_render::Texture> = Vec::new();
     let mut groups = Vec::new();
     let mut material_of = Vec::with_capacity(scene.faces().len());
     for face in scene.faces() {
         let texture = scene.texture_of(face.material);
-        let at = seen.iter().position(|&t| std::ptr::eq(t, texture));
-        material_of.push(at.unwrap_or_else(|| {
-            seen.push(texture);
-            groups.push(textures::bind_group(gpu, layout, texture));
-            groups.len() - 1
-        }));
+        let at = match seen.iter().position(|&t| std::ptr::eq(t, texture)) {
+            Some(at) => at,
+            None => {
+                seen.push(texture);
+                groups.push(textures::bind_group(gpu, layout, texture)?);
+                groups.len() - 1
+            }
+        };
+        material_of.push(at);
     }
-    (groups, material_of)
+    Ok((groups, material_of))
 }
 
 fn sampler(gpu: &Gpu, address: wgpu::AddressMode, finish: Finish) -> wgpu::Sampler {
@@ -345,7 +351,7 @@ impl FacePass {
             ],
         });
         let (material_groups, material_of) =
-            materials(gpu, &pipeline.get_bind_group_layout(1), scene);
+            materials(gpu, &pipeline.get_bind_group_layout(1), scene)?;
         let by_material = vec![Vec::new(); material_groups.len()];
         Ok(Self {
             pipeline,

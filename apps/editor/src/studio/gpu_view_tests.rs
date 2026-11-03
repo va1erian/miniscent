@@ -9,6 +9,7 @@ use miniscent_game::SessionConfig;
 use mscent_math::Vec3;
 use mscent_render::{BakeCache, Framebuffer, View};
 
+use super::gpu_view::Devices;
 use super::scene::LevelScene;
 use super::worker::{Request, Scene};
 use crate::build::{self, Built};
@@ -130,6 +131,56 @@ fn a_level_with_viewports_stays_on_the_software_renderer() {
         .clone();
     let mut gpu = LevelScene::on_gpu(built(&doc));
     assert_eq!(gpu.render(&req).expect("a frame").pixels(), a.pixels());
+}
+
+/// A device lost under a scene, as a driver reset loses it: that frame and the
+/// next are software's own bytes, and the view says why. The device is the
+/// test's own, so the tests beside it keep theirs.
+#[test]
+fn a_lost_device_leaves_the_pane_to_software_and_says_why() {
+    let Ok(device) = mscent_gpu::Gpu::new() else {
+        return;
+    };
+    let doc = showcase();
+    let req = request(160, 90, Vec::new());
+    let software = LevelScene::new(built(&doc))
+        .render(&req)
+        .expect("a frame")
+        .clone();
+    let mut scene = LevelScene::on_own_gpu(built(&doc), device.clone());
+    let first = scene.render(&req).expect("a frame").clone();
+    assert_ne!(first.pixels(), software.pixels(), "drawn on the GPU");
+    assert_eq!(scene.gpu_failure(), None);
+    device.destroy();
+    for _ in 0..2 {
+        let after = scene.render(&req).expect("a frame");
+        assert_eq!(after.pixels(), software.pixels());
+    }
+    let why = scene.gpu_failure().expect("the GPU given up");
+    assert!(why.contains("lost"), "{why}");
+}
+
+/// The editor's device, lost: opened again the first time, and the second time
+/// an error that says why, which leaves every scene after it to software.
+#[test]
+fn a_lost_device_is_opened_again_once() {
+    let open = || mscent_gpu::Gpu::new().map_err(|e| e.to_string());
+    let Ok(first) = open() else {
+        return;
+    };
+    let devices = Devices::new();
+    let got = devices.get(|| Ok(first.clone())).expect("the first");
+    assert!(!devices.can_reopen());
+    got.destroy();
+    assert!(devices.can_reopen());
+    let second = devices.get(open).expect("opened again");
+    assert_eq!(second.lost(), None);
+    assert!(!devices.can_reopen());
+    second.destroy();
+    assert!(!devices.can_reopen());
+    let why = devices.get(open).err().expect("not again");
+    assert!(why.contains("lost"), "{why}");
+    assert_eq!(devices.get(open).err(), Some(why), "and it stays gone");
 }
 
 /// `cargo test --release -p mscent-editor pane_cost -- --ignored --nocapture`

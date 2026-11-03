@@ -89,8 +89,13 @@ impl GpuRenderer {
         Self::with_finish(gpu, assets, Finish::Reference)
     }
 
-    /// Puts `assets` on `gpu`, to draw frames with `finish`.
+    /// Puts `assets` on `gpu`, to draw frames with `finish`. A level wgpu would
+    /// refuse, or a lost device, is an error here and not in [`Self::take_error`].
     pub fn with_finish(gpu: Gpu, assets: &LevelAssets, finish: Finish) -> Result<Self, GpuError> {
+        gpu.clone().checked(|| Self::build(gpu, assets, finish))
+    }
+
+    fn build(gpu: Gpu, assets: &LevelAssets, finish: Finish) -> Result<Self, GpuError> {
         let frame_uniform = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("frame"),
             size: FRAME_BYTES,
@@ -123,7 +128,13 @@ impl GpuRenderer {
         self.finish
     }
 
-    /// The first GPU error since the last call, if any.
+    /// `made`, or `None` with why kept for [`Self::take_error`].
+    fn reported<T>(&self, made: Result<T, GpuError>) -> Option<T> {
+        made.map_err(|why| self.gpu.report(why.to_string())).ok()
+    }
+
+    /// The first GPU error since the last call, if any: why a [`Self::draw`]
+    /// gave `None`, when it was the GPU's doing.
     pub fn take_error(&self) -> Option<String> {
         self.gpu.take_error()
     }
@@ -131,7 +142,9 @@ impl GpuRenderer {
     /// Draws a frame of `assets`, the level this was made from, into `fb`. The
     /// stats have no `pixels` or `spans`, which a GPU does not count. `None` when
     /// the view or the size cannot make a camera, the device has gone, or the
-    /// level's voxels have changed into more than this GPU can hold. `None` too
+    /// level's voxels have changed into more than this GPU can hold, or the frame
+    /// or its actors are more than it can; [`Self::take_error`] says which of the
+    /// last four it was. `None` too
     /// for a frame with particles, which this does not draw yet, rather than a
     /// frame without them.
     pub fn draw(
@@ -143,13 +156,19 @@ impl GpuRenderer {
         if frame.effects.particles.is_some() {
             return None;
         }
+        if let Some(why) = self.gpu.lost() {
+            return self.reported(Err(GpuError::Lost(why)));
+        }
         let (width, height) = (fb.width(), fb.height());
         let cam = assets.camera(frame.view, width, height)?;
         let mut stats = assets.scene().visible_set(&cam, self.voxels.candidates());
         if self.targets.as_ref().map(Targets::size) != Some((width, height)) {
             let size = (width, height);
-            let targets = Targets::new(&self.gpu, size, self.finish, self.resolve.as_ref());
-            self.targets = Some(targets);
+            let (finish, resolve) = (self.finish, self.resolve.as_ref());
+            let targets = self
+                .gpu
+                .checked(|| Targets::new(&self.gpu, size, finish, resolve));
+            self.targets = self.reported(targets);
         }
         let targets = self.targets.as_ref()?;
         let uniform = frame_bytes(assets, &cam, frame, self.faces.atlas_size);
@@ -160,12 +179,15 @@ impl GpuRenderer {
         let (poses, lights) = (frame.effects.poses, frame.effects.lights);
         self.faces
             .prepare(&self.gpu, assets, &cam, &stats.drawn, poses, lights);
-        self.actors
+        let actors = self
+            .actors
             .prepare(&self.gpu, assets, &cam, frame.actors, lights);
-        let voxels = self
-            .voxels
-            .prepare(&self.gpu, assets, &cam, lights, &mut stats);
-        voxels.ok()?;
+        self.reported(actors)?;
+        let voxels = self.gpu.checked(|| {
+            self.voxels
+                .prepare(&self.gpu, assets, &cam, lights, &mut stats)
+        });
+        self.reported(voxels)?;
         let mut encoder = self.gpu.device.create_command_encoder(&Default::default());
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

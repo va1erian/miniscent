@@ -7,7 +7,7 @@
 //! and only the software path gives the same ones on every machine.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock, PoisonError};
+use std::sync::{Mutex, PoisonError};
 
 use mscent_gpu::{Finish, Gpu, GpuRenderer};
 use mscent_render::camera::MAX_SIDE;
@@ -16,8 +16,7 @@ use mscent_render::{FrameInput, Framebuffer, LevelAssets, Quality};
 static WANTED: AtomicBool = AtomicBool::new(false);
 /// Whether the last frame came from the GPU, which sets how large the pane draws.
 static ACTIVE: AtomicBool = AtomicBool::new(false);
-/// One device for the life of the editor: every edit brings a new scene.
-static DEVICE: OnceLock<Result<Gpu, String>> = OnceLock::new();
+static DEVICE: Devices = Devices::new();
 /// What the view last said, and whether the log has seen it.
 static REPORT: Mutex<(String, bool)> = Mutex::new((String::new(), true));
 
@@ -56,9 +55,44 @@ fn report(line: String) {
     }
 }
 
-fn device() -> Result<&'static Gpu, &'static str> {
-    let opened = DEVICE.get_or_init(|| Gpu::new().map_err(|e| e.to_string()));
-    opened.as_ref().map_err(String::as_str)
+/// A device for the life of the editor, as every edit brings a new scene; or
+/// why there is none. Opened when first asked for, and a lost one opened again
+/// once: a GPU that keeps going is left to software.
+pub(super) struct Devices {
+    slot: Mutex<Option<Result<Gpu, String>>>,
+    reopened: AtomicBool,
+}
+
+impl Devices {
+    pub(super) const fn new() -> Self {
+        Self {
+            slot: Mutex::new(None),
+            reopened: AtomicBool::new(false),
+        }
+    }
+
+    /// The device, opened with `open` if it has to be.
+    pub(super) fn get(&self, open: impl FnOnce() -> Result<Gpu, String>) -> Result<Gpu, String> {
+        let mut slot = self.slot.lock().unwrap_or_else(PoisonError::into_inner);
+        let current = slot.as_ref().and_then(|opened| opened.as_ref().ok());
+        if let Some(why) = current.and_then(Gpu::lost) {
+            let gone = format!("the GPU device was lost: {why}");
+            let again = !self.reopened.swap(true, Ordering::Relaxed);
+            *slot = (!again).then_some(Err(gone));
+        }
+        slot.get_or_insert_with(open).clone()
+    }
+
+    /// Whether the device has gone and can still be opened again.
+    pub(super) fn can_reopen(&self) -> bool {
+        let slot = self.slot.lock().unwrap_or_else(PoisonError::into_inner);
+        let current = slot.as_ref().and_then(|opened| opened.as_ref().ok());
+        current.is_some_and(|gpu| gpu.lost().is_some()) && !self.reopened.load(Ordering::Relaxed)
+    }
+}
+
+fn device() -> Result<Gpu, String> {
+    DEVICE.get(|| Gpu::new().map_err(|e| e.to_string()))
 }
 
 /// The internal render size for a pane of `pane` pixels: the pane divided by
@@ -76,11 +110,15 @@ pub fn frame_size(pane: (u32, u32), max_width: u32) -> (u32, u32) {
 #[derive(Default)]
 pub struct GpuView {
     level: Option<GpuRenderer>,
-    /// The GPU failed on this scene, so software draws it from here on.
-    failed: bool,
+    /// Why the GPU failed on this scene, which software draws from here on.
+    failed: Option<String>,
     /// Draws whatever `set_wanted` says, for a test among parallel ones.
     #[cfg(test)]
     pub forced: bool,
+    /// A device of the test's own, which it may lose without taking the
+    /// editor's from the tests beside it.
+    #[cfg(test)]
+    pub own_device: Option<Gpu>,
 }
 
 impl GpuView {
@@ -108,25 +146,56 @@ impl GpuView {
         self.level = None;
     }
 
+    /// Why the GPU gave this scene up, if it has.
+    #[cfg(test)]
+    pub fn failure(&self) -> Option<&str> {
+        self.failed.as_deref()
+    }
+
     fn give_up(&mut self, why: &str) {
         self.level = None;
-        self.failed = true;
+        self.failed = Some(why.to_string());
         self.say(format!("3D view: software renderer, because {why}"));
+    }
+
+    /// The test's own device, or the editor's.
+    fn device(&self) -> Result<Gpu, String> {
+        #[cfg(test)]
+        if let Some(gpu) = &self.own_device {
+            return Ok(gpu.clone());
+        }
+        device()
+    }
+
+    /// For a frame the GPU failed: the level is made again on a new device
+    /// the next frame if the device was lost for the first time, and otherwise
+    /// left to software.
+    fn failed_frame(&mut self, why: &str) {
+        #[cfg(test)]
+        let reopen = self.own_device.is_none() && DEVICE.can_reopen();
+        #[cfg(not(test))]
+        let reopen = DEVICE.can_reopen();
+        if reopen {
+            self.level = None;
+            self.say(format!("3D view: {why}; opening the GPU again"));
+        } else {
+            self.give_up(why);
+        }
     }
 
     /// The level on the GPU with the finish `quality` gets there, made if it has
     /// to be. `None` leaves it to software.
     fn level(&mut self, assets: &LevelAssets, quality: Quality) -> Option<&mut GpuRenderer> {
-        let gpu = match device() {
+        let gpu = match self.device() {
             Ok(gpu) => gpu,
             Err(why) => {
-                self.give_up(why);
+                self.give_up(&why);
                 return None;
             }
         };
-        let finish = Finish::of(quality, gpu);
+        let finish = Finish::of(quality, &gpu);
         if self.level.as_ref().map(GpuRenderer::finish) != Some(finish) {
-            match GpuRenderer::with_finish(gpu.clone(), assets, finish) {
+            match GpuRenderer::with_finish(gpu, assets, finish) {
                 Ok(level) => self.level = Some(level),
                 Err(why) => {
                     self.give_up(&why.to_string());
@@ -147,7 +216,7 @@ impl GpuView {
     }
 
     fn try_draw(&mut self, assets: &LevelAssets, fb: &mut Framebuffer, frame: &FrameInput) -> bool {
-        if !self.is_wanted() || self.failed {
+        if !self.is_wanted() || self.failed.is_some() {
             return false;
         }
         if let Some(why) = GpuRenderer::cannot_draw(assets) {
@@ -161,10 +230,10 @@ impl GpuView {
         };
         let drawn = level.draw(assets, fb, frame).is_some();
         match level.take_error() {
-            Some(why) => self.give_up(&why),
-            None if !drawn => self.give_up("the GPU drew no frame"),
+            Some(why) => self.failed_frame(&why),
+            None if !drawn => self.failed_frame("the GPU drew no frame"),
             None => {
-                if let Ok(gpu) = device() {
+                if let Ok(gpu) = self.device() {
                     self.say(format!("3D view: {}", gpu.adapter()));
                 }
                 return true;
