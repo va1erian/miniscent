@@ -42,6 +42,10 @@ pub struct ModelInstance {
     /// Multiplies its light, per channel: 1 leaves it as it is. Costs nothing per
     /// pixel, so one design can be elite, wounded or of another faction.
     pub tint: Vec3,
+    /// Not drawn: it only casts shadows, for a renderer that has them. The player's
+    /// own ship is this in first person, where it would fill the view. Software draws
+    /// no shadows, so it draws nothing of it.
+    pub cast_only: bool,
 }
 
 impl ModelInstance {
@@ -53,6 +57,7 @@ impl ModelInstance {
             rot,
             scale: 1.0,
             tint: Vec3::new(1.0, 1.0, 1.0),
+            cast_only: false,
         }
     }
 }

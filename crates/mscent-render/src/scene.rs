@@ -17,20 +17,28 @@
 //! can skip covered work. When the eye is inside solid space there is no
 //! sensible portal flood, so every leaf counts as visible.
 
+#[cfg(test)]
+mod flood_oracle;
 mod holes;
 mod pan;
 mod prep;
 mod reach;
+#[cfg(test)]
+mod reach_tests;
+mod rooms;
 mod surface;
 mod visible;
 mod walk;
 
 pub use holes::HoleList;
 pub use reach::LightReach;
+pub use rooms::RoomMap;
 pub use surface::Surface;
 
 use mscent_math::{Aabb, DPlane, Vec3};
-use mscent_world::{Bsp, Face, Islands, LeafId, LeafKind, Portals};
+use std::sync::Arc;
+
+use mscent_world::{Bsp, Face, Islands, LeafId, LeafKind, Portals, Rooms};
 
 use crate::camera::Camera;
 use crate::framebuffer::Framebuffer;
@@ -85,6 +93,7 @@ pub struct Scene {
     portal_info: Vec<PortalInfo>,
     voxels: VoxelScene,
     holes: holes::Holes,
+    rooms: Arc<RoomMap>,
 }
 
 impl Scene {
@@ -116,6 +125,7 @@ impl Scene {
         let leaf_faces = prep::leaf_faces(bsp.leaves().len(), &faces);
         let holes = holes::Holes::default();
         let node_bounds = scene_bounds(&bsp, &leaf_faces, &polys, &voxels, &holes);
+        let rooms = Arc::new(RoomMap::new(Rooms::build(&bsp, &portals), &faces));
         let portal_info = portals
             .portals()
             .iter()
@@ -141,6 +151,7 @@ impl Scene {
             portal_info,
             voxels,
             holes,
+            rooms,
         }
     }
 

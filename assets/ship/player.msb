@@ -1,0 +1,19 @@
+miniscent-blueprint 1
+# The player's ship, authored in the player's own frame: the nose along -Z, up
+# along +Y, the right wing along +X, so that the player's orientation turns it as
+# it is. Drawn only from outside (a chase view); in first person it only casts a
+# shadow. A little over a unit across.
+name player-ship
+class drone
+scale 0.25
+skin hull plating
+skin strut metal
+skin lens glass glow
+
+part body cell=0.5
+solid ngon 0 0 -3  0 0 2.5  0.35 1.0  6 hull
+solid plate 0.35  0.6 -0.1 0.2  3.0 -0.1 2.4  3.0 -0.1 3.2  0.6 -0.1 2.4 strut
+solid plate 0.35  -0.6 -0.1 0.2  -3.0 -0.1 2.4  -3.0 -0.1 3.2  -0.6 -0.1 2.4 strut
+solid plate 0.3  0 0.7 0.6  0 2.3 2.6  0 2.3 3.2  0 0.7 2.8 strut
+solid ngon 0 0 2.0  0 0 3.4  0.8 0.6  8 strut
+add sphere 0 0 3.5 0.6 lens

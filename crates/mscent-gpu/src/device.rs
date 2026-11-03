@@ -80,6 +80,8 @@ pub struct Gpu {
     /// The same for the faces' pipelines and the viewport faces'.
     pub(crate) face_pipelines: Arc<[OnceLock<Compiled>; Finish::COUNT]>,
     pub(crate) hole_pipelines: Arc<[OnceLock<wgpu::RenderPipeline>; Finish::COUNT]>,
+    /// The shadow casters' pipelines, which do not depend on a finish.
+    pub(crate) shadow_pipelines: Arc<OnceLock<Arc<crate::shadows::Pipelines>>>,
 }
 
 impl Gpu {
@@ -130,6 +132,7 @@ impl Gpu {
             voxel_pipelines: Arc::default(),
             face_pipelines: Arc::default(),
             hole_pipelines: Arc::default(),
+            shadow_pipelines: Arc::default(),
         })
     }
 

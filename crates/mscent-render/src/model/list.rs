@@ -124,6 +124,9 @@ pub struct ModelList {
     pub triangles: u32,
     /// For a renderer that projects vertices itself: `screen` stays empty.
     unprojected: bool,
+    /// Lists for shadow maps: every instance whatever the camera sees, those that
+    /// are not drawn too.
+    casters: bool,
     /// Those in view, with how far off they are and their instance.
     near: Vec<(f32, u32)>,
     /// By instance: its level of detail last frame.
@@ -137,6 +140,17 @@ impl ModelList {
     pub fn unprojected() -> Self {
         Self {
             unprojected: true,
+            ..Self::default()
+        }
+    }
+
+    /// A list of what casts shadows, for a renderer that projects vertices itself:
+    /// every model with a pose that can be drawn, in view or not, and the ones that
+    /// are only cast, which a list of what is drawn leaves out.
+    pub fn casters_unprojected() -> Self {
+        Self {
+            unprojected: true,
+            casters: true,
             ..Self::default()
         }
     }
@@ -196,7 +210,9 @@ impl ModelList {
         let base = lit.points.len();
         let (eye, frustum) = (eye_of(cam), cam.frustum());
         for (i, instance) in (0u32..).zip(instances) {
-            if let Some(d) = distance_in_view(table, instance, cam, &frustum, eye) {
+            let wanted = self.casters || !instance.cast_only;
+            let seen = (!self.casters).then_some(&frustum);
+            if let Some(d) = distance_in_view(table, instance, cam, seen, eye).filter(|_| wanted) {
                 self.near.push((d, i));
             }
         }
@@ -314,7 +330,7 @@ fn distance_in_view(
     table: &ModelTable,
     instance: &ModelInstance,
     cam: &Camera,
-    frustum: &Frustum,
+    frustum: Option<&Frustum>,
     eye: Vec3,
 ) -> Option<f32> {
     let model = table.get(instance.model.0)?;
@@ -331,7 +347,8 @@ fn distance_in_view(
     let radius = model.radius * model.scale * instance.scale;
     let r = Vec3::new(radius, radius, radius);
     let bounds = Aabb::new(instance.pos - r, instance.pos + r);
-    in_view(cam, frustum, &bounds).then(|| (instance.pos - eye).length())
+    let seen = frustum.is_none_or(|f| in_view(cam, f, &bounds));
+    seen.then(|| (instance.pos - eye).length())
 }
 
 /// Where most of the light comes from, by its strength at `pos`, as a unit vector.

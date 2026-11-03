@@ -52,10 +52,9 @@ fn a_wall_behind_a_wall_is_out_of_reach() {
         .collect();
     assert!(!reached.is_empty());
     for &i in &reached {
+        // In front of the room on the near side of the slab, and of no other.
         let face = &scene.faces()[i];
-        // On the lit side of the face, and on the near side of the slab.
-        assert!(face.plane.signed_distance(v(-5.0, 0.0, 0.0).to_f64()) > 0.0);
-        assert!(face.front_leaves.contains(&here), "face {i}");
+        assert!(face.front_leaves.iter().all(|&l| l == here), "face {i}");
     }
     // The same light on the far side lights a different set of faces.
     let mut far = DynLight::new();
@@ -64,23 +63,18 @@ fn a_wall_behind_a_wall_is_out_of_reach() {
 }
 
 #[test]
-fn only_faces_within_the_radius_and_facing_the_light_count() {
+fn a_room_is_reached_whole_and_the_shading_cuts_it_by_distance_and_facing() {
     let scene = scene_of(&[cuboid([-20.0; 3], [20.0; 3], Op::Subtract, 0)]);
     let mut reach = LightReach::default();
-    scene.light_reach(v(0.0, 0.0, 0.0), 25.0, &mut reach);
-    assert_eq!(lit_faces(&scene, &reach).len(), 6, "all six walls, 20 away");
-    scene.light_reach(v(0.0, 0.0, 0.0), 15.0, &mut reach);
-    assert!(lit_faces(&scene, &reach).is_empty(), "20 is past 15");
-    scene.light_reach(v(15.0, 0.0, 0.0), 6.0, &mut reach);
-    assert_eq!(
-        lit_faces(&scene, &reach).len(),
-        1,
-        "only the wall at x = 20"
-    );
+    // Every wall is in the light's room, 20 away or not.
+    for (pos, radius) in [(0.0, 25.0), (0.0, 15.0), (15.0, 6.0)] {
+        scene.light_reach(v(pos, 0.0, 0.0), radius, &mut reach);
+        assert_eq!(lit_faces(&scene, &reach).len(), 6, "{pos} {radius}");
+    }
 }
 
 #[test]
-fn the_flood_stops_where_the_radius_does() {
+fn the_reach_stops_where_the_radius_does() {
     // Two rooms joined by a corridor 20 long.
     let scene = scene_of(&[
         cuboid([-30.0, -5.0, -5.0], [-10.0, 5.0, 5.0], Op::Subtract, 0),
