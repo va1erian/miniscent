@@ -39,23 +39,25 @@ pub(crate) struct ScreenV {
 
 /// One chunk of a frame.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ListedChunk {
+pub struct ListedChunk {
     pub chunk: u32,
+    /// Its level of detail: 0 is full.
     pub lod: u8,
     /// Where its vertices start in the frame's list.
-    pub start: usize,
+    pub(crate) start: usize,
     /// Screen rows `first..last` it may cover.
-    pub first: i32,
-    pub last: i32,
+    pub(crate) first: i32,
+    pub(crate) last: i32,
     /// Bit `i`: dynamic light `i` can reach it.
     pub lights: u8,
 }
 
-/// A frame's voxel chunks, and what is kept from one frame to the next.
+/// A frame's voxel chunks, and what is kept from one frame to the next: which
+/// chunks, at which detail, is the same choice for every renderer.
 #[derive(Default)]
-pub(crate) struct VoxelList {
-    pub chunks: Vec<ListedChunk>,
-    pub screen: Vec<ScreenV>,
+pub struct VoxelList {
+    pub(crate) chunks: Vec<ListedChunk>,
+    pub(crate) screen: Vec<ScreenV>,
     /// Filled by the BSP walk: chunks of visible leaves.
     pub candidates: Vec<u32>,
     /// Those that can be seen, with how far off they are.
@@ -73,12 +75,27 @@ pub(crate) struct VoxelList {
     flood: Flood,
     flooded: Option<u32>,
     pub triangles: u32,
+    /// For a renderer that projects on its own: no screen positions or rows.
+    unprojected: bool,
 }
 
 impl VoxelList {
+    /// A list for a renderer that projects vertices itself, as a GPU does.
+    pub fn unprojected() -> Self {
+        Self {
+            unprojected: true,
+            ..Self::default()
+        }
+    }
+
+    /// This frame's chunks, nearest first.
+    pub fn chunks(&self) -> &[ListedChunk] {
+        &self.chunks
+    }
+
     /// Replaces the list from [`Self::candidates`]. `lights` says which dynamic
     /// lights reach a leaf, as a bit per light.
-    pub(crate) fn prepare(
+    pub fn prepare(
         &mut self,
         scene: &VoxelScene,
         cam: &Camera,
@@ -153,9 +170,13 @@ impl VoxelList {
         let lod = self.pick_lod(scene, eye, i);
         let mesh = &chunk.lods[usize::from(lod)];
         let start = self.screen.len();
-        self.screen
-            .extend(mesh.vertices.iter().map(|v| project(cam, v.pos)));
-        let (first, last) = row_span(&self.screen[start..], cam.height() as i32);
+        let (first, last) = if self.unprojected {
+            (0, 0)
+        } else {
+            self.screen
+                .extend(mesh.vertices.iter().map(|v| project(cam, v.pos)));
+            row_span(&self.screen[start..], cam.height() as i32)
+        };
         let reach = chunk.leaves.iter().fold(0u8, |m, &l| m | lights(l));
         self.triangles = self.triangles.saturating_add(mesh.triangles.len() as u32);
         self.chunks.push(ListedChunk {

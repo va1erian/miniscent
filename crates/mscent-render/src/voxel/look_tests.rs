@@ -96,7 +96,7 @@ fn flat(color: u32) -> crate::Texture {
 /// The same ball with every vertex sent down the blended path.
 fn all_blended(mut scene: VoxelScene) -> VoxelScene {
     for lods in &mut scene.lods {
-        for lod in lods {
+        for lod in std::sync::Arc::make_mut(lods) {
             lod.axis.iter_mut().for_each(|a| *a = IN_SEAM);
         }
     }

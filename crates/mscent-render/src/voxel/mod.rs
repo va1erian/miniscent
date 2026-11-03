@@ -9,14 +9,19 @@
 //! * [`fill`]: back-face rejection and a fill whose shared edges cannot leak or
 //!   double-draw. [`shader`] lights the plain case and [`blend`] the triangles
 //!   whose corners disagree on texture, or that carry the [`solid`] spots.
+//!
+//! The GPU renderer takes the same list, unprojected, and each chunk as a
+//! [`ChunkLook`], with the numbers these modules shade by.
 
 pub(crate) mod blend;
 pub(crate) mod fill;
 mod flood;
 pub(crate) mod list;
-pub use list::MAX_VOXEL_TRIS;
+pub use blend::{BAYER, MATERIAL_BAND};
+pub use list::{ListedChunk, MAX_VOXEL_TRIS, VoxelList};
 pub(crate) mod shader;
 mod solid;
+pub use solid::{SpotField, has_spots, spot_field};
 mod tri;
 
 use std::collections::HashMap;
@@ -52,7 +57,7 @@ pub(crate) struct LodData {
 /// The texture axes of each dominant world axis. The same as the default brush
 /// mapping (a test holds them to it), so a voxel wall carries on the texture of
 /// the brush wall it meets. A table: this runs once per triangle.
-const AXES: [(Vec3, Vec3); 3] = [
+pub const AXES: [(Vec3, Vec3); 3] = [
     (Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
     (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
     (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)),
@@ -68,14 +73,14 @@ const INHERIT_CELLS: i32 = 2;
 const DEEP_LIGHT: f32 = 0.6;
 
 /// Texels per world unit of a voxel surface.
-pub(crate) const TEXELS_PER_UNIT: f32 = 1.0 / DEFAULT_SCALE;
+pub const TEXELS_PER_UNIT: f32 = 1.0 / DEFAULT_SCALE;
 
 /// How far ahead the dominant axis of a normal must be, as a share of itself, for
 /// a surface to take one projection alone. Inside this band two fade together.
-pub(crate) const SEAM_BAND: f32 = 0.12;
+pub const SEAM_BAND: f32 = 0.12;
 /// A vertex's axis when it lies in that band: its triangles go the blended way,
 /// so that no fade is cut off at the edge of a plain triangle.
-const IN_SEAM: u8 = 3;
+pub const IN_SEAM: u8 = 3;
 
 /// The two largest parts of `n`, by axis, and how far the first leads the second.
 pub(crate) fn seam_of(n: Vec3) -> (u8, u8, f32) {
@@ -226,7 +231,8 @@ fn nearest_light(cell: [i8; 3], old: &[CellLight]) -> Option<VertexLight> {
 #[derive(Clone, Debug, Default)]
 pub struct VoxelScene {
     pub(crate) world: VoxelWorld,
-    pub(crate) lods: Vec<[LodData; 3]>,
+    /// Shared, so that a renderer holding a chunk can tell it has changed.
+    pub(crate) lods: Vec<Arc<[LodData; 3]>>,
     /// For each BSP leaf, the chunks seen from it.
     pub(crate) leaf_chunks: Vec<Vec<u32>>,
     /// For each chunk, its volume and its place in that volume's grid.
@@ -248,7 +254,7 @@ impl VoxelScene {
             .map(|(c, chunk): (usize, &Arc<VoxelChunk>)| {
                 let mut full = light(c, &chunk.lods[0]);
                 full.resize(chunk.lods[0].vertices.len(), VertexLight::default());
-                lod_data(chunk, full)
+                Arc::new(lod_data(chunk, full))
             })
             .collect();
         let mut scene = Self {
@@ -311,7 +317,7 @@ impl VoxelScene {
                 continue;
             };
             let mesh = &chunk.lods[0];
-            self.lods[i] = lod_data(chunk, inherit(mesh, old.unwrap_or(&[]), &fresh));
+            self.lods[i] = Arc::new(lod_data(chunk, inherit(mesh, old.unwrap_or(&[]), &fresh)));
         }
         self.index();
     }
@@ -363,6 +369,59 @@ impl VoxelScene {
 
     pub fn world(&self) -> &VoxelWorld {
         &self.world
+    }
+
+    /// Chunk `c` as a renderer draws it, or `None` past the last chunk.
+    pub fn chunk(&self, c: usize) -> Option<ChunkLook> {
+        Some(ChunkLook {
+            chunk: self.world.chunks.get(c)?.clone(),
+            data: self.lods.get(c)?.clone(),
+        })
+    }
+
+    /// Whether chunk `c` is still what `look` was taken from. Every change to a
+    /// chunk's mesh or light replaces it, so this compares two pointers.
+    pub fn chunk_is(&self, c: usize, look: &ChunkLook) -> bool {
+        let (Some(chunk), Some(data)) = (self.world.chunks.get(c), self.lods.get(c)) else {
+            return false;
+        };
+        Arc::ptr_eq(chunk, &look.chunk) && Arc::ptr_eq(data, &look.data)
+    }
+}
+
+/// One chunk's surface and what draws it, for a renderer to keep beside what it
+/// made of them. Holding both `Arc`s, it keeps their addresses from being reused,
+/// so a new chunk cannot pass [`VoxelScene::chunk_is`] for this one.
+#[derive(Clone, Debug)]
+pub struct ChunkLook {
+    chunk: Arc<VoxelChunk>,
+    data: Arc<[LodData; 3]>,
+}
+
+/// One level of detail of a [`ChunkLook`]: the mesh, and per vertex its light,
+/// the axis that textures it ([`IN_SEAM`] in the band between two) and its
+/// material.
+pub struct LodLook<'a> {
+    pub mesh: &'a ChunkMesh,
+    pub light: &'a [VertexLight],
+    /// The light direction in the frame the normal maps are authored in.
+    pub tangent_light: &'a [Vec3],
+    pub axis: &'a [u8],
+    pub material: &'a [u8],
+}
+
+impl ChunkLook {
+    /// Level `lod`: 0 is full detail, 2 the coarsest; larger is clamped.
+    pub fn lod(&self, lod: usize) -> LodLook<'_> {
+        let lod = lod.min(2);
+        let data = &self.data[lod];
+        LodLook {
+            mesh: &self.chunk.lods[lod],
+            light: &data.light,
+            tangent_light: &data.dir_t,
+            axis: &data.axis,
+            material: &data.material,
+        }
     }
 }
 

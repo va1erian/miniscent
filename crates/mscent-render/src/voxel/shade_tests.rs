@@ -109,7 +109,7 @@ fn triangles_with_mixed_corners_shade_like_their_neighbours() {
     let plain = VoxelScene::new(world.clone(), bsp.leaves().len(), light);
     let mut mixed = plain.clone();
     for lods in &mut mixed.lods {
-        for data in lods.iter_mut() {
+        for data in std::sync::Arc::make_mut(lods).iter_mut() {
             for (i, m) in data.material.iter_mut().enumerate() {
                 *m = (i % 2) as u8;
             }
