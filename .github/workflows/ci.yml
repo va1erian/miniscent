@@ -17,9 +17,14 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings -D clippy::undocumented_unsafe_blocks
       # The parity test needs a GPU, and runners have none: Mesa's CPU Vulkan driver.
       - run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
-      - run: cargo test --workspace
+      - run: cargo test --workspace --exclude mscent-gpu
         env:
           MSCENT_REQUIRE_GPU: "1" # no adapter is a failure here, a skip elsewhere
+      # One test at a time: llvmpipe ended these binaries with a segfault while
+      # their tests each opened a device in parallel, a different binary each run.
+      - run: cargo test -p mscent-gpu -- --test-threads=1
+        env:
+          MSCENT_REQUIRE_GPU: "1"
       - run: python3 tools/check_file_length.py
       - run: python3 tools/check_docs.py
       - run: python3 tools/check_frame_cost.py

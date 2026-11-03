@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use mscent_platform::Platform;
+use mscent_render::camera::MAX_SIDE;
 use mscent_render::png_encode::encode_png;
 use mscent_render::resolution::{ResolutionConfig, ResolutionController};
 use mscent_render::{FrameInput, Framebuffer, LevelAssets};
@@ -85,8 +86,30 @@ pub struct Shown<'a> {
     pub layer: &'a Framebuffer,
     /// The white flash between the world and the layer, `0..=256`.
     pub white: u32,
-    /// The window's inner size.
+    /// The window's inner size, and the world's, which is drawn to fill it.
     pub window: (u32, u32),
+    pub world: (u32, u32),
+}
+
+/// What a world that shows itself draws in a window of `window` pixels: the world
+/// at the window's own size, or what `scaled` makes of it, and the layer at about
+/// `base`'s height, the window's shape at a whole fraction of its size, so that
+/// the HUD's pixels read as they do at the base size. A window with no area, as
+/// a minimised one, draws at `base`, and shows nothing.
+fn shown_sizes(
+    window: (u32, u32),
+    base: (u32, u32),
+    scaled: impl Fn((u32, u32)) -> (u32, u32),
+) -> ((u32, u32), (u32, u32)) {
+    if window.0 == 0 || window.1 == 0 {
+        return (base, base);
+    }
+    let window = (window.0.min(MAX_SIDE), window.1.min(MAX_SIDE));
+    let k = (window.1 + base.1 / 2) / base.1.max(1);
+    let k = k.max(1);
+    let layer = ((window.0 / k).max(16), (window.1 / k).max(16));
+    let (w, h) = scaled(window);
+    ((w.max(16), h.max(16)), layer)
 }
 
 /// Software draws every world.
@@ -169,7 +192,14 @@ pub fn run_with(
         let render_start = Instant::now();
         let fb = if world.shows() {
             let window = platform.size();
-            let shown = session.render_layered((w, h), &mut |assets, frame, layer, white| {
+            let sizes = shown_sizes(window, opts.base, |(ww, wh)| {
+                match (&controller, opts.adaptive) {
+                    (Some(c), true) => c.internal_size(ww, wh),
+                    _ => (ww, wh),
+                }
+            });
+            let shown = session.render_layered(sizes, &mut |assets, frame, layer, white| {
+                let world_size = sizes.0;
                 world.show(
                     assets,
                     frame,
@@ -177,6 +207,7 @@ pub fn run_with(
                         layer,
                         white,
                         window,
+                        world: world_size,
                     },
                 )
             });
@@ -197,7 +228,7 @@ pub fn run_with(
         }
         let cost = render_start.elapsed();
         if let Some(fb) = fb {
-            platform.present(fb.pixels(), w, h);
+            platform.present(fb.pixels(), fb.width(), fb.height());
         }
         // A frame the world showed itself is not on the CPU to be written.
         if let (Some(stem), Some(&t), Some(fb)) =
@@ -205,7 +236,7 @@ pub fn run_with(
             && now.as_secs_f64() >= t
         {
             next_shot += 1;
-            if let Some(png) = encode_png(w, h, fb.pixels()) {
+            if let Some(png) = encode_png(fb.width(), fb.height(), fb.pixels()) {
                 let path = shot_path(stem, t);
                 if std::fs::write(&path, png).is_ok() {
                     shots.push(path);
@@ -285,6 +316,34 @@ mod tests {
         assert_eq!((r.frames, r.max_ms, r.final_scale), (3, 3.0, 750));
         assert!((r.avg_ms - 2.0).abs() < 1e-9);
         assert_eq!(summarize(vec![], 1000, vec![]).frames, 0);
+    }
+
+    #[test]
+    fn a_window_draws_its_world_at_its_size_and_the_hud_at_the_base_height() {
+        let same = |size| size;
+        // A maximised window, not 16:9: the world fills it and the HUD keeps
+        // the base's pixel size, in the window's shape.
+        assert_eq!(
+            shown_sizes((2000, 1088), (640, 360), same),
+            ((2000, 1088), (666, 362))
+        );
+        assert_eq!(
+            shown_sizes((3840, 2160), (640, 360), same),
+            ((3840, 2160), (640, 360))
+        );
+        assert_eq!(
+            shown_sizes((800, 400), (640, 360), same),
+            ((800, 400), (800, 400))
+        );
+        let half = |(w, h): (u32, u32)| (w / 2, h / 2);
+        assert_eq!(shown_sizes((3840, 2160), (640, 360), half).0, (1920, 1080));
+        // Minimised: nothing to show, so the base, which a framebuffer can hold.
+        assert_eq!(
+            shown_sizes((0, 0), (640, 360), same),
+            ((640, 360), (640, 360))
+        );
+        let huge = shown_sizes((20_000, 9_000), (640, 360), same);
+        assert!(huge.0.0 <= MAX_SIDE && huge.0.1 <= MAX_SIDE, "{huge:?}");
     }
 
     #[test]

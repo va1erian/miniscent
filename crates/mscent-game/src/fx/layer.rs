@@ -173,7 +173,8 @@ impl Gate {
 fn gain(s: &SpriteDraw, tag: Tag, weight: f32, screen: &Screen) -> f32 {
     // A NaN or infinite radius fails this and stays; the renderer refuses it.
     let big = s.radius.is_finite() && 2.0 * s.radius.min(MAX_RADIUS) > BIG_DIAMETER;
-    if tag.tier == Tier::Essential || !big || seen(s, screen.depth) < MIN_SEEN {
+    let seen = seen(s, screen.depth, screen.width, screen.height);
+    if tag.tier == Tier::Essential || !big || seen < MIN_SEEN {
         return 0.0;
     }
     saving(s, weight, screen).max(0.0)

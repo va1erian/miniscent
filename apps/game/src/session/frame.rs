@@ -5,15 +5,22 @@ use mscent_collide::STEP_HZ;
 use mscent_game::Screen;
 use mscent_game::fx::combat::ViewKick;
 use mscent_math::{Quat, Vec3};
+use mscent_render::particles::{ParticleDraws, SpriteBank};
 use mscent_render::{
-    Actor, Effects, FrameInput, FrameRenderer, Framebuffer, LevelAssets, MoverPose, View,
-    layer_over, simd,
+    Actor, DynLight, Effects, FrameInput, FrameRenderer, Framebuffer, LevelAssets, MoverPose,
+    Quality, View, layer_over, simd,
 };
 
 use super::GameSession;
 use crate::drawn::{actors_of, mover_poses_of};
 
 const WHITE: u32 = 0xffff_ffff;
+/// The particle budget's depth is a quarter of its frame each way, and at most
+/// this wide: it probes large sprites at five points, which a coarse depth
+/// answers, and it is drawn on the CPU each frame. The showcase's faces drawn
+/// flat cost 0.16 ms at 160x90, 0.52 at 320x180 and 4.0 at 960x540.
+const ESTIMATE_SHARE: u32 = 4;
+const ESTIMATE_WIDTH: u32 = 160;
 
 /// Cheap interpolation between nearby orientations.
 fn nlerp(a: Quat, b: Quat, t: f32) -> Quat {
@@ -74,9 +81,7 @@ impl GameSession {
         other: &mut dyn FnMut(&LevelAssets, &mut Framebuffer, &FrameInput) -> bool,
     ) -> Option<&Framebuffer> {
         let mut fb = take_sized(&mut self.fb, (width, height))?;
-        // `fb` still holds the last frame, whose depth is the best guess at
-        // what this one hides.
-        let at = self.prepare((width, height), Some(&fb));
+        let at = self.prepare((width, height));
         let effects = Effects {
             particles: Some((&self.draws, &self.bank)),
             lights: self.fx.lights(self.renderer.scene()),
@@ -89,8 +94,8 @@ impl GameSession {
             quality: self.quality,
             actors: &at.actors,
             effects,
-            // The particle budget reads it, next frame.
-            wants_depth: true,
+            // The particle budget reads its own estimate, so nothing reads it.
+            wants_depth: false,
         };
         let drawn = if other(self.renderer.assets(), &mut fb, &input) {
             Some(())
@@ -109,38 +114,30 @@ impl GameSession {
     }
 
     /// [`Self::render`] for a renderer that shows the frame itself: `show` gets
-    /// the world to draw, the layer the HUD, feedback, menus and notices are
-    /// drawn into, and the white flash to put between them, and says whether it
-    /// showed them. Where it did not, software draws the world and the layer goes
-    /// over it, and that frame is returned to be presented. The particle budget
-    /// has no depth here: nothing is read back.
+    /// the world to draw at `world` pixels, the layer of `layer` pixels the HUD,
+    /// feedback, menus and notices are drawn into, and the white flash to put
+    /// between them, and says whether it showed them. Where it did not, software
+    /// draws the world at the layer's size and the layer goes over it, and that
+    /// frame is returned to be presented.
     pub fn render_layered(
         &mut self,
-        (width, height): (u32, u32),
+        (world, layer_size): ((u32, u32), (u32, u32)),
         show: &mut dyn FnMut(&LevelAssets, &FrameInput, &Framebuffer, u32) -> bool,
     ) -> Option<Option<&Framebuffer>> {
-        let mut layer = take_sized(&mut self.layer, (width, height))?;
+        let mut layer = take_sized(&mut self.layer, layer_size)?;
         layer.clear(0);
-        let at = self.prepare((width, height), None);
+        let at = self.prepare(world);
         self.draw_over(&mut layer, &at.view);
-        let effects = Effects {
-            particles: Some((&self.draws, &self.bank)),
-            lights: self.fx.lights(self.renderer.scene()),
-            poses: &at.poses,
-            vista_time: at.vista_time,
-            models: None,
-        };
-        let input = FrameInput {
-            view: &at.view,
-            quality: self.quality,
-            actors: &at.actors,
-            effects,
-            wants_depth: false,
-        };
+        let lights = self.fx.lights(self.renderer.scene());
+        let input = frame_input(&at, (&self.draws, &self.bank), lights, self.quality);
         let shown = show(self.renderer.assets(), &input, &layer, self.kick.white);
         let mut fb = None;
         if !shown {
-            let mut frame = take_sized(&mut self.fb, (width, height))?;
+            // The particles were placed on a screen of the world's size.
+            let at = self.prepare(layer_size);
+            let lights = self.fx.lights(self.renderer.scene());
+            let input = frame_input(&at, (&self.draws, &self.bank), lights, self.quality);
+            let mut frame = take_sized(&mut self.fb, layer_size)?;
             if self.renderer.draw(&mut frame, &input).is_some() {
                 if self.kick.white > 0 {
                     simd::lerp_toward(frame.pixels_mut(), WHITE, self.kick.white);
@@ -160,8 +157,8 @@ impl GameSession {
 
     /// What a frame of `size` draws, before any of it is drawn: the view kick,
     /// the camera's pose, the actors and movers where they are, and the
-    /// particles, thinned by what `depth` hides.
-    fn prepare(&mut self, (width, height): (u32, u32), depth: Option<&Framebuffer>) -> Prepared {
+    /// particles, thinned by what the estimate of its depth hides.
+    fn prepare(&mut self, (width, height): (u32, u32)) -> Prepared {
         // The particle clock stops on the pause menu, and a flash must not stay
         // up behind it for as long as the pause lasts.
         self.kick = if self.menu.screen() == Screen::Paused {
@@ -175,19 +172,37 @@ impl GameSession {
         };
         let view = self.view();
         let alpha = self.stepper.alpha();
+        let estimate = self.estimate(&view, (width, height));
         match self.renderer.camera(&view, width, height) {
             Some(cam) => {
                 let fog = self.renderer.fog();
-                self.fx.collect(&cam, fog, depth, &mut self.draws);
+                self.fx
+                    .collect(&cam, fog, estimate.as_ref(), &mut self.draws);
             }
             None => self.draws.clear(),
         }
+        self.estimate = estimate;
         Prepared {
             view,
             actors: actors_of(&self.game, alpha),
             poses: mover_poses_of(&self.game, alpha),
             vista_time: self.vista_time(),
         }
+    }
+
+    /// The depth the particle budget reads for a frame of `size` from `view`: its
+    /// visible faces, flat, at a fraction of its size each way. Drawn on the CPU
+    /// whatever draws the frame, so every renderer thins the same particles, and
+    /// one that reads nothing back has it too. Faces only: what an actor or a
+    /// mover hides is not counted, which only costs a sprite behind one.
+    fn estimate(&mut self, view: &View, (width, height): (u32, u32)) -> Option<Framebuffer> {
+        let share = width.div_ceil(ESTIMATE_WIDTH).max(ESTIMATE_SHARE);
+        let size = ((width / share).max(16), (height / share).max(16));
+        let cam = self.renderer.camera(view, size.0, size.1)?;
+        let mut fb = take_sized(&mut self.estimate, size)?;
+        fb.clear(0);
+        self.renderer.scene().render(&mut fb, &cam, None);
+        Some(fb)
     }
 
     /// What goes over the world, into `fb`: feedback, the HUD and menus, and
@@ -220,5 +235,27 @@ fn take_sized(slot: &mut Option<Framebuffer>, (width, height): (u32, u32)) -> Op
     match slot.take() {
         Some(fb) if (fb.width(), fb.height()) == (width, height) => Some(fb),
         _ => Framebuffer::new(width, height),
+    }
+}
+
+/// The world of a frame `at` describes, with nothing read back after it.
+fn frame_input<'a>(
+    at: &'a Prepared,
+    particles: (&'a ParticleDraws, &'a SpriteBank),
+    lights: &'a [DynLight],
+    quality: Quality,
+) -> FrameInput<'a> {
+    FrameInput {
+        view: &at.view,
+        quality,
+        actors: &at.actors,
+        effects: Effects {
+            particles: Some(particles),
+            lights,
+            poses: &at.poses,
+            vista_time: at.vista_time,
+            models: None,
+        },
+        wants_depth: false,
     }
 }

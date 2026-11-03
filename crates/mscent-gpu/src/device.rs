@@ -180,6 +180,12 @@ impl Gpu {
         self.cpu
     }
 
+    /// Waits until everything submitted so far is done, for measuring.
+    pub fn wait(&self) {
+        // A lost device has nothing left to finish.
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+    }
+
     /// The adapter's name, for reports.
     pub fn adapter(&self) -> &str {
         &self.adapter

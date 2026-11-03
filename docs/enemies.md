@@ -85,7 +85,7 @@ takes 4.3 and 8.4 ms. An estimated factor of 5 puts the 12 at about 9 ms at High
 - **Mip level of a blended triangle ignores scale.** It takes the texel rate from depth in world units, while a
   model's texels are in its own units, so the stock designs at scale 0.25 take a level four times too sharp on
   blended triangles, and shimmer at a distance. Plain triangles take theirs from the projected texels and are right.
-  The GPU does the same, to stay on par. Fix in both when M15.3 touches the shading.
+  The GPU does the same. Fix it in both when M15.3 touches the shading.
 
 ### M15.11
 

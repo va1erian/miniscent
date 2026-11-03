@@ -7,7 +7,7 @@ use miniscent_game::FrameStats;
 use mscent_platform::Event;
 use mscent_render::{Effects, FrameInput, Framebuffer, Quality, VoxelChange, draw_text};
 
-use super::gpu_view::{self, GpuView};
+use super::gpu_view::GpuView;
 use super::highlight;
 use super::worker::{Request, Scene};
 use crate::build::Built;
@@ -111,7 +111,6 @@ impl Scene for LevelScene {
 
     fn render(&mut self, req: &Request) -> Option<&Framebuffer> {
         if req.play {
-            gpu_view::set_inactive();
             let gpu = &mut self.gpu;
             let session = self.built.session_mut()?;
             return session.render_through(req.w, req.h, &mut |assets, fb, frame| {

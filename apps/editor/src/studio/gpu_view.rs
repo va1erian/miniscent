@@ -37,8 +37,9 @@ pub fn active() -> bool {
     ACTIVE.load(Ordering::Relaxed)
 }
 
-/// For a frame the GPU has not drawn yet: Play's, which software draws where
-/// the GPU cannot.
+/// Until a frame says otherwise: on entering Play, which software draws where
+/// the GPU cannot. Once, not at every frame: the pane's frame size follows this
+/// flag, and a size that flips remakes the GPU's targets each time.
 pub fn set_inactive() {
     ACTIVE.store(false, Ordering::Relaxed);
 }

@@ -175,6 +175,20 @@ impl GpuRenderer {
         Some(stats)
     }
 
+    /// Draws a frame of `assets` at `size` and keeps it on the GPU, for measuring
+    /// what a frame costs with nothing read back or shown; [`Gpu::wait`] waits
+    /// for it to be done. `None` as for [`Self::draw`].
+    pub fn draw_unread(
+        &mut self,
+        assets: &LevelAssets,
+        size: (u32, u32),
+        frame: &FrameInput,
+    ) -> Option<SceneStats> {
+        let (stats, _, encoder) = self.encode(assets, size, frame)?;
+        self.gpu.queue.submit([encoder.finish()]);
+        Some(stats)
+    }
+
     /// Draws a frame of `assets` at `size` and shows it in `presenter`'s window
     /// with `overlay` over it, reading nothing back. `None` as for [`Self::draw`],
     /// and for a window that cannot take the frame.
