@@ -69,6 +69,23 @@ fn composited(
     white: u32,
     window: (u32, u32),
 ) -> Vec<u32> {
+    composited_by(
+        &mut Compositor::new(gpu, COLOR),
+        gpu,
+        scene,
+        layer,
+        (white, window),
+    )
+}
+
+/// [`composited`] with `compositor`, which keeps its layer from frame to frame.
+fn composited_by(
+    compositor: &mut Compositor,
+    gpu: &Gpu,
+    scene: &Framebuffer,
+    layer: &Framebuffer,
+    (white, window): (u32, (u32, u32)),
+) -> Vec<u32> {
     let usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
     let size = (scene.width(), scene.height());
     let source = texture(gpu, size, usage);
@@ -93,7 +110,6 @@ fn composited(
         window,
         rect: fit_rect(size.0, size.1, window.0, window.1),
     };
-    let mut compositor = Compositor::new(gpu, COLOR);
     let mut encoder = gpu.device.create_command_encoder(&Default::default());
     let view = source.create_view(&Default::default());
     let into = target.create_view(&Default::default());
@@ -241,4 +257,35 @@ fn a_smaller_layer_goes_over_the_scaled_scene_by_whole_pixels() {
         );
         assert_eq!(gpu.take_error(), None);
     }
+}
+
+#[test]
+fn a_layer_whose_marks_move_leaves_none_behind() {
+    let Some(gpu) = gpu() else { return };
+    let (scene, _) = frame();
+    let mut compositor = Compositor::new(&gpu, COLOR);
+    let marks = |rows: (i32, i32)| {
+        let mut layer = Framebuffer::new(FRAME.0, FRAME.1).expect("a layer");
+        layer.clear(0);
+        fill_rect(
+            &mut layer,
+            4,
+            rows.0,
+            20,
+            (rows.1 - rows.0) as u32,
+            0xc0ff_ff40,
+        );
+        layer
+    };
+    let empty = {
+        let mut layer = Framebuffer::new(FRAME.0, FRAME.1).expect("a layer");
+        layer.clear(0);
+        layer
+    };
+    // Top rows, then bottom rows, then nothing: each frame shows only its own.
+    for layer in [marks((1, 6)), marks((16, 22)), empty] {
+        let got = composited_by(&mut compositor, &gpu, &scene, &layer, (0, (80, 48)));
+        assert_eq!(got, expected(&scene, &layer, 0, (80, 48)));
+    }
+    assert_eq!(gpu.take_error(), None);
 }
