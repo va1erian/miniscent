@@ -90,8 +90,8 @@ impl Scene for LevelScene {
         }
     }
 
+    /// The GPU's copy follows on its next frame, remaking only the changed chunks.
     fn apply_voxels(&mut self, change: VoxelChange) {
-        self.gpu.level_changed();
         self.built.renderer_mut().apply_voxels(change);
     }
 

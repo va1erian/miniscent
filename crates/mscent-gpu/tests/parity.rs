@@ -8,13 +8,17 @@
 
 #[path = "support/compare.rs"]
 mod compare;
+#[path = "support/gpu.rs"]
+mod gpu;
 #[path = "support/scenes.rs"]
 mod scenes;
 
 use std::path::{Path, PathBuf};
 
 use compare::{Frame, compare};
-use mscent_gpu::{Gpu, GpuError, GpuRenderer};
+use gpu::gpu;
+use mscent_gpu::{Gpu, GpuRenderer};
+use mscent_math::Vec3;
 use mscent_render::png_encode::encode_png;
 use mscent_render::{Effects, FrameInput, Framebuffer, LevelRenderer, Quality};
 use scenes::{Framing, Pose, Scene, Taken};
@@ -56,7 +60,63 @@ fn cases() -> Vec<Case> {
         ),
         case("actor", AtActor, High, Taken::Actors),
         case("mover", AtDoor, High, Taken::MoverPose),
+        case(
+            "voxel",
+            look(0.0, -6.0, 1.0, 0.0, 5.0, -2.0),
+            Low,
+            Taken::Voxels,
+        ),
+        case(
+            "voxel_shadow",
+            look(0.5, -0.5, 4.0, 0.0, 4.5, 0.0),
+            Low,
+            Taken::Lamps,
+        ),
+        case(
+            "voxel_bump",
+            look(2.5, 0.5, 0.5, 0.0, 5.0, -1.0),
+            Medium,
+            Taken::Quality(Low),
+        ),
+        case(
+            "voxel_specular",
+            look(4.0, 3.5, 0.5, 3.6, 7.5, -2.0),
+            High,
+            Taken::Quality(Medium),
+        ),
+        case(
+            "voxel_blend",
+            look(2.5, 3.0, 0.0, 2.0, 6.5, -2.0),
+            High,
+            Taken::Textures,
+        ),
+        case(
+            "voxel_spots",
+            look(-2.0, 2.0, 0.5, -4.5, 6.0, -2.0),
+            High,
+            Taken::Spots,
+        ),
+        case(
+            "voxel_lod",
+            look(0.0, -18.0, 2.0, 0.0, 6.0, -2.0),
+            Low,
+            Taken::Voxels,
+        ),
+        case(
+            "voxel_mips",
+            look(6.5, -14.0, 0.0, 6.5, 2.0, -2.75),
+            Low,
+            Taken::Textures,
+        ),
     ]
+}
+
+/// Standing at the first three, looking at the last three.
+fn look(x: f32, y: f32, z: f32, ax: f32, ay: f32, az: f32) -> Pose {
+    Pose::Looking {
+        eye: Vec3::new(x, y, z),
+        at: Vec3::new(ax, ay, az),
+    }
 }
 
 fn software(scene: &Scene, frame: &Framing, quality: Quality, without: Option<Taken>) -> Frame {
@@ -131,22 +191,6 @@ fn write_pictures(name: &str, reference: &Frame, other: &Frame) -> PathBuf {
     dir
 }
 
-/// The GPU, or `None` where a skip is allowed.
-fn gpu() -> Option<Gpu> {
-    match Gpu::new() {
-        Ok(gpu) => Some(gpu),
-        Err(why @ (GpuError::NoAdapter(_) | GpuError::NoDevice(_))) => {
-            assert!(
-                std::env::var_os("MSCENT_REQUIRE_GPU").is_none(),
-                "MSCENT_REQUIRE_GPU is set: {why}"
-            );
-            eprintln!("skipped: {why}");
-            None
-        }
-        Err(why) => panic!("{why}"),
-    }
-}
-
 /// A level, and what of it is on the GPU.
 struct OnGpu {
     level: LevelRenderer,
@@ -165,14 +209,26 @@ fn the_renderers_draw_the_same_frames() {
     let (second, third) = (first.clone(), first.clone());
     eprintln!("adapter: {}", first.adapter());
     let (showcase, door, hard) = (Scene::showcase(), Scene::door(), Scene::hard_shadows());
-    let mut showcase_gpu = on_gpu(first, &showcase);
+    let (voxel_room, voxel_distance) = (Scene::voxel_room(), Scene::voxel_distance());
+    let mut showcase_gpu = on_gpu(first.clone(), &showcase);
     let mut door_gpu = on_gpu(second, &door);
     let mut hard_gpu = on_gpu(third, &hard);
     let mut failures = Vec::new();
     for case in cases() {
+        // A voxel frame's detail depends on the frames before it, as software's
+        // does, so each voxel case starts a level of its own on both.
+        let mut voxel_gpu;
         let (scene, renderer) = match (case.name, case.pose) {
             (_, Pose::AtDoor) => (&door, &mut door_gpu),
             ("light_mips", _) => (&hard, &mut hard_gpu),
+            (name, _) if name.starts_with("voxel") => {
+                let scene = match name {
+                    "voxel_lod" | "voxel_mips" => &voxel_distance,
+                    _ => &voxel_room,
+                };
+                voxel_gpu = on_gpu(first.clone(), scene);
+                (scene, &mut voxel_gpu)
+            }
             _ => (&showcase, &mut showcase_gpu),
         };
         let framing = scene.framing(case.pose);

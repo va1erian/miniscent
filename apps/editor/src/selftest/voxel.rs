@@ -1,5 +1,6 @@
 //! Selftest of the Voxel tool: a stroke on a wall changes the picture with no
-//! preview job, undo gives back the same picture, and the sculpted level plays.
+//! preview job, on the GPU where there is one, undo gives back the same picture,
+//! and the sculpted level plays.
 
 use mscent_world::level_text;
 use xui::xui_canvas::snapshot::Stage;
@@ -7,7 +8,7 @@ use xui::xui_canvas::snapshot::Stage;
 use super::{Run, pump, wait_for_preview};
 use crate::model::Tool;
 use crate::model::generators::Kind;
-use crate::studio::Preview;
+use crate::studio::{Preview, gpu_view};
 use crate::ui::{Click, Msg, PaneDrag, Probe, Prop, VoxelProp, cmd};
 
 const LEVEL: &str = "miniscent-level 1
@@ -87,6 +88,9 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         "the stroke changed the picture",
     );
     run.shot(stage, "voxel-03-sculpted.png");
+    // A machine with no GPU has software to fall back on, and that is all.
+    let on_gpu = gpu_view::active() || !gpu_view::wanted() || mscent_gpu::Gpu::new().is_err();
+    run.check(on_gpu, "a level with voxels draws on the GPU when it can");
 
     stage.emit(Msg::Menu(cmd::UNDO));
     let undone = settled_picture(stage, probe);

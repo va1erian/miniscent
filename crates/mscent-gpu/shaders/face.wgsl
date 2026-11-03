@@ -6,15 +6,8 @@ override LONG_AXIS_LIMIT: f32;
 override MIN_BLEND: f32;
 override BUMP_FULL: f32;
 override BUMP_GONE: f32;
-override MIN_FLAT: f32;
-override MIN_GAIN: f32;
-override MAX_GAIN: f32;
-override RELIEF: f32;
-override KNEE: f32;
-override ROLL: f32;
 override SPEC_GAIN: f32;
 override MIN_SPEC: f32;
-override TABLE_LEN: u32;
 
 const HAS_NORMALS: u32 = 1u;
 const SPEC_VISIBLE: u32 = 2u;
@@ -118,30 +111,6 @@ fn light_color(face: Face, luxel: vec2f, rate: f32) -> vec3f {
 fn to_texture_frame(face: Face, v: vec3f) -> vec3f {
     let f = face.frame;
     return vec3f(v.x * f.x + v.y * f.y, v.x * f.z + v.y * f.w, v.z);
-}
-
-fn unit_or(v: vec3f, fallback: vec3f) -> vec3f {
-    let length_squared = dot(v, v);
-    return select(fallback, v / sqrt(length_squared), length_squared > 0.0);
-}
-
-fn bump_gain(n: vec3f, l: vec3f) -> f32 {
-    let flat_response = max(l.z, MIN_FLAT);
-    let tilted = n.x * RELIEF * l.x + n.y * RELIEF * l.y + n.z * flat_response;
-    return clamp(tilted / flat_response, MIN_GAIN, MAX_GAIN);
-}
-
-fn soft_limit(k: vec3f) -> vec3f {
-    let d = max(k - vec3f(KNEE), vec3f(0.0));
-    return k - d * d / (vec3f(ROLL) + d);
-}
-
-// SpecTable::response, for the table of `row`.
-fn spec_response(row: u32, n_dot_h: f32) -> f32 {
-    let x = clamp(n_dot_h, 0.0, 1.0) * f32(TABLE_LEN - 1u);
-    let i = min(u32(x), TABLE_LEN - 2u);
-    let first = spec_tables[row * TABLE_LEN + i];
-    return first + (spec_tables[row * TABLE_LEN + i + 1u] - first) * (x - f32(i));
 }
 
 // The highlight: `add_highlight` in texel_light.rs.

@@ -3,7 +3,7 @@
 
 use std::future::Future;
 use std::pin::pin;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::task::{Context, Poll, Waker};
 
 /// Why a GPU cannot draw, in words for a log.
@@ -47,6 +47,9 @@ pub struct Gpu {
     pub(crate) queue: wgpu::Queue,
     adapter: String,
     first_error: Arc<Mutex<Option<String>>>,
+    /// Compiled once for the device: the editor makes a scene on every edit, and
+    /// this pipeline is a fifth of a voxel scene's first frame.
+    pub(crate) voxel_pipeline: Arc<OnceLock<wgpu::RenderPipeline>>,
 }
 
 impl Gpu {
@@ -78,6 +81,7 @@ impl Gpu {
             queue,
             adapter: adapter.get_info().name,
             first_error,
+            voxel_pipeline: Arc::default(),
         })
     }
 
