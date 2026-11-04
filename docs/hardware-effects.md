@@ -388,10 +388,11 @@ is held to a truth.
 ## Costs
 
 Targets on the dev machine at 3840x2160, High, over the 5.1 ms of today's frame with
-readback: shadows 1.5 ms or less for two lights at 1024, parallax 1 ms or less on the
-showcase, to be measured and recorded in `docs/perf/`. Software and the effects
-switched off cost nothing more. Memory: two cube maps of 1024 at `R32Float` is 48 MB, so
-the default is 512 at first, 12 MB, with 1024 behind the measurement.
+readback: shadows 1.5 ms or less for two lights, parallax 1 ms or less on the
+showcase. Measured: see [perf/hardware.md](perf/hardware.md). Software and the effects
+switched off cost nothing more. Memory as built: four cube maps of 768 at `R32Float`
+(two dynamic lights, two static lamps), 56 MB. The stress scene with all four maps in
+use costs 1.7 to 2.1 ms, over the target; caching a still map is the first fix.
 
 ## Risks
 
