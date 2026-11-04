@@ -67,6 +67,10 @@ impl Editor {
                 self.close_fog_window();
                 let play = self.play.get();
                 play.set_visible(true);
+                // Out from under Play too: xui repaints every node a frame's
+                // damage touches, covered or not, so the editor beneath would
+                // be painted again for each picture (56 ms at 1080p).
+                self.work_host.get().set_visible(false);
                 self.pane3d().set_grab(false);
                 play.set_grab(true);
                 play.focus();
@@ -88,6 +92,7 @@ impl Editor {
         self.studio.leave_play();
         self.play.get().set_grab(false);
         self.play.get().set_visible(false);
+        self.work_host.get().set_visible(true);
         self.pane3d().focus();
         self.script.resume();
         if let Some(m) = message {
