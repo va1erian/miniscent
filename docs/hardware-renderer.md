@@ -376,6 +376,25 @@ frame. The face, cutout and viewport pipelines are compiled once per device, as 
 voxels' are: without that, a new scene of a vista level cost the editor's pane more than
 its 12 ms and the adaptive scale shrank its frame.
 
+
+## Instant Play in the editor
+
+Play draws as the game does, straight into a window, through the game's own
+`GpuWorld` (`studio/play_direct.rs`). The window is the Play pane's own: xui gives a
+custom node a native child window (`Ui::set_native_surface`), keeps it on the node's
+bounds and visibility, and passes its pointer input on as the node's. The render thread
+presents into it, so a Play frame is never read back, never crosses to the UI thread and
+never goes through xui's software composite. The pane's input goes to the render thread
+the moment it arrives (`studio/input.rs`), as the game reads its input right before it
+steps, and the thread paces Play as the game does, spinning the last 2 ms of a frame.
+
+Measured on the showcase at a 1600x935 pane on the RTX 5070 Ti: 60.0 frames a second and
+0.5 to 0.6 ms of render call, where the pane's route took 56.9 ms of UI thread per frame
+at 1080p with the editor under it and 13.5 ms without. Where there is no native window
+(the offscreen backend in tests; Wayland and macOS, where xui makes none, as `winit`
+would make a separate top-level window there), or the GPU gives the window up, Play
+falls back to the pane's frames, which the tests still read, and the log says why.
+
 ## Two traps in the game path
 
 Neither touches the editor's edit view, as it has no particles and reads back anyway.

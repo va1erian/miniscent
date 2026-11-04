@@ -39,6 +39,9 @@ impl Editor {
         } else {
             self.pane3d()
         };
+        if self.studio.mode == Mode::Play {
+            self.follow_surface();
+        }
         let events = pane.take_events();
         let clicks = pane.take_clicks();
         let drags = pane.take_drags();

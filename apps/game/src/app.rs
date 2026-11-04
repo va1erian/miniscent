@@ -96,7 +96,7 @@ pub struct Shown<'a> {
 /// `base`'s height, the window's shape at a whole fraction of its size, so that
 /// the HUD's pixels read as they do at the base size. A window with no area, as
 /// a minimised one, draws at `base`, and shows nothing.
-fn shown_sizes(
+pub fn shown_sizes(
     window: (u32, u32),
     base: (u32, u32),
     scaled: impl Fn((u32, u32)) -> (u32, u32),

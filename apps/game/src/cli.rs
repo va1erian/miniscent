@@ -138,6 +138,10 @@ fn res(s: &str) -> Result<(u32, u32), String> {
     }
 }
 
+/// The internal resolution at full quality when `--res` does not say: the
+/// size the HUD is drawn for.
+pub const BASE_RES: (u32, u32) = (640, 360);
+
 /// Parses the arguments after the program name.
 pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String> {
     let mut o = Options {
@@ -145,7 +149,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
         corridor: false,
         quality: Quality::High,
         scale: 2,
-        res: (640, 360),
+        res: BASE_RES,
         assets: None,
         screenshot: None,
         frames: None,

@@ -135,6 +135,11 @@ impl GpuWorld {
             .ok_or_else(|| "the GPU drew no frame".into())
     }
 
+    /// Why the GPU was given up, if it was.
+    pub fn failure(&self) -> Option<&str> {
+        self.failed.as_deref()
+    }
+
     /// Gives up the GPU for `why`, after which software draws.
     fn fail(&mut self, why: String) {
         if !self.strict {

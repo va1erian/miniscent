@@ -1,8 +1,9 @@
 //! The render thread. It owns a [`Scene`] (the built level and its game
 //! session), steps and renders it at a 60 Hz target and publishes the newest
-//! frame. The UI thread never waits for it: input goes in through a bounded
-//! channel with `try_send`, frames come out through a one-slot mailbox read
-//! with `try_lock`, and a slow scene costs resolution (the adaptive scale),
+//! frame. The UI thread never waits for it: commands go in through a bounded
+//! channel with `try_send`, input through an inbox it only `try_lock`s
+//! (`input.rs`), frames come out through a one-slot mailbox read with
+//! `try_lock`, and a slow scene costs resolution (the adaptive scale),
 //! not UI responsiveness. Stale frames are replaced in the mailbox, never
 //! queued. A panic in the scene is caught and reported as an error text. A new
 //! scene replaces the old one on the running thread, so the fly camera and any
@@ -10,7 +11,7 @@
 
 use std::collections::VecDeque;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{
     Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError, sync_channel,
 };
@@ -19,33 +20,26 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use miniscent_game::FrameStats;
-use mscent_platform::Event;
+use mscent_platform::{Event, GpuWindow};
 use mscent_render::{Framebuffer, View, VoxelChange};
 
 use super::Mode;
+use super::adaptive::Adaptive;
 use super::highlight::Highlights;
+pub use super::input::{Inbox, Input};
+pub use super::slow::{Slow, set_slow_ms, slow_ms};
 use crate::build::{Built, panic_text};
 use crate::model::FlyCam;
 
 /// One frame every 1/60 s.
 const TARGET: Duration = Duration::from_micros(16_667);
+/// How long before a Play frame is due the thread stops sleeping and spins.
+const SPIN: Duration = Duration::from_millis(2);
 /// Longest simulated step after a stall; the session sub-steps at 120 Hz.
 const MAX_DT: Duration = Duration::from_millis(100);
-/// Pending command batches; beyond this input is dropped, not queued.
+/// Pending commands; beyond this a command is dropped, not queued, or held
+/// back by the UI thread when it must not be lost.
 const QUEUE: usize = 64;
-/// Extra delay per rendered frame, in ms (the hidden `--slow-play-ms`).
-static SLOW_MS: AtomicU64 = AtomicU64::new(0);
-
-/// Makes every scene created from now on take `ms` longer per frame, to
-/// reproduce a slow machine.
-pub fn set_slow_ms(ms: u64) {
-    SLOW_MS.store(ms, Ordering::Relaxed);
-}
-
-pub fn slow_ms() -> u64 {
-    SLOW_MS.load(Ordering::Relaxed)
-}
-
 /// What the thread draws and steps.
 pub trait Scene: Send + 'static {
     /// Starts the game over (entering Play).
@@ -59,12 +53,25 @@ pub trait Scene: Send + 'static {
     fn relight(&mut self, _lit: Built) {}
     /// Changes voxel surfaces under the same brushes.
     fn apply_voxels(&mut self, _change: VoxelChange) {}
+    /// Shows Play in `window` itself from now on, or (`None`) as frames for
+    /// the pane again.
+    fn set_surface(&mut self, _window: Option<Surface>) {}
+    /// Whether the surface was given up since the last call, its frames being
+    /// left to the pane.
+    fn surface_lost(&mut self) -> bool {
+        false
+    }
 }
+
+/// The window Play can present into, the Play pane's own.
+pub type Surface = Arc<dyn GpuWindow>;
 
 /// A picture the thread is asked to draw.
 pub struct Request {
     pub w: u32,
     pub h: u32,
+    /// The pane's own size, which `w` and `h` scale down to hold the budget.
+    pub pane: (u32, u32),
     /// Game view (true) or the editor's fly camera.
     pub play: bool,
     pub view: View,
@@ -82,37 +89,7 @@ pub struct Frame {
     pub mode: Mode,
 }
 
-/// Delays every frame, wrapping a scene (the `--slow-play-ms` flag).
-pub struct Slow {
-    pub inner: Box<dyn Scene>,
-    pub delay: Duration,
-}
-
-impl Scene for Slow {
-    fn restart(&mut self) {
-        self.inner.restart();
-    }
-
-    fn step(&mut self, dt: Duration, events: &[Event], stats: FrameStats) -> bool {
-        self.inner.step(dt, events, stats)
-    }
-
-    fn render(&mut self, req: &Request) -> Option<&Framebuffer> {
-        std::thread::sleep(self.delay);
-        self.inner.render(req)
-    }
-
-    fn relight(&mut self, lit: Built) {
-        self.inner.relight(lit);
-    }
-
-    fn apply_voxels(&mut self, change: VoxelChange) {
-        self.inner.apply_voxels(change);
-    }
-}
-
 enum Cmd {
-    Input(Vec<Event>),
     Size(u32, u32),
     Mode(Mode),
     Camera(Box<FlyCam>),
@@ -122,6 +99,7 @@ enum Cmd {
     Relight(Box<Built>),
     /// One whole batch, so a frame never shows half a dab.
     Voxels(VoxelChange),
+    Surface(Option<Surface>),
 }
 
 #[derive(Default)]
@@ -130,6 +108,9 @@ struct Shared {
     camera: Mutex<Option<FlyCam>>,
     error: Mutex<Option<String>>,
     quit: AtomicBool,
+    /// Input the UI handed over since the last frame took it.
+    inbox: Inbox,
+    surface_lost: AtomicBool,
     stop: AtomicBool,
     alive: AtomicBool,
 }
@@ -152,7 +133,7 @@ pub struct Worker {
     tx: SyncSender<Cmd>,
     shared: Arc<Shared>,
     size: (u32, u32),
-    lost_input: bool,
+    input: Input,
     /// Commands that must not be lost, waiting for room in the queue.
     held: VecDeque<Cmd>,
 }
@@ -175,10 +156,10 @@ impl Worker {
             })
             .map_err(|e| format!("cannot start the render thread: {e}"))?;
         let w = Worker {
+            input: Input::new(shared.inbox.clone()),
             tx,
             shared,
             size: (0, 0),
-            lost_input: false,
             held: VecDeque::new(),
         };
         Ok((w, handle))
@@ -188,19 +169,14 @@ impl Worker {
         !matches!(self.tx.try_send(cmd), Err(TrySendError::Full(_)))
     }
 
-    /// Forwards input. When the thread is so far behind that the queue is
-    /// full the batch is dropped and the next one starts with a focus-lost
-    /// event, so no key stays held.
+    /// Forwards input (see [`Input::send`]).
     pub fn input(&mut self, events: &[Event]) {
-        if events.is_empty() && !self.lost_input {
-            return;
-        }
-        let mut batch = Vec::with_capacity(events.len() + 1);
-        if self.lost_input {
-            batch.push(Event::FocusLost);
-        }
-        batch.extend_from_slice(events);
-        self.lost_input = !self.send(Cmd::Input(batch));
+        self.input.send(events);
+    }
+
+    /// A way in for input of its own, which a pane hands over as it arrives.
+    pub fn input_sender(&self) -> Input {
+        Input::new(self.shared.inbox.clone())
     }
 
     /// Tells the thread the pane size; `(0, 0)` means "not visible".
@@ -210,7 +186,12 @@ impl Worker {
         }
     }
 
+    /// Changes mode. The input handed over so far belongs to the old one, and
+    /// goes now, on this side: input sent after this returns is the new mode's,
+    /// though the thread takes the command later. The thread holds the inbox
+    /// only to empty it, so this does not wait on a frame.
     pub fn mode(&self, mode: Mode) {
+        lock(&self.shared.inbox).clear();
         self.send(Cmd::Mode(mode));
     }
 
@@ -233,6 +214,18 @@ impl Worker {
     pub fn relight(&mut self, lit: Built) {
         self.held.push_back(Cmd::Relight(Box::new(lit)));
         self.flush();
+    }
+
+    /// Has Play present into `window`, or (`None`) send frames again. Never
+    /// lost, like a scene.
+    pub fn surface(&mut self, window: Option<Surface>) {
+        self.held.push_back(Cmd::Surface(window));
+        self.flush();
+    }
+
+    /// Whether the scene gave its surface up since the last call.
+    pub fn take_surface_lost(&self) -> bool {
+        self.shared.surface_lost.swap(false, Ordering::AcqRel)
     }
 
     /// Changes voxel surfaces under the current scene. Never lost, like a scene.
@@ -287,27 +280,6 @@ impl Worker {
     }
 }
 
-/// Scales the internal resolution to keep the frame cost near the budget.
-struct Adaptive {
-    scale: f32,
-}
-
-impl Adaptive {
-    fn update(&mut self, cost: Duration) {
-        let ms = cost.as_secs_f32() * 1000.0;
-        if ms > 12.0 {
-            self.scale = (self.scale * 0.85).max(0.25);
-        } else if ms < 7.0 {
-            self.scale = (self.scale * 1.1).min(1.0);
-        }
-    }
-
-    fn size(&self, w: u32, h: u32) -> (u32, u32) {
-        let s = |v: u32| ((v as f32 * self.scale) as u32).clamp(16, v.max(16));
-        (s(w), s(h))
-    }
-}
-
 struct Loop {
     mode: Mode,
     size: (u32, u32),
@@ -316,12 +288,13 @@ struct Loop {
     dirty: bool,
     events: Vec<Event>,
     fly: FlyCam,
+    /// Given to every scene, a new one too.
+    surface: Option<Surface>,
 }
 
 impl Loop {
     fn apply(&mut self, cmd: Cmd, scene: &mut Box<dyn Scene>, sh: &Shared) {
         match cmd {
-            Cmd::Input(mut e) => self.events.append(&mut e),
             Cmd::Size(w, h) => {
                 self.size = (w, h);
                 self.dirty = true;
@@ -348,6 +321,12 @@ impl Loop {
             }
             Cmd::Scene(s) => {
                 *scene = s;
+                scene.set_surface(self.surface.clone());
+                self.dirty = true;
+            }
+            Cmd::Surface(window) => {
+                self.surface.clone_from(&window);
+                scene.set_surface(window);
                 self.dirty = true;
             }
             Cmd::Relight(lit) => {
@@ -376,6 +355,7 @@ fn run(mut scene: Box<dyn Scene>, rx: &Receiver<Cmd>, sh: &Shared, fly: FlyCam) 
         dirty: true,
         events: Vec::new(),
         fly,
+        surface: None,
     };
     let mut adaptive = Adaptive { scale: 1.0 };
     let mut last = Instant::now();
@@ -391,6 +371,7 @@ fn run(mut scene: Box<dyn Scene>, rx: &Receiver<Cmd>, sh: &Shared, fly: FlyCam) 
                 Err(TryRecvError::Disconnected) => return,
             }
         }
+        st.events.append(&mut lock(&sh.inbox));
         advance(&mut st, &mut *scene, sh, dt, cost);
         let (w, h) = st.size;
         if st.dirty && w > 0 && h > 0 {
@@ -401,14 +382,24 @@ fn run(mut scene: Box<dyn Scene>, rx: &Receiver<Cmd>, sh: &Shared, fly: FlyCam) 
             adaptive.update(cost);
             st.dirty = false;
         }
-        // Sleep to the next frame, still taking commands as they arrive.
+        // Sleep to the next frame, still taking commands as they arrive. Play
+        // spins the last moments as the game does: a sleep can overshoot by a
+        // millisecond, which costs a 60 Hz frame now and then.
         let deadline = now + TARGET;
-        while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+        let spin = if st.mode == Mode::Play && st.size.0 > 0 {
+            SPIN
+        } else {
+            Duration::ZERO
+        };
+        while let Some(left) = deadline.checked_duration_since(Instant::now() + spin) {
             match rx.recv_timeout(left) {
                 Ok(c) => st.apply(c, &mut scene, sh),
                 Err(RecvTimeoutError::Timeout) => break,
                 Err(RecvTimeoutError::Disconnected) => return,
             }
+        }
+        while Instant::now() < deadline {
+            std::hint::spin_loop();
         }
     }
 }
@@ -458,38 +449,22 @@ fn publish(st: &Loop, scene: &mut dyn Scene, sh: &Shared, (w, h): (u32, u32)) {
     let req = Request {
         w,
         h,
+        pane: st.size,
         play: st.mode == Mode::Play,
         view: st.fly.view(),
         banner: st.banner,
         highlights: st.highlights.clone(),
     };
-    let Some(fb) = scene.render(&req) else { return };
-    let rgba = rgba_of(fb.pixels());
-    let frame = Frame {
+    // A frame Play showed in its own window is not one for the pane.
+    let frame = scene.render(&req).map(|fb| Frame {
         w: fb.width(),
         h: fb.height(),
-        rgba,
+        rgba: rgba_of(fb.pixels()),
         mode: st.mode,
-    };
-    *lock(&sh.latest) = Some(frame);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn adaptive_scale_drops_when_slow_and_recovers_within_bounds() {
-        let mut a = Adaptive { scale: 1.0 };
-        for _ in 0..30 {
-            a.update(Duration::from_millis(100));
-        }
-        assert_eq!(a.scale, 0.25);
-        assert_eq!(a.size(960, 600), (240, 150));
-        for _ in 0..60 {
-            a.update(Duration::from_millis(2));
-        }
-        assert_eq!(a.scale, 1.0);
-        assert_eq!(a.size(10, 10), (16, 16));
+    });
+    if scene.surface_lost() {
+        sh.surface_lost.store(true, Ordering::Release);
     }
+    let Some(frame) = frame else { return };
+    *lock(&sh.latest) = Some(frame);
 }

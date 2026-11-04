@@ -50,7 +50,7 @@ pub fn take_report() -> Option<String> {
     (!std::mem::replace(&mut slot.1, true)).then(|| slot.0.clone())
 }
 
-fn report(line: String) {
+pub(super) fn report(line: String) {
     let mut slot = REPORT.lock().unwrap_or_else(PoisonError::into_inner);
     if slot.0 != line {
         *slot = (line, false);
@@ -93,7 +93,13 @@ impl Devices {
     }
 }
 
-fn device() -> Result<Gpu, String> {
+/// Says the GPU drew the last frame, for a frame it showed without the view.
+pub(super) fn set_active() {
+    ACTIVE.store(true, Ordering::Relaxed);
+}
+
+/// The editor's device, opened if it has to be.
+pub(super) fn device() -> Result<Gpu, String> {
     DEVICE.get(|| Gpu::new().map_err(|e| e.to_string()))
 }
 

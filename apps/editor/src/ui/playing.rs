@@ -53,6 +53,22 @@ impl Editor {
         self.state.borrow_mut().message = message;
     }
 
+    /// Hands Play the pane's own window once the backend has made it, and
+    /// gives the window up if Play could not show itself there.
+    pub(super) fn follow_surface(&mut self) {
+        let play = self.play.get();
+        // Input the render thread held its inbox against goes now.
+        play.flush_forward();
+        if self.studio.take_surface_lost() {
+            self.studio.set_surface(None);
+            play.set_native(false);
+        } else if !self.studio.has_surface()
+            && let Some(window) = play.native()
+        {
+            self.studio.set_surface(Some(window));
+        }
+    }
+
     /// Opens the Instant Play layer over the whole work area.
     pub(super) fn begin_play(&mut self) {
         match self.studio.enter_play() {
@@ -71,11 +87,16 @@ impl Editor {
                 // damage touches, covered or not, so the editor beneath would
                 // be painted again for each picture (56 ms at 1080p).
                 self.work_host.get().set_visible(false);
+                // Its own window, which the GPU shows Play in as the game does.
+                if crate::studio::gpu_view::wanted() {
+                    play.set_native(true);
+                }
                 self.pane3d().set_grab(false);
                 play.set_grab(true);
                 play.focus();
                 // Focus changes from the editor are not the player's input.
                 play.take_events();
+                play.set_forward(self.studio.input_sender());
                 let text = "Playing: Esc = back, WASD (ZQSD on AZERTY) move, Space fire, Q/E roll";
                 self.state.borrow_mut().message = text.into();
                 self.set_status(text);
@@ -89,7 +110,10 @@ impl Editor {
 
     /// Back to the editor; the document is exactly as it was.
     pub(super) fn end_play(&mut self, message: Option<&str>) {
+        self.play.get().set_forward(None);
         self.studio.leave_play();
+        self.studio.set_surface(None);
+        self.play.get().set_native(false);
         self.play.get().set_grab(false);
         self.play.get().set_visible(false);
         self.work_host.get().set_visible(true);
