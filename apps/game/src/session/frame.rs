@@ -5,6 +5,7 @@ use mscent_collide::STEP_HZ;
 use mscent_game::Screen;
 use mscent_game::fx::combat::ViewKick;
 use mscent_math::{Quat, Vec3};
+use mscent_render::model::{ModelInstance, ModelTable};
 use mscent_render::particles::{ParticleDraws, SpriteBank};
 use mscent_render::{
     Actor, DynLight, Effects, FrameInput, FrameRenderer, Framebuffer, LevelAssets, MoverPose,
@@ -21,6 +22,9 @@ const WHITE: u32 = 0xffff_ffff;
 /// flat cost 0.16 ms at 160x90, 0.52 at 320x180 and 4.0 at 960x540.
 const ESTIMATE_SHARE: u32 = 4;
 const ESTIMATE_WIDTH: u32 = 160;
+/// How far behind and above the ship a chase view stands.
+const CHASE_BACK: f32 = 3.0;
+const CHASE_UP: f32 = 0.8;
 
 /// Cheap interpolation between nearby orientations.
 fn nlerp(a: Quat, b: Quat, t: f32) -> Quat {
@@ -50,11 +54,30 @@ impl GameSession {
     pub fn view(&self) -> View {
         let alpha = self.stepper.alpha();
         let p = &self.game.player;
-        View {
-            pos: self.eye() + self.kick.shake,
-            orientation: (nlerp(self.prev_orientation, p.orientation, alpha) * p.bank_rotation())
-                .normalized(),
+        let orientation =
+            (nlerp(self.prev_orientation, p.orientation, alpha) * p.bank_rotation()).normalized();
+        let mut pos = self.eye() + self.kick.shake;
+        if self.chase {
+            let (back, up) = (Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 1.0, 0.0));
+            pos = pos + orientation.rotate(back) * CHASE_BACK + orientation.rotate(up) * CHASE_UP;
         }
+        View { pos, orientation }
+    }
+
+    /// The ship where the player is this frame, turned as the view is.
+    fn ship_now(&self) -> Option<ModelInstance> {
+        let p = &self.game.player;
+        let pos = p.body.prev_pos.lerp(p.body.pos, self.stepper.alpha());
+        let turn = self.view().orientation;
+        Some(self.ship.as_ref()?.instance(pos, turn, self.chase))
+    }
+
+    /// What a frame draws models with: the ship, if there is one.
+    fn ship_models<'a>(
+        ship: Option<&'a crate::ship::Ship>,
+        instance: &'a Option<ModelInstance>,
+    ) -> Option<(&'a ModelTable, &'a [ModelInstance])> {
+        Some(ship?.models(instance.as_ref()?))
     }
 
     /// Seconds of play for what a vista does over time: the fixed steps simulated
@@ -87,7 +110,7 @@ impl GameSession {
             lights: self.fx.lights(self.renderer.scene()),
             poses: &at.poses,
             vista_time: at.vista_time,
-            models: None,
+            models: Self::ship_models(self.ship.as_ref(), &at.ship),
         };
         let input = FrameInput {
             view: &at.view,
@@ -100,7 +123,9 @@ impl GameSession {
         let drawn = if other(self.renderer.assets(), &mut fb, &input) {
             Some(())
         } else {
-            self.renderer.draw(&mut fb, &input).map(|_| ())
+            self.renderer
+                .draw(&mut fb, &software_input(&input))
+                .map(|_| ())
         };
         if drawn.is_some() {
             if self.kick.white > 0 {
@@ -129,16 +154,32 @@ impl GameSession {
         let at = self.prepare(world);
         self.draw_over(&mut layer, &at.view);
         let lights = self.fx.lights(self.renderer.scene());
-        let input = frame_input(&at, (&self.draws, &self.bank), lights, self.quality);
+        let models = Self::ship_models(self.ship.as_ref(), &at.ship);
+        let input = frame_input(
+            &at,
+            (&self.draws, &self.bank),
+            (lights, models),
+            self.quality,
+        );
         let shown = show(self.renderer.assets(), &input, &layer, self.kick.white);
         let mut fb = None;
         if !shown {
             // The particles were placed on a screen of the world's size.
             let at = self.prepare(layer_size);
             let lights = self.fx.lights(self.renderer.scene());
-            let input = frame_input(&at, (&self.draws, &self.bank), lights, self.quality);
+            let models = Self::ship_models(self.ship.as_ref(), &at.ship);
+            let input = frame_input(
+                &at,
+                (&self.draws, &self.bank),
+                (lights, models),
+                self.quality,
+            );
             let mut frame = take_sized(&mut self.fb, layer_size)?;
-            if self.renderer.draw(&mut frame, &input).is_some() {
+            if self
+                .renderer
+                .draw(&mut frame, &software_input(&input))
+                .is_some()
+            {
                 if self.kick.white > 0 {
                     simd::lerp_toward(frame.pixels_mut(), WHITE, self.kick.white);
                 }
@@ -187,6 +228,7 @@ impl GameSession {
             actors: actors_of(&self.game, alpha),
             poses: mover_poses_of(&self.game, alpha),
             vista_time: self.vista_time(),
+            ship: self.ship_now(),
         }
     }
 
@@ -227,6 +269,7 @@ struct Prepared {
     actors: Vec<Actor>,
     poses: Vec<MoverPose>,
     vista_time: f32,
+    ship: Option<ModelInstance>,
 }
 
 /// The framebuffer in `slot`, made again at `size` if it is not that size.
@@ -238,11 +281,30 @@ fn take_sized(slot: &mut Option<Framebuffer>, (width, height): (u32, u32)) -> Op
     }
 }
 
+/// `input` as software draws it: without the player's ship, which only the
+/// hardware renderer draws (and shadows), so that a chase view's ship is not
+/// drawn by whichever renderer happens to be in use.
+fn software_input<'a>(input: &FrameInput<'a>) -> FrameInput<'a> {
+    FrameInput {
+        view: input.view,
+        quality: input.quality,
+        actors: input.actors,
+        effects: Effects {
+            models: None,
+            ..input.effects
+        },
+        wants_depth: input.wants_depth,
+    }
+}
+
 /// The world of a frame `at` describes, with nothing read back after it.
 fn frame_input<'a>(
     at: &'a Prepared,
     particles: (&'a ParticleDraws, &'a SpriteBank),
-    lights: &'a [DynLight],
+    (lights, models): (
+        &'a [DynLight],
+        Option<(&'a ModelTable, &'a [ModelInstance])>,
+    ),
     quality: Quality,
 ) -> FrameInput<'a> {
     FrameInput {
@@ -254,7 +316,7 @@ fn frame_input<'a>(
             lights,
             poses: &at.poses,
             vista_time: at.vista_time,
-            models: None,
+            models,
         },
         wants_depth: false,
     }

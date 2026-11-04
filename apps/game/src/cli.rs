@@ -30,6 +30,8 @@ miniscent [options]
                            the default in a window), software (the default
                            headless, whose pictures are the same everywhere),
                            or the GPU and nothing else, failing with why
+  --chase                  put the camera behind the player's ship and draw it (the
+                           hardware renderer only; cosmetic)
   --autoclose-ms <n>       desktop: quit after n milliseconds
   --check                  with --level: compile the level's script, run its top
                            level and list every name; fails on any error
@@ -93,6 +95,8 @@ pub struct Options {
     pub pack_level: Option<(PathBuf, PathBuf)>,
     /// `None` for the default: `auto` in a window, `software` headless.
     pub renderer: Option<Renderer>,
+    /// `--chase`: a third-person camera, to look at the ship.
+    pub chase: bool,
 }
 
 impl Options {
@@ -162,6 +166,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
         dump_level: None,
         pack_level: None,
         renderer: None,
+        chase: false,
     };
     let mut it = args.into_iter();
     while let Some(arg) = it.next() {
@@ -204,6 +209,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
             "--no-cache" => o.no_cache = true,
             "--rebake" => o.rebake = true,
             "--no-adaptive" => o.adaptive = false,
+            "--chase" => o.chase = true,
             "--renderer" => o.renderer = Some(renderer(&value("--renderer")?)?),
             "--autoclose-ms" => {
                 o.autoclose_ms = Some(

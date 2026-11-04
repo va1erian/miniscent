@@ -6,6 +6,7 @@ use mscent_render::MoverPose;
 
 use crate::device::{Gpu, GpuError};
 use crate::faces::{Draw, buffer};
+use crate::shadows::ShadowMaps;
 
 /// A `Pose` of the shader: a matrix, the eye and the pan.
 pub(crate) const POSE_BYTES: usize = 96;
@@ -48,6 +49,7 @@ pub(crate) struct Shared<'a> {
     pub(crate) clamped: wgpu::Sampler,
     pub(crate) repeat: wgpu::Sampler,
     pub(crate) lights: &'a wgpu::Buffer,
+    pub(crate) shadows: &'a ShadowMaps,
 }
 
 impl Shared<'_> {
@@ -63,6 +65,13 @@ impl Shared<'_> {
             wgpu::BindingResource::Sampler(&self.repeat),
             self.lights.as_entire_binding(),
         ];
+        let shadows = self.shadows.bound.iter().flat_map(|(cube, sampler)| {
+            [
+                wgpu::BindingResource::TextureView(cube),
+                wgpu::BindingResource::Sampler(sampler),
+            ]
+        });
+        let resources = resources.into_iter().chain(shadows);
         let entries: Vec<wgpu::BindGroupEntry> = (0u32..)
             .zip(resources)
             .map(|(binding, resource)| wgpu::BindGroupEntry { binding, resource })

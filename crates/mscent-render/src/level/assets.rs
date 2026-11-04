@@ -223,6 +223,19 @@ impl LevelAssets {
         });
     }
 
+    /// Lists every part of `instances` for a shadow map, whatever `cam` sees and
+    /// including the instances that are only cast, with no dynamic light: what a
+    /// shadow needs of a model is its shape. `list` is from
+    /// [`ModelList::casters_unprojected`].
+    pub fn list_model_casters(
+        &self,
+        list: &mut ModelList,
+        models: Option<(&ModelTable, &[ModelInstance])>,
+        cam: &Camera,
+    ) {
+        self.list_models(list, models, cam, &[]);
+    }
+
     /// The camera a frame uses for this view and target size.
     pub fn camera(&self, view: &View, width: u32, height: u32) -> Option<Camera> {
         view.camera(self.cfg.fov_y, NEAR, FAR, width, height)

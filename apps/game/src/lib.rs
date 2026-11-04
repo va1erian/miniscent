@@ -27,6 +27,7 @@ pub mod lightcache;
 mod notices;
 pub mod scripts;
 pub mod session;
+mod ship;
 pub mod trace;
 
 pub use session::{FrameStats, GameSession, SessionConfig, SessionError, StepOutcome};

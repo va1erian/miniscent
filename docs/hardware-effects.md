@@ -1,9 +1,11 @@
 # Hardware renderer: projected shadows and parallax mapping
 
 Status: accepted plan. M16.1 (the switches) and M16.2 (parallax) are built, with what was
-measured in [status.md](status.md), M16; shadows (M16.3 to M16.4) and the View menu
-toggles (M16.5) are not. Work items are M16 in [work-items.md](work-items.md) once
-accepted. Builds on [hardware-renderer.md](hardware-renderer.md).
+measured in [status.md](status.md), M16. Shadows are built as a first slice (M16.3, and the
+casters of M16.4 that are enemy models, actors and movers): see "Shadows as built" below
+for what is there and what is left. The View menu toggles (M16.5) are not. Work items are
+M16 in [work-items.md](work-items.md) once accepted. Builds on
+[hardware-renderer.md](hardware-renderer.md).
 
 Where parallax as built differs from the plan below: a material's depth defaults to 0, so
 only a `materials.txt` line that gives one (brick 14, rock 16) draws relief; a map is lifted
@@ -120,6 +122,124 @@ sky, movers, voxels, faces, actors, particles ... as now
 2. Cutout texels (leaves, grilles) cast solid in v1.
 3. Shadows at High only.
 
+### Shadows as built (first slice)
+
+`crates/mscent-gpu/src/shadows.rs`, `shadow_lights.rs`, `mover_casters.rs`,
+`shaders/shadow.wgsl` and `shaders/shadow_sample.wgsl`, with `face.wgsl` calling the
+lookup. Tests are `tests/shadows.rs` and `tests/shadow_off.rs`; numbers are in
+[status.md](status.md), M16.3, and [perf/hardware.md](perf/hardware.md).
+
+What is built, as planned unless said:
+
+- **Maps.** `SHADOW_LIGHTS` (2, in Rust, given to the shader as an override) cube maps of 768
+  a side in one `R32Float` array, holding distance over the light's reach, with a shared
+  depth buffer, six passes a light before the scene pass. Made with the renderer (28 MB; 512
+  looked blocky where a light is close to the floor and a surface is large on screen, and
+  1024 cost no less to look at but 0.3 ms more). A device that cannot hold them draws the
+  frame without shadows, reports no error, and keeps the hardware renderer. It is decided
+  in `shadow_maps.rs`: `cube_arrays` (the adapter has cube array textures and the device at least
+  6 array layers) decides whether the faces are built with the lookup at all, and if not
+  `face_pipeline.rs` builds them with a stub (`shadow_none.wgsl`) and a layout without
+  bindings 9 and 10; `fits` (side 768, 12 layers, `R32Float` that can be drawn into and
+  read) decides whether the maps are made, inside an error scope, so that running out of
+  memory is a value too. Where they are not made the faces are bound to one cube of a texel
+  that the shader never reads, and no light is given a slot. The caster pipelines are
+  compiled with the first frame in which a light holds a map (not with the renderer), once
+  per device; if that fails, the error goes to `take_error` once and no light holds a map.
+  Tests: `tests/shadow_limits.rs`, for a 512-texel device, one with 8 layers and one with 4,
+  each drawing the frame with shadows on equal to the frame with them off.
+- **Which lights.** The brightest over their distance to the eye among the frame's lit
+  lights; a light keeps its map until another is 1.25 times stronger, so a tie does not swap
+  frame to frame (`shadow_lights.rs`, unit tests). A light that is dark, or whose position or
+  radius is not finite, is never a candidate.
+- **Casters.** Enemy models and the player's ship (their part's storage as the voxel
+  pipeline reads it, one matrix a part, parts culled by a sphere against the light's sphere;
+  listed for the maps apart from what the camera draws, so a model out of view, or one that
+  is only a caster, still casts: `ModelInstance::cast_only`, `ModelList::casters_unprojected`,
+  a second `ModelPass` that writes no frames or materials), actors (their triangle
+  list, all of it, in each light's passes) and movers (every face, not just those that face
+  the camera, at their poses, culled by a sphere). Both sides of a triangle cast.
+- **Receivers.** Lit brush faces in `face.wgsl`: each light's term in `dynamic_light()` is
+  multiplied by its visibility, and the baked term is not. A mover's own faces are not
+  looked up, as their dynamic light is already taken in their authored frame.
+- **Sampling.** `shadow_visibility`: the receiver moved off its plane along its normal; its
+  depth taken on its own plane at each tap, not at one point; a small slope-scaled bias left
+  over; eight blocker taps find the nearest occluder, the penumbra width comes from the light's
+  size (0.5 units) over that distance and clamps to 2 to 16 texels of radius; 24 taps of a
+  fixed Vogel disc. The taps are not turned per pixel: a turned pattern left grain that
+  measured ten times the stair-step of the fixed one (0.28 against 0.03 px).
+- **Off.** With shadows off, or no light with a map, the frame is the frame without them.
+  `tests/shadow_off.rs` proves it by comparing frames of one process with each other (shadows
+  on with no light, and with lights and no casters, against shadows off; and the shadows
+  switch against everything off). It holds no pixels taken on another machine: the hash of
+  a frame drawn before the shadows existed (b3c0e6d, 0x4d4c_1f56_c230_8935, on the
+  RTX 5070 Ti) is printed by the test for a person to compare, and is not asserted, as other
+  drivers round differently. So "byte for byte before" is a claim for that machine, not
+  one a test holds.
+
+What differs from the plan above, and what is left:
+
+1. **Static faces and voxel chunks are not casters yet** (decision 1, the costliest). A
+   pillar or a wall does not shadow a dynamic light, so a lamp behind a pillar still lights
+   what is behind it, as today, and a model's shadow does not reach a surface the model's
+   own light cannot. Adding them is a list in `shadows::Casters` and a draw in
+   `ShadowPass::draw_casters`: faces take the movers' pipeline with pose 0 and an index
+   list culled by `reaches_face`; chunks take the voxel vertex buffer. The follow-up also
+   owns the light-through-a-wall-corner test, which this slice can only run on two boxes that
+   touch (`light_does_not_pass_between_two_boxes_that_touch`).
+2. **Voxel faces and enemy models do not receive.** Their dynamic light is a vertex
+   property computed on the CPU (models, actors) or per chunk (voxels), so neither darkens in
+   a shadow. A model in another model's shadow is lit as before.
+3. ~~Models cast only when the camera lists them.~~ Fixed with the player's ship: models are
+   listed for the maps whatever the camera sees (test `a_model_the_camera_does_not_see_still_casts`).
+   They are not yet culled per light before listing, only per part when drawn, and actors are
+   not culled per light.
+4. **Actors cast the triangles that face the camera**, as `actor_triangles` drops the others,
+   so a shadow from the camera's own side of an actor is a little short at its edge.
+5. **Cutouts cast solid**, as decided. Models' voxel levels of detail follow the camera, not
+   the light.
+6. **A still map is redrawn every frame.** The cache is the first optimisation if the
+   measured cost (about 1.1 to 1.3 ms in a room with two lights and six enemies, 4K) needs
+   it; a cheaper receiver (fewer taps where the kernel is small) is the other.
+7. The View menu toggle is M16.5. The game has `--chase` for the ship (below).
+
+#### Known limits
+
+Found in review and tracked, with no code change yet:
+
+- **Which lights get a map ignores reach, and its hysteresis is keyed by index.** The
+  brightest two lights over their distance to the eye are chosen, whether or not their
+  reach touches anything that casts, so a strong light with no caster in range can hold a
+  slot a weaker one needed. A light keeps its slot by its index in the frame's light list,
+  so a list that reorders between frames (a light dying shifts the rest) swaps maps and
+  shows a frame of the wrong shadow.
+- **The shadow path allocates every frame.** Candidate lists, the caster bind groups and
+  the `Vec`s of the holders are made per frame; `tests/frame_alloc`-style checks do not
+  cover it. It is small beside the draw, but not zero, and the rule is none.
+- **The ship's hull may occlude a muzzle flash.** The ship is a caster for every light the
+  frame has, including a flash at the player's own muzzle, which lies inside or at its
+  hull; the flash light could then be shadowed by the ship it came from. Nobody has looked
+  at a real window with a shot in flight, so this is not known to happen.
+
+### The player's ship
+
+`assets/ship/player.msb` (766 bytes, 144 triangles, the stock skins plating, metal and
+glass): a hull, swept wings, a fin and an engine pod about a unit and a quarter long, authored
+in the player's own frame (nose -Z, up +Y) so that the player's orientation turns it as it is.
+`apps/game/src/ship.rs` makes the instance each frame from the interpolated position and the
+view's orientation, bank included; nothing reads it back, so collision, aim and replays do not
+see it. The ship's asset and `ship.rs` code are in a build with the `hardware` feature only
+(`Ship::build` is `None` without it). They are not all there is to the software build's size:
+the rooms code (M17.2) is in `mscent-world` and `mscent-render` and is in every build, and
+the software game binary measured 2,176,512 bytes against 2,161,152 on origin/main (15,360 more; budget 2,200,000), and the hardware one 6,046,208 against 5,879,808 (166,400 more; budget 6,200,000). Software never draws the ship: the session hands the
+software renderer a frame with no models (`software_input` in `session/frame.rs`), so a
+chase view on software shows the world from behind an empty place, and a session with a ship
+draws the software frames of one without (`apps/game/tests/ship.rs`, with and without
+`--chase`). In first person it is `cast_only`: never drawn, always a caster. `--chase`
+(`GameSession::set_chase`) puts the camera 3 behind and 0.8 above it, and the GPU draws the
+ship, to look at. Not done: shots and enemy fire do not yet make lights with
+a shadow-casting priority of their own; the ship shadows whichever lights the frame has.
+
 ## Parallax mapping
 
 ### Approach: parallax occlusion mapping in the face fragment shader
@@ -177,9 +297,11 @@ M16.2 and M16.3 are independent and can run side by side.
 As everywhere: real pixels. Neither effect has a software frame to compare with, so each
 is held to a truth.
 
-- **Off is a no-op.** A frame with both effects switched off equals the frame from before
-  this work, byte for byte. This is a regression check on the GPU's own output, not a
-  comparison with software.
+- **Off is a no-op.** A frame with shadows switched off equals the frame with them on and
+  nothing to shade, and the frame of a renderer with both effects off (`tests/shadow_off.rs`,
+  frames of one process against each other, so it holds on any adapter). This is a check on
+  the GPU's own output, not a comparison with software, and not against pixels from before
+  this work.
 - **Shadow, geometry.** A flat grey room, a point light and a box of known size. The pixel
   on the floor where the box's shadow falls by hand computation is under 10% of the lit
   value; a pixel beside it is lit; fails with the caster dropped from the map.

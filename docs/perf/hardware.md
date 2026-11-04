@@ -79,3 +79,49 @@ The adaptive resolution reads a frame's cost from its render call, which on the 
 includes showing it. When the GPU falls behind, the next window texture waits, at a frame
 latency of 1, so the cost rises and the world is drawn smaller. `apps/game/tests/slow_gpu.rs`
 shows that with a stand-in that takes 30 ms a frame. No slow GPU has run it.
+
+## Projected shadows
+
+`frame_cost` puts two dynamic lights beside the eye and six stock sentries round it, so
+that the shadows have lights and casters; `noshadows` after it switches only the shadows
+off, `plain` both effects. 3840x2160, High (Fine), median over 240 frames of the time until
+the GPU is done, in milliseconds, RTX 5070 Ti, the other 239 frames after the first:
+
+| Level | Shadows on | `noshadows` | `plain` | Cost of shadows |
+|---|---|---|---|---|
+| showcase | 1.85 (p95 2.13) | 0.76 (0.98) | 0.67 | 1.09 |
+| facility | 1.86 (p95 2.29) | 0.66 (0.97) | 0.67 | 1.20 |
+| voxel-cave | 0.81 (p95 1.08) | 0.45 (0.69) | | 0.36 |
+
+The budget in [hardware-effects.md](../hardware-effects.md) is 1.5 ms or less for two lights
+(it said 1024 a side; this is 768). It is met, with the lights near the eye and so over the
+most of the screen; the cost is nearly all in the receivers (a blocker search of 8 taps and
+a filter of 24 on each lit pixel that a light with a map reaches), not in the six passes or in
+the map's size (1024 measured 2.2 ms against 2.1 at 768, 512 about 1.9 at 32 taps). The
+models are listed twice with shadows on, once for the camera and once for the maps, which
+is most of the 0.1 to 0.3 ms that this has grown since the first slice. Medium, which has no
+shadows, is unchanged. Memory: the maps are 2 lights x 6 faces x 768 x 768 x 4 bytes, 28 MB,
+and a 2.4 MB depth.
+
+Cheaper receivers are the first thing to reach for if this has to come down: fewer taps
+where the kernel is under 3 texels, or a map that is kept while its light and casters do
+not move.
+
+### Seeded
+
+Each bug put in by hand, the tests run, then taken out again:
+
+| Bug | Caught by |
+|---|---|
+| Shadow ignores its switch (pick, and the shader's check) | `tests/shadow_off.rs` |
+| Filter taps cut to 1 and the kernel to 0 (no PCF) | `the_edge_is_soft_and_steady...`: penumbra 0.6 px against 8.8, limit 6 |
+| Cube faces +X and -X swapped | `an_actor_casts_a_shadow_and_so_does_a_mover` only |
+| Cube faces +Y and -Y swapped, or +Z and -Z | `a_shadow_falls_right_for_a_light_on_every_side_of_the_box` |
+| No casters drawn | 7 of the 8 tests in `tests/shadows.rs` |
+| The shadow multiplies the baked light too | `the_shadow_takes_only_the_dynamic_light_and_leaves_the_baked` |
+| **No bias at all** (normal offset, constant, slope, and the receiver's plane taken at a point) | **nothing**: every test passes |
+
+The last is not a bug the tests can see yet. No receiver in this slice is also a caster, so
+nothing is ever at the depth of what shades it, and bias has nothing to do. The follow-up
+that makes static faces casters needs its acne test, with this bug seeded, in the same
+change.

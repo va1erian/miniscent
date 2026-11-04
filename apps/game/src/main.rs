@@ -227,6 +227,7 @@ fn real_main() -> Result<(), String> {
             eprintln!("script warning: {warning}");
         }
     }
+    session.set_chase(o.chase);
     println!("level ready in {:.2}s", started.elapsed().as_secs_f32());
     if let Some(rep) = cache.last_report() {
         println!("{}", rep.describe());
