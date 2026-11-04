@@ -47,6 +47,7 @@ fn request_with(w: u32, h: u32, highlights: Marks) -> Request {
     Request {
         w,
         h,
+        pane: (w, h),
         play: false,
         view: View::from_angles(Vec3::new(3.0, 3.0, 2.5), -0.78, -0.2, 0.0),
         banner: None,

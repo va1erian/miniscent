@@ -98,6 +98,8 @@ struct Shared {
     lock_lost: Cell<bool>,
     /// The right button is held for a mouse look.
     looking: Cell<bool>,
+    /// Where input goes the moment it arrives, instead of waiting in `events`.
+    forward: RefCell<Option<crate::studio::worker::Input>>,
 }
 
 /// A pane that draws a frame and collects input.
@@ -279,7 +281,7 @@ fn handle<M: 'static>(
     look: &Cell<Option<(i32, i32)>>,
     event: &Event,
 ) {
-    let push = |e| shared.events.borrow_mut().push(e);
+    let push = |e| shared.push(e);
     match *event {
         Event::MouseDown {
             x,
@@ -490,6 +492,7 @@ impl<M: 'static> Placeable<M> for View3d<M> {
     }
 }
 
+mod play;
 #[cfg(test)]
 #[path = "view3d_tests.rs"]
 mod tests;

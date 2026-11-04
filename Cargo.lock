@@ -870,20 +870,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 
 [[package]]
-name = "embed-resource"
-version = "3.0.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6168487b5e7eb2673e6efe1200b1848016e436a6ca0b8031bf04bd9d493a249f"
-dependencies = [
- "cc",
- "memchr",
- "rustc_version",
- "toml",
- "vswhom",
- "winreg",
-]
-
-[[package]]
 name = "encoding_rs"
 version = "0.8.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1900,6 +1886,7 @@ dependencies = [
  "mscent-script",
  "mscent-texgen",
  "mscent-world",
+ "raw-window-handle",
  "xui",
  "xui-blitz",
  "xui-code-editor",
@@ -3966,26 +3953,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
 
 [[package]]
-name = "vswhom"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be979b7f07507105799e854203b470ff7c78a1639e330a58f183b5fea574608b"
-dependencies = [
- "libc",
- "vswhom-sys",
-]
-
-[[package]]
-name = "vswhom-sys"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb067e4cbd1ff067d1df46c9194b5de0e98efd2810bbc95c5d5e5f25a3231150"
-dependencies = [
- "cc",
- "libc",
-]
-
-[[package]]
 name = "walkdir"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4609,16 +4576,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "winreg"
-version = "0.56.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d6f32a0ff4a9f6f01231eb2059cc85479330739333e0e58cadf03b6af2cca10"
-dependencies = [
- "cfg-if",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4723,9 +4680,8 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 [[package]]
 name = "xui"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=876803f680803e629a40de07017f8fcd45fad903#876803f680803e629a40de07017f8fcd45fad903"
+source = "git+https://github.com/va1erian/xui?rev=07cdfa3c00e2528ac2410a02f3baeacf51857dc7#07cdfa3c00e2528ac2410a02f3baeacf51857dc7"
 dependencies = [
- "embed-resource",
  "xui-canvas",
  "xui-core",
 ]
@@ -4733,7 +4689,7 @@ dependencies = [
 [[package]]
 name = "xui-blitz"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=876803f680803e629a40de07017f8fcd45fad903#876803f680803e629a40de07017f8fcd45fad903"
+source = "git+https://github.com/va1erian/xui?rev=07cdfa3c00e2528ac2410a02f3baeacf51857dc7#07cdfa3c00e2528ac2410a02f3baeacf51857dc7"
 dependencies = [
  "anyrender",
  "anyrender_vello_cpu",
@@ -4756,7 +4712,7 @@ dependencies = [
 [[package]]
 name = "xui-canvas"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=876803f680803e629a40de07017f8fcd45fad903#876803f680803e629a40de07017f8fcd45fad903"
+source = "git+https://github.com/va1erian/xui?rev=07cdfa3c00e2528ac2410a02f3baeacf51857dc7#07cdfa3c00e2528ac2410a02f3baeacf51857dc7"
 dependencies = [
  "arboard",
  "cosmic-text",
@@ -4773,7 +4729,7 @@ dependencies = [
 [[package]]
 name = "xui-code-editor"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=876803f680803e629a40de07017f8fcd45fad903#876803f680803e629a40de07017f8fcd45fad903"
+source = "git+https://github.com/va1erian/xui?rev=07cdfa3c00e2528ac2410a02f3baeacf51857dc7#07cdfa3c00e2528ac2410a02f3baeacf51857dc7"
 dependencies = [
  "regex",
  "ropey",
@@ -4783,16 +4739,17 @@ dependencies = [
 [[package]]
 name = "xui-core"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=876803f680803e629a40de07017f8fcd45fad903#876803f680803e629a40de07017f8fcd45fad903"
+source = "git+https://github.com/va1erian/xui?rev=07cdfa3c00e2528ac2410a02f3baeacf51857dc7#07cdfa3c00e2528ac2410a02f3baeacf51857dc7"
 dependencies = [
  "png 0.17.16",
+ "raw-window-handle",
  "zune-jpeg",
 ]
 
 [[package]]
 name = "xui-gpu"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=876803f680803e629a40de07017f8fcd45fad903#876803f680803e629a40de07017f8fcd45fad903"
+source = "git+https://github.com/va1erian/xui?rev=07cdfa3c00e2528ac2410a02f3baeacf51857dc7#07cdfa3c00e2528ac2410a02f3baeacf51857dc7"
 dependencies = [
  "glow",
  "xui-core",

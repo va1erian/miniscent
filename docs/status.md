@@ -116,7 +116,9 @@ one. Reported by the user from a real Windows session, and what was done:
   per-user cache dir for built-in/unsaved levels), written atomically, with the reason logged when
   a file is ignored. Showcase release: cold bake 49 ms, warm load 8 ms (`tests/lightcache.rs`,
   `bake_cache.rs`). `miniscent --bake|--rebake|--no-cache`; see `docs/lightmaps.md`.
-- **Threaded Instant Play.** Play runs on a render thread (`studio/worker.rs`): input goes in over a
+- **Threaded Instant Play.** On the GPU, Play presents into the Play pane's own native window as the
+  game presents into its own, with input sent on as it arrives ([hardware-renderer.md](hardware-renderer.md),
+  "Instant Play in the editor"). Play runs on a render thread (`studio/worker.rs`): input goes in over a
   bounded `try_send` channel, frames come out through a one-slot mailbox read with `try_lock`, stale
   frames are dropped, and a slow scene lowers the adaptive resolution instead of stalling the UI. A
   panic in the scene is caught and reported. `studio/tests.rs`: 200 UI ticks run while the test holds
