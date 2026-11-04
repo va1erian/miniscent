@@ -260,7 +260,12 @@ impl ModelPass {
         // Low has neither bump nor highlight, as a glowing triangle has neither.
         for quality in [frame.quality, Quality::Low] {
             let looks = (quality, GpuEffects::at(quality));
-            let bytes = crate::frame_bytes(clip, (frame.fog, &[]), looks, ((0, 0), Slots::NONE));
+            let bytes = crate::frame_bytes(
+                clip,
+                (frame.fog, &[]),
+                looks,
+                ((0, 0), Slots::NONE, Default::default()),
+            );
             self.push_slot(&bytes, frame.stride);
         }
         let bytes = voxels::uniform_bytes_at(frame.cam, listed.eye);

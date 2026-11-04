@@ -145,6 +145,13 @@ impl LevelAssets {
         &self.cfg
     }
 
+    /// The lamps of the play space, as the lightmap was baked with them. A
+    /// renderer that shadows what moves takes its share of a lamp from the
+    /// baked light by the lamp's own falloff.
+    pub fn lamps(&self) -> &[PointLight] {
+        &self.play_lights
+    }
+
     /// The level's own enemies and goal, at their spawn points.
     pub fn actors(&self) -> &[Actor] {
         &self.actors

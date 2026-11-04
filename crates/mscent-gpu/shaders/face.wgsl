@@ -224,12 +224,55 @@ fn material(t: texture_2d<f32>, at: vec2f, grad: mat2x2f, level: f32) -> vec4f {
     return textureSampleLevel(t, smooth_repeat, at, level);
 }
 
+// Where a luxel is on its face, in the face's tangent frame.
+fn on_face(face: Face, luxel: vec2f) -> vec2f {
+    return vec2f(face.tangent.w + luxel.x * face.origin.w, face.bitangent.w + luxel.y * face.origin.w);
+}
+
+// Whether the line from a lamp to `p` comes near `bound` (a position and radius):
+// the kernel of the shadow lookup looks that far to the side, in the map's texels,
+// so the sphere is made that much wider. A line that does not has nothing in its
+// way, and is not looked up. A bound that is not a number never rules out.
+fn may_be_shaded(lamp: vec3f, p: vec3f, bound: vec4f) -> bool {
+    let along = p - lamp;
+    let t = clamp(dot(bound.xyz - lamp, along) / dot(along, along), 0.0, 1.0);
+    let nearest = lamp + along * t;
+    let spread = (SHADOW_MAX_KERNEL + SHADOW_NORMAL_OFFSET + 2.0) * (2.0 / SHADOW_SIDE) * length(nearest - lamp);
+    return !(length(bound.xyz - nearest) > bound.w + spread);
+}
+
+// What the movers' shadows take from the baked light at a luxel: for each static
+// lamp that has a map, the light the baker put here from it (colour, falloff to a
+// power of the distance, and the cosine of incidence, as soft.rs has it) over the
+// share of the lamp that the map blocks. The map holds movers only, so the bake's
+// own shadows are not in it, and the caller never takes more than the bake holds.
+fn lamp_shadowed(face: Face, luxel: vec2f) -> vec3f {
+    let at = on_face(face, luxel);
+    var lost = vec3f(0.0);
+    for (var j = 0u; j < LAMP_SHADOWS; j++) {
+        let l = frame.lamps[j];
+        let rel = l.xyz - face.origin.xyz;
+        let to = vec3f(dot(rel, face.tangent.xyz) - at.x, dot(rel, face.bitangent.xyz) - at.y, dot(rel, face.normal.xyz));
+        let dist = length(to);
+        if dist < l.w && dist > MIN_LENGTH && to.z > 0.0 {
+            let world = face.origin.xyz + face.tangent.xyz * at.x + face.bitangent.xyz * at.y;
+            if !may_be_shaded(l.xyz, world, frame.lamp_bounds[j]) {
+                continue;
+            }
+            let blocked = 1.0 - shadow_visibility(SHADOW_LIGHTS + j, l, world, face.normal.xyz);
+            let share = pow(1.0 - dist / l.w, LAMP_FALLOFF_POWER) * (to.z / dist) * blocked;
+            lost += frame.lamp_colors[j].rgb * 256.0 * share;
+        }
+    }
+    return lost;
+}
+
 // FacePoints::at in face_points.rs, in the face's tangent frame, at the pixel
 // rather than stepped along a span. A light that has a shadow map is multiplied by
 // how much of it reaches the point; the baked light is not, as the bake has its own
 // shadows. A mover's faces are not looked up: they are authored elsewhere.
 fn dynamic_light(face: Face, mask: u32, luxel: vec2f, corner: Corner) -> vec3f {
-    let at = vec2f(face.tangent.w + luxel.x * face.origin.w, face.bitangent.w + luxel.y * face.origin.w);
+    let at = on_face(face, luxel);
     var sum = vec3f(0.0);
     var left = mask;
     while left != 0u {
@@ -243,7 +286,7 @@ fn dynamic_light(face: Face, mask: u32, luxel: vec2f, corner: Corner) -> vec3f {
             let fall = 1.0 - dist / l.w;
             var seen = 1.0;
             let slot = frame.shadow_slots[i];
-            if frame.shadows_on != 0u && corner.pose == 0u && slot < SHADOW_LIGHTS {
+            if frame.shadows_on != 0u && corner.pose == 0u && slot < SHADOW_MAPS {
                 let world = face.origin.xyz + face.tangent.xyz * at.x + face.bitangent.xyz * at.y;
                 seen = shadow_visibility(slot, l, world, face.normal.xyz);
             }
@@ -257,6 +300,9 @@ fn lit(face: Face, corner: Corner, texel: vec3f, rate: f32, grad: mat2x2f, shift
     let u_v = vec3f(corner.texels, 1.0);
     let luxel = vec2f(dot(face.to_luxel_x.xyz, u_v), dot(face.to_luxel_y.xyz, u_v));
     var k = light_color(face, luxel, rate) * 256.0;
+    if frame.shadows_on != 0u && corner.pose == 0u {
+        k = max(k - lamp_shadowed(face, luxel), vec3f(0.0));
+    }
     let mask = set_lights[face.flags >> SET_SHIFT];
     if mask != 0u {
         k += dynamic_light(face, mask, luxel, corner);

@@ -107,6 +107,20 @@ Cheaper receivers are the first thing to reach for if this has to come down: few
 where the kernel is under 3 texels, or a map that is kept while its light and casters do
 not move.
 
+### Static lamps' shadows
+
+Same scene and method as above, with the levels' own lamps now taking two more maps when
+something that moves is in their reach, so the stress scene has four maps in use. The cost of
+shadows in all (median until done, 3840x2160, High Fine, shadows on minus `noshadows`, 240
+frames): showcase 2.42 - 0.73 = 1.69 ms (was 1.09), facility 2.75 - 0.63 = 2.12 (was 1.20),
+voxel-cave 0.96 - 0.42 = 0.54 (was 0.36). That is over the 1.5 ms that two lights were held
+to, in a scene made to be a worst case: six enemies and two dynamic lights round the eye, so
+that the lamps' bound is the size of the room and the early-out saves nothing, and the models
+are listed for the maps every frame (CPU side 0.49 against 0.16 ms). One lamp, a sentry and the
+ship (`lamp_shot ... 3840 2160 time`): 0.65 ms without shadows, 1.13 with, so +0.48. The maps
+are 4 x 6 x 768 x 768 x 4 bytes, 56 MB. The first thing to reach for is the one named above: a
+map kept while its light and casters do not move, which a lamp's maps mostly would not.
+
 ### Seeded
 
 Each bug put in by hand, the tests run, then taken out again:

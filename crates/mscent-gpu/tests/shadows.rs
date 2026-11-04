@@ -228,7 +228,7 @@ fn light_does_not_pass_between_two_boxes_that_touch() {
 }
 
 #[test]
-fn the_shadow_takes_only_the_dynamic_light_and_leaves_the_baked() {
+fn the_shadow_takes_the_dynamic_light_and_leaves_the_baked_where_it_is_not_shaded() {
     with_gpu!();
     let spec = Room {
         baked_lamp: Some((v(5.0, 5.0, 6.0), 0.4)),
@@ -247,8 +247,8 @@ fn the_shadow_takes_only_the_dynamic_light_and_leaves_the_baked() {
     let on = shot.frame(&view(), ON, &with_light);
     let baked = shot.frame(&view(), ON, &baked_only);
     let off = shot.frame(&view(), OFF, &with_light);
-    keep("baked_on.png", &on);
-    for (x, y) in [(-1.5, -1.5), (1.5, -1.5), (0.0, -1.7)] {
+    // Off the far side of the box from the baked lamp, which it shades too.
+    for (x, y) in [(1.5, -1.5), (0.0, -1.7)] {
         let (a, b, c) = (
             floor_level(&shot, &on, x, y),
             floor_level(&shot, &baked, x, y),
