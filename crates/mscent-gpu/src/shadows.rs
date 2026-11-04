@@ -1,6 +1,8 @@
-//! Projected shadows from the frame's dynamic lights (`docs/hardware-effects.md`).
+//! Projected shadows from the frame's dynamic lights and the level's lamps
+//! (`docs/hardware-effects.md`).
 //!
-//! The strongest `SHADOW_LIGHTS` lights each get a cube map, drawn before the scene
+//! The strongest `SHADOW_LIGHTS` lights, and `LAMP_SHADOWS` static lamps
+//! (`lamp_shadows.rs`), each get a cube map, drawn before the scene
 //! from what stands in their way, as six passes. A face of it holds the distance
 //! from the light over its reach, so the faces' shader looks a point up by its
 //! direction alone (`shadow_sample.wgsl`). This pass is in this frame only at High
@@ -10,12 +12,16 @@
 //! voxel chunks join by adding a list to [`Casters`] and a draw to
 //! [`ShadowPass::draw_casters`]; nothing else here changes.
 
-use std::ops::Range;
 use std::sync::Arc;
 
 use mscent_math::Vec3;
+use mscent_world::lightmap::PointLight;
 
 use crate::device::{Gpu, GpuError};
+use crate::lamp_shadows::{FALLOFF_POWER, LAMP_SHADOWS, LampPick, Lamps, frame_lamps};
+pub(crate) use crate::shadow_casters::{
+    Casters, ModelCasters, MoverCasters, MoverDraw, PartSphere, meet,
+};
 use crate::shadow_lights::{Candidate, FACES, Pick, SHADOW_LIGHTS, Slots, cube_bytes};
 use crate::targets::DEPTH;
 
@@ -27,7 +33,9 @@ pub(crate) const SIDE: u32 = 768;
 /// Beyond the map, which is lit.
 const NOTHING: f64 = 2.0;
 pub(crate) const MAP: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
-pub(crate) const LAYERS: u32 = 6 * SHADOW_LIGHTS as u32;
+/// Maps in a frame: the dynamic lights', then the lamps'.
+pub(crate) const MAPS: usize = SHADOW_LIGHTS + LAMP_SHADOWS;
+pub(crate) const LAYERS: u32 = 6 * MAPS as u32;
 /// The nearest a caster is drawn to the light, in world units.
 const NEAR: f32 = 0.05;
 /// Bytes of a `Cube` in `shadow.wgsl`.
@@ -50,9 +58,12 @@ const BLOCKER_TAPS: u32 = 8;
 const TAPS: u32 = 24;
 
 /// The sampling's overrides, for the faces' shader.
-pub(crate) fn sample_constants() -> [(&'static str, f64); 10] {
+pub(crate) fn sample_constants() -> [(&'static str, f64); 13] {
     [
         ("SHADOW_LIGHTS", SHADOW_LIGHTS as f64),
+        ("SHADOW_MAPS", MAPS as f64),
+        ("LAMP_SHADOWS", LAMP_SHADOWS as f64),
+        ("LAMP_FALLOFF_POWER", FALLOFF_POWER),
         ("SHADOW_SIDE", f64::from(SIDE)),
         ("SHADOW_NORMAL_OFFSET", f64::from(NORMAL_OFFSET)),
         ("SHADOW_BIAS", f64::from(BIAS)),
@@ -63,48 +74,6 @@ pub(crate) fn sample_constants() -> [(&'static str, f64); 10] {
         ("SHADOW_BLOCKER_TAPS", f64::from(BLOCKER_TAPS)),
         ("SHADOW_TAPS", f64::from(TAPS)),
     ]
-}
-
-/// What a model part contributes: where its triangles are in the corner list, and
-/// a sphere in the world that holds it.
-pub(crate) struct PartSphere {
-    pub(crate) corners: Range<u32>,
-    pub(crate) centre: Vec3,
-    pub(crate) radius: f32,
-}
-
-/// Enemy models' parts: storage the voxel pipeline reads, and a matrix a part.
-pub(crate) struct ModelCasters<'a> {
-    pub(crate) vertices: &'a wgpu::Buffer,
-    pub(crate) corners: &'a wgpu::Buffer,
-    pub(crate) worlds: &'a wgpu::Buffer,
-    pub(crate) parts: &'a [PartSphere],
-}
-
-/// One mover's triangles, in the level's index list for movers, and a sphere in
-/// the world that holds them where the mover now is.
-pub(crate) struct MoverDraw {
-    pub(crate) pose: u32,
-    pub(crate) indices: Range<u32>,
-    pub(crate) centre: Vec3,
-    pub(crate) radius: f32,
-}
-
-/// Movers: the faces' vertices, as authored, and their poses.
-pub(crate) struct MoverCasters<'a> {
-    pub(crate) vertices: &'a wgpu::Buffer,
-    pub(crate) indices: &'a wgpu::Buffer,
-    pub(crate) poses: &'a wgpu::Buffer,
-    pub(crate) draws: &'a [MoverDraw],
-}
-
-/// Everything a frame has that casts a shadow.
-#[derive(Default)]
-pub(crate) struct Casters<'a> {
-    /// Actors' vertices, and how many.
-    pub(crate) actors: Option<(&'a wgpu::Buffer, u32)>,
-    pub(crate) models: Option<ModelCasters<'a>>,
-    pub(crate) movers: Option<MoverCasters<'a>>,
 }
 
 /// The caster pipelines, compiled once for a device.
@@ -285,12 +254,31 @@ pub(crate) struct ShadowPass {
     /// Made when a light first casts. A failure is kept, and the renderer draws
     /// on without shadows, as it does where the maps do not fit.
     drawing: Option<Result<Drawing, ()>>,
-    pick: Pick,
+    pick: Pick<SHADOW_LIGHTS>,
+    lamp_pick: LampPick,
 }
 
-/// Whether two spheres touch.
-fn meet(a: (Vec3, f32), b: (Vec3, f32)) -> bool {
-    (a.0 - b.0).length() <= a.1 + b.1
+/// Which lights hold maps in a frame.
+pub(crate) struct Picked {
+    /// The map of each dynamic light.
+    pub(crate) slots: Slots,
+    /// The lamps that hold maps, as `Frame` has them.
+    pub(crate) lamps: Lamps,
+    /// By map, who holds it and where: the dynamic lights first, then the lamps.
+    pub(crate) holders: [Option<(usize, Candidate)>; MAPS],
+}
+
+impl Picked {
+    /// No map is held.
+    pub(crate) const NONE: Self = Self {
+        slots: Slots::NONE,
+        lamps: Lamps([None; LAMP_SHADOWS]),
+        holders: [None; MAPS],
+    };
+
+    pub(crate) fn any(&self) -> bool {
+        self.holders.iter().any(Option::is_some)
+    }
 }
 
 impl ShadowPass {
@@ -299,32 +287,48 @@ impl ShadowPass {
             maps: ShadowMaps::new(gpu),
             drawing: None,
             pick: Pick::default(),
+            lamp_pick: LampPick::default(),
         }
     }
 
-    /// Which lights hold maps this frame, as the `Frame` wants them, and who they
-    /// are. `eye` is the camera's. Compiles the caster pipelines the first time a
-    /// light holds one; if that fails, no light does, and the error is reported.
+    /// Whether this device holds maps at all.
+    pub(crate) fn ready(&self) -> bool {
+        self.maps.ready()
+    }
+
+    /// Which lights and lamps hold maps this frame, as the `Frame` wants them.
+    /// `eye` is the camera's, and `casters` what a lamp must reach to cast.
+    /// Compiles the caster pipelines the first time a map is held; if that fails,
+    /// none is, and the error is reported.
     pub(crate) fn pick(
         &mut self,
         gpu: &Gpu,
-        lights: &[mscent_render::DynLight],
+        (lights, lamps): (&[mscent_render::DynLight], &[PointLight]),
         eye: Vec3,
-    ) -> (Slots, [Option<(usize, Candidate)>; SHADOW_LIGHTS]) {
-        let none = (Slots::NONE, Default::default());
+        casters: &Casters,
+    ) -> Picked {
         if !self.maps.ready() {
-            return none;
+            return Picked::NONE;
         }
-        let (slots, holders) = self.pick.pick(lights, eye);
-        if !holders.iter().any(Option::is_some) {
-            return (slots, holders);
+        let (slots, lit) = self.pick.pick(lights, eye);
+        let held = self.lamp_pick.pick(lamps, eye, |p, r| casters.reach(p, r));
+        let mut holders = [None; MAPS];
+        holders[..SHADOW_LIGHTS].copy_from_slice(&lit);
+        holders[SHADOW_LIGHTS..].copy_from_slice(&held);
+        let picked = Picked {
+            slots,
+            lamps: frame_lamps(lamps, &held, |p, r| casters.bound(p, r)),
+            holders,
+        };
+        if !picked.any() {
+            return picked;
         }
         let drawing = self.drawing.get_or_insert_with(|| {
             Drawing::new(gpu).map_err(|why| gpu.report(format!("shadows are off: {why}")))
         });
         match drawing {
-            Ok(_) => (slots, holders),
-            Err(()) => none,
+            Ok(_) => picked,
+            Err(()) => Picked::NONE,
         }
     }
 
@@ -333,7 +337,7 @@ impl ShadowPass {
         &self,
         gpu: &Gpu,
         encoder: &mut wgpu::CommandEncoder,
-        holders: &[Option<(usize, Candidate)>; SHADOW_LIGHTS],
+        holders: &[Option<(usize, Candidate)>; MAPS],
         casters: &Casters,
     ) {
         let (Some(Ok(drawing)), Some(drawable)) = (&self.drawing, &self.maps.drawable) else {

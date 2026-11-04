@@ -132,15 +132,15 @@ lookup. Tests are `tests/shadows.rs` and `tests/shadow_off.rs`; numbers are in
 What is built, as planned unless said:
 
 - **Maps.** `SHADOW_LIGHTS` (2, in Rust, given to the shader as an override) cube maps of 768
-  a side in one `R32Float` array, holding distance over the light's reach, with a shared
-  depth buffer, six passes a light before the scene pass. Made with the renderer (28 MB; 512
+  a side (and two for static lamps, below) in one `R32Float` array, holding distance over the light's reach, with a shared
+  depth buffer, six passes a light before the scene pass. Made with the renderer (56 MB for four maps, 28 for the two it first had; 512
   looked blocky where a light is close to the floor and a surface is large on screen, and
   1024 cost no less to look at but 0.3 ms more). A device that cannot hold them draws the
   frame without shadows, reports no error, and keeps the hardware renderer. It is decided
   in `shadow_maps.rs`: `cube_arrays` (the adapter has cube array textures and the device at least
   6 array layers) decides whether the faces are built with the lookup at all, and if not
   `face_pipeline.rs` builds them with a stub (`shadow_none.wgsl`) and a layout without
-  bindings 9 and 10; `fits` (side 768, 12 layers, `R32Float` that can be drawn into and
+  bindings 9 and 10; `fits` (side 768, 24 layers, `R32Float` that can be drawn into and
   read) decides whether the maps are made, inside an error scope, so that running out of
   memory is a value too. Where they are not made the faces are bound to one cube of a texel
   that the shader never reads, and no light is given a slot. The caster pipelines are
@@ -202,6 +202,7 @@ What differs from the plan above, and what is left:
    measured cost (about 1.1 to 1.3 ms in a room with two lights and six enemies, 4K) needs
    it; a cheaper receiver (fewer taps where the kernel is small) is the other.
 7. The View menu toggle is M16.5. The game has `--chase` for the ship (below).
+   Static lamps' shadows are in their own section.
 
 #### Known limits
 
@@ -220,6 +221,63 @@ Found in review and tracked, with no code change yet:
   frame has, including a flash at the player's own muzzle, which lies inside or at its
   hull; the flash light could then be shadowed by the ship it came from. Nobody has looked
   at a real window with a shot in flight, so this is not known to happen.
+
+### Shadows from static lamps
+
+The level's lamps (`LevelAssets::lamps`, the play space's) are baked into the lightmap with
+the level standing still, so nothing that moves ever shadowed them: a ship under a lamp threw
+no shadow from it, whatever the dynamic lights did. Shadows from them are built in
+`lamp_shadows.rs`, `shadow_frame.rs`, `shadow_casters.rs`, and `lamp_shadowed` and
+`may_be_shaded` in `face.wgsl`:
+
+- **Maps.** `LAMP_SHADOWS` (2) more cube maps, after the dynamic lights' two, so a shot's flash
+  does not take a lamp's shadow away. Four maps in all (`MAPS`), 24 layers.
+- **Which lamps.** The brightest over their distance to the eye *among the lamps that reach
+  something that casts* (a sphere of the lamp's radius against the spheres of model parts,
+  movers and the actors), with the dynamic lights' hysteresis (`Pick<N>`, shared). A lamp in
+  another room of the level with nothing near it takes no map. Casters are listed for the
+  frame whenever shadows are on and the level has lamps (the models already were, with a
+  light), which is most of the 0.3 ms of CPU the stress scene below gained.
+- **Receivers.** The baked light cannot be multiplied by a visibility as a dynamic light's term
+  is, as the lightmap holds all the lamps and the bounce added up. So a face takes from it
+  what the lamp put there: `colour * (1 - d / r)^p * cos`, the baker's own formula
+  (`soft.rs`; `p` is `LAMP_FALLOFF_POWER`, 3, given by Rust), times the share the map blocks
+  from 0 to 1, and never more than the bake holds (`max(k - lost, 0)`). The map holds movers
+  only, so a face the bake already left dark (behind a wall) takes nothing, and a lit face that
+  a mover shades from the lamp's side is darkened by the lamp's share, leaving the other
+  lamps, the ambient and the bounce. Mover faces are not looked up, as for dynamic lights.
+  Where the map says nothing is in the way, nothing is taken, so such a frame is the frame
+  without shadows.
+- **Early out.** A sphere that holds everything that casts into a lamp's map goes in `Frame`
+  (`lamp_bounds`); a face whose line to the lamp misses it, by the kernel's reach, skips the
+  eight and twenty-four taps. The `lamp_shot` picture with and without it is byte for byte the
+  same (compared once by hand, not by a test), and in the stress scene it saves nothing, as six
+  enemies all round the eye make the sphere the size of the room.
+- **Off.** With shadows off, or no lamp holding a map, no lamp is given a radius and the frame
+  is the frame without them (`tests/shadow_lamps.rs`, and the shadows switch).
+- **Tests.** `tests/shadow_lamps.rs`, 8, real pixels: a box under a baked lamp has the
+  floor's shadow by hand (three probes inside it read under half of the lit floor, whose
+  ambient is left, and three beside it within 3%); a pillar between the lamp and the box
+  leaves no pixel lighter than shadows off draws it, and some darker; a ship, an actor and a
+  moved mover all darken the floor; a dynamic light and a baked lamp over the same box each
+  lose their share (under a quarter of the lit floor is left); GPUs with 12 layers (the old
+  budget) and with 4 draw the frame with shadows on equal to the frame with them off, and
+  report no error; and the control, the real GPU differs; with nothing that moves the frame
+  is the frame without shadows. `lamp_shadows.rs` unit tests: the strongest lamps that reach
+  a caster win, a lamp with nothing to reach does not compete, a near tie does not swap over
+  20 frames, lamps that are NaN, infinite, zero-radius or colourless cast nothing, and what
+  `Frame` is given for a lamp and its bound. `shadow_casters.rs`: the merged bound holds both
+  spheres.
+- **Pictures.** `cargo run --release -p mscent-gpu --example lamp_shot -- <dir> [w h] [time]`:
+  `lamp_before.png` and `lamp_after.png`, a sentry and the ship under one lamp, no dynamic
+  light.
+- **Cost.** In [perf/hardware.md](perf/hardware.md): +0.5 ms at 4K for one lamp and two
+  casters; 1.7 to 2.1 ms for the shadows in all in the stress scene with all four maps in
+  use, over the 1.5 ms that two lights were held to.
+- **Not done.** Models and actors as receivers: they are lit by `MeshLighting` with no
+  shadows, so a model in a lamp's shadow is lit as before. Voxels do not receive. Static
+  brushes do not cast. A lamp that only a layer's own room bakes (`all` and not `play` lamps)
+  is not a candidate. Actors are bounded as one sphere, so one far actor widens it.
 
 ### The player's ship
 

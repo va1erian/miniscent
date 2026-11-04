@@ -9,7 +9,13 @@
 // own plane at each tap and not at one point, and a small slope-scaled term is
 // left over for the plane being sampled at a texel's resolution.
 
+// Maps in all, the first SHADOW_LIGHTS of them the dynamic lights', then those of
+// LAMP_SHADOWS static lamps, whose baked light falls off with a power of the
+// distance (the baker's).
+override SHADOW_MAPS: u32;
 override SHADOW_LIGHTS: u32;
+override LAMP_SHADOWS: u32;
+override LAMP_FALLOFF_POWER: f32;
 override SHADOW_SIDE: f32;
 override SHADOW_NORMAL_OFFSET: f32;
 override SHADOW_BIAS: f32;

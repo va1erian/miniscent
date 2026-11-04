@@ -18,6 +18,7 @@ mod face_views;
 mod faces;
 mod finish;
 mod holes;
+mod lamp_shadows;
 mod lightmap;
 mod models;
 mod mover_casters;
@@ -25,6 +26,8 @@ mod particle_data;
 mod particles;
 mod present;
 mod resolve;
+mod shadow_casters;
+mod shadow_frame;
 mod shadow_lights;
 mod shadow_maps;
 mod shadows;
@@ -42,25 +45,28 @@ pub use finish::Finish;
 pub use present::{Overlay, Presenter};
 
 use mscent_math::Mat4;
-use mscent_render::scene::{SceneStats, eye_of};
+use mscent_render::scene::SceneStats;
 use mscent_render::{
     Camera, DynLight, Fog, FrameInput, Framebuffer, LevelAssets, Quality, VistaView,
 };
 
 use actors::ActorPass;
 use faces::FacePass;
+use lamp_shadows::Lamps;
 use models::ModelPass;
 use particles::ParticlePass;
 use resolve::DepthResolve;
+use shadow_frame::casters_of;
 use shadow_lights::Slots;
-use shadows::{Casters, ShadowPass};
+use shadows::ShadowPass;
 use sky::SkyPass;
 use targets::Targets;
 use vistas::VistaPass;
 use voxels::VoxelPass;
 
-/// The `Frame` of `common.wgsl`: its scalars, padded to the 16 its lights need.
-pub(crate) const FRAME_BYTES: u64 = 112 + dyn_lights::BYTES + 16;
+/// The `Frame` of `common.wgsl`: its scalars, padded to the 16 its lights need,
+/// the lights, their maps, and the lamps that cast.
+pub(crate) const FRAME_BYTES: u64 = 112 + dyn_lights::BYTES + 16 + lamp_shadows::BYTES;
 
 /// A level on a GPU. It keeps what it uploaded and borrows the level to draw it,
 /// so the level can stay with its owner and with the software renderer.
@@ -92,7 +98,7 @@ pub(crate) fn frame_bytes(
     clip: Mat4,
     (fog, lights): (Option<Fog>, &[DynLight]),
     (quality, effects): (Quality, GpuEffects),
-    (atlas, slots): ((u32, u32), Slots),
+    (atlas, slots, lamps): ((u32, u32), Slots, Lamps),
 ) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(FRAME_BYTES as usize);
     for c in &clip.cols {
@@ -114,6 +120,7 @@ pub(crate) fn frame_bytes(
     bytes.resize(112, 0);
     dyn_lights::push(&mut bytes, lights);
     slots.push(&mut bytes);
+    lamps.push(&mut bytes);
     bytes
 }
 
@@ -267,22 +274,11 @@ impl GpuRenderer {
                 .checked(|| Targets::new(&self.gpu, size, finish, resolve));
             self.targets = self.reported(targets);
         }
-        let targets = self.targets.as_ref()?;
+        self.targets.as_ref()?;
         let (quality, atlas) = (frame.quality, self.faces.atlas_size);
         let effects = self.effects_at(quality);
         let looks = (quality, effects);
         let clip = cam.gpu_clip_matrix();
-        let (slots, holders) = match effects.shadows {
-            true => self
-                .shadows
-                .pick(&self.gpu, frame.effects.lights, eye_of(&cam)),
-            false => (Slots::NONE, Default::default()),
-        };
-        let lit = (assets.fog(), frame.effects.lights);
-        let uniform = frame_bytes(clip, lit, looks, (atlas, slots));
-        self.gpu
-            .queue
-            .write_buffer(&self.frame_uniform, 0, &uniform);
         self.sky.prepare(&self.gpu, height);
         let (poses, lights) = (frame.effects.poses, frame.effects.lights);
         let layers = match self.vistas.as_mut() {
@@ -296,7 +292,12 @@ impl GpuRenderer {
         // A layer's sealed room has its own fog, and no dynamic light reaches it.
         let layer_frame = |v: &VistaView| {
             let clip = v.cam.gpu_clip_matrix();
-            frame_bytes(clip, (v.fog, &[]), looks, (atlas, Slots::NONE))
+            frame_bytes(
+                clip,
+                (v.fog, &[]),
+                looks,
+                (atlas, Slots::NONE, Lamps::default()),
+            )
         };
         let visible = (&cam, &stats.drawn[..]);
         let moved = (poses, lights);
@@ -320,27 +321,22 @@ impl GpuRenderer {
             let layered = vistas.prepare_voxels(&self.gpu, assets, &self.voxels, &self.faces);
             stats.vista_triangles = self.reported(layered)?;
         }
-        if holders.iter().any(Option::is_some) {
-            let seen = (frame.effects.models, lights);
-            let listed = self.gpu.checked(|| {
-                let mut unused = SceneStats::default();
-                (self.casters).prepare(&self.gpu, assets, (&cam, quality), seen, &mut unused)
-            });
-            self.reported(listed)?;
-        }
+        let picked = self.pick_shadows(assets, &cam, frame, looks)?;
+        let targets = self.targets.as_ref()?;
+        let lit = (assets.fog(), frame.effects.lights);
+        let uniform = frame_bytes(clip, lit, looks, (atlas, picked.slots, picked.lamps));
+        self.gpu
+            .queue
+            .write_buffer(&self.frame_uniform, 0, &uniform);
         let particles = self
             .particles
             .prepare(&self.gpu, &cam, frame.effects.particles);
         let particles = self.reported(particles)?;
         let mut encoder = self.gpu.device.create_command_encoder(&Default::default());
-        if holders.iter().any(Option::is_some) {
-            let casters = Casters {
-                actors: self.actors.casters(),
-                models: self.casters.casters(),
-                movers: self.faces.casters(),
-            };
+        if picked.any() {
+            let casters = casters_of(&self.actors, &self.casters, &self.faces);
             self.shadows
-                .encode(&self.gpu, &mut encoder, &holders, &casters);
+                .encode(&self.gpu, &mut encoder, &picked.holders, &casters);
         }
         if let Some(vistas) = &self.vistas {
             vistas.encode(&mut encoder, (&self.sky, &self.voxels, &self.faces));

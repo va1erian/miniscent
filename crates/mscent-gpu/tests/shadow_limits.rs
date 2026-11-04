@@ -1,7 +1,7 @@
 //! A GPU too small for the shadow maps still draws everything but the shadows: the
 //! frame with shadows on is the frame with them off, nothing is reported, and the
 //! renderer lives. Each GPU here is the real one with a limit turned down: maps
-//! 768 a side, 12 layers (a cube a face of 2 lights), and a layout that holds
+//! 768 a side, 24 layers (a cube a face of 2 lights and 2 lamps), and a layout that holds
 //! them as a cube array, which wants 6 layers.
 //!
 //! A machine with no GPU skips this, unless `MSCENT_REQUIRE_GPU` is set.

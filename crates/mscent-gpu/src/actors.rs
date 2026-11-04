@@ -1,6 +1,7 @@
 //! Actors: their triangles lit on the CPU each frame, as the software path does,
 //! so a frame's lighting has one source.
 
+use mscent_math::Vec3;
 use mscent_render::Camera;
 use mscent_render::mesh::MAX_LIGHT;
 use mscent_render::scene::eye_of;
@@ -129,6 +130,25 @@ impl ActorPass {
                 listed.extend_from_slice(&light.to_le_bytes());
             }
         });
+    }
+
+    /// A sphere round the listed triangles: the middle of their box, and its half
+    /// diagonal. `None` for none.
+    pub(crate) fn bound(&self) -> Option<(Vec3, f32)> {
+        let corners = self
+            .listed
+            .as_chunks::<{ VERTEX_BYTES as usize }>()
+            .0
+            .iter()
+            .map(|v| {
+                let axis = |i: usize| f32::from_le_bytes([v[i], v[i + 1], v[i + 2], v[i + 3]]);
+                Vec3::new(axis(0), axis(4), axis(8))
+            });
+        let (lo, hi) = corners.fold(None, |found: Option<(Vec3, Vec3)>, p| {
+            let (lo, hi) = found.unwrap_or((p, p));
+            Some((lo.min(p), hi.max(p)))
+        })?;
+        Some(((lo + hi) * 0.5, (hi - lo).length() * 0.5))
     }
 
     /// The vertex buffer and its count, for the shadow maps to draw from.

@@ -3,7 +3,8 @@
 //! A frame has up to `MAX_DYN_LIGHTS` lights and room for `SHADOW_LIGHTS` maps,
 //! so the lights that matter most get them: the brightest over their distance to
 //! the eye. Two lights near a tie would swap their shadows frame to frame, which
-//! is a flicker, so a light keeps its map until another is clearly stronger.
+//! is a flicker, so a light keeps its map until another is clearly stronger. The
+//! level's static lamps choose among their own maps the same way (`lamp_shadows.rs`).
 
 use mscent_math::Vec3;
 use mscent_render::{DynLight, MAX_DYN_LIGHTS};
@@ -64,19 +65,21 @@ impl Candidate {
     }
 }
 
-/// Who holds each map, kept from frame to frame.
-#[derive(Default)]
-pub(crate) struct Pick {
-    held: [Option<usize>; SHADOW_LIGHTS],
+/// Who holds each of `N` maps, kept from frame to frame.
+pub(crate) struct Pick<const N: usize> {
+    held: [Option<usize>; N],
 }
 
-impl Pick {
+impl<const N: usize> Default for Pick<N> {
+    fn default() -> Self {
+        Self { held: [None; N] }
+    }
+}
+
+impl<const N: usize> Pick<N> {
     /// Gives the maps to the strongest of `candidates`, by light index, and
     /// returns which light holds each.
-    pub(crate) fn choose(
-        &mut self,
-        candidates: &[Option<Candidate>],
-    ) -> [Option<usize>; SHADOW_LIGHTS] {
+    pub(crate) fn choose(&mut self, candidates: &[Option<Candidate>]) -> [Option<usize>; N] {
         let strength = |i: usize| candidates.get(i).copied().flatten().map(|c| c.brightness);
         for holder in &mut self.held {
             *holder = holder.filter(|&i| strength(i).is_some());
@@ -88,7 +91,7 @@ impl Pick {
         waiting.sort_by(|a, b| b.1.total_cmp(&a.1));
         for (light, power) in waiting {
             // The free map, else the weakest one that this is clearly stronger than.
-            let weakest = (0..SHADOW_LIGHTS).min_by(|&a, &b| {
+            let weakest = (0..N).min_by(|&a, &b| {
                 let of = |s: usize| self.held[s].and_then(strength).unwrap_or(f32::NEG_INFINITY);
                 of(a).total_cmp(&of(b))
             });
@@ -100,7 +103,9 @@ impl Pick {
         }
         self.held
     }
+}
 
+impl Pick<SHADOW_LIGHTS> {
     /// The maps `lights` have, seen from `eye`, and who holds each map.
     pub(crate) fn pick(
         &mut self,
@@ -181,14 +186,14 @@ mod tests {
         })
     }
 
-    fn held(pick: &mut Pick, strengths: &[Option<f32>]) -> Vec<Option<usize>> {
+    fn held(pick: &mut Pick<SHADOW_LIGHTS>, strengths: &[Option<f32>]) -> Vec<Option<usize>> {
         let all: Vec<_> = strengths.iter().map(|s| s.and_then(lit)).collect();
         pick.choose(&all).to_vec()
     }
 
     #[test]
     fn the_strongest_lights_get_the_maps() {
-        let mut pick = Pick::default();
+        let mut pick = Pick::<SHADOW_LIGHTS>::default();
         let got = held(&mut pick, &[Some(1.0), Some(5.0), Some(3.0), Some(0.5)]);
         let mut got: Vec<_> = got.into_iter().flatten().collect();
         got.sort();
@@ -197,7 +202,7 @@ mod tests {
 
     #[test]
     fn two_lights_near_a_tie_do_not_swap_frame_to_frame() {
-        let mut pick = Pick::default();
+        let mut pick = Pick::<SHADOW_LIGHTS>::default();
         let first = held(&mut pick, &[Some(4.0), Some(3.9), Some(3.95)]);
         for flip in 0..20 {
             let (a, b, c) = if flip % 2 == 0 {
@@ -212,7 +217,7 @@ mod tests {
 
     #[test]
     fn a_clearly_stronger_light_does_take_a_map() {
-        let mut pick = Pick::default();
+        let mut pick = Pick::<SHADOW_LIGHTS>::default();
         held(&mut pick, &[Some(4.0), Some(3.0), Some(1.0)]);
         let now = held(&mut pick, &[Some(4.0), Some(3.0), Some(9.0)]);
         assert!(now.contains(&Some(2)), "{now:?}");
@@ -220,7 +225,7 @@ mod tests {
 
     #[test]
     fn a_light_that_goes_dark_gives_up_its_map() {
-        let mut pick = Pick::default();
+        let mut pick = Pick::<SHADOW_LIGHTS>::default();
         held(&mut pick, &[Some(4.0), Some(3.0)]);
         let now = held(&mut pick, &[None, Some(3.0)]);
         assert_eq!(now.iter().flatten().collect::<Vec<_>>(), [&1]);
