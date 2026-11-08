@@ -30,23 +30,19 @@ const PEAK: f64 = 64.0;
 const VOXEL_ROCK: u8 = 4;
 
 impl EditorState {
-    /// The slot and layer index a new mountain layer takes: the next layer of the
-    /// level's vista if it has one, else layer 0 of the next free slot.
+    /// The slot and layer index a new mountain layer takes: the first free layer
+    /// of the level's vista if it has one, else layer 0 of the next free slot.
     fn mountain_layer(&self) -> Result<(u8, u8), String> {
-        let layers = self.doc.entities().iter().filter_map(|e| match e.entity {
-            Entity::VistaLayer { slot, layer, .. } => Some((slot, layer)),
-            _ => None,
-        });
-        let Some(slot) = layers.clone().next().map(|(slot, _)| slot) else {
+        let Some(slot) = self.vista_slot() else {
             let slot = self.free_vista_slot();
             return slot.map(|s| (s, 0)).ok_or_else(|| {
                 format!("All {VIEW_SLOTS} vista slots have a layer: delete one first")
             });
         };
-        let next = layers.filter(|&(s, _)| s == slot).map(|(_, l)| l + 1).max();
-        match next {
-            Some(n) if n < MAX_VISTA_LAYERS => Ok((slot, n)),
-            _ => Err(format!(
+        // The first free layer, so a gap left by a deleted one is used.
+        match self.free_layer_in(slot) {
+            Some(layer) => Ok((slot, layer)),
+            None => Err(format!(
                 "Vista slot {slot} has all {MAX_VISTA_LAYERS} layers: delete one first"
             )),
         }

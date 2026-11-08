@@ -15,6 +15,8 @@ use crate::model::stroke::StrokeKeys;
 pub(super) const MIN_RADIUS: f64 = 0.25;
 pub(super) const MAX_RADIUS: f64 = 8.0;
 const WHEEL_STEP: f64 = 1.15;
+/// How far one wheel notch moves the 3D camera, in world units.
+const DOLLY_STEP: f32 = 2.0;
 
 impl Editor {
     /// A button or field of the face section.
@@ -64,8 +66,8 @@ impl Editor {
     pub(super) fn pane_wheel(&mut self, notches: i32) {
         let mut st = self.state.borrow_mut();
         if st.pending() && notches != 0 {
-            // A held generation: the wheel rolls another seed.
-            let seed = st.voxel.seed.wrapping_add_signed(notches.signum());
+            // A held generation: the wheel rolls another seed, a notch apiece.
+            let seed = st.voxel.seed.wrapping_add_signed(notches);
             st.reroll_to(seed);
             st.message = format!("Seed {}", st.voxel.seed);
         } else if st.rolling() {
@@ -74,6 +76,11 @@ impl Editor {
             let r = st.voxel.radius * WHEEL_STEP.powi(notches);
             st.voxel.radius = r.clamp(MIN_RADIUS, MAX_RADIUS);
             st.message = format!("Radius {:.2}", st.voxel.radius);
+        } else if notches != 0 {
+            drop(st);
+            let mut cam = self.studio.fly_camera();
+            cam.dolly(notches as f32 * DOLLY_STEP);
+            self.studio.set_camera(cam);
         }
     }
 

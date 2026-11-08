@@ -235,7 +235,7 @@ impl EditorState {
     }
 
     /// Takes the held generation away, if there is one.
-    pub(super) fn drop_pending(&mut self) -> bool {
+    pub fn drop_pending(&mut self) -> bool {
         if !self.pending() {
             return false;
         }

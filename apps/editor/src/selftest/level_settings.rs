@@ -6,6 +6,7 @@ use xui::xui_canvas::snapshot::Stage;
 
 use super::{Run, pump};
 use crate::ui::{Msg, Probe, cmd};
+use xui::widget::DialogAction;
 
 pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     stage.emit(Msg::Menu(cmd::LEVEL_SETTINGS));
@@ -44,7 +45,15 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         probe.fog_window_picture().is_some(),
         "asking again leaves one window up",
     );
+    // An unsaved edit makes New ask first, and wait for the answer.
+    stage.emit(Msg::SetFog(3.0, 50.0));
     stage.emit(Msg::Menu(cmd::NEW));
+    pump(stage, 1);
+    run.check(
+        probe.fog_window_picture().is_some() && probe.state().borrow().fog() == Some((3.0, 50.0)),
+        "New waits while the level has unsaved changes",
+    );
+    stage.emit(Msg::Discard(DialogAction::Accept(String::new())));
     pump(stage, 1);
     run.check(
         probe.fog_window_picture().is_none(),

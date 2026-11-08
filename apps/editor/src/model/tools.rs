@@ -54,6 +54,8 @@ impl EditorState {
     /// Switches tool, dropping a half-made slice.
     pub fn set_tool(&mut self, tool: Tool) {
         if tool != self.tool {
+            // A held result is kept, as every other action but Esc keeps it.
+            self.commit_pending();
             self.cancel_drag();
         }
         self.tool = tool;
@@ -86,6 +88,7 @@ impl EditorState {
 
     pub(super) fn finish_line(&mut self, cut: Cut) -> bool {
         if cut.a == cut.b {
+            self.message = "The slice line has no length: drag it across the brush".into();
             return false;
         }
         self.cut = Some(cut);
@@ -108,7 +111,12 @@ impl EditorState {
             self.message = "Draw a slice line over a selected brush first".into();
             return false;
         };
+        if def.is_volume() {
+            self.message = "Voxel volumes cannot be sliced".into();
+            return false;
+        }
         let Some(plane) = ops::line_plane(cut.view.axes(), cut.a, cut.b, 1.0e-6) else {
+            self.message = "The slice line has no length: drag it across the brush".into();
             return false;
         };
         // The kept piece (or the back one when both stay) is the original;
@@ -155,10 +163,14 @@ impl EditorState {
     /// Removes the selected brush's volume from every brush it overlaps and
     /// deletes it, leaving convex pieces (Hammer's Carve).
     pub fn carve_selected(&mut self) -> bool {
-        let Some(cutter) = self.selected_brush().filter(|b| !b.is_volume()).cloned() else {
+        let Some(cutter) = self.selected_brush().cloned() else {
             self.message = "Select a brush to carve with".into();
             return false;
         };
+        if cutter.is_volume() {
+            self.message = "A voxel volume cannot carve: use the Voxel tool's Carve".into();
+            return false;
+        }
         let mut cmds = Vec::new();
         let mut joins = Vec::new();
         let mut carved = 0;
@@ -186,7 +198,7 @@ impl EditorState {
         self.history.run(&mut self.doc, Command::Batch(cmds));
         self.selection = None;
         self.faces.clear();
-        self.message = format!("Carved {carved} brushes");
+        self.message = format!("Carved {}", super::count(carved, "brush", "brushes"));
         true
     }
 
@@ -265,7 +277,7 @@ impl EditorState {
             self.message = "Those faces cannot move that far".into();
             return false;
         }
-        let count = cmds.len();
+        let count = self.faces.len();
         self.history.run(&mut self.doc, Command::Batch(cmds));
         self.faces = if dist > 0.0 {
             self.pushed_faces(&fresh)
@@ -273,7 +285,9 @@ impl EditorState {
             Vec::new()
         };
         self.face_key = None;
-        self.message = format!("Extruded {count} face(s) by {dist}");
+        let way = if dist > 0.0 { "out" } else { "in" };
+        let faces = super::count(count, "face", "faces");
+        self.message = format!("Pushed {faces} {way} by {}", dist.abs());
         true
     }
 
@@ -315,6 +329,15 @@ impl EditorState {
             return true;
         }
         self.selection = self.pick(p).filter(|s| matches!(s, Selection::Brush(_)));
+        if self
+            .selected_brush()
+            .is_some_and(|b| ops::vertices(b).is_none())
+        {
+            self.message = format!(
+                "This brush has more than {} corners, or is a volume: its corners cannot be moved",
+                ops::MAX_VERTS
+            );
+        }
         true
     }
 

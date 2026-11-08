@@ -34,8 +34,8 @@ pub(super) const SAMPLE_MENU: [MenuId; SAMPLES.len()] = {
     ids
 };
 
-/// Whether `msg` loses what the script buffer holds: closing, or putting another
-/// level's script there. The samples list's first row is its label, and opens
+/// Whether `msg` loses the level and what the script buffer holds: closing, or
+/// putting another level there. The samples list's first row is its label, and opens
 /// nothing.
 pub(super) fn replaces_script(msg: &Msg) -> bool {
     match msg {
@@ -77,29 +77,64 @@ impl Editor {
         self.panel.show_script_uses(&st);
     }
 
-    /// Whether `msg` must wait for the user: it would lose unsaved script edits,
-    /// so it is kept and the question asked. A message let through by the answer
-    /// comes back here with the edits already given up.
+    /// Whether `msg` must wait for the user: it would lose unsaved work (the
+    /// level, its script, or on closing, Texture Studio recipes), so it is kept
+    /// and the question asked. A message let through by the answer comes back
+    /// here once, and passes.
     pub(super) fn ask_before(&mut self, msg: &Msg) -> bool {
-        if !replaces_script(msg) || !self.state.borrow().script.dirty() {
+        if std::mem::take(&mut self.discarded) || !replaces_script(msg) {
+            return false;
+        }
+        let lost = self.unsaved_work(matches!(msg, Msg::CloseRequested));
+        if lost.is_empty() {
             return false;
         }
         self.script.reset_sample_list();
         self.after_discard = Some(msg.clone());
+        self.discard_dialog
+            .set_message(&format!("Not saved: {}. Discard them?", list(&lost)));
         self.discard_dialog.open();
         true
+    }
+
+    /// What would be lost, in words: the level, the script and, when the whole
+    /// editor goes, the recipes edited in the Texture Studio.
+    fn unsaved_work(&self, closing: bool) -> Vec<String> {
+        let mut lost = Vec::new();
+        let st = self.state.borrow();
+        if st.doc != self.saved {
+            lost.push("the level".to_string());
+        }
+        if st.script.dirty() {
+            lost.push("the script".to_string());
+        }
+        if closing {
+            let rows = self.tex.studio.borrow().rows();
+            let names: Vec<String> = rows
+                .into_iter()
+                .filter(|r| r.dirty)
+                .map(|r| r.name)
+                .collect();
+            if !names.is_empty() {
+                lost.push(format!("the materials {}", names.join(", ")));
+            }
+        }
+        lost
     }
 
     /// The user answered: what was waiting goes ahead, or does not. Giving the
     /// edits up here is what lets it through, whichever way it then ends.
     pub(super) fn discard_answer(&mut self, action: DialogAction) -> Option<Msg> {
-        let waiting = self.after_discard.take();
+        // The answer may come as a message, with the question still up.
+        self.discard_dialog.close();
+        let waiting = self.after_discard.take()?;
         match action {
             DialogAction::Accept(_) => {
                 let mut st = self.state.borrow_mut();
                 let path = st.doc.level_path().map(|p| p.with_extension("st"));
                 st.script.reload(path.as_deref());
-                waiting
+                self.discarded = true;
+                Some(waiting)
             }
             DialogAction::Cancel => None,
         }
@@ -241,6 +276,15 @@ impl Editor {
     }
 }
 
+/// "a", "a and b", "a, b and c".
+fn list(items: &[String]) -> String {
+    match items.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        Some((last, _)) => last.clone(),
+        None => String::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,5 +310,16 @@ mod tests {
         ] {
             assert!(!replaces_script(&msg));
         }
+    }
+
+    #[test]
+    fn losses_read_as_a_sentence() {
+        let words = |v: &[&str]| list(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(words(&["the level"]), "the level");
+        assert_eq!(
+            words(&["the level", "the script"]),
+            "the level and the script"
+        );
+        assert_eq!(words(&["a", "b", "c"]), "a, b and c");
     }
 }

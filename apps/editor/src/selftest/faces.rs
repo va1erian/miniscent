@@ -14,8 +14,11 @@ use crate::studio::Preview;
 use crate::ui::facepanel::FaceMsg;
 use crate::ui::{Msg, Probe, cmd};
 
-/// The Face tool's index in the palette.
-pub(super) const FACE_TOOL: usize = 6;
+/// The Face tool's index in the palette, looked up: a tool added before it
+/// moves it.
+pub(super) fn face_tool() -> usize {
+    crate::ui::palette_index(crate::model::Tool::Face)
+}
 
 fn edit(stage: &Stage<'_, Msg>, e: FaceEdit) {
     stage.emit(Msg::Face(FaceMsg::Edit(e)));
@@ -149,7 +152,7 @@ pub(super) fn frame_wall(
     let pane = probe.view_pane();
     let state = probe.state();
     state.borrow_mut().selection = None;
-    stage.emit(Msg::Tool(FACE_TOOL));
+    stage.emit(Msg::Tool(face_tool()));
     let framed = biggest_wall(&state.borrow().doc, accept);
     run.check(framed.is_some(), "a big wall can be seen from in front");
     let (wall, cam) = framed?;

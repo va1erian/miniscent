@@ -104,7 +104,7 @@ fn drags(stage: &Stage<'_, Msg>, probe: &Probe) {
     super::drag_timing::drag(stage, probe, "showcase, brush 0", 0);
     let cave =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/levels/voxel-cave.msl");
-    stage.emit(Msg::OpenPath(cave));
+    super::guide::leave(stage, Msg::OpenPath(cave));
     for which in 0..2 {
         super::drag_timing::drag(stage, probe, &format!("voxel-cave, brush {which}"), which);
     }

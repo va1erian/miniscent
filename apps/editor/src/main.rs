@@ -20,6 +20,7 @@
 #![cfg_attr(not(feature = "canvas"), allow(dead_code, unused_imports))]
 
 mod build;
+mod errors;
 mod files;
 mod manual;
 mod materials;

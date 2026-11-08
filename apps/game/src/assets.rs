@@ -64,7 +64,7 @@ pub fn load_materials_from(assets_root: Option<&Path>) -> Result<(MaterialTable,
     }
     let looked: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
     Err(format!(
-        "assets/textures not found; looked in: {} (use --assets <dir>)",
+        "assets/textures not found; looked in: {}. Run from the Miniscent folder,          or give the game --assets <dir>",
         looked.join(", ")
     ))
 }

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use mscent_world::format::{self, MAX_FILE_BYTES};
 
+use crate::errors;
 use crate::model::Document;
 
 /// File extension of level files.
@@ -16,16 +17,15 @@ pub const EXT: &str = "msl";
 pub fn save(doc: &Document, path: &Path) -> Result<String, String> {
     let level = doc
         .to_level()
-        .map_err(|e| format!("cannot save: a brush is invalid ({e:?})"))?;
+        .map_err(|e| format!("Cannot save: a brush is invalid: {}", errors::brush(e)))?;
     // Flipping a brush can bring two names back together; a file with them
     // would not load again, so the level on disk stays as it was.
     level
         .check_labels()
-        .map_err(|e| format!("cannot save: fix the names first ({e:?})"))?;
+        .map_err(|e| format!("Cannot save: {}", errors::label(e)))?;
     let bytes = format::write(&level);
     // A file the loader refuses is worse than no save: the old one stays.
-    format::read(&bytes)
-        .map_err(|e| format!("cannot save: the level is past what a file can hold ({e:?})"))?;
+    format::read(&bytes).map_err(|e| format!("Cannot save: {}", errors::format(e)))?;
     let tmp = path.with_extension("msl.tmp");
     std::fs::write(&tmp, &bytes).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
     if let Err(e) = std::fs::rename(&tmp, path) {
@@ -53,7 +53,7 @@ pub fn load(path: &Path) -> Result<Document, String> {
     }
     let data = std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     let level = format::read(&data)
-        .map_err(|e| format!("{} is not a valid level ({e:?})", path.display()))?;
+        .map_err(|e| format!("Cannot open {}: {}", path.display(), errors::format(e)))?;
     let mut doc = Document::from_level(&level);
     doc.set_level_path(Some(path.to_path_buf()));
     Ok(doc)
@@ -144,7 +144,7 @@ mod tests {
             let path = temp(&format!("bad-{}.msl", name.replace(' ', "-")));
             std::fs::write(&path, data).expect("write");
             let err = load(&path).expect_err(name);
-            assert!(err.contains("not a valid level"), "{name}: {err}");
+            assert!(err.starts_with("Cannot open"), "{name}: {err}");
         }
         // Bit flips anywhere must give an error or a (valid) level.
         let path = temp("flip.msl");

@@ -63,6 +63,7 @@ impl Editor {
         self.light_key.set(self.studio.light_key());
         self.tex_advance();
         self.push_log(&tick.log);
+        self.show_problems(self.studio.problems());
         if let Some(s) = &tick.status {
             self.state.borrow_mut().message = s.clone();
             self.set_status(s);

@@ -125,6 +125,22 @@ impl Studio {
         Ok(())
     }
 
+    /// The entity to blame for why Play cannot start, by index in the level.
+    pub fn culprit(&self) -> Option<usize> {
+        self.unplayable.as_ref().and_then(|u| u.entity)
+    }
+
+    /// What stands in the way of the level now: its vista warnings, and why it
+    /// cannot be played, if it cannot.
+    pub fn problems(&self) -> Vec<String> {
+        let warnings = self.warned.iter().map(|w| format!("WARNING: {w}"));
+        let play = self
+            .unplayable
+            .iter()
+            .map(|u| format!("Cannot play: {}", u.why));
+        warnings.chain(play).collect()
+    }
+
     /// Forgets a Play that was waiting for the preview: the user went elsewhere.
     pub fn cancel_play_when_ready(&mut self) {
         self.play_pending = false;
@@ -279,16 +295,14 @@ impl Studio {
         self.live_dirty = false;
         self.live_bsp = Some(std::sync::Arc::new(built.renderer().scene().bsp().clone()));
         self.built_materials = built.materials;
-        let why = built.unplayable().map(str::to_string);
+        let why = built.problem().cloned();
         self.script_watch.files = built.watch.clone();
         self.attach(Box::new(LevelScene::new(built)), made_for, why);
         // Not while another build is wanted: this one may have read an older script.
         if self.play_pending && !self.refresh && self.built_doc.as_ref() == Some(doc) {
             self.play_pending = false;
-            match &self.unplayable {
-                None => out.play_now = true,
-                Some(why) => out.status = Some(format!("Cannot play: {why}")),
-            }
+            // Play says why it cannot start, and blames an entity.
+            out.play_now = true;
         }
     }
 

@@ -1,6 +1,7 @@
 //! The editor model: document, selection, tool settings and every edit
 //! operation. Each operation goes through the undo history.
 
+use mscent_world::entity::MAX_FOG_DEPTH;
 use mscent_world::{Entity, Op};
 
 use super::command::{Command, History};
@@ -53,11 +54,15 @@ pub struct EditorState {
     pub new_op: Op,
     pub new_material: u16,
     pub grid: f64,
-    /// Extent along the axis a view looks along, for new boxes.
+    /// Extent along the axis a view looks along, for new boxes when no brush
+    /// is selected to take it from.
     pub extent: (f64, f64),
-    /// Coordinate along the hidden axis for new entities, per world axis.
+    /// Where the last click in each 2D view was, per world axis: an entity
+    /// placed in one view takes the coordinate it hides from here.
     pub depth: [f64; 3],
     pub drag: Option<Drag>,
+    /// Why the drag's last step was refused, to say when it ends.
+    pub(super) held_back: Option<&'static str>,
     /// The slice line waiting for Enter.
     pub cut: Option<super::tools::Cut>,
     /// What the next slice keeps.
@@ -104,6 +109,7 @@ impl EditorState {
             extent: (0.0, 4.0),
             depth: [0.0, 0.0, 1.5],
             drag: None,
+            held_back: None,
             cut: None,
             keep: super::tools::Keep::Both,
             faces: Vec::new(),
@@ -160,6 +166,23 @@ impl EditorState {
         match self.selection {
             Some(Selection::Entity(id)) => self.doc.entity(id),
             _ => None,
+        }
+    }
+
+    /// The next grid size up (`dir` > 0) or down, held to the sizes offered.
+    pub fn step_grid(&mut self, dir: i32) {
+        let at = GRIDS.iter().position(|g| *g >= self.grid).unwrap_or(0);
+        let to = at
+            .saturating_add_signed(dir.signum() as isize)
+            .min(GRIDS.len() - 1);
+        self.grid = GRIDS[to];
+        self.message = format!("Grid {}", self.grid);
+    }
+
+    /// Selects the entity at `index` in the level's order, if there is one.
+    pub fn select_entity_at(&mut self, index: Option<usize>) {
+        if let Some(e) = index.and_then(|i| self.doc.entities().get(i)) {
+            self.selection = Some(Selection::Entity(e.id));
         }
     }
 
@@ -239,7 +262,7 @@ impl EditorState {
     pub fn set_fog(&mut self, fog_start: f32, fog_end: f32) -> bool {
         let world = fog_entity(fog_start, fog_end);
         if !world.is_valid() {
-            self.message = "Fog needs 0 <= start < end <= the maximum depth".into();
+            self.message = format!("Fog needs 0 <= start < end <= {MAX_FOG_DEPTH}");
             return false;
         }
         let existing = self
@@ -283,11 +306,20 @@ impl EditorState {
         let id = self.doc.alloc_id();
         let mut made = k.make(p);
         // A layer maps the middle of the play space, which only the editor knows.
-        if let Entity::VistaLayer { centre, .. } = &mut made {
+        if let Entity::VistaLayer {
+            centre,
+            slot,
+            layer,
+            ..
+        } = &mut made
+        {
             *centre = self.vista_centre();
+            // A pair already taken would be ignored: only the first counts.
+            (*slot, *layer) = self.free_vista_layer().unwrap_or((0, 0));
         }
         let entity = EntityDef { id, entity: made };
         let mut cmds = Vec::new();
+        let mut verb = "Placed";
         // There is one player start.
         if k == EntityKind::PlayerStart {
             for old in self
@@ -306,13 +338,21 @@ impl EditorState {
                     index,
                     entity: *old,
                 });
+                verb = "Moved the";
             }
         }
         let index = self.doc.entities().len().saturating_sub(cmds.len());
         cmds.push(Command::AddEntity { index, entity });
         self.history.run(&mut self.doc, Command::Batch(cmds));
         self.selection = Some(Selection::Entity(id));
-        self.message = format!("Placed {}", k.name().to_lowercase());
+        let at = p
+            .map(|v| format!("{}", (v * 100.0).round() / 100.0))
+            .join(", ");
+        self.message = format!("{verb} {} at {at}", k.name().to_lowercase());
+        if verb != "Placed" {
+            self.message
+                .push_str(": a level has one, so the old one went");
+        }
         id
     }
 
@@ -362,6 +402,8 @@ impl EditorState {
         let last = self.doc.brushes().len() as i64 - 1;
         let to = (from as i64 + delta as i64).clamp(0, last) as usize;
         if to == from {
+            let end = if delta > 0 { "last" } else { "first" };
+            self.message = format!("Already {end} in order");
             return false;
         }
         self.history
@@ -415,7 +457,7 @@ impl EditorState {
         let mut after = before;
         f(&mut after.entity);
         if !after.entity.is_valid() {
-            self.message = "Entity value out of range".into();
+            self.message = "That would leave a value of the entity out of range".into();
             return false;
         }
         if after == before {

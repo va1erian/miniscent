@@ -430,7 +430,7 @@ The tool is **Voxel (X)**. There is no need to place a box: dabbing is enough.
 
 Radius with the wheel, strength with Ctrl+wheel; hold Shift to lock the stroke to one plane.
 Right button remains fly-look, and only the 3D view paints. The 2D views show the box, an outline of
-each mixed chunk and the cursor, and they move and resize the box.
+each mixed chunk and the cursor, and they move the box (only box brushes are resized there).
 
 ### Generators: structure built, not sculpted
 

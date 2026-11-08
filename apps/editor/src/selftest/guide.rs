@@ -17,6 +17,12 @@ use crate::ui::script_pane::ScriptMsg;
 use crate::ui::{ManualMsg, Msg, Probe, cmd};
 use xui::widget::DialogAction;
 
+/// Goes to another level with `msg`, discarding unsaved changes if asked to.
+pub(super) fn leave(stage: &Stage<'_, Msg>, msg: Msg) {
+    stage.emit(msg);
+    stage.emit(Msg::Discard(DialogAction::Accept(String::new())));
+}
+
 /// Paints until the guide has laid its page out, and once more to show it. The
 /// view hands its page to its thread when painted and picks the frame up when
 /// painted again, and the headless backend paints only for a picture and has no

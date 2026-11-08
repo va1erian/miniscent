@@ -387,10 +387,15 @@ impl EditorState {
     pub fn place_kit(&mut self, kind: KitKind, p: [f64; 3]) -> bool {
         self.tool = Tool::Select;
         let room = room_around(self, p);
-        let Some(plan) = self.free_plan(kind, p, room).filter(in_range) else {
-            self.message = "Cannot place that here: it would leave the map".into();
+        let Some(plan) = self.free_plan(kind, p, room) else {
+            let stem = kind.entry().stem;
+            self.message = format!("No free name left: {stem}_1 to {stem}_9999 are all taken");
             return false;
         };
+        if !in_range(&plan) {
+            self.message = "Cannot place that here: it would leave the map".into();
+            return false;
+        }
         let mut cmds = Vec::new();
         let mut first = None;
         if let Some((bounds, name)) = &plan.mover {

@@ -62,7 +62,7 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     let level = level_text::from_text(LEVEL).expect("the level text");
     std::fs::write(&file, mscent_world::format::write(&level)).expect("writes");
     let _ = std::fs::remove_file(&script_file);
-    stage.emit(Msg::OpenPath(file.clone()));
+    super::guide::leave(stage, Msg::OpenPath(file.clone()));
     pump(stage, 3);
 
     // Make the second brush a mover, and name it, through the panel's messages.
@@ -103,7 +103,7 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
 
     // Saving keeps it all.
     stage.emit(Msg::SavePath(file.clone()));
-    stage.emit(Msg::OpenPath(file.clone()));
+    super::guide::leave(stage, Msg::OpenPath(file.clone()));
     let reopened = probe.state().borrow().doc.to_level();
     run.check(
         reopened.is_ok_and(|l| l.mover_groups.len() == 1 && l.labels.len() == 1),
@@ -112,7 +112,7 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
 
     // A broken script stops Play, and says where.
     std::fs::write(&script_file, "(mover: 'dor') moveTo: 'x' in: 1.").expect("writes");
-    stage.emit(Msg::OpenPath(file.clone()));
+    super::guide::leave(stage, Msg::OpenPath(file.clone()));
     wait_for_preview(stage, probe);
     stage.emit(Msg::Menu(cmd::PLAY));
     run.check(
