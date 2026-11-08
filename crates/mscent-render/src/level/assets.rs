@@ -7,6 +7,7 @@ use mscent_math::Vec3;
 
 use mscent_world::lightmap::{CellSites, Lightmap, PointLight};
 
+use super::kinds::KindModels;
 use super::setup::{mesh_lighting, spec_tables};
 use super::vista;
 use super::{Actor, BuildConfig, FAR, NEAR, View, VoxelChange, compiled, movers, overlay};
@@ -16,7 +17,7 @@ use crate::lighting_shader::UvToLuxel;
 use crate::lightmap_mips::LightMips;
 use crate::material::MaterialTable;
 use crate::mesh::MeshLighting;
-use crate::model::{ModelInstance, ModelList, ModelTable};
+use crate::model::{ModelId, ModelInstance, ModelList, ModelTable};
 use crate::scene::Scene;
 use crate::shade::Fog;
 use crate::specular::SpecTable;
@@ -37,6 +38,8 @@ pub struct LevelAssets {
     /// The cells the lightmap holds records for.
     voxel_sites: CellSites,
     actors: Vec<Actor>,
+    /// Every model a frame may draw: the kinds' and any added later.
+    kinds: KindModels,
     pub(super) meshes: overlay::ActorMeshes,
     pub(super) mover_faces: Vec<movers::MoverFaces>,
     pub(super) vistas: vista::Vistas,
@@ -61,10 +64,13 @@ impl LevelAssets {
             lights: all_lights,
             play_lights: lights,
             actors,
+            designs,
+            spawns,
             cfg,
             voxels,
             sites,
         } = parts;
+        let kinds = KindModels::new(&designs, &spawns, &materials);
         let spec = spec_tables(&materials);
         // The game path pays for smooth texture sampling; the raw
         // rasterizer benchmark does not.
@@ -99,6 +105,7 @@ impl LevelAssets {
             play_lights: lights,
             voxel_sites: sites,
             actors,
+            kinds,
             meshes: overlay::ActorMeshes::new(),
             scene,
             light_mips: LightMips::build(&lightmap),
@@ -152,9 +159,37 @@ impl LevelAssets {
         &self.play_lights
     }
 
-    /// The level's own enemies and goal, at their spawn points.
+    /// The level's own goal, at its place.
     pub fn actors(&self) -> &[Actor] {
         &self.actors
+    }
+
+    /// Every model frames of this level draw from: each enemy kind's, by its
+    /// index, then any added since.
+    pub fn models(&self) -> &ModelTable {
+        &self.kinds.table
+    }
+
+    /// The model of enemy kind `kind`, which [`Self::models`] holds.
+    pub fn kind_model(&self, kind: u8) -> Option<ModelId> {
+        self.kinds.ids.get(usize::from(kind)).copied()
+    }
+
+    /// The level's enemies at their spawns, facing +X, for a frame of the level
+    /// as it starts: what the editor and a still picture show.
+    pub fn spawn_models(&self) -> Option<(&ModelTable, &[ModelInstance])> {
+        Some((&self.kinds.table, &self.kinds.spawns))
+    }
+
+    /// Adds a model beyond the kinds, skinned from the level's materials.
+    pub fn add_model(
+        &mut self,
+        blueprint: &mscent_world::model::Blueprint,
+        model: &mscent_world::model::Model,
+    ) -> ModelId {
+        self.kinds
+            .table
+            .add(blueprint, model, self.scene.materials())
     }
 
     /// The level's fog, for effects drawn in the same frame.

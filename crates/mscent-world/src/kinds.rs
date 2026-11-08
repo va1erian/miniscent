@@ -109,7 +109,8 @@ pub enum KindError {
     BadStats(usize),
     /// The kind at this index has a blueprint the reader refuses.
     BadBlueprint(usize),
-    /// Building every kind would take more than [`MAX_LEVEL_MODEL_NS`].
+    /// Building one kind would take more than [`MAX_MODEL_NS`], or every kind
+    /// more than [`MAX_LEVEL_MODEL_NS`].
     TooCostly,
     /// The enemy entity at this index names a kind past the table.
     NoSuchKind(usize),
@@ -195,7 +196,12 @@ impl Level {
             if !k.stats.is_valid() {
                 return Err(KindError::BadStats(i));
             }
-            cost = cost.saturating_add(estimated_ns(&k.blueprint));
+            let ns = estimated_ns(&k.blueprint);
+            // One the builder would refuse fails the level now, not at its build.
+            if ns > MAX_MODEL_NS {
+                return Err(KindError::TooCostly);
+            }
+            cost = cost.saturating_add(ns);
         }
         if cost > MAX_LEVEL_MODEL_NS {
             return Err(KindError::TooCostly);

@@ -19,8 +19,11 @@ import sys
 # 1.6 MB until voxel volumes, which took the game from 1,576,960 to 1,885,184 bytes.
 # The texture generator adds about 140 KB, and replaced 902 KB of PNGs in the assets.
 # Projectors (M18: the entity, the cone in the baker, the editor-free world code) took
-# the software build to 2,201,088, 1,088 over the old 2.2 MB, so it is 2.3 MB now.
-BUDGET_BYTES = 2_300_000
+# the software build to 2,201,088, 1,088 over the old 2.2 MB, so it was 2.3 MB.
+# Enemy kinds in the level (M19.1, M19.2: the blueprint reader and writer) took it to
+# 2,281,472, and drawing them as their models (M19.3: the model builder, which the
+# game had not linked) to 2,331,648, so it is 2.4 MB now (docs/enemy-designer.md).
+BUDGET_BYTES = 2_400_000
 # wgpu and the hardware renderer (M14.7) took the default game from 2,126,336 to
 # 5,730,304 bytes; the plan expected about 5.7 MB. With projectors it is 6,088,704
 # (98% of 6.2 MB), so the budget is 6.3 MB.

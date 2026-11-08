@@ -72,7 +72,6 @@ pub(super) fn actors_of(level: &Level) -> Vec<Actor> {
         .entities
         .iter()
         .filter_map(|e| match *e {
-            Entity::Enemy { pos, .. } => Some(actor(ActorKind::Enemy, pos)),
             Entity::Goal { pos, .. } => Some(actor(ActorKind::Goal, pos)),
             _ => None,
         })

@@ -42,12 +42,9 @@ impl FrameRenderer for LevelRenderer {
 impl LevelRenderer {
     /// Draws one frame: visibility and projection once, then sky, level, actors
     /// and particles in parallel bands. Of the lights only the first
-    /// [`MAX_DYN_LIGHTS`] count.
-    pub(super) fn draw_frame(
-        &self,
-        fb: &mut Framebuffer,
-        input: &FrameInput,
-    ) -> Option<SceneStats> {
+    /// [`MAX_DYN_LIGHTS`] count. [`FrameRenderer::draw`] without the `&mut`, for
+    /// a frame whose models come from this renderer's own table.
+    pub fn draw_frame(&self, fb: &mut Framebuffer, input: &FrameInput) -> Option<SceneStats> {
         let FrameInput {
             view,
             quality,

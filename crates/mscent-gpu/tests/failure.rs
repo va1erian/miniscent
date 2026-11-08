@@ -162,7 +162,7 @@ fn more_actors_than_a_buffer_holds_are_an_error_and_the_next_frame_draws() {
     let level = room();
     let mut renderer = GpuRenderer::new(device, level.assets()).expect("fits");
     let one = Actor {
-        kind: ActorKind::Enemy,
+        kind: ActorKind::Crate,
         pos: Vec3::new(5.0, 5.0, 1.5),
         yaw: 0.0,
     };

@@ -212,30 +212,6 @@ impl Mesh {
         Self::new(verts, tris)
     }
 
-    /// The enemy: a round red body with two bone horns and a glowing yellow
-    /// eye on its +X side, about 1.5 units tall.
-    pub fn enemy() -> Self {
-        let horn = || Self::bipyramid(5, 0.12, 0.6, 0.05, 0xffe8_e0c0);
-        let parts: Option<Vec<(Mesh, Vec3)>> = [
-            (
-                Self::sphere(8, 14, 0.7, 0xffc0_2828),
-                Vec3::new(0.0, 0.0, 0.1),
-            ),
-            (horn(), Vec3::new(0.0, 0.4, 0.6)),
-            (horn(), Vec3::new(0.0, -0.4, 0.6)),
-            (
-                Self::sphere(4, 8, 0.2, 0xfff8_e840),
-                Vec3::new(0.58, 0.0, 0.25),
-            ),
-        ]
-        .into_iter()
-        .map(|(m, o)| Some((m?, o)))
-        .collect();
-        parts
-            .and_then(|p| Self::combine(&p))
-            .unwrap_or_else(Self::empty)
-    }
-
     /// The goal: a tall gold octahedron wearing a ring of six cyan gems,
     /// about 2.2 units tall.
     pub fn goal() -> Self {
@@ -250,21 +226,6 @@ impl Mesh {
         parts
             .and_then(|p| Self::combine(&p))
             .unwrap_or_else(Self::empty)
-    }
-
-    /// An enemy on the player's side: the enemy's shape, in green.
-    pub fn friendly() -> Self {
-        let parts = [
-            (
-                Self::sphere(8, 14, 0.7, 0xff28_b048),
-                Vec3::new(0.0, 0.0, 0.1),
-            ),
-            (
-                Self::sphere(4, 8, 0.2, 0xfff8_e840),
-                Vec3::new(0.58, 0.0, 0.25),
-            ),
-        ];
-        Self::assembled(parts)
     }
 
     /// Something to shoot: an amber gem on a dark ball.

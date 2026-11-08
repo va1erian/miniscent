@@ -160,7 +160,7 @@ fn an_enemy_muzzle_flash_shows_in_front_of_its_own_hull() {
     let r = renderer(false);
     let at = v(5.0, 0.0, 0.0);
     let enemy = [Actor {
-        kind: ActorKind::Enemy,
+        kind: ActorKind::Crate,
         pos: at,
         yaw: 0.0,
     }];

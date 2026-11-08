@@ -1,6 +1,6 @@
 # Enemy designer: design
 
-Status: accepted; M19.1 and M19.2 are built ([as built](#as-built)). Work items are [M19](work-items.md#m19-enemy-designer). It takes the
+Status: accepted; M19.1 to M19.3 are built ([as built](#as-built)). Work items are [M19](work-items.md#m19-enemy-designer). It takes the
 foundry in [enemies.md](enemies.md) (blueprints, the model path on both renderers) and makes it something a
 level designer uses: enemies are designed in the editor, by generator, by hand or both, saved **in the level**,
 and placed as real enemies that play and draw as designed. It replaces M15.4, M15.10 and the editor half of
@@ -48,6 +48,27 @@ design below:
   2.3 MB budget; the default build from 6,088,704 to 6,125,568. Most of it is the blueprint reader and writer, which
   the game now links to read a level's kinds. M19.3 links the builder too, so it has under 19 KB left before the budget
   has to be raised or something shrunk.
+
+### M19.3
+
+`crates/mscent-render/src/level/kinds.rs`, `LevelAssets::models`, `kind_model` and `spawn_models`, and
+`apps/game/src/drawn.rs`, with these changes from the design below:
+
+- **One model table per level.** The level's assets build every kind's model with the level and keep them in the
+  table frames draw from; the player's ship is added to the same table (`LevelRenderer::add_model`), and added again
+  when a session takes a new renderer. The stock pair is built once a process and shared, since it is the same for
+  every level without kinds.
+- **A kind that will not build fails the level** with `BuildError::Model(index)`. The reader now refuses one kind
+  costlier than `MAX_MODEL_NS` as well as a level past `MAX_LEVEL_MODEL_NS`, so only a level made in code reaches it.
+- **Enemies are not actors.** `ActorKind::Enemy` and `Friendly`, `Mesh::enemy` and `Mesh::friendly` are gone. A live
+  enemy is its kind's model at its interpolated position, turned by its facing, which is not interpolated between
+  steps. Software draws the enemies and not the ship, as before.
+- **Friendly enemies are tinted green** (`ModelInstance::tint`, which both renderers apply), not ringed: tint was
+  already built, and a ring would have been a second mesh to keep.
+- **Still pictures.** `LevelRenderer::render` and its kin draw only what they are given. A frame that wants the
+  level's enemies where they start passes `LevelAssets::spawn_models`, as the editor's pane on either renderer does.
+- **Binary.** Linking the builder took the software-only game from 2,281,472 to 2,331,648 bytes, past its 2.3 MB
+  budget, which is now 2.4 MB (`tools/check_size.py`); the default build is 6,133,760 bytes of 6.3 MB.
 
 ## The design in brief
 

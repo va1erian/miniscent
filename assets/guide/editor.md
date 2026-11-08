@@ -222,7 +222,7 @@ A click sets the two coordinates the view shows. The third is fixed: **Z = 1.5**
 | Player start (P) | Where the player's ship begins, facing Yaw (the arrow in the Top view). A level has one: placing another replaces it. |
 | Light (L) | A lamp, baked into the lighting. See Lighting. |
 | Projector (J) | A spot lamp shining one way. See Lighting. |
-| Enemy (E) | An enemy. Kind picks one of the level's enemy kinds, counted from 0. A level with no kinds of its own has two: 0 the drone and 1 the hunter. |
+| Enemy (E) | An enemy. Kind picks one of the level's enemy kinds, counted from 0. A level with no kinds of its own has two: 0 the drone and 1 the hunter. The 3D view shows each enemy as its kind's model, facing +X as it does before it first moves. |
 | Goal (G) | Reaching within its Radius wins. |
 | Marker (M) | A named point for a script: a spawn point, a hinge. |
 | Zone (Z) | A box a script hears about when the player enters or leaves. Half X, Y and Z are half its size. |

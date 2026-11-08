@@ -265,6 +265,32 @@ fn a_level_too_costly_to_build_is_refused_before_building() {
     assert!(start.elapsed().as_millis() < 100, "{:?}", start.elapsed());
 }
 
+#[test]
+fn one_kind_too_costly_to_build_is_refused() {
+    let head = "miniscent-blueprint 1
+name heavy
+class drone
+skin hull metal
+";
+    let smooths = "smooth sphere 0 0 0 12
+"
+    .repeat(crate::model::MAX_PIECES - 1);
+    let text = format!(
+        "{head}part p cell=0.25
+add sphere 0 0 0 8 hull
+{smooths}"
+    );
+    assert!(estimated_ns(&model::read(text.as_bytes()).unwrap()) > MAX_MODEL_NS);
+    let level = Level {
+        kinds: vec![kind("heavy", &text)],
+        ..Level::default()
+    };
+    assert_eq!(
+        refused(&level),
+        Err(FormatError::Kinds(KindError::TooCostly))
+    );
+}
+
 fn text_error(level_text: &str) -> (usize, String) {
     let e = from_text(level_text).unwrap_err();
     (e.line, e.msg)

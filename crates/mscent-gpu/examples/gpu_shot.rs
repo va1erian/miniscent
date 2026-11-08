@@ -76,7 +76,10 @@ fn main() -> Result<(), String> {
         view: &view,
         quality: Quality::High,
         actors: assets.actors(),
-        effects: Effects::default(),
+        effects: Effects {
+            models: assets.spawn_models(),
+            ..Effects::default()
+        },
         wants_depth: false,
     };
     let (mut costs, mut triangles) = (Vec::with_capacity(FRAMES), 0);

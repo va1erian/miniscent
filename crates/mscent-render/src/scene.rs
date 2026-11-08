@@ -189,6 +189,11 @@ impl Scene {
         self.refresh_bounds();
     }
 
+    /// What the level is drawn with.
+    pub fn materials(&self) -> &MaterialTable {
+        &self.materials
+    }
+
     pub fn bsp(&self) -> &Bsp {
         &self.bsp
     }
