@@ -5,6 +5,7 @@ pub mod command;
 pub mod document;
 pub mod entity;
 pub mod facetex;
+pub mod fields;
 pub mod fly;
 pub mod generators;
 mod growth;
@@ -53,5 +54,10 @@ pub use pointer::Pointer;
 pub use state::{EditorState, Selection, Tool};
 pub use tools::Keep;
 pub use view::{Camera2D, View};
+
+/// `n` things in words: "1 brush", "2 brushes".
+pub(crate) fn count(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
 #[cfg(test)]
 mod label_tests;

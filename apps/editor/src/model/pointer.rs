@@ -6,8 +6,11 @@ use mscent_math::Vec3d;
 use super::command::Command;
 use super::document::{BrushDef, EntityDef, Shape};
 use super::entity::{pos, with_pos};
-use super::state::{EditorState, Selection, Tool};
+use super::state::{EditorState, LIMIT, Selection, Tool, box_ok};
 use super::view::View;
+
+/// Why a drag stopped at the edge of the map.
+const OFF_MAP: &str = "That would leave the map (past 4096 on an axis): it stays at the edge";
 
 /// A pointer position in one view.
 #[derive(Clone, Copy, Debug)]
@@ -259,8 +262,9 @@ impl EditorState {
                     Original::Brush(orig) => {
                         let mut moved = orig;
                         moved.translate(d);
-                        // Volumes may touch but not overlap: it stays where it fits.
-                        if !self.volume_overlaps(&moved) {
+                        // It stays where it last fitted, and the release says why.
+                        self.held_back = self.misfit(&moved);
+                        if self.held_back.is_none() {
                             self.doc.replace_brush(&moved);
                         }
                     }
@@ -271,7 +275,9 @@ impl EditorState {
                             id: orig.id,
                             entity: with_pos(&orig.entity, np),
                         };
-                        if moved.entity.is_valid() {
+                        let inside = np.iter().all(|v| v.abs() <= LIMIT);
+                        self.held_back = (!inside || !moved.entity.is_valid()).then_some(OFF_MAP);
+                        if self.held_back.is_none() {
                             self.doc.replace_entity(&moved);
                         }
                     }
@@ -297,15 +303,42 @@ impl EditorState {
                         _ => {}
                     }
                 }
-                self.doc.replace_brush(&resized);
+                let (lo, hi) = resized.bounds();
+                self.held_back = (!box_ok(lo, hi)).then_some(OFF_MAP);
+                if self.held_back.is_none() {
+                    self.doc.replace_brush(&resized);
+                }
                 true
             }
         }
     }
 
-    /// Button up: commits the drag as one undo step.
+    /// Why a brush cannot be moved to where `moved` is: past the map's edge, or
+    /// into another volume.
+    fn misfit(&self, moved: &BrushDef) -> Option<&'static str> {
+        let (lo, hi) = moved.bounds();
+        if !box_ok(lo, hi) {
+            Some(OFF_MAP)
+        } else if self.volume_overlaps(moved) {
+            Some("Voxel volumes cannot overlap: it stays where it last fitted")
+        } else {
+            None
+        }
+    }
+
+    /// Button up: commits the drag as one undo step, and says why it stopped
+    /// short if it did.
     pub fn pointer_up(&mut self, p: Pointer) -> bool {
+        self.held_back = None;
         self.pointer_move(p);
+        let changed = self.finish_drag();
+        if let Some(why) = self.held_back.take() {
+            self.message = why.into();
+        }
+        changed
+    }
+
+    fn finish_drag(&mut self) -> bool {
         match self.drag.take() {
             None => false,
             Some(Drag::Create { view, start, cur }) => {

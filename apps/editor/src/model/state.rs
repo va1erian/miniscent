@@ -59,6 +59,8 @@ pub struct EditorState {
     /// Coordinate along the hidden axis for new entities, per world axis.
     pub depth: [f64; 3],
     pub drag: Option<Drag>,
+    /// Why the drag's last step was refused, to say when it ends.
+    pub(super) held_back: Option<&'static str>,
     /// The slice line waiting for Enter.
     pub cut: Option<super::tools::Cut>,
     /// What the next slice keeps.
@@ -105,6 +107,7 @@ impl EditorState {
             extent: (0.0, 4.0),
             depth: [0.0, 0.0, 1.5],
             drag: None,
+            held_back: None,
             cut: None,
             keep: super::tools::Keep::Both,
             faces: Vec::new(),
@@ -304,6 +307,7 @@ impl EditorState {
         }
         let entity = EntityDef { id, entity: made };
         let mut cmds = Vec::new();
+        let mut verb = "Placed";
         // There is one player start.
         if k == EntityKind::PlayerStart {
             for old in self
@@ -322,13 +326,17 @@ impl EditorState {
                     index,
                     entity: *old,
                 });
+                verb = "Moved the";
             }
         }
         let index = self.doc.entities().len().saturating_sub(cmds.len());
         cmds.push(Command::AddEntity { index, entity });
         self.history.run(&mut self.doc, Command::Batch(cmds));
         self.selection = Some(Selection::Entity(id));
-        self.message = format!("Placed {}", k.name().to_lowercase());
+        self.message = format!("{verb} {}", k.name().to_lowercase());
+        if verb != "Placed" {
+            self.message.push_str(": a level has one, so the old one went");
+        }
         id
     }
 
@@ -378,6 +386,8 @@ impl EditorState {
         let last = self.doc.brushes().len() as i64 - 1;
         let to = (from as i64 + delta as i64).clamp(0, last) as usize;
         if to == from {
+            let end = if delta > 0 { "last" } else { "first" };
+            self.message = format!("Already {end} in order");
             return false;
         }
         self.history
@@ -431,7 +441,7 @@ impl EditorState {
         let mut after = before;
         f(&mut after.entity);
         if !after.entity.is_valid() {
-            self.message = "Entity value out of range".into();
+            self.message = "That would leave a value of the entity out of range".into();
             return false;
         }
         if after == before {

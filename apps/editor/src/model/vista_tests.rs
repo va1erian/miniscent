@@ -144,7 +144,9 @@ fn every_layer_edit_is_one_undo_step_and_undoes() {
     let before = st.doc.clone();
     for i in 0..16 {
         let depth = st.history.depth();
-        let edited = st.edit_selected_entity(|e| set_param(e, i, 2.0));
+        let edited = st.edit_selected_entity(|e| {
+            set_param(e, i, 2.0);
+        });
         assert_eq!(st.history.depth(), depth + usize::from(edited), "field {i}");
         if edited {
             st.undo();
@@ -334,8 +336,11 @@ fn scale_is_the_inverse_of_parallax_with_zero_for_infinite() {
     assert_eq!(scale(&e).1, 16.0);
     set_param(&mut e, 2, 1.0e9);
     assert_eq!(scale(&e).1, 4096.0, "held to the largest scale");
-    set_param(&mut e, 2, -3.0);
+    set_param(&mut e, 2, 0.5);
     assert_eq!(scale(&e).1, 1.0, "held to the smallest scale");
+    let note = set_param(&mut e, 2, -3.0);
+    assert_eq!(scale(&e).1, 0.0, "below the range is its end, infinite");
+    assert_eq!(note.as_deref(), Some("Scale must be 0 to 4096: set to 0"));
     set_param(&mut e, 2, 0.0);
     assert_eq!(scale(&e).1, 0.0, "0 is infinitely far");
     set_param(&mut e, 2, f64::NAN);

@@ -15,6 +15,7 @@ use super::material_list::MaterialChoices;
 use super::quiet;
 use super::voxelpanel::{VoxelPanel, VoxelProp, apply as apply_voxel};
 use crate::model::entity::{entity_name, params, pos, set_param, with_pos};
+use crate::model::fields::{Limit, limits};
 use crate::model::{EditorState, Shape, Tool};
 
 /// The container a list is remade in.
@@ -79,6 +80,9 @@ pub struct Panel {
     pos: [Handle<NumberField<Msg>>; 3],
     param_labels: [Handle<Label<Msg>>; PARAMS],
     params: [Handle<NumberField<Msg>>; PARAMS],
+    /// Holds the kind-specific rows, and the steps they were made with.
+    params_host: Handle<Host>,
+    steps_shown: std::cell::RefCell<Vec<f64>>,
     names_group: Handle<GroupBox<Msg>>,
     name: Handle<Edit<Msg>>,
     tags: Handle<Edit<Msg>>,
@@ -98,15 +102,34 @@ fn field(
         .bind(handle)
 }
 
-/// A kind-specific field. Its range is wide because the model holds each value
-/// to its own limits (a vista layer's fog reaches 100 000).
+/// A kind-specific field stepping by `step`. Its range is wide because the model
+/// holds each value to its own limits and says so when it clamps one; a field
+/// that clamped by itself would say nothing.
 fn param_field(
     handle: &Handle<NumberField<Msg>>,
+    step: f64,
     make: impl Fn(f64) -> Prop + 'static,
 ) -> Build<NumberField<Msg>, Msg> {
-    number_field(-MAX_PARAM, MAX_PARAM, 1.0)
+    number_field(-MAX_PARAM, MAX_PARAM, step)
         .then(move |f| f.on_commit(move |v| Some(Msg::Prop(make(v)))))
         .bind(handle)
+}
+
+/// The kind-specific rows, their steppers moving by `steps` (1 past its end).
+/// A field's step is fixed when it is made, so another kind makes them again.
+fn params_grid(
+    labels: &[Handle<Label<Msg>>; PARAMS],
+    fields: &[Handle<NumberField<Msg>>; PARAMS],
+    steps: &[f64],
+) -> Layout<Msg> {
+    let mut rows = grid([Track::Auto, Track::Fill(1)]).gap(6);
+    for i in 0..PARAMS {
+        let step = steps.get(i).copied().unwrap_or(1.0);
+        rows = rows
+            .child(label("-").bind(&labels[i]))
+            .child(param_field(&fields[i], step, move |v| Prop::Param(i, v)));
+    }
+    column().child(rows)
 }
 
 impl Panel {
@@ -236,17 +259,17 @@ impl Panel {
             bounds = bounds.child(field(&self.max[a], move |v| Prop::Max(a, v)));
         }
         let brush = column().gap(6).child(brush).child(bounds);
-        let mut ent = grid([Track::Auto, Track::Fill(1)]).gap(6);
+        let mut place = grid([Track::Auto, Track::Fill(1)]).gap(6);
         for a in 0..3 {
-            ent = ent
+            place = place
                 .child(label(format!("Pos {}", AXES[a])))
                 .child(field(&self.pos[a], move |v| Prop::Pos(a, v)));
         }
-        for i in 0..PARAMS {
-            ent = ent
-                .child(label("-").bind(&self.param_labels[i]))
-                .child(param_field(&self.params[i], move |v| Prop::Param(i, v)));
-        }
+        let rows = params_grid(&self.param_labels, &self.params, &[]);
+        let ent = column().gap(6).children((
+            place,
+            panel(rows).plain().bind(&self.params_host),
+        ));
         let names = grid([Track::Auto, Track::Fill(1)])
             .gap(6)
             .child(label("Name"))
@@ -356,6 +379,7 @@ impl Panel {
             self.pos[a].get().set_enabled(ent.is_some());
         }
         let list = ent.map(|e| params(&e.entity)).unwrap_or_default();
+        self.sync_steps(ent.map(|e| limits(&e.entity)).unwrap_or_default());
         for i in 0..PARAMS {
             let (name, value) = list.get(i).copied().unwrap_or(("-", 0.0));
             quiet::set_text(&*self.param_labels[i].get(), name);
@@ -363,6 +387,27 @@ impl Panel {
             self.params[i].get().set_enabled(i < list.len());
             self.show(self.param_labels[i].get().id(), i < list.len());
             self.show(self.params[i].get().id(), i < list.len());
+        }
+    }
+}
+
+impl Panel {
+    /// Makes the kind-specific fields again when their steps change. A failure
+    /// is tried again on the next sync.
+    fn sync_steps(&self, limits: Vec<Limit>) {
+        let steps: Vec<f64> = limits.iter().map(|l| l.step).collect();
+        if steps.is_empty() || *self.steps_shown.borrow() == steps {
+            return;
+        }
+        let Some(host) = self.params_host.try_get() else {
+            return;
+        };
+        let rows = params_grid(&self.param_labels, &self.params, &steps);
+        if host.set_layout(rows).is_ok() {
+            *self.steps_shown.borrow_mut() = steps;
+            if let Some(ui) = &self.ui {
+                ui.invalidate_layout();
+            }
         }
     }
 }
@@ -394,7 +439,14 @@ pub fn apply(st: &mut EditorState, prop: Prop) -> bool {
             p[a] = v;
             *e = with_pos(e, p);
         }),
-        Prop::Param(i, v) => st.edit_selected_entity(|e| set_param(e, i, v)),
+        Prop::Param(i, v) => {
+            let mut note = None;
+            let changed = st.edit_selected_entity(|e| note = set_param(e, i, v));
+            if let Some(note) = note {
+                st.message = note;
+            }
+            changed
+        }
         Prop::NameText(text) => {
             st.sync_draft();
             st.draft.name = text;

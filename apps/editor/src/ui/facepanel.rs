@@ -62,6 +62,8 @@ pub struct FacePanel {
     tiles: [Handle<NumberField<Msg>>; 2],
     follow: Handle<CheckBox<Msg>>,
     info: Handle<Label<Msg>>,
+    /// Extrude out and in, which need picked faces as their menu items do.
+    extrude: [Handle<Button<Msg>>; 2],
 }
 
 /// A square RGBA preview of a texture.
@@ -255,11 +257,13 @@ impl FacePanel {
             .child(small("Flip V", edit(FaceEdit::FlipV)))
             .child(
                 small("Extrude out", Msg::Menu(cmd::EXTRUDE))
-                    .tooltip("Push the picked faces out by one grid step (Ctrl+E)"),
+                    .tooltip("Push the picked faces out by one grid step (Ctrl+E)")
+                    .bind(&self.extrude[0]),
             )
             .child(
                 small("Extrude in", Msg::Menu(cmd::EXTRUDE_IN))
-                    .tooltip("Pull the picked faces in by one grid step (Ctrl+Shift+E)"),
+                    .tooltip("Pull the picked faces in by one grid step (Ctrl+Shift+E)")
+                    .bind(&self.extrude[1]),
             )
             .child(
                 small("Copy", Msg::Face(FaceMsg::Copy))
@@ -300,6 +304,9 @@ impl FacePanel {
     pub fn sync(&self, st: &EditorState, show: impl Fn(WidgetId, bool)) {
         let view = st.face_view();
         show(self.group.get().id(), view.is_some());
+        for h in &self.extrude {
+            h.get().set_enabled(!st.faces.is_empty());
+        }
         let Some(v) = view else { return };
         self.sync_lists(&v);
         let t = &v.info;
