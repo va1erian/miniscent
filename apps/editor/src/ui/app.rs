@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use mscent_world::Op;
 use xui::prelude::*;
-use xui::widget::{Dialog, FileDialog, HasText};
+use xui::widget::{Dialog, FileDialog};
 
 pub use super::commands::cmd;
 use super::commands::menus;
@@ -24,7 +24,6 @@ use super::texstudio::Workspace;
 use super::toolbar::IconButton;
 use super::view3d::View3d;
 use super::viewport::ViewEvent;
-use super::wrap::{LOG_COLS, LOG_ROWS, wrap};
 use crate::files;
 use crate::model::{Document, EditorState, state::GRIDS};
 use crate::studio::{HELP, Mode, Preview, Studio};
@@ -64,6 +63,8 @@ pub struct Editor {
     pub(super) log_view: Handle<MultilineEdit<Msg>>,
     pub(super) studio: Studio,
     pub(super) log: Vec<String>,
+    /// What stands in the way now, shown above the log (see `log.rs`).
+    pub(super) problems: Vec<String>,
     /// The file the document came from or was last saved to.
     pub(super) path: Option<PathBuf>,
     /// The document as last saved or loaded, to show a modified mark.
@@ -140,6 +141,7 @@ impl Editor {
             log_view: Handle::new(),
             studio,
             log: Vec::new(),
+            problems: Vec::new(),
             path,
             saved,
             open_dialog,
@@ -206,7 +208,7 @@ impl Editor {
         let side = column().gap(4).children((
             scroll(column().child(app.panel.layout())).fill(1),
             group(
-                "Lighting log",
+                "Problems and log",
                 column().child(multiline_edit().bind(&app.log_view).height(LOG_HEIGHT)),
             ),
         ));
@@ -339,24 +341,6 @@ F5 plays it.
         for arr in [&self.classic, &self.quad] {
             arr.view3d.get().show_text(&text);
         }
-    }
-
-    /// Adds lines to the log panel.
-    pub(super) fn push_log(&mut self, lines: &[String]) {
-        if lines.is_empty() {
-            return;
-        }
-        for line in lines {
-            self.log.extend(wrap(line, LOG_COLS));
-        }
-        let excess = self.log.len().saturating_sub(300);
-        self.log.drain(..excess);
-        // The box cannot be scrolled to its end, so it shows the newest lines.
-        let from = self.log.len().saturating_sub(LOG_ROWS);
-        self.log_view.get().set_text(&self.log[from..].join(
-            "
-",
-        ));
     }
 
     pub(super) fn set_status(&self, text: &str) {

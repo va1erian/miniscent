@@ -363,3 +363,22 @@ fn only_a_vista_layer_takes_a_value_past_the_plain_limit() {
     let centre_x = params(&layer)[3].1;
     assert_eq!(centre_x, 100_000.0);
 }
+
+#[test]
+fn a_new_layer_takes_the_first_free_layer_of_the_levels_vista() {
+    let mut st = level_with_room();
+    let slot_layer = |e: Entity| match e {
+        Entity::VistaLayer { slot, layer, .. } => (slot, layer),
+        _ => panic!("not a layer"),
+    };
+    st.place_entity(EntityKind::VistaLayer, [100.0, 8.0, 4.0]);
+    assert_eq!(slot_layer(selected_layer(&st)), (0, 0));
+    st.place_entity(EntityKind::VistaLayer, [120.0, 8.0, 4.0]);
+    assert_eq!(slot_layer(selected_layer(&st)), (0, 1));
+    // Field 1 is the layer: moving it to 3 leaves a gap at 1, which is filled.
+    st.edit_selected_entity(|e| {
+        set_param(e, 1, 3.0);
+    });
+    st.place_entity(EntityKind::VistaLayer, [140.0, 8.0, 4.0]);
+    assert_eq!(slot_layer(selected_layer(&st)), (0, 1));
+}

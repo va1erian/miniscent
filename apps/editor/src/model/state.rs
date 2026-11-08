@@ -302,8 +302,16 @@ impl EditorState {
         let id = self.doc.alloc_id();
         let mut made = k.make(p);
         // A layer maps the middle of the play space, which only the editor knows.
-        if let Entity::VistaLayer { centre, .. } = &mut made {
+        if let Entity::VistaLayer {
+            centre,
+            slot,
+            layer,
+            ..
+        } = &mut made
+        {
             *centre = self.vista_centre();
+            // A pair already taken would be ignored: only the first counts.
+            (*slot, *layer) = self.free_vista_layer().unwrap_or((0, 0));
         }
         let entity = EntityDef { id, entity: made };
         let mut cmds = Vec::new();

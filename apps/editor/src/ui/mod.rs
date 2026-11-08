@@ -9,6 +9,7 @@ mod icons;
 mod keys;
 mod layouts;
 mod level_dialog;
+mod log;
 mod manual_window;
 mod material_list;
 mod messages;

@@ -130,6 +130,14 @@ impl Studio {
         self.unplayable.as_ref().and_then(|u| u.entity)
     }
 
+    /// What stands in the way of the level now: its vista warnings, and why it
+    /// cannot be played, if it cannot.
+    pub fn problems(&self) -> Vec<String> {
+        let warnings = self.warned.iter().map(|w| format!("WARNING: {w}"));
+        let play = self.unplayable.iter().map(|u| format!("Cannot play: {}", u.why));
+        warnings.chain(play).collect()
+    }
+
     /// Forgets a Play that was waiting for the preview: the user went elsewhere.
     pub fn cancel_play_when_ready(&mut self) {
         self.play_pending = false;

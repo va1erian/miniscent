@@ -25,6 +25,8 @@ pub enum VistaWarning {
     LayerInSolid { slot: u8, layer: u8 },
     /// A wall shows this slot, and no layer feeds it: it shows the gradient.
     SlotWithoutLayer { slot: u8 },
+    /// Two layers share a slot and layer: only the first counts.
+    DuplicateLayer { slot: u8, layer: u8 },
     /// A mover's brush has a viewport face; a mover is never drawn as a hole.
     MoverWithViewport { group: String },
 }
@@ -40,6 +42,10 @@ impl fmt::Display for VistaWarning {
             Self::LayerInSolid { slot, layer } => write!(
                 f,
                 "vista slot {slot} layer {layer} has its position in solid and shows nothing"
+            ),
+            Self::DuplicateLayer { slot, layer } => write!(
+                f,
+                "two vista layers are slot {slot} layer {layer}: only the first counts;                  give the other a free layer"
             ),
             Self::SlotWithoutLayer { slot } => write!(
                 f,
@@ -76,6 +82,23 @@ fn movers_with_viewport(level: &Level) -> impl Iterator<Item = VistaWarning> + '
     })
 }
 
+/// A warning for each layer whose slot and layer an earlier one has; the level
+/// keeps only the first (`Level::vista_layers`).
+fn duplicate_layers(level: &Level) -> Vec<VistaWarning> {
+    let mut seen = Vec::new();
+    let mut out = Vec::new();
+    for e in &level.entities {
+        if let Entity::VistaLayer { slot, layer, .. } = *e {
+            if seen.contains(&(slot, layer)) {
+                out.push(VistaWarning::DuplicateLayer { slot, layer });
+            } else {
+                seen.push((slot, layer));
+            }
+        }
+    }
+    out
+}
+
 /// What is worth telling the mapper about the vistas of `level`. A level that
 /// cannot be compiled has none to judge, and a bad one is reported where it is
 /// built.
@@ -85,6 +108,7 @@ pub fn vista_warnings(level: &Level) -> Vec<VistaWarning> {
         return Vec::new();
     }
     let mut out: Vec<VistaWarning> = movers_with_viewport(level).collect();
+    out.extend(duplicate_layers(level));
     let csg = level.csg_brushes();
     let Ok(bsp) = compile(&csg) else {
         return out;
