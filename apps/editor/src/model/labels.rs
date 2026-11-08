@@ -3,9 +3,9 @@
 //! before it is applied, so the document stays one that can be saved.
 
 use super::command::Command;
-use crate::errors;
 use super::document::{Document, GroupDef, Id, LabelDef};
 use super::state::{EditorState, Selection};
+use crate::errors;
 use mscent_world::Op;
 
 /// The panel's name and tag fields, while being typed in.
@@ -197,6 +197,13 @@ impl EditorState {
     /// Which lines of the script name the selection, for the panel. Read only:
     /// the wiring lives in the script, and this shows where.
     pub fn script_uses(&self) -> String {
+        if self
+            .selected_entity()
+            .is_some_and(|e| !named_by_scripts(&e.entity))
+        {
+            return "Scripts cannot find this by name: they know enemies, markers,                     zones and movers"
+                .into();
+        }
         let (name, _) = self.selection_label();
         if name.is_empty() {
             return String::new();
@@ -217,6 +224,16 @@ impl EditorState {
             format!("Script lines: {}", found.join(", "))
         }
     }
+}
+
+/// Whether a script can find `e` by its name. The game lists names only for
+/// these (`mscent_game::arena`); other names are kept, but nothing reads them.
+fn named_by_scripts(e: &mscent_world::Entity) -> bool {
+    use mscent_world::Entity;
+    matches!(
+        e,
+        Entity::Enemy { .. } | Entity::Marker { .. } | Entity::Zone { .. }
+    )
 }
 
 #[cfg(test)]
@@ -424,6 +441,18 @@ mod tests {
         assert_eq!(st.sync_draft().0, "");
         st.selection = Some(Selection::Entity(a));
         assert_eq!(st.sync_draft().0, "here");
+    }
+
+    #[test]
+    fn a_kind_no_script_can_find_by_name_says_so() {
+        let mut st = EditorState::default();
+        st.place_entity(crate::model::EntityKind::Light, [0.0; 3]);
+        assert!(
+            st.script_uses()
+                .starts_with("Scripts cannot find this by name")
+        );
+        st.place_entity(crate::model::EntityKind::Marker, [0.0; 3]);
+        assert!(!st.script_uses().starts_with("Scripts cannot"));
     }
 
     #[test]

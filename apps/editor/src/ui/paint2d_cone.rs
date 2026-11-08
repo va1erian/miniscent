@@ -50,7 +50,8 @@ pub(super) fn segments(
     out
 }
 
-/// Draws a projector at `c`: a diamond, to tell it from a point light's disc, and
+/// Draws a projector at `c`: a triangle, to tell it from a point light's disc
+/// and a goal's diamond, and
 /// for the selected one (`Some(view axes)`) its cone as well.
 pub(super) fn projector(
     pen: &mut Pen,
@@ -80,7 +81,7 @@ pub(super) fn projector(
         }
     }
     let d = (r * 1.2) as i32;
-    let corners = [(0, -d), (d, 0), (0, d), (-d, 0)];
+    let corners = [(0, -d), (d, d), (-d, d)];
     let pts: Vec<Point> = corners
         .iter()
         .map(|&(x, y)| Point::new(c.x + x, c.y + y))

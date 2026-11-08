@@ -7,7 +7,6 @@ use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use mscent_world::Op;
 use xui::prelude::*;
 use xui::widget::{Dialog, FileDialog};
 
@@ -188,23 +187,29 @@ impl Editor {
             row().gap(2).children((tool_button(12), tool_button(13))),
         ));
         let op_button = |i: usize| {
-            let (tip, glyph) = OPS[i];
+            let (tip, glyph, _) = OPS[i];
             let root = root.clone();
             build(move |ui| IconButton::new(ui, &root, glyph, tip, Msg::NewOp(i))).bind(&app.ops[i])
         };
         let grid_names: Vec<String> = GRIDS.iter().map(|g| format!("{g}")).collect();
         let grid_refs: Vec<&str> = grid_names.iter().map(String::as_str).collect();
-        let palette = scroll(column().padding(8).gap(8).children((
-            group("Tools", tools),
-            group(
-                "New brush",
-                row().gap(2).children((op_button(0), op_button(1))),
-            ),
-            group(
-                "Grid size",
-                column().child(combo_box(&grid_refs).on_select(Msg::Grid).bind(&app.grid_box)),
-            ),
-        )));
+        let palette = scroll(
+            column().padding(8).gap(8).children((
+                group("Tools", tools),
+                group(
+                    "New brush",
+                    row().gap(2).children((op_button(0), op_button(1))),
+                ),
+                group(
+                    "Grid size",
+                    column().child(
+                        combo_box(&grid_refs)
+                            .on_select(Msg::Grid)
+                            .bind(&app.grid_box),
+                    ),
+                ),
+            )),
+        );
         let side = column().gap(4).children((
             scroll(column().child(app.panel.layout())).fill(1),
             group(
@@ -299,8 +304,8 @@ impl Editor {
         }
         let grid = GRIDS.iter().position(|g| *g == st.grid).unwrap_or(2);
         super::quiet::select(&self.grid_box.get(), grid);
-        for (i, op) in [Op::Subtract, Op::Add].into_iter().enumerate() {
-            self.ops[i].get().set_checked(st.new_op == op);
+        for (i, op) in OPS.iter().enumerate() {
+            self.ops[i].get().set_checked(st.new_op == op.2);
         }
         drop(st);
         self.sync_tex_menu();
@@ -401,7 +406,7 @@ impl App for Editor {
                 .borrow_mut()
                 .set_tool(TOOLS[i.min(TOOLS.len() - 1)].3),
             Msg::NewOp(i) => {
-                self.state.borrow_mut().new_op = if i == 0 { Op::Subtract } else { Op::Add };
+                self.state.borrow_mut().new_op = OPS[i.min(OPS.len() - 1)].2;
             }
             Msg::Grid(i) => self.state.borrow_mut().grid = GRIDS[i.min(GRIDS.len() - 1)],
             Msg::Face(m) => self.face_message(m),

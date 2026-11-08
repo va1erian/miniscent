@@ -13,6 +13,7 @@ use super::super::viewport::{Viewport, fit_camera};
 use super::*;
 use crate::model::Selection;
 use crate::model::View;
+use mscent_world::Op;
 use xui::widget::Placeable;
 
 /// What the step closure needs from the built app.

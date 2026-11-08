@@ -1,5 +1,6 @@
 //! The tool palette's contents and the window-wide keyboard shortcuts.
 
+use mscent_world::Op;
 use xui::icon::Lucide;
 use xui::widget::MenuId;
 use xui::{Key, Modifiers};
@@ -81,10 +82,19 @@ pub(super) const TOOLS: [(&str, Key, Glyph, Tool); 14] = [
     ),
 ];
 
-/// The new-brush operation buttons: tooltip and icon (index 0 is Subtract).
-pub(super) const OPS: [(&str, Glyph); 2] = [
-    ("New brush carves (subtract)", Glyph::Lucide(Lucide::Minus)),
-    ("New brush is solid (add)", Glyph::Lucide(Lucide::Plus)),
+/// The new-brush operation buttons: tooltip, icon and operation, in the order
+/// of the panel's Operation list.
+pub(super) const OPS: [(&str, Glyph, Op); 2] = [
+    (
+        "New brush is solid (add)",
+        Glyph::Lucide(Lucide::Plus),
+        Op::Add,
+    ),
+    (
+        "New brush carves (subtract)",
+        Glyph::Lucide(Lucide::Minus),
+        Op::Subtract,
+    ),
 ];
 
 /// A key's name for a tooltip.
@@ -222,10 +232,19 @@ mod tests {
 
     #[test]
     fn menus_show_every_key_of_a_command_and_the_key_does_it() {
-        assert_eq!(menu_label("&Redo", cmd::REDO), "&Redo   Ctrl+Y, Ctrl+Shift+Z");
+        assert_eq!(
+            menu_label("&Redo", cmd::REDO),
+            "&Redo   Ctrl+Y, Ctrl+Shift+Z"
+        );
         assert_eq!(menu_label("&Play", cmd::PLAY), "&Play   F5, Ctrl+R");
-        assert_eq!(menu_label("Level &settings...", cmd::LEVEL_SETTINGS), "Level &settings...   F8");
-        assert_eq!(menu_label("Open &showcase level", cmd::SHOWCASE), "Open &showcase level");
+        assert_eq!(
+            menu_label("Level &settings...", cmd::LEVEL_SETTINGS),
+            "Level &settings...   F8"
+        );
+        assert_eq!(
+            menu_label("Open &showcase level", cmd::SHOWCASE),
+            "Open &showcase level"
+        );
         for b in &BINDINGS {
             let mods = Modifiers {
                 ctrl: b.ctrl,
@@ -243,8 +262,14 @@ mod tests {
 
     #[test]
     fn tool_letters_and_escape_still_reach_the_editor() {
-        assert!(matches!(shortcut(Key::B, Modifiers::NONE), Some(Msg::Guarded(_))));
-        assert!(matches!(shortcut(Key::ESCAPE, Modifiers::NONE), Some(Msg::Escape)));
+        assert!(matches!(
+            shortcut(Key::B, Modifiers::NONE),
+            Some(Msg::Guarded(_))
+        ));
+        assert!(matches!(
+            shortcut(Key::ESCAPE, Modifiers::NONE),
+            Some(Msg::Escape)
+        ));
         let ctrl = Modifiers {
             ctrl: true,
             ..Modifiers::NONE
