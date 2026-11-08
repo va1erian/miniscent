@@ -26,7 +26,8 @@ cargo run --release -p mscent-editor -- --showcase
 # and the Texture Studio (docs/texture-studio.md, on the Texture menu): build a recipe,
 # read its pixels, undo, apply to the level, save and load it back; PNGs in <dir>/texture
 # the same session and the script workflow: load, edit, save, reload, four views, play, Esc, edit
-# again; open a sample, type with completion, see a mistake, play it, add a door, read the guide
+# again; open a sample, type with completion, see a mistake, play it, add a door, read the guide,
+# and open the editor manual (Help, F1) on every page; PNGs in <dir>/script-pane/manual-*.png
 cargo run --release -p mscent-editor -- --selftest target/shots/editor
 
 # gate
@@ -338,6 +339,7 @@ GUI itself was not driven by hand, only the model through the pointer API and th
 | M7.6 | Done | `apps/editor/src/build.rs` and `studio/preview.rs`: CSG, faces, portals and bake follow every edit in the background; invalid brushes are errors naming the problem (`build::tests`, `studio/preview_tests.rs`); lighting log shown in the panel |
 | M7.7 | Partial | `files.rs`, `model/document.rs`: save and load of brush and entity source (`.msl`); selftest round-trips 27 brushes and 13 entities; hostile files and missing paths are errors (`files::tests`). Format versioning was not tested |
 | M7.8 | Done | `studio.rs`, `studio/worker.rs`: Play runs `miniscent-game` in-process (default features off) on its own thread, Esc returns, edit then play again; selftest passes both plays and checks the document is untouched. Run headlessly only; not tried interactively with a real mouse |
+| M7.9 | Done | The editor manual, `assets/guide/editor.md`, in the editor under Help, Editor manual (F1), which opens on the page about the tool in hand (`manual.rs`, `ui/manual_window.rs`). It shares the scripting guide's Markdown subset (`pages.rs`) and HTML view (`ui/guide_html.rs`). Tests check that the Keys page lists every shortcut `ui/keys.rs` answers to and every palette tool by its key; the selftest lays out and snapshots every page. Rough edges found while writing it are issues 63 to 71 |
 
 ## M8 LazyOS port and release
 

@@ -1,14 +1,20 @@
 //! The guide of the script pane: pages laid out by their own thread and drawn,
 //! examples put in the script by a click on their link, and the guide in the
-//! pane's own window.
+//! pane's own window. And the editor manual: F1 opens it on the page about the
+//! tool in hand, each page is laid out and drawn in its window, and Esc's
+//! message closes it. The headless backend runs no second window's own
+//! messages, so the view's frames come here as the editor's message, as the
+//! window would forward them.
 
 use std::time::{Duration, Instant};
 
 use xui::xui_canvas::snapshot::Stage;
 
 use super::{Run, pump};
+use crate::manual;
+use crate::model::Tool;
 use crate::ui::script_pane::ScriptMsg;
-use crate::ui::{Msg, Probe, cmd};
+use crate::ui::{ManualMsg, Msg, Probe, cmd};
 use xui::widget::DialogAction;
 
 /// Paints until the guide has laid its page out, and once more to show it. The
@@ -167,4 +173,60 @@ pub(super) fn scaled(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         );
     }
     stage.emit(Msg::Script(ScriptMsg::Float(false)));
+}
+
+/// Draws frames until the page on show is laid out; whether it was.
+fn wait_for_page(stage: &Stage<'_, Msg>, probe: &Probe) -> bool {
+    let end = Instant::now() + Duration::from_secs(10);
+    while !probe.manual_ready() && Instant::now() < end {
+        let _ = probe.manual_picture();
+        stage.emit(Msg::Manual(ManualMsg::Frame));
+        pump(stage, 1);
+    }
+    // Once more, so the picture taken next has the page in it.
+    pump(stage, 3);
+    let _ = probe.manual_picture();
+    stage.emit(Msg::Manual(ManualMsg::Frame));
+    pump(stage, 2);
+    probe.manual_ready()
+}
+
+/// The window's picture as `name`; whether it was written.
+fn snapshot(run: &Run, probe: &Probe, name: &str) -> bool {
+    let shot = probe.manual_picture();
+    matches!(
+        shot.map(|img| img.map(|img| img.save_png(run.dir.join(name)))),
+        Some(Ok(Ok(())))
+    )
+}
+
+pub(super) fn manual(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
+    probe.state().borrow_mut().set_tool(Tool::Voxel);
+    stage.emit(Msg::Menu(cmd::MANUAL));
+    pump(stage, 2);
+    run.check(
+        probe.manual_topic() == Some(manual::topic_for(Tool::Voxel)),
+        "F1 opens the manual on the page about the tool in hand",
+    );
+    let pages = manual::pages();
+    for (i, page) in pages.iter().enumerate() {
+        stage.emit(Msg::Manual(ManualMsg::Topic(i)));
+        let ready = wait_for_page(stage, probe);
+        run.check(ready, &format!("the page {:?} is laid out", page.title));
+        let name = format!(
+            "manual-{i:02}-{}.png",
+            page.title.replace([' ', ':', ','], "-")
+        );
+        run.check(snapshot(run, probe, &name), &format!("snapshot of {name}"));
+    }
+    probe.state().borrow_mut().set_tool(Tool::Select);
+    stage.emit(Msg::Menu(cmd::MANUAL));
+    pump(stage, 1);
+    run.check(
+        probe.manual_topic() == Some(manual::topic_for(Tool::Select)),
+        "F1 again turns the open manual to the tool now in hand",
+    );
+    stage.emit(Msg::Manual(ManualMsg::Close));
+    pump(stage, 1);
+    run.check(probe.manual_topic().is_none(), "Esc closes the manual");
 }
