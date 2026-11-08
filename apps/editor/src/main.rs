@@ -10,6 +10,10 @@
 //!   adds the material to `<dir>/materials.txt` if there is one.
 //! * `--ui-timing [dir] [WxH]` prints what the UI thread's everyday work costs,
 //!   in a window of 1280x800 or `WxH` pixels.
+//! * `--canvas` uses the software backend where Direct2D is the default.
+//! * `--live-timing [level.msl]` opens the real window on the voxel cave (or the
+//!   level given), drags, sculpts and flies on a script, prints how often each
+//!   part of the window painted, and quits.
 
 // `--selftest` and `--ui-timing` need the canvas backend, so without it the probes and
 // accessors they alone use would warn as dead code.
@@ -76,6 +80,7 @@ fn main() -> xui::backend::Result<()> {
     if let Some(ms) = slow {
         studio::worker::set_slow_ms(ms);
     }
+    let live = args.iter().any(|a| a == "--live-timing");
     let showcase = args.iter().any(|a| a == "--showcase")
         || std::env::var_os("MSCENT_EDITOR_SHOWCASE").is_some();
     let path = args
@@ -87,40 +92,66 @@ fn main() -> xui::backend::Result<()> {
         })
         .map(|(_, a)| a)
         .map(std::path::PathBuf::from);
+    let path = path.or_else(|| live.then(live_level));
     let make = move |ui: &mut xui::app::Ui<ui::Msg>| {
-        if let Some(p) = &path {
-            return match files::load(p) {
-                Ok(doc) => Editor::build_from(ui, doc, Some(p.clone()), None),
-                Err(e) => Editor::build_from(ui, Document::new(), None, Some(e)),
-            };
+        let mut editor = open(ui, path.as_deref(), showcase)?;
+        editor.start_ticks(ui);
+        if live {
+            editor.start_live(ui);
         }
-        let doc = if showcase {
-            Document::from_level(&mscent_world::showcase_level())
-        } else {
-            Document::new()
-        };
-        Editor::build(ui, doc)
+        Ok(editor)
     };
-    launch(make)
+    launch(make, args.iter().any(|a| a == "--canvas"))
 }
 
-/// Opens the editor window on the Direct2D backend.
-#[cfg(feature = "d2d")]
-fn launch<F>(make: F) -> xui::backend::Result<()>
+/// The level `--live-timing` opens when given none: the voxel cave.
+fn live_level() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/levels/voxel-cave.msl")
+}
+
+/// The editor on `path`, the showcase or an empty level.
+fn open(
+    ui: &mut xui::app::Ui<ui::Msg>,
+    path: Option<&std::path::Path>,
+    showcase: bool,
+) -> xui::backend::Result<Editor> {
+    if let Some(p) = path {
+        return match files::load(p) {
+            Ok(doc) => Editor::build_from(ui, doc, Some(p.to_path_buf()), None),
+            Err(e) => Editor::build_from(ui, Document::new(), None, Some(e)),
+        };
+    }
+    let doc = if showcase {
+        Document::from_level(&mscent_world::showcase_level())
+    } else {
+        Document::new()
+    };
+    Editor::build(ui, doc)
+}
+
+/// Opens the editor window: on Direct2D where it is built in, unless
+/// `--canvas` asks for the software backend.
+fn launch<F>(make: F, canvas: bool) -> xui::backend::Result<()>
 where
     F: FnOnce(&mut xui::app::Ui<ui::Msg>) -> xui::backend::Result<Editor>,
 {
-    xui::app("miniscent editor")
-        .size(1280, 800)
-        .backend(std::rc::Rc::new(xui_d2d::D2dBackend::new()))
-        .run(make)
-}
-
-/// Opens the editor window on the software backend.
-#[cfg(all(feature = "canvas", not(feature = "d2d")))]
-fn launch<F>(make: F) -> xui::backend::Result<()>
-where
-    F: FnOnce(&mut xui::app::Ui<ui::Msg>) -> xui::backend::Result<Editor>,
-{
-    xui::app("miniscent editor").size(1280, 800).run(make)
+    let app = xui::app("miniscent editor").size(1280, 800);
+    #[cfg(all(windows, feature = "d2d"))]
+    if !canvas {
+        return app
+            .backend(std::rc::Rc::new(xui_d2d::D2dBackend::new()))
+            .run(make);
+    }
+    #[cfg(feature = "canvas")]
+    {
+        let _ = canvas;
+        app.run(make)
+    }
+    #[cfg(not(feature = "canvas"))]
+    {
+        let _ = (app, make, canvas);
+        Err(xui::backend::BackendError::Unsupported(
+            "no backend built in",
+        ))
+    }
 }

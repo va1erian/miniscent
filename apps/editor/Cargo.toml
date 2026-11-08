@@ -29,10 +29,14 @@ xui-blitz = { git = "https://github.com/va1erian/xui", rev = "91eea5418203251a5c
 xui-d2d = { git = "https://github.com/va1erian/xui", rev = "91eea5418203251a5c23cd6a06e96f2f7d1650b3", optional = true }
 
 [features]
+# Both backends: Direct2D draws the window on Windows (`--canvas` for the
+# software one), and the headless selftest harness always needs canvas. Elsewhere
+# d2d builds nothing and canvas draws the window.
+default = ["canvas", "d2d"]
 # The software backend (winit + tiny-skia) and the headless selftest harness.
-default = ["canvas"]
 canvas = ["xui/canvas"]
 # The lightweight Windows backend: Direct2D and DirectWrite, native file dialogs.
+# It feels faster than canvas: it repaints only what changed and draws on the GPU.
 d2d = ["dep:xui-d2d"]
 
 [dev-dependencies]

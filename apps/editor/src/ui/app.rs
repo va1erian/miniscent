@@ -77,6 +77,8 @@ pub struct Editor {
     /// Everything but the menu and the status bar, while the level is showing.
     pub(super) work_host: Handle<xui::widget::Panel<Msg>>,
     pub(super) tex: Workspace,
+    /// The frame tick's beat and `--live-timing`'s script.
+    pub(super) clock: super::live::Clock,
 }
 
 impl Editor {
@@ -145,6 +147,7 @@ impl Editor {
             eye_moved: std::time::Instant::now(),
             work_host: Handle::new(),
             tex,
+            clock: super::live::Clock::default(),
         };
         app.panel.attach(ui);
         app.tex.attach(ui);
@@ -240,7 +243,6 @@ impl Editor {
         )?;
         ui.on_key(shortcut);
         ui.on_close(|| Some(Msg::CloseRequested));
-        ui.every(16, Msg::Tick);
         app.play.get().set_visible(false);
         app.tex.set_visible(false);
         app.set_disposition(Disposition::Quad);
@@ -441,9 +443,10 @@ impl App for Editor {
             }
             Msg::View(ViewEvent::Changed) => {}
             Msg::Tick | Msg::Step => {
-                self.advance();
+                super::meter::time(super::meter::Lane::Tick, || self.advance());
                 return;
             }
+            Msg::Live => return self.live_message(ui),
             Msg::Guarded(inner) => {
                 // Enter answers what the workspace has on top, from the name field too.
                 if matches!(*inner, Msg::Menu(cmd::SLICE))
