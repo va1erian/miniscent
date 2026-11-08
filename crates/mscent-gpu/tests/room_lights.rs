@@ -32,6 +32,7 @@ struct OnGpu {
 
 fn on_gpu(gpu: Gpu, brushes: Vec<Brush>) -> OnGpu {
     let level = Level {
+        kinds: Vec::new(),
         brushes,
         entities: Vec::new(),
         labels: Vec::new(),

@@ -14,7 +14,7 @@ use super::facepanel::FacePanel;
 use super::material_list::MaterialChoices;
 use super::quiet;
 use super::voxelpanel::{VoxelPanel, VoxelProp, apply as apply_voxel};
-use crate::model::entity::{entity_name, params, pos, set_param, with_pos};
+use crate::model::entity::{clamp_kind, entity_name, params, pos, set_param, with_pos};
 use crate::model::fields::{Limit, limits};
 use crate::model::{EditorState, Shape, Tool};
 
@@ -442,8 +442,12 @@ pub fn apply(st: &mut EditorState, prop: Prop) -> bool {
             *e = with_pos(e, p);
         }),
         Prop::Param(i, v) => {
+            let kinds = st.doc.kind_count();
             let mut note = None;
-            let changed = st.edit_selected_entity(|e| note = set_param(e, i, v));
+            let changed = st.edit_selected_entity(|e| {
+                note = set_param(e, i, v);
+                note = clamp_kind(e, kinds).or(note.take());
+            });
             if let Some(note) = note {
                 st.message = note;
             }

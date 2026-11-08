@@ -19,6 +19,7 @@ use mscent_world::materials::{NO_DRAW, view_slot};
 use mscent_world::voxel::{ChunkMesh, VoxelWorld};
 use mscent_world::{Bsp, Face, Level, Portals, brush_faces, compile, extract_faces};
 
+use super::kinds::{Design, designs_of, spawns_of};
 use super::setup::{actors_of, lights_of, with_level_fog};
 use super::vista::Vistas;
 use super::{
@@ -74,6 +75,9 @@ pub(super) struct Parts {
     /// The lamps of the play space: meshes and voxels light without shadows.
     pub play_lights: Vec<PointLight>,
     pub actors: Vec<Actor>,
+    /// The enemy kinds, built, and where the level's enemies start.
+    pub designs: Vec<Design>,
+    pub spawns: Vec<(mscent_math::Vec3, u8)>,
     pub cfg: BuildConfig,
     pub voxels: VoxelWorld,
     /// The surface cells of `voxels`, which the lightmap holds a record for each of.
@@ -200,6 +204,8 @@ impl Compiled {
             lights,
             play_lights,
             actors: actors_of(level),
+            designs: designs_of(level)?,
+            spawns: spawns_of(level),
             cfg: with_level_fog(cfg, level),
             voxels,
             sites,

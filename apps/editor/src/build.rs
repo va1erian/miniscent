@@ -173,6 +173,7 @@ pub fn validate(doc: &Document) -> Result<Level, String> {
         return Err(format!("entity {} has an out-of-range value", i + 1));
     }
     let level = Level {
+        kinds: doc.kinds().to_vec(),
         brushes,
         entities,
         volumes,
@@ -180,6 +181,7 @@ pub fn validate(doc: &Document) -> Result<Level, String> {
         mover_groups: doc.export_groups(),
     };
     level.check_labels().map_err(errors::label)?;
+    level.check_kinds().map_err(errors::kinds)?;
     Ok(level)
 }
 

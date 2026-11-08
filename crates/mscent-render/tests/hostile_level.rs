@@ -180,7 +180,7 @@ fn hostile_views_sizes_and_actors_do_not_panic() {
     ];
     let actors = [
         Actor {
-            kind: ActorKind::Enemy,
+            kind: ActorKind::Crate,
             pos: Vec3::new(nan, 0.0, 0.0),
             yaw: nan,
         },
@@ -190,7 +190,7 @@ fn hostile_views_sizes_and_actors_do_not_panic() {
             yaw: 1.0e30,
         },
         Actor {
-            kind: ActorKind::Enemy,
+            kind: ActorKind::Crate,
             pos: eye() + Vec3::new(0.0, 1.0, 0.0),
             yaw: 0.0,
         },

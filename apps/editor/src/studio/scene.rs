@@ -158,12 +158,16 @@ impl Scene for LevelScene {
             view: &req.view,
             quality: Quality::High,
             actors: renderer.actors(),
-            effects: Effects::default(),
+            // The level's enemies as their kinds' models, where they start.
+            effects: Effects {
+                models: renderer.assets().spawn_models(),
+                ..Effects::default()
+            },
             // Only the face tool's tint is cut by what is in front.
             wants_depth: !req.highlights.tinted.is_empty(),
         };
         if !self.gpu.draw(renderer.assets(), fb, &frame) {
-            renderer.render(fb, &req.view, Quality::High, renderer.actors(), None)?;
+            renderer.draw_frame(fb, &frame)?;
         }
         if !req.highlights.is_empty()
             && let Some(cam) = req

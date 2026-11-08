@@ -8,7 +8,7 @@ use mscent_game::LoadError;
 use mscent_render::BuildError;
 use mscent_world::format::FormatError;
 use mscent_world::lightmap::LightmapError;
-use mscent_world::{BrushError, CsgError, Entity, LabelError};
+use mscent_world::{BrushError, CsgError, Entity, KindError, LabelError};
 
 use crate::model::entity::entity_name;
 
@@ -29,6 +29,28 @@ pub fn label(e: LabelError) -> String {
         LabelError::MoverNotAdd => {
             "A mover must be an add brush: a moving hole has no meaning".into()
         }
+    }
+}
+
+/// What is wrong with the level's enemy kinds. Kinds and entities count from 1.
+pub fn kinds(e: KindError) -> String {
+    let n = |i: usize| i.saturating_add(1);
+    match e {
+        KindError::TooMany => "The level has more enemy kinds than it may hold (32)".into(),
+        KindError::BadName(i) => format!(
+            "Enemy kind {} needs a name of lower-case letters, digits, _ and -, at most 32",
+            n(i)
+        ),
+        KindError::DuplicateName(i) => format!("Enemy kind {} has the name of another", n(i)),
+        KindError::BadStats(i) => format!("Enemy kind {} has a stat out of range", n(i)),
+        KindError::BadBlueprint(i) => {
+            format!("Enemy kind {} has a design that does not read", n(i))
+        }
+        KindError::TooCostly => "The enemy kinds would take too long to build: simplify one".into(),
+        KindError::NoSuchKind(i) => format!(
+            "Enemy (entity {}) names a kind the level does not have",
+            n(i)
+        ),
     }
 }
 
@@ -64,6 +86,7 @@ pub fn format(e: FormatError) -> String {
         FormatError::BadTexInfo => "a texture mapping is out of range".into(),
         FormatError::BadVolume => "a voxel volume is invalid or overlaps another".into(),
         FormatError::Labels(l) => label(l),
+        FormatError::Kinds(k) => kinds(k),
     }
 }
 
@@ -84,6 +107,9 @@ pub fn build(e: BuildError) -> String {
         BuildError::Csg(c) => csg(c).into(),
         BuildError::Bake(l) => lighting(l).into(),
         BuildError::Materials(id) => format!("the material table is missing stock material {id}"),
+        BuildError::Model(i) => {
+            format!("enemy kind {}'s design will not build", i.saturating_add(1))
+        }
     }
 }
 
@@ -117,6 +143,8 @@ pub fn load(e: LoadError, entities: &[Entity]) -> (String, Option<usize>) {
             Some(i),
         ),
         LoadError::Labels(l) => (label(l), None),
+        LoadError::Kinds(KindError::NoSuchKind(i)) => (kinds(KindError::NoSuchKind(i)), Some(i)),
+        LoadError::Kinds(k) => (kinds(k), None),
     }
 }
 
@@ -155,5 +183,20 @@ mod tests {
                 .any(|w| w.chars().skip(1).any(char::is_uppercase));
             assert!(!camel, "{text}");
         }
+    }
+
+    #[test]
+    fn an_enemy_past_the_kinds_is_named_from_one_and_blamed() {
+        let (text, who) = load(LoadError::Kinds(KindError::NoSuchKind(2)), &[]);
+        assert_eq!(
+            text,
+            "Enemy (entity 3) names a kind the level does not have"
+        );
+        assert_eq!(who, Some(2));
+        let (text, who) = load(LoadError::Kinds(KindError::BadStats(0)), &[]);
+        assert_eq!(
+            (text.as_str(), who),
+            ("Enemy kind 1 has a stat out of range", None)
+        );
     }
 }

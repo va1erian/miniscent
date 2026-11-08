@@ -39,6 +39,7 @@ fn renderer(divider: bool) -> LevelRenderer {
         ));
     }
     let level = Level {
+        kinds: Vec::new(),
         brushes,
         entities: vec![Entity::Light {
             pos: v(-5.0, 0.0, 5.0),
@@ -72,7 +73,7 @@ fn placed(r: &LevelRenderer, pos: Vec3, radius: f32, color: f32) -> DynLight {
 
 fn enemy_at(pos: Vec3) -> Actor {
     Actor {
-        kind: ActorKind::Enemy,
+        kind: ActorKind::Crate,
         pos,
         yaw: 0.0,
     }

@@ -154,9 +154,9 @@ impl GameSession {
             Arena::from_level(level)
         }
         .map_err(SessionError::Load)?;
-        let ship = Ship::build(&materials);
-        let renderer = LevelRenderer::from_level_cached(level, materials, &cfg.build, cache)
+        let mut renderer = LevelRenderer::from_level_cached(level, materials, &cfg.build, cache)
             .map_err(SessionError::Build)?;
+        let ship = Ship::build(&mut renderer);
         let mut session = Self::with_renderer(arena, renderer, cfg);
         session.ship = ship;
         Ok(session)
@@ -215,6 +215,9 @@ impl GameSession {
     /// lighting for the same level arrives while it is being played.
     pub fn set_renderer(&mut self, renderer: LevelRenderer) {
         self.renderer = renderer;
+        if let Some(ship) = &mut self.ship {
+            ship.add_to(&mut self.renderer);
+        }
     }
 
     /// Sets off a blast. Nothing in the game does this yet; damage from one is

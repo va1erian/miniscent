@@ -100,17 +100,19 @@ pub(crate) struct ScriptState {
 }
 
 impl ScriptState {
-    pub(crate) fn new(zones: usize, enemies: usize) -> Self {
+    /// `kinds` are the level's, which scripts find by name and build on.
+    pub(crate) fn new(zones: usize, enemies: usize, kinds: &[crate::KindPlay]) -> Self {
         Self {
             handlers: Vec::new(),
             tags: Vec::new(),
             enemy_tags: vec![Vec::new(); enemies],
             prop_tags: Vec::new(),
             prop_kinds: built_in_kinds(),
-            kinds: vec![
-                ("drone".to_string(), 0, crate::stats_for(0)),
-                ("hunter".to_string(), 1, crate::stats_for(1)),
-            ],
+            // At most `MAX_LEVEL_KINDS`, so every index fits a `u8`.
+            kinds: (0u8..)
+                .zip(kinds)
+                .map(|(i, k)| (k.name.clone(), i, k.stats))
+                .collect(),
             inventory: Vec::new(),
             messages: Vec::new(),
             errors: Vec::new(),
@@ -205,7 +207,11 @@ impl Game {
 
     /// Starts the script over, from a fresh copy of the loaded program.
     pub(crate) fn start_script(&mut self) {
-        self.script = ScriptState::new(self.arena.zones.len(), self.enemies.len());
+        self.script = ScriptState::new(
+            self.arena.zones.len(),
+            self.enemies.len(),
+            &self.arena.kinds,
+        );
         self.tag_level_enemies();
         let Some(mut vm) = self.script_program.clone() else {
             self.vm = None;

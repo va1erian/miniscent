@@ -17,7 +17,11 @@
 //! zone 0 10 0  2 2 2  name hall  tag alarm        # x y z, half sizes
 //! vista 0 0 0  0 0 0  0 0 0.0625  0 0 0.1  0 0  0 1e5  0x8090a0  # see below
 //! mover vault_door  tag doors  brushes 1 2        # brush lines, counted from 0
+//! kind hornet hp=40 radius=0.75 ...  then | blueprint lines, then end
 //! ```
+//!
+//! A `kind` block is an enemy kind, in `level_text/kinds.rs`; an `enemy` line's kind
+//! counts them from 0, and a level with none plays the stock drone and hunter.
 //!
 //! A `projector` line is a spot light: yaw and pitch in radians (pitch -1.57 shines
 //! straight down), then the cone's inner and outer half angles in radians, full
@@ -42,11 +46,13 @@
 use crate::brush::{Brush, Op};
 use crate::entity::{Entity, Level};
 use crate::format::{self, MAX_BRUSHES, MAX_ENTITIES, MAX_FILE_BYTES};
+use crate::kinds::MAX_LEVEL_KINDS;
 use crate::labels::{EntityLabel, MoverGroup};
 use crate::texinfo::TexInfo;
 use mscent_math::{DPlane, Vec3, Vec3d};
 use std::fmt::Write as _;
 
+mod kinds;
 mod mountains;
 mod words;
 
@@ -71,6 +77,9 @@ impl std::fmt::Display for TextError {
 /// Writes `level` as text. [`from_text`] reads it back to an equal level.
 pub fn to_text(level: &Level) -> String {
     let mut out = format!("{HEADER}\n");
+    for k in &level.kinds {
+        out += &kinds::kind_text(k);
+    }
     for b in &level.brushes {
         out += &brush_line(b);
     }
@@ -458,7 +467,17 @@ pub fn from_text(text: &str) -> Result<Level, TextError> {
         });
     }
     let mut level = Level::default();
-    for (i, line) in lines {
+    while let Some((i, line)) = lines.next() {
+        if kinds::opens(line) {
+            if level.kinds.len() >= MAX_LEVEL_KINDS {
+                return Err(TextError {
+                    line: i + 1,
+                    msg: "too many kinds".to_string(),
+                });
+            }
+            level.kinds.push(kinds::read(i + 1, line, &mut lines)?);
+            continue;
+        }
         read_line(&mut level, line).map_err(|msg| TextError { line: i + 1, msg })?;
     }
     // The binary reader is the one judge of what a level may be.

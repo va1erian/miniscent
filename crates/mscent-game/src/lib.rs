@@ -33,10 +33,12 @@ pub mod arena;
 pub mod combat;
 pub mod destruct;
 pub mod enemy;
+mod facing;
 pub mod fx;
 pub mod game;
 pub mod hud;
 pub mod input;
+pub mod kind;
 pub mod menu;
 pub mod mover;
 pub mod player;
@@ -57,6 +59,7 @@ pub use enemy::{AiState, Enemy, EnemyStats, Faction, stats_for};
 pub use game::{Event, Game, Phase, Shooter, Struck};
 pub use hud::{HudModel, draw_hud, draw_menu};
 pub use input::Input;
+pub use kind::{KindPlay, kinds_of, stats_of};
 pub use menu::{Menu, MenuAction, MenuCommand, Screen};
 pub use mover::{Mover, MoverError, WhenBlocked};
 pub use player::Player;
@@ -80,6 +83,8 @@ mod enemy_tests;
 mod game_tests;
 #[cfg(test)]
 mod hud_tests;
+#[cfg(test)]
+mod kind_tests;
 #[cfg(test)]
 mod mover_tests;
 #[cfg(test)]

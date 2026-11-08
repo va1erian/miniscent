@@ -6,9 +6,11 @@ use mscent_game::Screen;
 use mscent_game::fx::combat::ViewKick;
 use mscent_math::{Quat, Vec3};
 use mscent_render::model::{ModelInstance, ModelTable};
+
+use crate::drawn::enemy_models;
 use mscent_render::particles::{ParticleDraws, SpriteBank};
 use mscent_render::{
-    Actor, DynLight, Effects, FrameInput, FrameRenderer, Framebuffer, LevelAssets, MoverPose,
+    Actor, DynLight, Effects, FrameInput, Framebuffer, LevelAssets, LevelRenderer, MoverPose,
     Quality, View, layer_over, simd,
 };
 
@@ -72,14 +74,6 @@ impl GameSession {
         Some(self.ship.as_ref()?.instance(pos, turn, self.chase))
     }
 
-    /// What a frame draws models with: the ship, if there is one.
-    fn ship_models<'a>(
-        ship: Option<&'a crate::ship::Ship>,
-        instance: &'a Option<ModelInstance>,
-    ) -> Option<(&'a ModelTable, &'a [ModelInstance])> {
-        Some(ship?.models(instance.as_ref()?))
-    }
-
     /// Seconds of play for what a vista does over time: the fixed steps simulated
     /// so far plus the part of the next one, never a wall clock, so a scripted
     /// shot is the same every run. It stands still while the game does.
@@ -110,7 +104,7 @@ impl GameSession {
             lights: self.fx.lights(self.renderer.scene()),
             poses: &at.poses,
             vista_time: at.vista_time,
-            models: Self::ship_models(self.ship.as_ref(), &at.ship),
+            models: models_of(&self.renderer, &at),
         };
         let input = FrameInput {
             view: &at.view,
@@ -124,7 +118,7 @@ impl GameSession {
             Some(())
         } else {
             self.renderer
-                .draw(&mut fb, &software_input(&input))
+                .draw_frame(&mut fb, &software_input(&input, at.enemies))
                 .map(|_| ())
         };
         if drawn.is_some() {
@@ -154,7 +148,7 @@ impl GameSession {
         let at = self.prepare(world);
         self.draw_over(&mut layer, &at.view);
         let lights = self.fx.lights(self.renderer.scene());
-        let models = Self::ship_models(self.ship.as_ref(), &at.ship);
+        let models = models_of(&self.renderer, &at);
         let input = frame_input(
             &at,
             (&self.draws, &self.bank),
@@ -167,7 +161,7 @@ impl GameSession {
             // The particles were placed on a screen of the world's size.
             let at = self.prepare(layer_size);
             let lights = self.fx.lights(self.renderer.scene());
-            let models = Self::ship_models(self.ship.as_ref(), &at.ship);
+            let models = models_of(&self.renderer, &at);
             let input = frame_input(
                 &at,
                 (&self.draws, &self.bank),
@@ -177,7 +171,7 @@ impl GameSession {
             let mut frame = take_sized(&mut self.fb, layer_size)?;
             if self
                 .renderer
-                .draw(&mut frame, &software_input(&input))
+                .draw_frame(&mut frame, &software_input(&input, at.enemies))
                 .is_some()
             {
                 if self.kick.white > 0 {
@@ -223,12 +217,16 @@ impl GameSession {
             None => self.draws.clear(),
         }
         self.estimate = estimate;
+        let mut models = enemy_models(&self.game, alpha, self.renderer.assets());
+        let enemies = models.len();
+        models.extend(self.ship_now());
         Prepared {
             view,
-            actors: actors_of(&self.game, alpha),
+            actors: actors_of(&self.game),
             poses: mover_poses_of(&self.game, alpha),
             vista_time: self.vista_time(),
-            ship: self.ship_now(),
+            models,
+            enemies,
         }
     }
 
@@ -269,7 +267,10 @@ struct Prepared {
     actors: Vec<Actor>,
     poses: Vec<MoverPose>,
     vista_time: f32,
-    ship: Option<ModelInstance>,
+    /// The enemies, then the player's ship if there is one.
+    models: Vec<ModelInstance>,
+    /// How many of `models` are enemies.
+    enemies: usize,
 }
 
 /// The framebuffer in `slot`, made again at `size` if it is not that size.
@@ -281,20 +282,31 @@ fn take_sized(slot: &mut Option<Framebuffer>, (width, height): (u32, u32)) -> Op
     }
 }
 
-/// `input` as software draws it: without the player's ship, which only the
-/// hardware renderer draws (and shadows), so that a chase view's ship is not
-/// drawn by whichever renderer happens to be in use.
-fn software_input<'a>(input: &FrameInput<'a>) -> FrameInput<'a> {
+/// `input` as software draws it: its first `enemies` models, without the
+/// player's ship after them, which only the hardware renderer draws (and
+/// shadows), so that a chase view's ship is not drawn by whichever renderer
+/// happens to be in use.
+fn software_input<'a>(input: &FrameInput<'a>, enemies: usize) -> FrameInput<'a> {
+    let models = input.effects.models;
     FrameInput {
         view: input.view,
         quality: input.quality,
         actors: input.actors,
         effects: Effects {
-            models: None,
+            models: models.map(|(table, all)| (table, &all[..enemies.min(all.len())])),
             ..input.effects
         },
         wants_depth: input.wants_depth,
     }
+}
+
+/// What a frame draws models with: the level's table, and the enemies and the
+/// ship where `at` has them.
+fn models_of<'a>(
+    renderer: &'a LevelRenderer,
+    at: &'a Prepared,
+) -> Option<(&'a ModelTable, &'a [ModelInstance])> {
+    Some((renderer.assets().models(), &at.models))
 }
 
 /// The world of a frame `at` describes, with nothing read back after it.

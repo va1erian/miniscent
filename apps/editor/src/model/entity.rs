@@ -217,6 +217,20 @@ pub fn params(e: &Entity) -> Vec<(&'static str, f64)> {
     }
 }
 
+/// Holds an enemy's kind inside a table of `count` kinds, since a level whose
+/// enemy names a kind past its table does not load. What to tell the user when
+/// it had to.
+pub fn clamp_kind(e: &mut Entity, count: usize) -> Option<String> {
+    let Entity::Enemy { kind, .. } = e else {
+        return None;
+    };
+    let last = u8::try_from(count.saturating_sub(1)).unwrap_or(u8::MAX);
+    (*kind > last).then(|| {
+        *kind = last;
+        format!("Kind must be 0 to {last}: set to {last}")
+    })
+}
+
 /// Sets field `i` of [`params`], held to its limits. What to tell the user: the
 /// value was clamped, or was not a number and changed nothing. Out-of-range
 /// indices change nothing.

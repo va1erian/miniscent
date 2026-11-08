@@ -62,18 +62,16 @@ fn constructors_validate() {
     };
     assert!(Mesh::new(vec![v, v], vec![bad]).is_none(), "index 2 of 2");
     assert!(Mesh::new(vec![v, v, v], vec![bad]).is_some());
-    // Enemy: body 8x14 sphere (196), two horns 10 each, eye 4x8 sphere (48).
-    assert_eq!(Mesh::enemy().triangles().len(), 196 + 20 + 48);
     assert_eq!(Mesh::goal().triangles().len(), 56);
 }
 
 #[test]
 fn every_angle_shows_the_mesh_and_the_silhouette_varies() {
     let lighting = MeshLighting::default();
-    let enemy = Mesh::enemy();
+    let mesh = Mesh::goal();
     let mut shapes = Vec::new();
     for (yaw, pitch) in [(0.0, 0.0), (1.2, 0.0), (2.5, 0.3), (4.0, -0.3), (0.0, 1.2)] {
-        let fb = render(&enemy, &camera(yaw, pitch, 3.2), &lighting);
+        let fb = render(&mesh, &camera(yaw, pitch, 3.2), &lighting);
         let n = covered(&fb);
         assert!(n > 25 && n < 300, "yaw {yaw} pitch {pitch}: {n} pixels");
         shapes.push(silhouette(&fb));
@@ -126,7 +124,7 @@ fn light_comes_from_the_sun_side() {
 
 #[test]
 fn point_light_brightens_nearby_surfaces() {
-    let enemy = Mesh::enemy();
+    let mesh = Mesh::goal();
     let dark = MeshLighting {
         ambient: 0.2,
         sun: 0.0,
@@ -141,7 +139,7 @@ fn point_light_brightens_nearby_surfaces() {
     let cam = camera(core::f32::consts::FRAC_PI_2, 0.0, 3.2);
     let sum =
         |fb: &Framebuffer| -> u64 { fb.pixels().iter().map(|&p| u64::from((p >> 8) & 255)).sum() };
-    assert!(sum(&render(&enemy, &cam, &near)) > sum(&render(&enemy, &cam, &dark)));
+    assert!(sum(&render(&mesh, &cam, &near)) > sum(&render(&mesh, &cam, &dark)));
 }
 
 #[test]
@@ -185,12 +183,12 @@ fn fog_pulls_colour_toward_the_fog_colour() {
     draw_mesh(
         &mut fb,
         &cam,
-        &Mesh::enemy(),
+        &Mesh::goal(),
         &pose(),
         &MeshLighting::default(),
         fog,
     );
-    let plain = render(&Mesh::enemy(), &cam, &MeshLighting::default());
+    let plain = render(&Mesh::goal(), &cam, &MeshLighting::default());
     let blue = |fb: &Framebuffer| -> u64 { fb.pixels().iter().map(|&p| u64::from(p & 255)).sum() };
     assert!(blue(&fb) > blue(&plain));
 }

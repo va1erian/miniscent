@@ -7,7 +7,7 @@
 //! coordinates. [`LevelRenderer::render`] then draws a frame through the
 //! portal-culled BSP walk with the baked light, bump mapping and specular
 //! chosen by [`Quality`], distance fog, a sky gradient behind everything,
-//! the level's enemy and goal meshes and an optional HUD.
+//! the level's enemies as their kinds' models, the goal's mesh and an optional HUD.
 
 mod assets;
 mod cache;
@@ -16,6 +16,7 @@ mod config;
 mod effects;
 mod fill;
 mod frame;
+mod kinds;
 mod movers;
 mod overlay;
 mod setup;
@@ -88,6 +89,8 @@ pub enum BuildError {
     /// The material table does not hold the stock materials at their ids; the
     /// value is the first id that is wrong.
     Materials(u16),
+    /// The enemy kind at this index has a model that will not build.
+    Model(usize),
 }
 
 /// A change to a level's voxel surfaces that needs no compile.
@@ -203,9 +206,20 @@ impl LevelRenderer {
         self.assets.config()
     }
 
-    /// The level's own enemies and goal, at their spawn points.
+    /// The level's own goal, at its place. Enemies are models:
+    /// [`LevelAssets::spawn_models`].
     pub fn actors(&self) -> &[Actor] {
         self.assets.actors()
+    }
+
+    /// Adds a model beyond the level's kinds, the player's ship, to the table
+    /// frames draw from, with its skins from the level's materials.
+    pub fn add_model(
+        &mut self,
+        blueprint: &mscent_world::model::Blueprint,
+        model: &mscent_world::model::Model,
+    ) -> crate::model::ModelId {
+        self.assets.add_model(blueprint, model)
     }
 
     /// The level's fog, for effects drawn in the same frame.

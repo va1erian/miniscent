@@ -36,6 +36,7 @@ fn room() -> Result<LevelRenderer, String> {
         labels: Vec::new(),
         mover_groups: Vec::new(),
         volumes: Vec::new(),
+        kinds: Vec::new(),
     };
     let cfg = BuildConfig {
         luxel_size: 0.5,

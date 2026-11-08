@@ -303,7 +303,7 @@ fn a_huge_lamp_in_a_vista_room_changes_no_play_space_luxel() {
 #[test]
 fn a_huge_lamp_in_a_vista_room_changes_no_pixel_of_an_actor() {
     let actor = Actor {
-        kind: ActorKind::Enemy,
+        kind: ActorKind::Crate,
         pos: Vec3::new(0.0, 8.0, -10.0),
         yaw: 0.0,
     };

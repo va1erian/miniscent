@@ -41,6 +41,7 @@ fn renderer(divider: bool) -> LevelRenderer {
         ));
     }
     let level = Level {
+        kinds: Vec::new(),
         brushes,
         entities: vec![Entity::Light {
             pos: v(-5.0, 0.0, 5.0),
@@ -159,7 +160,7 @@ fn an_enemy_muzzle_flash_shows_in_front_of_its_own_hull() {
     let r = renderer(false);
     let at = v(5.0, 0.0, 0.0);
     let enemy = [Actor {
-        kind: ActorKind::Enemy,
+        kind: ActorKind::Crate,
         pos: at,
         yaw: 0.0,
     }];

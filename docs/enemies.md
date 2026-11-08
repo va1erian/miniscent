@@ -5,6 +5,11 @@ model, but the game does not ask either to until M15.4, so it looks as it did. T
 by a throwaway spike that is not in the tree. Figures for anything not yet built are targets. Work items are
 [M15](work-items.md#m15-enemy-foundry).
 
+**Superseded in part by [enemy-designer.md](enemy-designer.md)** (M19): designs are kept in the level, not in
+`enemies.txt`; generators live in the editor, not a `mscent-foundry` crate; the horned ball goes, with kinds 0 and 1
+drawn as stock designs. It replaces M15.4, M15.10 and the editor half of M15.6. Sections below that disagree with it
+are kept for their reasoning.
+
 ## As built
 
 M15.1, `crates/mscent-world/src/model/`, with three hand-written blueprints in `assets/enemies/`.

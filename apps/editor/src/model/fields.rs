@@ -14,8 +14,9 @@ pub const MAX_PLAIN_PARAM: f64 = 4096.0;
 /// Least radius or half size: a zero one would hold nothing.
 const LEAST_SIZE: f64 = 0.1;
 
-/// Enemy kinds the game knows, by number.
-pub const ENEMY_KINDS: [&str; 2] = ["drone", "hunter"];
+/// The most enemy kinds a level holds; the level's own table holds a Kind
+/// tighter (`super::entity::clamp_kind`).
+const ENEMY_KINDS: f64 = (mscent_world::kinds::MAX_LEVEL_KINDS - 1) as f64;
 
 /// The values a field takes and how far its steppers move it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -55,7 +56,7 @@ pub fn limits(e: &Entity) -> Vec<Limit> {
             let depth = f64::from(MAX_FOG_DEPTH);
             vec![limit(0.0, depth - 1.0, 10.0), limit(1.0, depth, 10.0)]
         }
-        Entity::Enemy { .. } => vec![limit(0.0, (ENEMY_KINDS.len() - 1) as f64, 1.0)],
+        Entity::Enemy { .. } => vec![limit(0.0, ENEMY_KINDS, 1.0)],
         Entity::PlayerStart { .. } | Entity::Marker { .. } => vec![YAW],
         Entity::Zone { .. } => vec![SIZE; 3],
         Entity::VistaLayer { .. } => vista_limits(),

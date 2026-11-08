@@ -226,9 +226,9 @@ fn hostile_views_frame_sizes_actors_and_poses_draw() {
     ];
     let odd = |kind, pos, yaw| Actor { kind, pos, yaw };
     let actors = [
-        odd(ActorKind::Enemy, Vec3::new(NAN, 0.0, 0.0), NAN),
+        odd(ActorKind::Crate, Vec3::new(NAN, 0.0, 0.0), NAN),
         odd(ActorKind::Goal, Vec3::new(1.0e30, 1.0e30, 0.0), 1.0e30),
-        odd(ActorKind::Enemy, eye() + Vec3::new(0.0, 1.0, 0.0), 0.0),
+        odd(ActorKind::Crate, eye() + Vec3::new(0.0, 1.0, 0.0), 0.0),
         odd(ActorKind::Goal, eye(), 0.0),
     ];
     let poses = [MoverPose {

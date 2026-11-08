@@ -231,6 +231,21 @@ Design in [projectors.md](projectors.md). Baked spot lights, drawn by both rende
 | M18.5 | Showcase gets four projectors | M18.3 | S | Loads, compiles, entities in empty space |
 | M18.6 | Projected shadows: projectors hold the static-lamp maps, the shader applies the cone | M18.3 | M | A mover shades the floor in a projector's pool, and not outside its cone, from real pixels |
 
+## M19 Enemy designer
+
+Design in [enemy-designer.md](enemy-designer.md). Enemies designed in the editor, by generator or by hand, saved in
+the level and played as real enemies. Replaces M15.4, M15.10 and the editor half of M15.6.
+
+| ID | Item | Deps | Size | Done when |
+|---|---|---|---|---|
+| M19.1 | World: kinds section (format 7), text block, stock table for old levels, limits, level cost | M15.1 | M | Round trip binary and text; bit-flip and truncation fuzz; every limit; old levels read the stock table |
+| M19.2 | Game: kinds from the level, build at load, facing, hit spheres, scripts by name; binary size measured | M19.1 | M | Replays bit-exact; a hand-written kind plays end to end through `--test`; size recorded against 2.2 MB |
+| M19.3 | Renderers: enemies drawn as their kind's model on both; `Mesh::enemy` deleted; friendly ring | M19.2, M15.11 | M | Frame tests on both find the model's pixels where the ball was; a showcase PNG looked at |
+| M19.4 | Editor placing: kind dropdown with thumbnails, model in the 3D pane, name and warning in 2D | M19.1, M19.3 | S | Selftest places two kinds, saves, reloads, and both draw |
+| M19.5 | Foundry core in the editor: plans, genes and locks, emit, gates, fit; sentry, dart, mantis plans | M19.1 | L | Same seed same text; 500 seeds per plan read back; gates reject planted failures |
+| M19.6 | Enemy Designer workspace: kinds list, sheet, preview, design and text tabs, Apply, library | M19.4, M19.5 | L | `--selftest` rolls, locks a gene, edits text, applies, saves, reloads and plays the kind; `tick_costs` held |
+| M19.7 | `--foundry plan --seeds N --out dir` headless contact sheet | M19.5 | S | Writes a sheet PNG and the gate table for 2000 seeds |
+
 ## Suggested order
 
 M0, then M1.1 through M1.4 in parallel with M2.1 through M2.3. The renderer

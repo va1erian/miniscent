@@ -114,7 +114,7 @@ Movers do not cast baked shadows, so light passes through a closed door. Place l
 
 # Enemies and props
 
-Spawn on markers, by kind. Enemy kinds are drone and hunter. Prop kinds are switch, keycard, terminal and crate. A tag groups what you spawn.
+Spawn on markers, by kind. Enemy kinds are the level's own, by name; a level with none of its own has drone and hunter. Prop kinds are switch, keycard, terminal and crate. A tag groups what you spawn.
 
     card := spawn: 'keycard' at: (marker: 'spot') tag: 'key'.
     card onPickup: [player give: 'red'. say: 'Red keycard'].
@@ -130,6 +130,8 @@ Tune a kind of your own:
     sentry := defineEnemy: 'sentry' base: 0.
     sentry hp: 80.
     sentry speed: 0.
+
+The base is a kind's name, which the new kind copies as it stands, or the number of one of the level's kinds. The new kind looks like its base and is hit where its base is.
 
 A prop does only what you ask of it: it can be picked up if it has onPickup:, used if it has onUse:hold:, and shot if it has onHit:.
 

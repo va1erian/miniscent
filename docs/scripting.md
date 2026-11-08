@@ -350,9 +350,9 @@ mover for `onArrived:` and `onHit:`, the player for a zone.
 otherwise spawn nothing and wait forever. `tagged:` accepts any name, since a tag can come into being with
 a spawn, so it has no load-time check.
 
-`spawn:at:tag:` takes any enemy kind (`drone`, `hunter`, or from `defineEnemy:base:`) or prop kind (`switch`, `keycard`, `terminal`, `crate`, or from `defineProp:`). A name is one kind or the other. A prop does only what its script asks: it can be shot if it has health or an `onHit:`, picked up if it has an `onPickup:`, used if it has an `onUse:hold:`. Props are not solid. `say:` shows on the HUD and on the console.
+`spawn:at:tag:` takes any enemy kind (the level's own by name, `drone` and `hunter` in a level with none of its own, or from `defineEnemy:base:`) or prop kind (`switch`, `keycard`, `terminal`, `crate`, or from `defineProp:`). A name is one kind or the other. A prop does only what its script asks: it can be shot if it has health or an `onHit:`, picked up if it has an `onPickup:`, used if it has an `onUse:hold:`. Props are not solid. `say:` shows on the HUD and on the console.
 
-`defineEnemy:base:` setters write the fields of `EnemyStats`, so most tuning needs no rebuild. A new AI
+`defineEnemy:base:` takes a kind's name, whose stats it copies as they stand, or the number of one of the level's kinds; the new kind wears its base's model and hit spheres. Its setters write the fields of `EnemyStats`, so most tuning needs no rebuild. A new AI
 state does need one: `enemy.rs` stays Rust, because it runs at 120 Hz for every enemy and sight rays are
 expensive. Scripts choose behaviour; they do not run per-step AI.
 

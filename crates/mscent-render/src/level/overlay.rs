@@ -15,10 +15,7 @@ use crate::texture::Texture;
 /// What kind of thing an [`Actor`] is, which picks its mesh.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActorKind {
-    Enemy,
     Goal,
-    /// An enemy on the player's side.
-    Friendly,
     Switch,
     Keycard,
     Terminal,
@@ -72,9 +69,7 @@ fn pose_of(a: &Actor) -> Pose {
 
 /// Meshes for the actor kinds, built once.
 pub(super) struct ActorMeshes {
-    enemy: Mesh,
     goal: Mesh,
-    friendly: Mesh,
     switch: Mesh,
     keycard: Mesh,
     terminal: Mesh,
@@ -86,9 +81,7 @@ pub(super) struct ActorMeshes {
 impl ActorMeshes {
     pub(super) fn new() -> Self {
         Self {
-            enemy: Mesh::enemy(),
             goal: Mesh::goal(),
-            friendly: Mesh::friendly(),
             switch: Mesh::switch(),
             keycard: Mesh::keycard(),
             terminal: Mesh::terminal(),
@@ -99,9 +92,7 @@ impl ActorMeshes {
 
     fn mesh_of(&self, kind: ActorKind) -> &Mesh {
         match kind {
-            ActorKind::Enemy => &self.enemy,
             ActorKind::Goal => &self.goal,
-            ActorKind::Friendly => &self.friendly,
             ActorKind::Switch => &self.switch,
             ActorKind::Keycard => &self.keycard,
             ActorKind::Terminal => &self.terminal,

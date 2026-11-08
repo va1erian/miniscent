@@ -223,7 +223,7 @@ A click sets the two coordinates the view shows. The third comes from your last 
 | Player start (P) | Where the player's ship begins, facing Yaw (the arrow in the Top view). A level has one: placing another moves it, and the status says so. |
 | Light (L) | A lamp, baked into the lighting. See Lighting. |
 | Projector (J) | A spot lamp shining one way, drawn as a triangle. See Lighting. |
-| Enemy (E) | An enemy. Kind 0 is a drone, 1 a hunter. |
+| Enemy (E) | An enemy. Kind picks one of the level's enemy kinds, counted from 0. A level with no kinds of its own has two: 0 the drone and 1 the hunter. The 3D view shows each enemy as its kind's model, facing +X as it does before it first moves. |
 | Goal (G) | Reaching within its Radius wins. Drawn as a diamond. |
 | Marker (M) | A named point for a script: a spawn point, a hinge. |
 | Zone (Z) | A box a script hears about when the player enters or leaves. Half X, Y and Z are half its size. |
@@ -236,6 +236,7 @@ Type in a field and press **Enter**, or leave it: that commits one undo step. Te
 - Every field has a range. A value past it is set to the nearest end, and the status says so: **Red must be 0 to 1: set to 1**.
 - The arrows step by what suits the field: colours by 0.05, angles by 15 (pitch by 5), fog by 10, sizes by 0.5. Radius and half sizes stay above 0.
 - A fog's start and end push each other, so the end stays past the start.
+- An enemy's Kind is held to the level's kinds the same way: in a level with the stock two, 5 becomes 1. A level whose enemy names a kind it does not have will not load, so it cannot be saved either.
 - Angles are in degrees.
 
 ## The world entity
@@ -407,7 +408,7 @@ A level whose script is new must be saved before it can play, since the script l
 
 | File | What it holds |
 |---|---|
-| name.msl | The level |
+| name.msl | The level, with its enemy kinds if it has its own |
 | name.st | Its script |
 | name.msl.lit | Its baked lighting, written on save |
 

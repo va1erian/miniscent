@@ -49,6 +49,7 @@ fn room() -> LevelRenderer {
     let brush = Brush::cuboid(d(-20.0, -20.0, -20.0), d(20.0, 20.0, 20.0), Op::Subtract, 0)
         .expect("a room");
     let level = Level {
+        kinds: Vec::new(),
         brushes: vec![brush],
         entities: vec![Entity::Light {
             pos: Vec3::new(-5.0, 0.0, 5.0),
@@ -94,7 +95,7 @@ fn lights_allocate_nothing_a_frame_without_them_does_not() {
     let r = room();
     let mut fb = Framebuffer::new(160, 90).expect("a target");
     let actors = [Actor {
-        kind: ActorKind::Enemy,
+        kind: ActorKind::Crate,
         pos: Vec3::new(2.0, 0.0, 0.0),
         yaw: 0.0,
     }];

@@ -29,7 +29,7 @@ fn sample() -> Level {
             },
             Entity::Enemy {
                 pos: p(5.0, 5.0, 1.0),
-                kind: 3,
+                kind: 1,
             },
             Entity::Goal {
                 pos: p(-6.0, 6.0, 1.0),
