@@ -9,6 +9,7 @@ use xui::widget::GroupBox;
 
 use super::Msg;
 use super::faces::{MAX_RADIUS, MIN_RADIUS};
+use super::quiet;
 use crate::model::generators::{FieldKind, Kind};
 use crate::model::stroke::VoxelOp;
 use crate::model::{EditorState, Tool};
@@ -144,22 +145,20 @@ impl VoxelPanel {
         show(self.group.get().id(), st.tool == Tool::Voxel);
         let tool = &st.voxel;
         let at = |list: &[VoxelOp]| list.iter().position(|&o| o == tool.op).unwrap_or(0);
-        self.op.get().select(at(&VoxelOp::ALL));
+        quiet::select(&self.op.get(), at(&VoxelOp::ALL));
         self.radius.get().set_value(tool.radius);
-        self.material
-            .get()
-            .select(usize::from(tool.material).min(NAMES.len() - 1));
-        self.cell
-            .get()
-            .select(CELLS.iter().position(|&c| c == tool.cell).unwrap_or(1));
+        let material = usize::from(tool.material).min(NAMES.len() - 1);
+        quiet::select(&self.material.get(), material);
+        let cell = CELLS.iter().position(|&c| c == tool.cell).unwrap_or(1);
+        quiet::select(&self.cell.get(), cell);
         let generator = tool
             .generator
             .and_then(|k| Kind::ALL.iter().position(|&x| x == k))
             .map_or(0, |i| i + 1);
-        self.generator.get().select(generator);
+        quiet::select(&self.generator.get(), generator);
         self.seed.get().set_value(f64::from(tool.seed));
         let field = FieldKind::ALL.iter().position(|&f| f == tool.field);
-        self.field.get().select(field.unwrap_or(0));
+        quiet::select(&self.field.get(), field.unwrap_or(0));
         self.wavelength.get().set_value(tool.wavelength);
     }
 }

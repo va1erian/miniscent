@@ -10,11 +10,24 @@ struct Frame {
     fog_on: u32,
     bump_on: u32,
     spec_on: u32,
+    // The GPU-only looks, from the effects switches (effects.rs).
+    parallax_on: u32,
+    shadows_on: u32,
     atlas_size: vec2f,
     // The dynamic lights, a position and radius each, then a colour; a light of
     // radius 0 reaches nothing.
     lights: array<vec4f, 4>,
     light_colors: array<vec4f, 4>,
+    // The shadow map each light has, by light, or 0xffffffff for none.
+    shadow_slots: vec4u,
+    // The static lamps whose shadows movers cast, a position and radius each, then
+    // a colour; a lamp of radius 0 has no map. Lamp `i` is read from map
+    // `SHADOW_LIGHTS + i`.
+    lamps: array<vec4f, 2>,
+    lamp_colors: array<vec4f, 2>,
+    // A sphere, as a position and radius, that holds all that casts into a lamp's
+    // map: a point whose line to the lamp misses it is in no shadow.
+    lamp_bounds: array<vec4f, 2>,
 }
 
 @group(0) @binding(0) var<uniform> frame: Frame;

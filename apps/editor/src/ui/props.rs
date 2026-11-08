@@ -12,6 +12,7 @@ use xui::widget::{Edit, GroupBox, HasText};
 use super::Msg;
 use super::facepanel::FacePanel;
 use super::material_list::MaterialChoices;
+use super::quiet;
 use super::voxelpanel::{VoxelPanel, VoxelProp, apply as apply_voxel};
 use crate::model::entity::{entity_name, params, pos, set_param, with_pos};
 use crate::model::{EditorState, Shape, Tool};
@@ -185,9 +186,7 @@ impl Panel {
         let brush = st.selected_brush();
         self.material.get().set_enabled(brush.is_some());
         if let Some(b) = brush {
-            self.material
-                .get()
-                .select(self.materials.row_of(b.material));
+            quiet::select(&self.material.get(), self.materials.row_of(b.material));
         }
         if let Some(view) = st.face_view() {
             self.face.sync_lists(&view);
@@ -291,12 +290,22 @@ impl Panel {
         }
         st.poll_script();
         self.show(self.names_group.get().id(), st.selection.is_some());
-        self.uses.get().set_text(&st.script_uses());
+        quiet::set_text(&*self.uses.get(), &st.script_uses());
     }
 
     /// The lines of the script that name the selection, as it is typed.
     pub fn show_script_uses(&self, st: &EditorState) {
-        self.uses.get().set_text(&st.script_uses());
+        quiet::set_text(&*self.uses.get(), &st.script_uses());
+    }
+
+    /// The selected brush's bounds, which is all a drag in a view changes.
+    pub fn sync_bounds(&self, st: &EditorState) {
+        let brush = st.selected_brush();
+        let (lo, hi) = brush.map_or(([0.0; 3], [0.0; 3]), |b| b.bounds());
+        for a in 0..3 {
+            self.min[a].get().set_value(lo[a]);
+            self.max[a].get().set_value(hi[a]);
+        }
     }
 
     /// Shows the selection in the fields and enables only the relevant ones.
@@ -319,7 +328,7 @@ impl Panel {
             (_, Some(e)) => entity_name(&e.entity).to_string(),
             _ => "Nothing selected".to_string(),
         };
-        self.what.get().set_text(&text);
+        quiet::set_text(&*self.what.get(), &text);
         // Only the section that applies is shown: no greyed placeholder
         // values for something that is not selected.
         self.show(
@@ -329,19 +338,15 @@ impl Panel {
         self.show(self.entity_group.get().id(), ent.is_some());
         self.face.sync(st, |id, visible| self.show(id, visible));
 
-        let (lo, hi) = brush.map_or(([0.0; 3], [0.0; 3]), |b| b.bounds());
+        self.sync_bounds(st);
         let editable = brush.is_some_and(|b| b.is_box());
         self.op.get().set_enabled(brush.is_some());
         self.material.get().set_enabled(brush.is_some());
         if let Some(b) = brush {
-            self.op.get().select(usize::from(b.op == Op::Subtract));
-            self.material
-                .get()
-                .select(self.materials.row_of(b.material));
+            quiet::select(&self.op.get(), usize::from(b.op == Op::Subtract));
+            quiet::select(&self.material.get(), self.materials.row_of(b.material));
         }
         for a in 0..3 {
-            self.min[a].get().set_value(lo[a]);
-            self.max[a].get().set_value(hi[a]);
             self.min[a].get().set_enabled(editable);
             self.max[a].get().set_enabled(editable);
         }
@@ -353,7 +358,7 @@ impl Panel {
         let list = ent.map(|e| params(&e.entity)).unwrap_or_default();
         for i in 0..PARAMS {
             let (name, value) = list.get(i).copied().unwrap_or(("-", 0.0));
-            self.param_labels[i].get().set_text(name);
+            quiet::set_text(&*self.param_labels[i].get(), name);
             self.params[i].get().set_value(value);
             self.params[i].get().set_enabled(i < list.len());
             self.show(self.param_labels[i].get().id(), i < list.len());

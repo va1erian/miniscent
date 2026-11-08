@@ -80,6 +80,8 @@ pub struct Gpu {
     /// The same for the faces' pipelines and the viewport faces'.
     pub(crate) face_pipelines: Arc<[OnceLock<Compiled>; Finish::COUNT]>,
     pub(crate) hole_pipelines: Arc<[OnceLock<wgpu::RenderPipeline>; Finish::COUNT]>,
+    /// The shadow casters' pipelines, which do not depend on a finish.
+    pub(crate) shadow_pipelines: Arc<OnceLock<Result<Arc<crate::shadows::Pipelines>, GpuError>>>,
 }
 
 impl Gpu {
@@ -130,6 +132,7 @@ impl Gpu {
             voxel_pipelines: Arc::default(),
             face_pipelines: Arc::default(),
             hole_pipelines: Arc::default(),
+            shadow_pipelines: Arc::default(),
         })
     }
 
@@ -178,6 +181,12 @@ impl Gpu {
     /// Whether the adapter draws on the CPU, as Mesa's llvmpipe does.
     pub fn is_cpu(&self) -> bool {
         self.cpu
+    }
+
+    /// Waits until everything submitted so far is done, for measuring.
+    pub fn wait(&self) {
+        // A lost device has nothing left to finish.
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
     }
 
     /// The adapter's name, for reports.

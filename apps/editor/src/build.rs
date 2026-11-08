@@ -238,7 +238,46 @@ fn preview(
     cfg: &SessionConfig,
 ) -> Result<Built, String> {
     let level = validate(doc)?;
-    let compiled = compile_level(&level, cfg)?;
+    // Before the script is read, so an edit made meanwhile is seen as a change.
+    let watch = doc.level_path().map(ScriptWatcher::new);
+    // The game's own copy of the level is built beside the picture: on a voxel
+    // level it costs as much as the CSG.
+    std::thread::scope(|s| {
+        let rules = s.spawn(|| rules(&level, doc.level_path()));
+        let picture = picture(&level, cache, materials, cfg);
+        let rules = rules
+            .join()
+            .unwrap_or_else(|p| Err(format!("the build crashed: {}", panic_text(&*p))));
+        let (renderer, lit) = picture?;
+        Ok(Built {
+            product: product(rules, renderer, cfg),
+            light: lit.light,
+            light_key: lit.light_key,
+            materials: lit.materials,
+            report: lit.report,
+            watch,
+            warnings: lit.warnings,
+        })
+    })
+}
+
+/// What a preview knows of a level besides its renderer.
+struct Lit {
+    light: Light,
+    light_key: u64,
+    materials: u64,
+    report: Option<BakeReport>,
+    warnings: Vec<String>,
+}
+
+/// The level's renderer with the best light at hand.
+fn picture(
+    level: &Level,
+    cache: &SharedCache,
+    materials: &SharedMaterials,
+    cfg: &SessionConfig,
+) -> Result<(LevelRenderer, Lit), String> {
+    let compiled = compile_level(level, cfg)?;
     let light_key = compiled.light_key();
     let stored = {
         let mut cache = lock(cache);
@@ -261,21 +300,18 @@ fn preview(
     let renderer = compiled
         .into_renderer(map, table?)
         .map_err(|e| format!("cannot prepare the level: {e:?}"))?;
-    // Before the script is read, so an edit made meanwhile is seen as a change.
-    let watch = doc.level_path().map(ScriptWatcher::new);
-    let warnings = vista_warnings(&level)
+    let warnings = vista_warnings(level)
         .iter()
         .map(ToString::to_string)
         .collect();
-    Ok(Built {
-        product: product(&level, renderer, cfg, doc.level_path()),
+    let lit = Lit {
         light,
         light_key,
         materials: generation,
         report,
-        watch,
         warnings,
-    })
+    };
+    Ok((renderer, lit))
 }
 
 /// A session on the level's script, or why there cannot be one. The renderer
@@ -293,20 +329,24 @@ fn scripted(
     }
 }
 
-fn product(
-    level: &Level,
-    renderer: LevelRenderer,
-    cfg: &SessionConfig,
-    path: Option<&Path>,
-) -> Product {
-    let files = match path.map(scripts::for_level).transpose() {
-        Ok(files) => files.flatten(),
-        Err(why) => return Product::ViewOnly(Box::new(renderer), why),
-    };
+/// The level's scripts and the arena the game plays it in, or why the script
+/// cannot be read.
+type Rules = Result<(Option<ScriptFiles>, Result<Arena, LoadError>), String>;
+
+fn rules(level: &Level, path: Option<&Path>) -> Rules {
+    let files = path.map(scripts::for_level).transpose()?.flatten();
     let arena = if files.is_some() {
         Arena::from_scripted_level(level)
     } else {
         Arena::from_level(level)
+    };
+    Ok((files, arena))
+}
+
+fn product(rules: Rules, renderer: LevelRenderer, cfg: &SessionConfig) -> Product {
+    let (files, arena) = match rules {
+        Ok(rules) => rules,
+        Err(why) => return Product::ViewOnly(Box::new(renderer), why),
     };
     match arena {
         Ok(arena) => match &files {

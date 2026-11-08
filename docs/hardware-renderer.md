@@ -1,33 +1,28 @@
 # Hardware renderer: plan
 
-Status: accepted, M14.1 to M14.6, M14.8 and M14.10 to M14.12 done, M14.7 done but for the particle depth estimate (see status.md) and the rest not started ([status.md](status.md)). Figures
+Status: done. M14.1 to M14.12 are built, the GPU draws the editor, Instant Play and the game, and what was not verified is listed per item in [status.md](status.md); costs are in [perf/hardware.md](perf/hardware.md). Figures
 under "Measured" were run for this plan; all others are targets to measure. The work
 items are in [work-items.md](work-items.md) as M14.
 
 ## Goal
 
-Hold 4K at full quality on a desktop GPU, with the same picture the software
-renderer draws, **in the editor's 3D pane first** and then in the game.
+Hold 4K at full quality on a desktop GPU, **in the editor's 3D pane first** and then
+in the game.
 
 **This becomes the primary renderer**, by the owner's decision of 2026-11-02. The
 software renderer's main target becomes LazyOS, which has no GPU driver. It stays the
-fallback on any machine where the GPU path fails to start, and for now the parity test
-still holds the two to one picture.
+fallback on any machine where the GPU path fails to start. Since 2026-11-03 the two no
+longer draw one picture: see [Two renderers](#two-renderers).
 
 - **Fast.** Native 4K with every feature on, no upscale.
 - **Small.** One crate, a few thousand lines, one dependency.
 - **Readable.** A frame reads as a list of passes in the order the software
   renderer fills them, with one small file per pass and one shader per kind of surface.
-- **On par.** One test compares the two renderers, and it runs in the `cargo test`
-  CI already does ([The parity gate](#the-parity-gate)).
+- **Same game.** Whichever renderer draws, the game plays the same
+  ([Two renderers](#two-renderers)).
 
 Not in scope:
 
-- New looks. No shadow maps, HDR or post-processing on one side only. A new look
-  goes in both renderers or in neither. The GPU may draw finer, by the owner's
-  decision of 2026-11-03: more resolution, and at High multisampling and
-  anisotropic filtering (`Finish::Fine`, M14.12), as the shading stays the same and
-  `Finish::Reference` is still held to software.
 - Baking on the GPU. Lightmaps stay CPU work, shared by both renderers.
 - OpenGL, D3D12, macOS, the web and LazyOS. A machine without working Vulkan draws in
   software.
@@ -218,9 +213,12 @@ fn draw(&mut self, fb: &mut Framebuffer, frame: &FrameInput) -> Option<SceneStat
 
 Target: under 3,000 lines of Rust and 800 of WGSL, no file over 300 lines.
 
-### Choices that make parity cheap
+### Choices made for parity
 
-Each of these carries a software fact over unchanged, so there is less to reconcile:
+These carried a software fact over unchanged while the two were held to one picture.
+With parity dropped they are free to change, apart from the constants passed as
+overrides; [#45](https://github.com/va1erian/miniscent/issues/45) tracks retiring the
+ones that hold back the GPU's look:
 
 | Fact | GPU choice |
 |---|---|
@@ -334,7 +332,8 @@ converts the damaged rows for `softbuffer`; that path was not run here.
 **The finish (M14.12).** At High, the GPU draws more finely than software can afford:
 4x multisampling on edges and trilinear, 16x anisotropic filtering of the materials
 (`Finish::Fine`, `crates/mscent-gpu/src/finish.rs`). The shading is the same.
-`Finish::Reference` is software's picture, which the parity test holds the GPU to; the
+`Finish::Reference` is software's picture, which the parity test held the GPU to until
+parity was dropped ([Two renderers](#two-renderers)); the
 pane and `gpu_shot` use `Finish::of(quality)`. A multisampled depth is read back
 through a resolve pass, the mean of the samples that hit something, which on a surface
 is the pixel centre's depth as software stores it.
@@ -377,6 +376,25 @@ frame. The face, cutout and viewport pipelines are compiled once per device, as 
 voxels' are: without that, a new scene of a vista level cost the editor's pane more than
 its 12 ms and the adaptive scale shrank its frame.
 
+
+## Instant Play in the editor
+
+Play draws as the game does, straight into a window, through the game's own
+`GpuWorld` (`studio/play_direct.rs`). The window is the Play pane's own: xui gives a
+custom node a native child window (`Ui::set_native_surface`), keeps it on the node's
+bounds and visibility, and passes its pointer input on as the node's. The render thread
+presents into it, so a Play frame is never read back, never crosses to the UI thread and
+never goes through xui's software composite. The pane's input goes to the render thread
+the moment it arrives (`studio/input.rs`), as the game reads its input right before it
+steps, and the thread paces Play as the game does, spinning the last 2 ms of a frame.
+
+Measured on the showcase at a 1600x935 pane on the RTX 5070 Ti: 60.0 frames a second and
+0.5 to 0.6 ms of render call, where the pane's route took 56.9 ms of UI thread per frame
+at 1080p with the editor under it and 13.5 ms without. Where there is no native window
+(the offscreen backend in tests; Wayland and macOS, where xui makes none, as `winit`
+would make a separate top-level window there), or the GPU gives the window up, Play
+falls back to the pane's frames, which the tests still read, and the log says why.
+
 ## Two traps in the game path
 
 Neither touches the editor's edit view, as it has no particles and reads back anyway.
@@ -416,106 +434,62 @@ after. `hardware` fails with its reason instead of falling back, for tests and b
 reports. A headless run (`--screenshot`, `--script`, `--bench`) stays `software` unless
 asked, as its pictures are to be the same on every machine.
 
-## The parity gate
+## Two renderers
 
-Simple on purpose: one test file, no new crate, script or CI job.
+By the owner's decision of 2026-11-03, the two renderers no longer draw one picture.
+That replaces the parity gate, which held the GPU's `Finish::Reference` to the software
+frame within 1.5 levels mean and 3 levels per 8x8 block.
 
-### The test
+### The rules
 
-`crates/mscent-gpu/tests/parity.rs` holds a table of about 15 cases, one per feature,
-and each draws at 320x180 on both renderers:
+- **Gameplay is identical.**
+  - The simulation, collision, hits, scripts and replays never read the renderer.
+  - A replay is bit-exact whichever renderer draws, or with none: `Game::step` takes
+    no renderer, and the headless runs draw nothing.
+  - Anything that decides play stays out of the renderers, for example what a shot
+    hits or whether an enemy sees the player. Dynamic lights, particles and decals are
+    cosmetic: the sim never reads them (`fx/lights.rs`).
+- **The hardware renderer is free to look better.** Its own lighting, many lights,
+  shadows, parallax, linear or HDR shading and hardware filtering may land on the GPU
+  only.
+- **The software renderer has to look good on the LazyOS reference box**
+  (i3-7100U, [plan.md](plan.md)) and hold its frame budget there. It is not measured
+  against the GPU's picture.
+- **Both show everything play depends on.** That means enemies, the goal, shots,
+  doors and movers, viewports into play space, and the HUD. A player must be able to
+  play the same level on either renderer.
+- **Shared constants are passed from Rust**, as pipeline overrides, never retyped in
+  WGSL. A changed constant then cannot leave the two sides disagreeing by accident.
+- **Both build, run and fail closed on hostile input.** The hostile and failure tests
+  (`tests/hostile.rs`, `tests/failure.rs`) stay.
 
-```rust
-const CASES: &[Case] = &[
-    Case { name: "fog", level: SHOWCASE, pose: FAR_HALL, quality: High, without: NoFog },
-    Case { name: "specular", level: SHOWCASE, pose: METAL_WALL, quality: High, without: Quality(Medium) },
-    Case { name: "dynlight", level: SHOWCASE, pose: RED_ROOM, quality: High, without: NoLights },
-    // ...
-];
-```
+### What stays from the gate, for now
 
-The features: sky, fog, texture, mips, lightmap, light mips, emissive, bump, specular,
-actor, mover, and voxel surfaces with their shadows, bump, specular, blends, spots,
-detail levels and mips so far, then dynamic light, sprite, decal and depth test. A feature adds a row when it is ported, and a new feature adds one in the PR that
-makes it.
+- `crates/mscent-gpu/tests/parity.rs` still runs in CI, on Mesa's lavapipe (the
+  `check` job in [ci.yml](../.github/workflows/ci.yml)). It now only catches changes
+  nobody meant to make to the current look.
+- A PR that changes one renderer's look on purpose updates or removes the cases it
+  breaks, and says so in its description. It does not port the change to the other
+  side. Do not loosen a limit to hide a change: remove the case instead.
+- `tests/finish.rs` and `Finish::Reference` stay until
+  [#45](https://github.com/va1erian/miniscent/issues/45) retires the parity-only
+  shading (integer display-space maths, the emulated level of detail, voxel texels in a
+  storage buffer, the spec tables) together with these tests.
+- The test that a game's `ParticleDraws` come out byte-equal on either renderer
+  (`apps/game/tests/gpu_world.rs`) also stays for now. The particle budget is cosmetic,
+  so it may go when the GPU particles change.
 
-Each case makes two checks:
+### The reviewer
 
-1. **Hardware against software.** After excluding pixels on an edge, the mean error per
-   channel and the worst 8x8 block mean must be under one pair of limits, 1.5 and 3
-   levels, which live in `mscent_math::epsilon` with every other tolerance. The block
-   measure catches a shadow or highlight that moved, which a global mean would average
-   away. Each colour is compared with its nearest within one pixel, as software corrects
-   perspective every 16 pixels and a GPU at each one: a texel on a steep wall lands up to
-   a pixel apart, and past that on a very steep one, with both right.
-2. **The case can fail.** The same frame in software with the feature removed must
-   *fail* that comparison. Otherwise the case is not looking at its feature. The repo has
-   met this before: `examples/crawl.rs` exists because `stability` passed on a crawling
-   shadow. It costs only a small software draw, and no test hook ships.
+`.claude/agents/render-reviewer.md` reviews a diff touching `mscent-render`,
+`mscent-gpu` or materials against [the rules](#the-rules). It looks for:
 
-There are no stored images. Each run draws both from current code, so a change to one
-side fails until the other follows. On failure the test writes `sw.png`, `hw.png` and
-`diff.png` to `parity/` under cargo's test directory, `target/tmp`, and prints the path.
+- gameplay that reads a renderer;
+- something play depends on that one renderer does not show;
+- a software change that costs the LazyOS frame budget;
+- a constant retyped in WGSL.
 
-One further test asserts that `ParticleDraws` come out byte-identical. Nothing else is
-needed for the simulation, since `Game::step` does not read the renderer.
-
-### In CI
-
-No new job. Two lines go in the existing `check` job in
-[ci.yml](../.github/workflows/ci.yml), since `cargo test --workspace` already runs the
-test. Runners have no GPU, so it uses Mesa's lavapipe, a CPU Vulkan driver:
-
-```yaml
-      - run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
-      - run: cargo test --workspace
-        env:
-          MSCENT_REQUIRE_GPU: "1" # no adapter is a failure here, a skip elsewhere
-```
-
-On `ubuntu-latest` the package takes 9 s. In a `rust:1.98` container on the dev machine
-the crate and its dependencies built and ran its tests in 32 s, without real shading. The
-target is under 2 minutes added to a cold run and 1 to a cached one. If it costs more or
-proves flaky, the fallback is to take those lines out and rely on the local run below.
-Parity must not be what makes CI slow.
-
-### Locally
-
-The same `cargo test` uses your real GPU, with nothing to remember. That also covers what
-Mesa cannot see, as it is not an Intel or NVIDIA driver. GPU speed is not gated: M14.9
-records it in `docs/perf/`, and software keeps `check_frame_cost.py`.
-
-### What was left out
-
-To save time, these are not built: a separate workflow, a checking script, a feature table with a ratchet, a rule failing PRs that touch one side,
-a rule on loosening tolerances, 4K comparison and artifact upload. The trade: a one-sided
-change that no case happens to show gets past CI. The reviewer agent looks for that at
-pre-PR review, at no CI cost. If such drift actually happens, add the rule then.
-
-### The agents
-
-**`AGENTS.md`** is read by every contributor, including agents other than Claude, so the
-rule goes there:
-
-```
-- The software and hardware renderers stay on par. A change to what a frame looks
-  like lands in both in one PR, with a row in crates/mscent-gpu/tests/parity.rs.
-  New looks go in both or neither, except that the GPU may draw finer
-  (Finish::Fine) while Finish::Reference stays on par. Shared constants are never
-  retyped in WGSL. Do not loosen a parity limit to pass a test.
-```
-
-The crate edges paragraph gains `mscent-gpu`.
-
-**`.claude/agents/`** gets two thin definitions that point here and do not restate it:
-
-| Agent | Tools | When | Job |
-|---|---|---|---|
-| `render-parity-reviewer` | Read-only, plus running the test | Pre-PR review of a diff touching `mscent-render` or `mscent-gpu` | Reports a look changed on one side, a retyped constant, a feature with no row, or a `without` that does not remove its feature |
-| `render-parity-porter` | Edit, run | After a change lands on one side | Ports it to the other and adds the row. May not edit `epsilon.rs`: if it cannot match, it stops and reports the pictures |
-
-The porter's restriction matters most: left unconstrained, the shortest path to a passing
-test is a looser limit.
+The `render-parity-porter` agent is gone, as there is nothing left to port.
 
 ## Size
 
@@ -576,8 +550,9 @@ As everywhere: read real pixels.
 
 - Seams: flythrough PNGs and the existing render suite are byte-identical after M14.1, and
   `frame_bench` is unchanged.
-- The parity cases, as above. Each shader term is broken by hand once during M14 to see
-  its case fail, recorded in the PR, as M10.3 did with its deliberate bugs.
+- The parity cases while they last ([Two renderers](#two-renderers)). Each shader term
+  was broken by hand once during M14 to see its case fail, as M10.3 did with its
+  deliberate bugs.
 - Editor: `--selftest` passes with hardware on and on the software fallback. A pick, a
   highlight, an edit, a viewport level, a sculpt, and Play.
 - Hostile levels through the GPU build: errors, no panic. A forced device loss, and a

@@ -206,9 +206,13 @@ impl Document {
     /// lightmap depends on nothing else. A mover group counts, because it takes
     /// its brushes out of the CSG.
     pub fn same_geometry(&self, other: &Document) -> bool {
-        self.entities == other.entities
-            && self.groups == other.groups
-            && self.brushes.len() == other.brushes.len()
+        self.entities == other.entities && self.groups == other.groups && self.same_solids(other)
+    }
+
+    /// Whether `other` has the same brush shapes and operations in the same
+    /// order: when not, the faces moved and so did their light.
+    pub fn same_solids(&self, other: &Document) -> bool {
+        self.brushes.len() == other.brushes.len()
             && self
                 .brushes
                 .iter()

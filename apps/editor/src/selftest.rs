@@ -22,6 +22,7 @@ use crate::model::{Document, FlyCam};
 use crate::studio::Preview;
 use crate::ui::{Editor, Msg, Probe, cmd};
 
+mod drag_timing;
 mod faces;
 mod guide;
 mod keys;

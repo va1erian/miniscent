@@ -30,6 +30,8 @@ miniscent [options]
                            the default in a window), software (the default
                            headless, whose pictures are the same everywhere),
                            or the GPU and nothing else, failing with why
+  --chase                  put the camera behind the player's ship and draw it (the
+                           hardware renderer only; cosmetic)
   --autoclose-ms <n>       desktop: quit after n milliseconds
   --check                  with --level: compile the level's script, run its top
                            level and list every name; fails on any error
@@ -93,6 +95,8 @@ pub struct Options {
     pub pack_level: Option<(PathBuf, PathBuf)>,
     /// `None` for the default: `auto` in a window, `software` headless.
     pub renderer: Option<Renderer>,
+    /// `--chase`: a third-person camera, to look at the ship.
+    pub chase: bool,
 }
 
 impl Options {
@@ -134,6 +138,10 @@ fn res(s: &str) -> Result<(u32, u32), String> {
     }
 }
 
+/// The internal resolution at full quality when `--res` does not say: the
+/// size the HUD is drawn for.
+pub const BASE_RES: (u32, u32) = (640, 360);
+
 /// Parses the arguments after the program name.
 pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String> {
     let mut o = Options {
@@ -141,7 +149,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
         corridor: false,
         quality: Quality::High,
         scale: 2,
-        res: (640, 360),
+        res: BASE_RES,
         assets: None,
         screenshot: None,
         frames: None,
@@ -162,6 +170,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
         dump_level: None,
         pack_level: None,
         renderer: None,
+        chase: false,
     };
     let mut it = args.into_iter();
     while let Some(arg) = it.next() {
@@ -204,6 +213,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
             "--no-cache" => o.no_cache = true,
             "--rebake" => o.rebake = true,
             "--no-adaptive" => o.adaptive = false,
+            "--chase" => o.chase = true,
             "--renderer" => o.renderer = Some(renderer(&value("--renderer")?)?),
             "--autoclose-ms" => {
                 o.autoclose_ms = Some(

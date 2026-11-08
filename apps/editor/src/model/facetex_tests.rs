@@ -102,7 +102,8 @@ fn picking_selects_faces_and_ctrl_toggles_more() {
     assert_eq!(st.selection, Some(Selection::Brush(id)));
     st.pick_face_at(&wall_ray, true);
     assert_eq!(st.faces.len(), 2);
-    assert_eq!(st.highlighted_faces().len(), 2);
+    assert_eq!(st.highlights().tinted.len(), 2);
+    assert!(st.highlights().outlined.is_empty());
     st.pick_face_at(&wall_ray, true);
     assert_eq!(st.faces.len(), 1, "ctrl-click again unpicks");
     st.pick_face_at(&ray([0.0, 0.0, 10.0], [0.0, 0.0, 1.0]), false);
@@ -110,7 +111,11 @@ fn picking_selects_faces_and_ctrl_toggles_more() {
     // With nothing picked the selected brush's six faces are the targets.
     assert_eq!(st.target_faces().len(), 6);
     st.tool = Tool::Select;
-    assert!(st.highlighted_faces().is_empty());
+    let marks = st.highlights();
+    assert!(marks.tinted.is_empty(), "only the face tool tints");
+    assert_eq!(marks.outlined.len(), 6, "the selected box is outlined");
+    st.selection = None;
+    assert!(st.highlights().is_empty());
 }
 
 fn floor_state() -> (EditorState, FaceRef) {

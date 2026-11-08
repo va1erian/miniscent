@@ -145,6 +145,13 @@ impl LevelAssets {
         &self.cfg
     }
 
+    /// The lamps of the play space, as the lightmap was baked with them. A
+    /// renderer that shadows what moves takes its share of a lamp from the
+    /// baked light by the lamp's own falloff.
+    pub fn lamps(&self) -> &[PointLight] {
+        &self.play_lights
+    }
+
     /// The level's own enemies and goal, at their spawn points.
     pub fn actors(&self) -> &[Actor] {
         &self.actors
@@ -221,6 +228,19 @@ impl LevelAssets {
         list.prepare(table, instances, cam, &self.lighting, lights, |p| {
             bsp.leaf_at_f32(p)
         });
+    }
+
+    /// Lists every part of `instances` for a shadow map, whatever `cam` sees and
+    /// including the instances that are only cast, with no dynamic light: what a
+    /// shadow needs of a model is its shape. `list` is from
+    /// [`ModelList::casters_unprojected`].
+    pub fn list_model_casters(
+        &self,
+        list: &mut ModelList,
+        models: Option<(&ModelTable, &[ModelInstance])>,
+        cam: &Camera,
+    ) {
+        self.list_models(list, models, cam, &[]);
     }
 
     /// The camera a frame uses for this view and target size.

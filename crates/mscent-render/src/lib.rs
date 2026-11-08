@@ -30,6 +30,7 @@ pub mod png_encode;
 pub mod raster;
 mod raster_masked;
 pub mod recipe_texture;
+pub mod relief;
 pub mod resolution;
 pub mod scene;
 pub mod shade;

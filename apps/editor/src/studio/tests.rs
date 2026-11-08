@@ -405,3 +405,17 @@ fn the_game_quitting_returns_to_edit_and_play_restarts() {
         assert_eq!(studio.mode, Mode::Edit);
     }
 }
+
+#[test]
+fn moving_a_brush_drops_a_running_bake_before_its_preview_is_up() {
+    use super::preview_tests::{settled, tick_until, with_box};
+    let (mut studio, doc) = settled();
+    let first = with_box(&doc, 40.0);
+    tick_until(&mut studio, &first, |s| s.bake_job.is_some());
+    let mut moved = first.clone();
+    let mut def = moved.brushes().last().expect("the new box").clone();
+    def.translate([1.0, 0.0, 0.0]);
+    moved.replace_brush_for_test(&def);
+    let _ = studio.tick(&[], (64, 48), &moved);
+    assert!(studio.bake_job.is_none(), "the bake still holds the cores");
+}

@@ -15,13 +15,17 @@ use crate::lighting_shader::{FaceLight, LightingShader};
 use crate::raster::{DrawStats, PolyList};
 use crate::shade::{FlatShader, Fog};
 
-/// Adds the lights of the frame that reach `face` to its shader.
+/// Adds the lights of the frame that reach face `i` to its shader: those in a
+/// room it is in front of, and then only the ones that are on its lit side and
+/// within their radius, so a span does not run the loop for a light that adds
+/// nothing to it.
 fn add_lights<const SPEC: bool>(
     shader: &mut LightingShader<'_, SPEC>,
-    face: usize,
+    (i, face): (usize, &Face),
     lights: &[DynLight],
 ) {
-    for l in lights.iter().filter(|l| l.is_lit() && l.reaches_face(face)) {
+    let lights = lights.iter().filter(|l| l.is_lit() && l.reaches_face(i));
+    for l in lights.filter(|l| l.lights_plane(&face.plane)) {
         shader.add_point(l.pos(), l.radius(), l.color());
     }
 }
@@ -110,12 +114,12 @@ impl LevelRenderer {
             .filter(|t| quality == Quality::High && t.is_visible())
             .and_then(|t| LightingShader::with_specular(fl, eye, t));
         if let Some(mut s) = spec {
-            add_lights(&mut s, i, lights);
+            add_lights(&mut s, (i, face), lights);
             return FaceShader::Spec(s);
         }
         match LightingShader::new(fl) {
             Some(mut s) => {
-                add_lights(&mut s, i, lights);
+                add_lights(&mut s, (i, face), lights);
                 FaceShader::Lit(s)
             }
             None => flat(UNLIT),

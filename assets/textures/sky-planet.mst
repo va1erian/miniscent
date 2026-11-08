@@ -42,3 +42,7 @@ op 0 11 1 out-albedo
 # The disc.
 op 10 0 1 ellipse w=0.9 h=0.9 color=1,1,1 background=0,0,0
 op 10 1 1 out-alpha
+# Height: the land over the sea, from the same noise as the land mask.
+op 12 0 1 noise freq_x=4 freq_y=4 octaves=4 persistence=0.55 seed=61
+op 12 1 1 range in_low=0.45 in_high=0.53
+op 12 2 1 out-height normal_strength=2

@@ -9,7 +9,8 @@ use mscent_render::{Effects, FrameInput, Framebuffer, Quality, VoxelChange, draw
 
 use super::gpu_view::GpuView;
 use super::highlight;
-use super::worker::{Request, Scene};
+use super::play_direct::Direct;
+use super::worker::{Request, Scene, Surface};
 use crate::build::Built;
 
 /// How often a running level's script is checked for changes, in game time.
@@ -19,6 +20,8 @@ pub struct LevelScene {
     built: Built,
     fb: Option<Framebuffer>,
     gpu: GpuView,
+    /// Play in the pane's own window, when it has one.
+    direct: Direct,
     since_watch: Duration,
 }
 
@@ -28,6 +31,7 @@ impl LevelScene {
             built,
             fb: None,
             gpu: GpuView::default(),
+            direct: Direct::default(),
             since_watch: Duration::ZERO,
         }
     }
@@ -49,6 +53,15 @@ impl LevelScene {
     pub fn on_gpu(built: Built) -> LevelScene {
         let mut scene = LevelScene::new(built);
         scene.gpu.forced = true;
+        scene
+    }
+
+    /// Draws on the GPU with its own looks (relief, shadows) off, for a test that
+    /// holds the picture to software's, which draws none.
+    #[cfg(test)]
+    pub fn on_plain_gpu(built: Built) -> LevelScene {
+        let mut scene = LevelScene::on_gpu(built);
+        scene.gpu.effects = Some(mscent_gpu::GpuEffects::OFF);
         scene
     }
 
@@ -98,6 +111,7 @@ impl Scene for LevelScene {
     /// The session keeps its running game; only what it draws with changes.
     fn relight(&mut self, lit: Built) {
         self.gpu.level_changed();
+        self.direct.level_changed();
         match self.built.session_mut() {
             Some(session) => session.set_renderer(lit.into_renderer()),
             None => self.built = lit,
@@ -109,10 +123,24 @@ impl Scene for LevelScene {
         self.built.renderer_mut().apply_voxels(change);
     }
 
+    fn set_surface(&mut self, window: Option<Surface>) {
+        self.direct.set_surface(window);
+    }
+
+    fn surface_lost(&mut self) -> bool {
+        self.direct.take_lost()
+    }
+
     fn render(&mut self, req: &Request) -> Option<&Framebuffer> {
         if req.play {
-            let gpu = &mut self.gpu;
             let session = self.built.session_mut()?;
+            if self.direct.shows() {
+                // Play keeps its own copy of the level on the GPU: the pane's
+                // goes until the editor draws again.
+                self.gpu.level_changed();
+                return self.direct.show(session, req).err().flatten();
+            }
+            let gpu = &mut self.gpu;
             return session.render_through(req.w, req.h, &mut |assets, fb, frame| {
                 gpu.draw(assets, fb, frame)
             });
@@ -131,7 +159,8 @@ impl Scene for LevelScene {
             quality: Quality::High,
             actors: renderer.actors(),
             effects: Effects::default(),
-            wants_depth: !req.highlights.is_empty(),
+            // Only the face tool's tint is cut by what is in front.
+            wants_depth: !req.highlights.tinted.is_empty(),
         };
         if !self.gpu.draw(renderer.assets(), fb, &frame) {
             renderer.render(fb, &req.view, Quality::High, renderer.actors(), None)?;

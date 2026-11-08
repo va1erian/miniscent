@@ -26,6 +26,7 @@ use mscent_world::Level;
 use crate::controls::Controls;
 use crate::feedback::Feedback;
 use crate::notices::Notices;
+use crate::ship::Ship;
 use mscent_script::{ScriptError, Source};
 
 mod frame;
@@ -104,6 +105,8 @@ pub struct GameSession {
     fb: Option<Framebuffer>,
     /// What goes over the world, for a renderer that shows the frame itself.
     layer: Option<Framebuffer>,
+    /// The particle budget's depth, from the last frame drawn.
+    estimate: Option<Framebuffer>,
     hit: u32,
     kill: u32,
     feedback: Feedback,
@@ -112,6 +115,11 @@ pub struct GameSession {
     bank: SpriteBank,
     kick: ViewKick,
     notices: Notices,
+    /// The player's ship, for shadows and a chase view; `None` where the build or
+    /// the way the session was made has none.
+    ship: Option<Ship>,
+    /// The camera follows behind the ship, which is then drawn.
+    chase: bool,
 }
 
 /// The game library keeps the camera frame (view along -Z); the level is
@@ -146,9 +154,12 @@ impl GameSession {
             Arena::from_level(level)
         }
         .map_err(SessionError::Load)?;
+        let ship = Ship::build(&materials);
         let renderer = LevelRenderer::from_level_cached(level, materials, &cfg.build, cache)
             .map_err(SessionError::Build)?;
-        Ok(Self::with_renderer(arena, renderer, cfg))
+        let mut session = Self::with_renderer(arena, renderer, cfg);
+        session.ship = ship;
+        Ok(session)
     }
 
     /// Starts a level that is already compiled and lit (the editor prepares
@@ -180,6 +191,7 @@ impl GameSession {
             stats: FrameStats::default(),
             fb: None,
             layer: None,
+            estimate: None,
             hit: 0,
             kill: 0,
             feedback: Feedback::default(),
@@ -188,7 +200,15 @@ impl GameSession {
             bank: SpriteBank::new(),
             kick: ViewKick::default(),
             notices: Notices::default(),
+            ship: None,
+            chase: false,
         }
+    }
+
+    /// Puts the camera behind the player's ship and draws the ship, to look at it.
+    /// Cosmetic: the simulation does not see the camera.
+    pub fn set_chase(&mut self, chase: bool) {
+        self.chase = chase;
     }
 
     /// Replaces what the level is drawn with and keeps the running game: new

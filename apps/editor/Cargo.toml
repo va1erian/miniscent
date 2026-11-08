@@ -17,15 +17,16 @@ mscent-texgen.workspace = true
 mscent-game.workspace = true
 mscent-script.workspace = true
 mscent-platform = { workspace = true }
-miniscent-game = { path = "../game", default-features = false }
-xui = { path = "C:/repos/xui/.claude/worktrees/win32-xui-core-port-0c0ffa/crates/xui", default-features = false }
-xui-code-editor = { path = "C:/repos/xui/.claude/worktrees/win32-xui-core-port-0c0ffa/crates/xui-code-editor" }
+# Its desktop feature for the GPU window Play presents into, as the game does.
+miniscent-game = { path = "../game", default-features = false, features = ["desktop", "hardware"] }
+xui = { path = "C:/repos/xui/.claude/worktrees/xui-d2d-native-surface-31cdf1/crates/xui", default-features = false }
+xui-code-editor = { path = "C:/repos/xui/.claude/worktrees/xui-d2d-native-surface-31cdf1/crates/xui-code-editor" }
 # The guide is an HTML page: it replaces a pile of text widgets (docs/scripting.md). Blitz over
 # xui-litehtml, which measures text at 96 dpi and paints it at the display's, so words drift when scaled.
-xui-blitz = { path = "C:/repos/xui/.claude/worktrees/win32-xui-core-port-0c0ffa/crates/xui-blitz" }
+xui-blitz = { path = "C:/repos/xui/.claude/worktrees/xui-d2d-native-surface-31cdf1/crates/xui-blitz" }
 
 [target.'cfg(windows)'.dependencies]
-xui-d2d = { path = "C:/repos/xui/.claude/worktrees/win32-xui-core-port-0c0ffa/crates/xui-d2d", optional = true }
+xui-d2d = { path = "C:/repos/xui/.claude/worktrees/xui-d2d-native-surface-31cdf1/crates/xui-d2d", optional = true }
 
 [features]
 # The software backend (winit + tiny-skia) and the headless selftest harness.
@@ -33,6 +34,11 @@ default = ["canvas"]
 canvas = ["xui/canvas"]
 # The lightweight Windows backend: Direct2D and DirectWrite, native file dialogs.
 d2d = ["dep:xui-d2d"]
+
+[dev-dependencies]
+# A stand-in window for the render thread's surface tests; already in the tree
+# through wgpu, winit and xui.
+raw-window-handle = "0.6"
 
 [lints]
 workspace = true

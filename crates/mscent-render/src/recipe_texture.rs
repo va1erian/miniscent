@@ -132,6 +132,7 @@ mod tests {
         let entry = |i: usize| Entry::Material {
             name: format!("big{i}"),
             gloss: 1,
+            depth: None,
         };
         for i in 0..65 {
             std::fs::write(d.join(format!("big{i}.mst")), big).expect("write");
@@ -153,6 +154,7 @@ mod tests {
         let entries = [Entry::Material {
             name: "a".to_string(),
             gloss: 1,
+            depth: None,
         }];
         let mut text = String::from("miniscent-recipe 1\nsize 1024 1024\n");
         for y in 0..100 {
@@ -295,6 +297,7 @@ op 5 5 1 out-alpha
         Entry::Material {
             name: name.to_string(),
             gloss: 1,
+            depth: None,
         }
     }
 

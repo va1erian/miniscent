@@ -228,14 +228,24 @@ fn play_locks_the_pointer_and_releases_it_on_esc_and_when_the_backend_ends_it() 
         s.press(Key::F5);
         s.wait_message("Playing");
         assert_eq!(s.backend.pointer_lock(), Some(id));
-        play.take_events();
+        let host = xui::widget::Placeable::id(&*s.editor.borrow().work_host.get());
+        assert!(
+            !s.ui.is_visible(host),
+            "the editor is not painted under Play"
+        );
+        // Play's input goes on to the render thread as it arrives, not at the
+        // next tick: here to a queue of the test's own.
+        let inbox = crate::studio::worker::Inbox::default();
+        play.set_forward(Some(crate::studio::worker::Input::new(inbox.clone())));
         s.inject(Event::PointerDelta { dx: 7, dy: -3 });
-        assert_eq!(play.take_events(), [motion(7.0, -3.0)]);
+        assert_eq!(*inbox.lock().unwrap(), [motion(7.0, -3.0)]);
+        assert_eq!(play.take_events(), [], "nothing waits for the tick");
 
         // Esc leaves Play and releases the pointer.
         s.press(Key::ESCAPE);
         s.wait_message("Back in the editor");
         assert_eq!(s.backend.pointer_lock(), None);
+        assert!(s.ui.is_visible(host), "the editor is back");
 
         // The backend ends the lock itself (Esc swallowed by the grab, or
         // focus lost): Play ends and the pointer stays released.

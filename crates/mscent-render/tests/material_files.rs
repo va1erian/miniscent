@@ -167,6 +167,37 @@ fn forged_specular_files_are_errors() {
 }
 
 #[test]
+fn forged_height_files_are_errors_and_a_depth_reaches_the_texture() {
+    let f = Fixture::with_stock("forged_h", STOCK);
+    for side in [64, 256] {
+        f.png("brick_h.png", side, 0xff80_8080);
+        assert!(
+            matches!(f.load(), Err(TextureError::SizeMismatch)),
+            "{side}"
+        );
+    }
+    f.write("brick_h.png", b"not a png");
+    assert!(matches!(f.load(), Err(TextureError::Png(_))));
+    let mut truncated = encode_png(128, 128, &vec![0xff00_0000; 128 * 128]).expect("encodes");
+    truncated.truncate(truncated.len() / 2);
+    f.write("brick_h.png", &truncated);
+    assert!(matches!(f.load(), Err(TextureError::Png(_))));
+    // A good one loads, and the manifest's fourth column is the relief's depth.
+    f.png("brick_h.png", 128, 0xff80_8080);
+    let deeper = STOCK.replacen("0 brick 25", "0 brick 25 9", 1);
+    f.write("materials.txt", deeper.as_bytes());
+    let table = f.load().expect("loads");
+    let plane = table
+        .get(MaterialId(0))
+        .and_then(|m| m.texture.height_plane());
+    assert_eq!(plane.map(|p| p.depth()), Some(9));
+    let plane = table
+        .get(MaterialId(1))
+        .and_then(|m| m.texture.height_plane());
+    assert_eq!(plane.map(|p| p.depth()), Some(0), "no column, no relief");
+}
+
+#[test]
 fn a_specular_file_with_no_normal_map_is_an_error() {
     let f = Fixture::new("no_normals");
     f.write("materials.txt", b"0 a 9\n");

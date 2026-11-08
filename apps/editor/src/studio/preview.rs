@@ -145,6 +145,15 @@ impl Studio {
         let changed = self.wanted.as_ref() != Some(doc);
         if changed {
             self.changed_at = Instant::now();
+            // The bake holds every core but one, and the preview of a moved
+            // brush would wait for them until it came up and dropped the bake.
+            if self
+                .bake_job
+                .as_ref()
+                .is_some_and(|b| !b.job.doc.same_solids(doc))
+            {
+                self.bake_job = None;
+            }
         }
         if changed && self.mode == Mode::Edit && self.try_live(doc) {
             return;

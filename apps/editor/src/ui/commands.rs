@@ -269,6 +269,10 @@ impl Editor {
 
     /// Replaces the document (New, Open, showcase).
     fn install(&mut self, doc: Document, path: Option<PathBuf>, message: &str) {
+        // Play's window and its input go with the level they were for.
+        if self.studio.mode == Mode::Play {
+            self.end_play(None);
+        }
         self.close_fog_window();
         self.studio.reset(&doc);
         self.studio.set_cache_level(path.as_deref());

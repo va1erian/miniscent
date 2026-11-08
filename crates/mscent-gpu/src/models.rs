@@ -10,16 +10,18 @@
 use std::num::NonZeroU64;
 use std::ops::Range;
 
-use mscent_render::model::{ListedPart, ModelInstance, ModelList, ModelTable};
+use mscent_render::model::{Level, ListedPart, ModelInstance, ModelList, ModelTable};
 use mscent_render::scene::SceneStats;
 use mscent_render::{Camera, DynLight, LevelAssets, Quality};
 
-use crate::FRAME_BYTES;
 use crate::device::{Gpu, GpuError};
 use crate::faces::buffer;
 use crate::finish::Finish;
+use crate::shadow_lights::Slots;
+use crate::shadows::{ModelCasters, PartSphere};
 use crate::voxel_materials::{self, MATERIALS};
 use crate::voxels::{self, UNIFORM_BYTES, VERTEX_BYTES, push_vec3};
+use crate::{FRAME_BYTES, GpuEffects};
 
 /// Bytes a part takes in the uniform buffer: a frame lit, a frame glowing and the
 /// voxel uniform, each in a slot of `stride` bytes.
@@ -32,6 +34,8 @@ struct Held {
     vertices: wgpu::Buffer,
     corners: wgpu::Buffer,
     uniforms: wgpu::Buffer,
+    /// A part's matrix to the world, for the shadow maps.
+    worlds: wgpu::Buffer,
     /// Binds `vertices` and `corners`.
     group: wgpu::BindGroup,
 }
@@ -44,6 +48,12 @@ struct Materials {
 
 pub(crate) struct ModelPass {
     finish: Finish,
+    /// Lists what casts shadows, wherever the camera looks, and draws nothing: it
+    /// writes the vertices and matrices a shadow map reads and no frames or
+    /// materials.
+    casting: bool,
+    /// Whether this frame's parts are written, for `casters`.
+    ready: bool,
     pipeline: Option<wgpu::RenderPipeline>,
     materials: Option<Materials>,
     wanted: [bool; MATERIALS],
@@ -53,6 +63,9 @@ pub(crate) struct ModelPass {
     vertices: Vec<u8>,
     corners: Vec<u8>,
     uniforms: Vec<u8>,
+    /// By part: its matrix to the world, and where it is.
+    worlds: Vec<u8>,
+    spheres: Vec<PartSphere>,
     remap: Vec<u32>,
     /// By part: its corners lit, then glowing.
     ranges: Vec<[Range<u32>; 2]>,
@@ -78,17 +91,25 @@ fn corner_count(bytes: &[u8]) -> Result<u32, GpuError> {
 }
 
 impl ModelPass {
-    pub(crate) fn new(finish: Finish) -> Self {
+    pub(crate) fn new(finish: Finish, casting: bool) -> Self {
         Self {
             finish,
+            casting,
+            ready: false,
             pipeline: None,
             materials: None,
             wanted: [false; MATERIALS],
-            list: ModelList::unprojected(),
+            list: if casting {
+                ModelList::casters_unprojected()
+            } else {
+                ModelList::unprojected()
+            },
             held: None,
             vertices: Vec::new(),
             corners: Vec::new(),
             uniforms: Vec::new(),
+            worlds: Vec::new(),
+            spheres: Vec::new(),
             remap: Vec::new(),
             ranges: Vec::new(),
             draws: Vec::new(),
@@ -106,8 +127,13 @@ impl ModelPass {
         stats: &mut SceneStats,
     ) -> Result<(), GpuError> {
         self.draws.clear();
-        assets.list_models(&mut self.list, models, cam, lights);
-        stats.model_triangles = self.list.triangles;
+        self.ready = false;
+        if self.casting {
+            assets.list_model_casters(&mut self.list, models, cam);
+        } else {
+            assets.list_models(&mut self.list, models, cam, lights);
+            stats.model_triangles = self.list.triangles;
+        }
         let Some((table, _)) = models else {
             return Ok(());
         };
@@ -135,9 +161,14 @@ impl ModelPass {
                     .clone()
             })
             .clone();
-        self.sync_materials(gpu, assets)?;
+        if !self.casting {
+            self.sync_materials(gpu, assets)?;
+        }
         self.upload(gpu, &pipeline)?;
-        self.bind_draws(gpu, &pipeline, stride);
+        if !self.casting {
+            self.bind_draws(gpu, &pipeline, stride);
+        }
+        self.ready = true;
         Ok(())
     }
 
@@ -145,6 +176,8 @@ impl ModelPass {
         self.vertices.clear();
         self.corners.clear();
         self.uniforms.clear();
+        self.worlds.clear();
+        self.spheres.clear();
         self.ranges.clear();
         let parts = std::mem::take(&mut self.list);
         let result = parts.parts().iter().try_for_each(|listed| {
@@ -152,8 +185,11 @@ impl ModelPass {
                 Some(level) => self.write_part(&parts, listed, level)?,
                 None => [0..0, 0..0],
             };
+            self.write_caster(listed, table.level_of(listed), &ranges);
             self.ranges.push(ranges);
-            self.write_uniforms(listed, frame);
+            if !self.casting {
+                self.write_uniforms(listed, frame);
+            }
             Ok(())
         });
         self.list = parts;
@@ -223,11 +259,55 @@ impl ModelPass {
         let clip = frame.cam.gpu_clip_matrix() * listed.to_world();
         // Low has neither bump nor highlight, as a glowing triangle has neither.
         for quality in [frame.quality, Quality::Low] {
-            let bytes = crate::frame_bytes(clip, (frame.fog, &[]), quality, (0, 0));
+            let looks = (quality, GpuEffects::at(quality));
+            let bytes = crate::frame_bytes(
+                clip,
+                (frame.fog, &[]),
+                looks,
+                ((0, 0), Slots::NONE, Default::default()),
+            );
             self.push_slot(&bytes, frame.stride);
         }
         let bytes = voxels::uniform_bytes_at(frame.cam, listed.eye);
         self.push_slot(&bytes, frame.stride);
+    }
+
+    /// What the shadow maps need of a part: its matrix, and a sphere round it. A
+    /// part turns about a pivot that need not be its origin, so the sphere is twice
+    /// as wide as its farthest vertex.
+    fn write_caster(
+        &mut self,
+        listed: &ListedPart,
+        level: Option<&Level>,
+        ranges: &[Range<u32>; 2],
+    ) {
+        let to_world = listed.to_world();
+        for c in &to_world.cols {
+            for value in [c.x, c.y, c.z, c.w] {
+                self.worlds.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+        let reach = level.map_or(0.0, |l| {
+            let far = l.vertices.iter().map(|v| v.pos.length());
+            far.fold(0.0, f32::max)
+        });
+        let scale = to_world.cols[0].xyz().length();
+        self.spheres.push(PartSphere {
+            corners: ranges[0].start..ranges[1].end,
+            centre: to_world.translation(),
+            radius: 2.0 * reach * scale,
+        });
+    }
+
+    /// The parts, for a light's shadow map; none when a frame has no models.
+    pub(crate) fn casters(&self) -> Option<ModelCasters<'_>> {
+        let held = self.held.as_ref().filter(|_| self.ready)?;
+        Some(ModelCasters {
+            vertices: &held.vertices,
+            corners: &held.corners,
+            worlds: &held.worlds,
+            parts: &self.spheres,
+        })
     }
 
     fn push_slot(&mut self, bytes: &[u8], stride: u64) {
@@ -257,6 +337,7 @@ impl ModelPass {
             fits(&h.vertices, &self.vertices)
                 && fits(&h.corners, &self.corners)
                 && fits(&h.uniforms, &self.uniforms)
+                && fits(&h.worlds, &self.worlds)
         });
         if held.is_none() {
             let size = |bytes: &[u8]| (bytes.len() as u64).max(4).next_power_of_two();
@@ -270,11 +351,13 @@ impl ModelPass {
                 size(&self.uniforms),
                 wgpu::BufferUsages::UNIFORM,
             )?;
+            let worlds = storage_of("model worlds", &self.worlds)?;
             let group = voxels::bind_mesh(gpu, pipeline, &vertices, &corners);
             self.held = Some(Held {
                 vertices,
                 corners,
                 uniforms,
+                worlds,
                 group,
             });
         }
@@ -284,6 +367,7 @@ impl ModelPass {
         gpu.queue.write_buffer(&held.vertices, 0, &self.vertices);
         gpu.queue.write_buffer(&held.corners, 0, &self.corners);
         gpu.queue.write_buffer(&held.uniforms, 0, &self.uniforms);
+        gpu.queue.write_buffer(&held.worlds, 0, &self.worlds);
         Ok(())
     }
 

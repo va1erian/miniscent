@@ -19,12 +19,18 @@ use crate::build::{BakeJob, Built, Job, Light, SharedCache};
 use crate::materials::SharedMaterials;
 use crate::model::{Document, FlyCam};
 
+mod adaptive;
 pub mod gpu_view;
 pub use gpu_view::frame_size;
+mod camera;
 mod highlight;
+pub(crate) mod input;
 mod live;
+mod play_direct;
+mod play_surface;
 mod preview;
 mod scene;
+mod slow;
 pub mod worker;
 
 use highlight::Highlights;
@@ -119,6 +125,8 @@ pub struct Studio {
     /// The vista warnings last put in the log, so an edit that leaves them as
     /// they were does not repeat them.
     warned: Vec<String>,
+    /// Play presents into the Play pane's own window.
+    surface: bool,
 }
 
 impl Studio {
@@ -131,6 +139,7 @@ impl Studio {
             live_dirty: false,
             live_count: 0,
             warned: Vec::new(),
+            surface: false,
             bake_job: None,
             wanted: None,
             changed_at: Instant::now(),
@@ -210,26 +219,13 @@ impl Studio {
         self.unplayable = None;
     }
 
-    /// Puts the fly camera back where a new document starts.
-    pub fn reset_camera(&mut self, doc: &Document) {
-        self.set_camera(FlyCam::for_document(doc));
-    }
-
-    /// The fly camera as it is right now.
-    pub fn fly_camera(&self) -> FlyCam {
-        self.worker
-            .as_ref()
-            .and_then(Worker::current_camera)
-            .unwrap_or_else(|| self.camera.clone())
-    }
-
-    /// Sets the faces to outline in the 3D view. Nothing is sent when they
-    /// are the ones already shown.
-    pub fn set_highlights(&mut self, polys: Vec<Vec<mscent_math::Vec3>>) {
-        if *self.highlights == polys {
+    /// Sets the faces to mark in the 3D view. Nothing is sent when they are
+    /// the ones already shown.
+    pub fn set_highlights(&mut self, marks: crate::model::facetex::Marks) {
+        if *self.highlights == marks {
             return;
         }
-        self.highlights = Highlights::new(polys);
+        self.highlights = Highlights::new(marks);
         if let Some(w) = &self.worker {
             w.highlights(&self.highlights);
         }
@@ -379,6 +375,7 @@ impl Studio {
     }
 
     fn retire_worker(&mut self) {
+        self.surface = false;
         if let Some(w) = self.worker.take() {
             // The next thread starts where this one left the camera.
             if let Some(c) = w.current_camera() {
@@ -402,7 +399,7 @@ impl Studio {
         self.sync_banner(doc);
         out.log.extend(gpu_view::take_report());
         // A GPU has the pixels to spare; on software a large pane costs resolution.
-        let max_width = if gpu_view::active() { pane.0 } else { 960 };
+        let max_width = self.max_frame_width(pane);
         let size = if pane.0 == 0 || pane.1 == 0 {
             (0, 0)
         } else {
@@ -490,6 +487,8 @@ mod material_tests;
 mod preview_tests;
 #[cfg(test)]
 mod race_tests;
+#[cfg(test)]
+mod surface_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

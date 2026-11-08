@@ -50,7 +50,7 @@ pub fn take_report() -> Option<String> {
     (!std::mem::replace(&mut slot.1, true)).then(|| slot.0.clone())
 }
 
-fn report(line: String) {
+pub(super) fn report(line: String) {
     let mut slot = REPORT.lock().unwrap_or_else(PoisonError::into_inner);
     if slot.0 != line {
         *slot = (line, false);
@@ -93,7 +93,13 @@ impl Devices {
     }
 }
 
-fn device() -> Result<Gpu, String> {
+/// Says the GPU drew the last frame, for a frame it showed without the view.
+pub(super) fn set_active() {
+    ACTIVE.store(true, Ordering::Relaxed);
+}
+
+/// The editor's device, opened if it has to be.
+pub(super) fn device() -> Result<Gpu, String> {
     DEVICE.get(|| Gpu::new().map_err(|e| e.to_string()))
 }
 
@@ -117,6 +123,9 @@ pub struct GpuView {
     /// Draws whatever `set_wanted` says, for a test among parallel ones.
     #[cfg(test)]
     pub forced: bool,
+    /// The GPU-only looks a test sets, where it holds the picture to software's.
+    #[cfg(test)]
+    pub effects: Option<mscent_gpu::GpuEffects>,
     /// A device of the test's own, which it may lose without taking the
     /// editor's from the tests beside it.
     #[cfg(test)]
@@ -221,9 +230,13 @@ impl GpuView {
         if !self.is_wanted() || self.failed.is_some() {
             return false;
         }
+        #[cfg(test)]
+        let effects = self.effects;
         let Some(level) = self.level(assets, frame.quality) else {
             return false;
         };
+        #[cfg(test)]
+        level.set_effects(effects);
         let drawn = level.draw(assets, fb, frame).is_some();
         match level.take_error() {
             Some(why) => self.failed_frame(&why),
