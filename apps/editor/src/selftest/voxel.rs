@@ -54,7 +54,7 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     let file = run.dir.join("sculpted.msl");
     let level = level_text::from_text(LEVEL).expect("the level text");
     std::fs::write(&file, mscent_world::format::write(&level)).expect("writes");
-    stage.emit(Msg::OpenPath(file.clone()));
+    super::guide::leave(stage, Msg::OpenPath(file.clone()));
     wait_for_preview(stage, probe);
     let original = settled_picture(stage, probe);
     run.check(original.is_some(), "the room is on screen");
@@ -100,7 +100,7 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     run.check(redone == sculpted, "redo gives back the sculpted picture");
 
     stage.emit(Msg::SavePath(file.clone()));
-    stage.emit(Msg::OpenPath(file.clone()));
+    super::guide::leave(stage, Msg::OpenPath(file.clone()));
     let reopened = probe.state().borrow().doc.volumes().count();
     run.check(reopened == 1, "the volume survives a save and reopen");
     wait_for_preview(stage, probe);

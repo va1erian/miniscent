@@ -138,7 +138,7 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     let file = run.dir.join("vista.msl");
     let level = level_text::from_text(LEVEL).expect("the level text");
     std::fs::write(&file, mscent_world::format::write(&level)).expect("writes");
-    stage.emit(Msg::OpenPath(file));
+    super::guide::leave(stage, Msg::OpenPath(file));
     wait_for_preview(stage, probe);
     let state = probe.state();
     let wall = frame_wall(run, stage, probe, |n: Vec3d| n.x > 0.9);

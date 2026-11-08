@@ -341,7 +341,7 @@ fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
         probe.message().starts_with("Saved"),
         &format!("saved: {}", probe.message()),
     );
-    stage.emit(Msg::OpenPath(file.clone()));
+    guide::leave(stage, Msg::OpenPath(file.clone()));
     run.check(
         probe.message().starts_with("Opened"),
         &format!("opened: {}", probe.message()),
@@ -358,7 +358,7 @@ fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
                 .map(|l| (l.brushes.len(), l.entities.len())),
         "the reloaded level has the same brush and entity counts",
     );
-    stage.emit(Msg::OpenPath(run.dir.join("does-not-exist.msl")));
+    guide::leave(stage, Msg::OpenPath(run.dir.join("does-not-exist.msl")));
     run.check(
         probe.message().starts_with("cannot open") && probe.state().borrow().doc == reloaded,
         &format!(

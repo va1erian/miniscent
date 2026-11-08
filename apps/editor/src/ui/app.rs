@@ -45,11 +45,12 @@ pub struct Editor {
     pub(super) disposition: Disposition,
     pub(super) play: Handle<View3d<Msg>>,
     pub(super) script: ScriptPane,
-    /// Asks before unsaved script edits go. Not a modal window: the default
-    /// backend has no modal loop, and `open_modal` returns at once with nothing.
+    /// Asks before unsaved work goes. Not a modal window: the default backend
+    /// has no modal loop, and `open_modal` returns at once with nothing.
     pub(super) discard_dialog: Dialog<Msg>,
-    /// What is waiting on that answer.
+    /// What is waiting on that answer, and whether the answer let it through.
     pub(super) after_discard: Option<Msg>,
+    pub(super) discarded: bool,
     /// The level settings window, once opened. It may have closed itself since.
     pub(super) fog_window: Rc<RefCell<Option<FogWindow>>>,
     /// The manual's window, once opened. It may have been closed since.
@@ -112,8 +113,8 @@ impl Editor {
             .on_cancel(|| None);
         let discard_dialog = Dialog::confirm(
             ui,
-            "Discard unsaved script edits?",
-            "The script has edits that are not saved. Discard them?",
+            "Discard unsaved changes?",
+            "Some changes are not saved. Discard them?",
         )?
         .on_action(|action| Some(Msg::Discard(action)));
         let tex = Workspace::new(studio.materials().clone());
@@ -126,6 +127,7 @@ impl Editor {
             script: ScriptPane::new(state.clone()),
             discard_dialog,
             after_discard: None,
+            discarded: false,
             fog_window: Rc::default(),
             manual: Rc::default(),
             menu: Handle::new(),
