@@ -165,6 +165,10 @@ impl EditorState {
         self.commit_pending();
         self.drag = None;
         let snapped = [self.snap(p.pos[0]), self.snap(p.pos[1])];
+        // A view sets the two coordinates it shows; the last click in another
+        // view gives an entity placed here its third.
+        let (a, b) = p.view.axes();
+        (self.depth[a], self.depth[b]) = (snapped[0], snapped[1]);
         match self.tool {
             Tool::Box => {
                 self.drag = Some(Drag::Create {
@@ -345,8 +349,13 @@ impl EditorState {
                 let (a, b) = view.axes();
                 let mut min = [0.0; 3];
                 let mut max = [0.0; 3];
-                min[view.hidden()] = self.extent.0;
-                max[view.hidden()] = self.extent.1;
+                // Along the axis the view hides: the selected brush's range, so a
+                // box drawn over a room spans it, else the default.
+                let h = view.hidden();
+                (min[h], max[h]) = match self.selected_brush() {
+                    Some(b) => (b.bounds().0[h], b.bounds().1[h]),
+                    None => self.extent,
+                };
                 min[a] = start[0].min(cur[0]);
                 max[a] = start[0].max(cur[0]);
                 min[b] = start[1].min(cur[1]);

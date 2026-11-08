@@ -326,7 +326,7 @@ fn edits_that_do_nothing_say_why() {
     drag(&mut s, View::Top, [2.0, 2.0], [2.0, 2.0]);
     assert!(s.message.starts_with("The slice line has no length"), "{}", s.message);
     s.place_entity(EntityKind::PlayerStart, [1.0, 1.0, 1.0]);
-    assert_eq!(s.message, "Placed player start");
+    assert_eq!(s.message, "Placed player start at 1, 1, 1");
     s.place_entity(EntityKind::PlayerStart, [2.0, 2.0, 1.0]);
     assert!(s.message.starts_with("Moved the player start"), "{}", s.message);
 }
@@ -345,4 +345,28 @@ fn a_drag_past_the_map_stops_at_the_edge_and_says_so() {
 fn counts_read_as_words() {
     assert_eq!(super::count(1, "brush", "brushes"), "1 brush");
     assert_eq!(super::count(3, "face", "faces"), "3 faces");
+}
+
+#[test]
+fn a_view_takes_the_coordinate_it_hides_from_the_last_click_elsewhere() {
+    let mut s = EditorState::default();
+    // A click in the side view sets Y and Z; the top view then sets X and Y.
+    s.set_tool(Tool::Select);
+    s.pointer_down(ptr(View::Side, 3.0, 6.0));
+    s.pointer_up(ptr(View::Side, 3.0, 6.0));
+    s.set_tool(Tool::Place(EntityKind::Light));
+    s.pointer_down(ptr(View::Top, 1.0, 2.0));
+    let light = s.selected_entity().expect("placed").entity;
+    assert_eq!(super::entity::pos(&light), [1.0, 2.0, 6.0]);
+    assert_eq!(s.message, "Placed light at 1, 2, 6");
+}
+
+#[test]
+fn a_box_drawn_with_a_brush_selected_spans_its_depth() {
+    let (mut s, _) = one_box();
+    let (lo, hi) = s.selected_brush().expect("selected").bounds();
+    s.set_tool(Tool::Box);
+    drag(&mut s, View::Front, [1.0, 1.0], [2.0, 3.0]);
+    let (nlo, nhi) = s.selected_brush().expect("new box").bounds();
+    assert_eq!((nlo[1], nhi[1]), (lo[1], hi[1]));
 }

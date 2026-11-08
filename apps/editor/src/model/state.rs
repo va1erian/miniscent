@@ -54,9 +54,11 @@ pub struct EditorState {
     pub new_op: Op,
     pub new_material: u16,
     pub grid: f64,
-    /// Extent along the axis a view looks along, for new boxes.
+    /// Extent along the axis a view looks along, for new boxes when no brush
+    /// is selected to take it from.
     pub extent: (f64, f64),
-    /// Coordinate along the hidden axis for new entities, per world axis.
+    /// Where the last click in each 2D view was, per world axis: an entity
+    /// placed in one view takes the coordinate it hides from here.
     pub depth: [f64; 3],
     pub drag: Option<Drag>,
     /// Why the drag's last step was refused, to say when it ends.
@@ -341,7 +343,8 @@ impl EditorState {
         cmds.push(Command::AddEntity { index, entity });
         self.history.run(&mut self.doc, Command::Batch(cmds));
         self.selection = Some(Selection::Entity(id));
-        self.message = format!("{verb} {}", k.name().to_lowercase());
+        let at = p.map(|v| format!("{}", (v * 100.0).round() / 100.0)).join(", ");
+        self.message = format!("{verb} {} at {at}", k.name().to_lowercase());
         if verb != "Placed" {
             self.message.push_str(": a level has one, so the old one went");
         }
