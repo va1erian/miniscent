@@ -127,9 +127,10 @@ pub(super) fn lamp_light<'a>(
                 if d <= 0.0 || d >= l.radius {
                     continue;
                 }
+                let beam = l.cone.map_or(1.0, |c| c.share(to * (-1.0 / d)));
                 let fall = 1.0 - d / l.radius;
                 let lambert = (v.normal.dot(to) / d).max(0.0);
-                let got = l.color * (fall * fall * lambert);
+                let got = l.color * (fall * fall * lambert * beam);
                 color = color + got;
                 dir = dir + to * (1.0 / d) * (got.x + got.y + got.z);
             }

@@ -9,7 +9,7 @@
 //! left to take from it.
 
 use mscent_math::Vec3;
-use mscent_world::lightmap::PointLight;
+use mscent_world::lightmap::{Cone, PointLight};
 
 use crate::shadow_lights::{Candidate, Pick};
 
@@ -21,8 +21,9 @@ const _: () = assert!(LAMP_SHADOWS == 2);
 /// The power of `1 - distance / radius` the baker lights with (`soft.rs` in
 /// mscent-world), which the faces' shader takes the lamp's share with.
 pub(crate) const FALLOFF_POWER: f64 = 3.0;
-/// Bytes of `lamps`, `lamp_colors` and `lamp_bounds` in `Frame`.
-pub(crate) const BYTES: u64 = 48 * LAMP_SHADOWS as u64;
+/// Bytes of `lamps`, `lamp_colors`, `lamp_bounds`, `lamp_aims` and `lamp_edges`
+/// in `Frame`.
+pub(crate) const BYTES: u64 = 80 * LAMP_SHADOWS as u64;
 
 /// What `Frame` holds of a lamp that casts.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -33,6 +34,8 @@ pub(crate) struct LampFrame {
     /// A sphere that holds everything that casts into the lamp's map, so that a
     /// face the lamp's light reaches past it can skip the lookup.
     pub(crate) bound: (Vec3, f32),
+    /// Where a projector shines; a lamp with none lights all round.
+    pub(crate) cone: Option<Cone>,
 }
 
 /// The lamps that cast, by map.
@@ -54,6 +57,24 @@ impl Lamps {
         each(bytes, |l| [l.color.x, l.color.y, l.color.z, 0.0]);
         each(bytes, |l| {
             [l.bound.0.x, l.bound.0.y, l.bound.0.z, l.bound.1]
+        });
+        // The cone, as `Cone::share` takes it: the axis and the outer cosine, then
+        // the inner cosine, whether there is a cone at all and whether its edge is hard.
+        each(bytes, |l| {
+            l.cone.map_or([0.0; 4], |c| {
+                let d = c.dir();
+                [d.x, d.y, d.z, c.edge_cosines().1]
+            })
+        });
+        each(bytes, |l| {
+            l.cone.map_or([0.0; 4], |c| {
+                [
+                    c.edge_cosines().0,
+                    1.0,
+                    f32::from(u8::from(c.is_hard())),
+                    0.0,
+                ]
+            })
         });
     }
 }
@@ -105,6 +126,7 @@ pub(crate) fn frame_lamps(
             radius: c.radius,
             color: lamps.get(i)?.color,
             bound: bound_of(c.pos, c.radius).unwrap_or((c.pos, c.radius)),
+            cone: lamps.get(i)?.cone,
         })
     }))
 }
@@ -118,6 +140,7 @@ mod tests {
             position: Vec3::new(x, 0.0, 0.0),
             color: Vec3::new(color, color, color),
             radius,
+            cone: None,
         }
     }
 

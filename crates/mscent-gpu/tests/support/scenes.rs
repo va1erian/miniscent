@@ -19,7 +19,7 @@ use mscent_render::{
 };
 use mscent_world::materials::{BRICK, CAP, METAL, ROCK, WAX};
 use mscent_world::voxel::{CellSize, Context, DabOp, Prim, Volume, apply_dab};
-use mscent_world::{Brush, Entity, Level, MoverGroup, Op, materials, showcase_level};
+use mscent_world::{Brush, Entity, Level, MoverGroup, Op, materials, showcase_base_level};
 
 /// How far from a surface `Pose::AtMaterial` stands.
 const NEAR_A_SURFACE: f32 = 3.0;
@@ -152,7 +152,7 @@ fn looking(eye: Vec3, along: Vec3) -> View {
 impl Scene {
     pub fn showcase() -> Self {
         Self {
-            level: showcase_level(),
+            level: showcase_base_level(),
             spotless: None,
             cfg: BuildConfig::default(),
             bakes: RefCell::new(BakeCache::new()),
@@ -166,7 +166,7 @@ impl Scene {
     /// level, and so would fog.
     pub fn hard_shadows() -> Self {
         Self {
-            level: showcase_level(),
+            level: showcase_base_level(),
             spotless: None,
             cfg: BuildConfig {
                 luxel_size: 0.03125,

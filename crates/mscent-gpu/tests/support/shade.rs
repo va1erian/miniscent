@@ -57,6 +57,9 @@ fn cuboid(a: [f64; 3], b: [f64; 3], op: Op, order: u32) -> Brush {
 pub struct Room {
     /// A baked lamp, its place and intensity, whose light a pillar then shadows in the bake.
     pub baked_lamp: Option<(Vec3, f32)>,
+    /// Makes the baked lamp a projector aimed straight down, with this outer half
+    /// angle and an inner one nine tenths of it.
+    pub cone: Option<f32>,
     /// A pillar, 2 wide, from the floor to the ceiling at the room's centre.
     pub pillar: bool,
     /// A mover the size of the box, where the box hangs, to be moved by a pose.
@@ -89,11 +92,23 @@ pub fn room(spec: Room) -> LevelRenderer {
     }
     let entities = spec
         .baked_lamp
-        .map(|(pos, intensity)| Entity::Light {
-            pos,
-            color: Vec3::new(1.0, 1.0, 1.0),
-            radius: 40.0,
-            intensity,
+        .map(|(pos, intensity)| match spec.cone {
+            None => Entity::Light {
+                pos,
+                color: Vec3::new(1.0, 1.0, 1.0),
+                radius: 40.0,
+                intensity,
+            },
+            Some(outer) => Entity::Projector {
+                pos,
+                yaw: 0.0,
+                pitch: -core::f32::consts::FRAC_PI_2,
+                color: Vec3::new(1.0, 1.0, 1.0),
+                radius: 40.0,
+                intensity,
+                inner: outer * 0.9,
+                outer,
+            },
         })
         .into_iter()
         .collect();

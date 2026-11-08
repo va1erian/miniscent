@@ -59,6 +59,7 @@ pub(super) fn baked() -> Lightmap {
         position: Vec3::new(-1.5, 0.0, 0.0),
         color: Vec3::new(32.0, 32.0, 32.0),
         radius: 3.0,
+        cone: None,
     };
     let cfg = BakeConfig {
         luxel_size: 0.25,

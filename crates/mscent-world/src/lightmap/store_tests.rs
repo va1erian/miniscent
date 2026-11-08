@@ -37,6 +37,7 @@ fn lamp(x: f32) -> PointLight {
         position: v3(x, 20.0, 30.0),
         color: v3(1.0, 0.9, 0.8),
         radius: 80.0,
+        cone: None,
     }
 }
 
@@ -210,6 +211,7 @@ fn penumbra_luxels(radius: f32, samples: u32) -> usize {
         position: v3(20.0, 45.0, 30.0),
         color: v3(1.0, 1.0, 1.0),
         radius: 400.0,
+        cone: None,
     };
     let cfg = BakeConfig {
         luxel_size: 1.0,

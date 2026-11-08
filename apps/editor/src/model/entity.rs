@@ -16,6 +16,7 @@ const MAX_PLAIN_PARAM: f64 = 4096.0;
 pub enum EntityKind {
     PlayerStart,
     Light,
+    Projector,
     Enemy,
     Goal,
     Marker,
@@ -28,6 +29,7 @@ impl EntityKind {
         match self {
             EntityKind::PlayerStart => "Player start",
             EntityKind::Light => "Light",
+            EntityKind::Projector => "Projector",
             EntityKind::Enemy => "Enemy",
             EntityKind::Goal => "Goal",
             EntityKind::Marker => "Marker",
@@ -46,6 +48,17 @@ impl EntityKind {
                 color: Vec3::new(1.0, 0.9, 0.7),
                 radius: 16.0,
                 intensity: 1.2,
+            },
+            // Straight down, so a new one throws a pool on the floor under it.
+            EntityKind::Projector => Entity::Projector {
+                pos,
+                yaw: 0.0,
+                pitch: -core::f32::consts::FRAC_PI_2,
+                color: Vec3::new(1.0, 0.95, 0.8),
+                radius: 24.0,
+                intensity: 1.6,
+                inner: 0.25,
+                outer: 0.55,
             },
             EntityKind::Enemy => Entity::Enemy { pos, kind: 0 },
             EntityKind::Goal => Entity::Goal { pos, radius: 1.5 },
@@ -87,6 +100,7 @@ pub fn entity_name(e: &Entity) -> &'static str {
     match e {
         Entity::PlayerStart { .. } => EntityKind::PlayerStart.name(),
         Entity::Light { .. } => EntityKind::Light.name(),
+        Entity::Projector { .. } => EntityKind::Projector.name(),
         Entity::Enemy { .. } => EntityKind::Enemy.name(),
         Entity::Goal { .. } => EntityKind::Goal.name(),
         Entity::World { .. } => "World",
@@ -113,6 +127,7 @@ pub fn with_pos(e: &Entity, p: [f64; 3]) -> Entity {
     match &mut out {
         Entity::PlayerStart { pos, .. }
         | Entity::Light { pos, .. }
+        | Entity::Projector { pos, .. }
         | Entity::Enemy { pos, .. }
         | Entity::Goal { pos, .. }
         | Entity::World { pos, .. }
@@ -137,6 +152,26 @@ pub fn params(e: &Entity) -> Vec<(&'static str, f64)> {
             ("Blue", short(color.z)),
             ("Radius", short(radius)),
             ("Intensity", short(intensity)),
+        ],
+        Entity::Projector {
+            yaw,
+            pitch,
+            color,
+            radius,
+            intensity,
+            inner,
+            outer,
+            ..
+        } => vec![
+            ("Yaw (deg)", short(yaw.to_degrees())),
+            ("Pitch (deg)", short(pitch.to_degrees())),
+            ("Red", short(color.x)),
+            ("Green", short(color.y)),
+            ("Blue", short(color.z)),
+            ("Radius", short(radius)),
+            ("Intensity", short(intensity)),
+            ("Inner angle (deg)", short(inner.to_degrees())),
+            ("Outer angle (deg)", short(outer.to_degrees())),
         ],
         Entity::Goal { radius, .. } => vec![("Radius", short(radius))],
         Entity::World {
@@ -205,6 +240,7 @@ pub fn set_param(e: &mut Entity, i: usize, v: f64) {
             4 => *intensity = v as f32,
             _ => {}
         },
+        Entity::Projector { .. } => set_projector_param(e, i, v),
         Entity::Goal { radius, .. } if i == 0 => *radius = v as f32,
         Entity::World { fog_start, .. } if i == 0 => *fog_start = v as f32,
         Entity::World { fog_end, .. } if i == 1 => *fog_end = v as f32,
@@ -219,6 +255,47 @@ pub fn set_param(e: &mut Entity, i: usize, v: f64) {
             _ => {}
         },
         Entity::VistaLayer { .. } => set_vista_param(e, i, v),
+        _ => {}
+    }
+}
+
+/// Field `i` of a projector, held to the ranges of `Entity::is_valid` so no edit
+/// can make a level that will not save or load. The inner angle never passes the
+/// outer one: each pushes the other. A value that is not a number changes nothing.
+fn set_projector_param(e: &mut Entity, i: usize, v: f64) {
+    let Entity::Projector {
+        yaw,
+        pitch,
+        color,
+        radius,
+        intensity,
+        inner,
+        outer,
+        ..
+    } = e
+    else {
+        return;
+    };
+    if !v.is_finite() {
+        return;
+    }
+    let quarter = core::f32::consts::FRAC_PI_2;
+    let unit = v.clamp(0.0, 1.0) as f32;
+    // Least outer angle: a cone of no width would light nothing.
+    let least = 0.5_f32.to_radians();
+    match i {
+        0 => *yaw = (v as f32).to_radians(),
+        1 => *pitch = (v as f32).to_radians().clamp(-quarter, quarter),
+        2 => color.x = unit,
+        3 => color.y = unit,
+        4 => color.z = unit,
+        5 => *radius = v.clamp(0.1, f64::from(MAX_ENTITY_COORD)) as f32,
+        6 => *intensity = v.clamp(0.0, f64::from(MAX_ENTITY_COORD)) as f32,
+        7 => *inner = (v as f32).to_radians().clamp(0.0, quarter).min(*outer),
+        8 => {
+            *outer = (v as f32).to_radians().clamp(least, quarter);
+            *inner = inner.min(*outer);
+        }
         _ => {}
     }
 }

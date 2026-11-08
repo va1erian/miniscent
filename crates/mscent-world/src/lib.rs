@@ -78,7 +78,7 @@ pub use labels::{EntityLabel, LabelError, MoverGroup};
 pub use level_builder::LevelBuilder;
 pub use portals::{Portal, Portals};
 pub use rooms::{RoomError, Rooms};
-pub use showcase::showcase_level;
+pub use showcase::{showcase_base_level, showcase_level};
 pub use texinfo::TexInfo;
 pub use vista_check::{VistaWarning, vista_warnings};
 
@@ -102,6 +102,8 @@ mod level_text_mountains_tests;
 mod level_text_tests;
 #[cfg(test)]
 mod portals_tests;
+#[cfg(test)]
+mod projector_tests;
 #[cfg(test)]
 mod review_tests;
 #[cfg(test)]

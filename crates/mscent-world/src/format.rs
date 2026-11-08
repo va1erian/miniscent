@@ -35,7 +35,7 @@ use crate::voxel::wire::{check_orders, read_volumes, write_volumes};
 use mscent_math::{DPlane, Vec3d};
 
 pub const MAGIC: [u8; 4] = *b"MSLV";
-pub const VERSION: u16 = 5;
+pub const VERSION: u16 = 6;
 /// Oldest version [`read`] still accepts.
 const MIN_VERSION: u16 = 1;
 pub const MAX_FILE_BYTES: usize = 64 << 20;
@@ -53,6 +53,8 @@ const LABELS_VERSION: u16 = 3;
 const VOLUMES_VERSION: u16 = 4;
 /// First version whose entities may be vista layers (tag 7).
 const VISTA_VERSION: u16 = 5;
+/// First version with [`Entity::Projector`], entity tag 8.
+const PROJECTOR_VERSION: u16 = 6;
 
 /// Smallest brush record: op, order, material, plane count.
 const BRUSH_HEAD: usize = 1 + 4 + 2 + 4;
@@ -151,6 +153,7 @@ fn write_entities(entities: &[Entity]) -> Vec<u8> {
             Entity::Marker { .. } => 5,
             Entity::Zone { .. } => 6,
             Entity::VistaLayer { .. } => 7,
+            Entity::Projector { .. } => 8,
         });
         put_vec3(&mut out, e.pos());
         match *e {
@@ -165,6 +168,21 @@ fn write_entities(entities: &[Entity]) -> Vec<u8> {
                 put_vec3(&mut out, color);
                 put_f32(&mut out, radius);
                 put_f32(&mut out, intensity);
+            }
+            Entity::Projector {
+                yaw,
+                pitch,
+                color,
+                radius,
+                intensity,
+                inner,
+                outer,
+                ..
+            } => {
+                put_vec3(&mut out, color);
+                for v in [yaw, pitch, radius, intensity, inner, outer] {
+                    put_f32(&mut out, v);
+                }
             }
             Entity::Enemy { kind, .. } => out.push(kind),
             Entity::Goal { radius, .. } => put_f32(&mut out, radius),
@@ -369,6 +387,16 @@ fn read_entity(c: &mut Cursor, version: u16) -> Result<Entity, FormatError> {
         6 => Entity::Zone {
             pos,
             half: c.vec3()?,
+        },
+        8 if version >= PROJECTOR_VERSION => Entity::Projector {
+            pos,
+            color: c.vec3()?,
+            yaw: c.f32()?,
+            pitch: c.f32()?,
+            radius: c.f32()?,
+            intensity: c.f32()?,
+            inner: c.f32()?,
+            outer: c.f32()?,
         },
         7 if version >= VISTA_VERSION => Entity::VistaLayer {
             pos,

@@ -42,6 +42,7 @@ fn lit_floor(w: f32) -> (Lightmap, usize) {
         position: Vec3::new(w / 2.0, 5.0, 5.0),
         color: Vec3::new(8.0, 8.0, 8.0),
         radius: 60.0,
+        cone: None,
     };
     (bake(&bsp, &[floor], &[lamp], &cfg()).unwrap(), 0)
 }

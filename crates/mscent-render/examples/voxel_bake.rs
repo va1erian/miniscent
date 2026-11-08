@@ -120,6 +120,7 @@ fn main() -> Result<(), Failure> {
                 position: pos,
                 color: color * (intensity * build.light_gain),
                 radius,
+                cone: None,
             }),
             _ => None,
         })

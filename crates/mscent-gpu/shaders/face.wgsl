@@ -241,6 +241,25 @@ fn may_be_shaded(lamp: vec3f, p: vec3f, bound: vec4f) -> bool {
     return !(length(bound.xyz - nearest) > bound.w + spread);
 }
 
+// The share of lamp `j`'s light that goes along `from_lamp`, a unit vector from
+// the lamp to the point: Cone::share in mscent-world, a smooth step between the
+// outer and the inner cosine; a lamp with no cone gives 1.
+fn cone_share(j: u32, from_lamp: vec3f) -> f32 {
+    let edges = frame.lamp_edges[j];
+    if edges.y == 0.0 {
+        return 1.0;
+    }
+    let aim = frame.lamp_aims[j];
+    let span = edges.x - aim.w;
+    let along = dot(aim.xyz, from_lamp);
+    // Edges that meet make a hard one, which Rust decides (`Cone::is_hard`).
+    if edges.z != 0.0 {
+        return select(0.0, 1.0, along >= aim.w);
+    }
+    let t = clamp((along - aim.w) / span, 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
 // What the movers' shadows take from the baked light at a luxel: for each static
 // lamp that has a map, the light the baker put here from it (colour, falloff to a
 // power of the distance, and the cosine of incidence, as soft.rs has it) over the
@@ -260,7 +279,8 @@ fn lamp_shadowed(face: Face, luxel: vec2f) -> vec3f {
                 continue;
             }
             let blocked = 1.0 - shadow_visibility(SHADOW_LIGHTS + j, l, world, face.normal.xyz);
-            let share = pow(1.0 - dist / l.w, LAMP_FALLOFF_POWER) * (to.z / dist) * blocked;
+            let beam = cone_share(j, normalize(world - l.xyz));
+            let share = pow(1.0 - dist / l.w, LAMP_FALLOFF_POWER) * (to.z / dist) * blocked * beam;
             lost += frame.lamp_colors[j].rgb * 256.0 * share;
         }
     }
