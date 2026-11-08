@@ -109,9 +109,9 @@ impl Probe {
         self.script.problems().cell_text(0, 0).unwrap_or_default()
     }
 
-    /// Whether the guide's page on show has been laid out and is drawn.
-    pub fn guide_ready(&self) -> bool {
-        self.script.guide_ready()
+    /// The title of the guide's page on show.
+    pub fn guide_title(&self) -> Option<String> {
+        self.script.guide_title()
     }
 
     /// Whether the script pane is on show.
@@ -135,9 +135,9 @@ impl Probe {
         self.view3d.clone()
     }
 
-    /// Whether the manual's window is up and its page laid out.
-    pub fn manual_ready(&self) -> bool {
-        self.manual.borrow().as_ref().is_some_and(Manual::is_ready)
+    /// The title of the manual's page on show, while its window is up.
+    pub fn manual_title(&self) -> Option<String> {
+        self.manual.borrow().as_ref().and_then(Manual::shown_title)
     }
 
     /// The manual's page on show, if its window is up.

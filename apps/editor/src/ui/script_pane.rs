@@ -366,10 +366,12 @@ impl ProbeHandles {
         self.open.get()
     }
 
-    /// Whether the guide shows a page.
-    pub fn guide_ready(&self) -> bool {
-        let view = self.active.borrow().guide.get();
-        !view.current_document().blocks().is_empty()
+    /// The title of the guide's page on show: its first block, the page's
+    /// heading.
+    pub fn guide_title(&self) -> Option<String> {
+        let doc = self.active.borrow().guide.get().current_document();
+        let first = doc.blocks().first()?;
+        Some(doc.block_text(first).to_owned())
     }
 
     /// The pane's own window, if it is up.

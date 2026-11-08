@@ -60,19 +60,26 @@ pub(super) fn style(mono: &str) -> MarkdownStyle {
     }
 }
 
-/// The script pane's colours for code, with names in the theme's accent.
+/// The script pane's colours for code, with names in the accent: `theme`'s
+/// for its own brightness, the stock theme's for the other, which the view
+/// uses only if the window switches brightness before the next page.
 pub(super) fn palette(theme: &Theme) -> CodePalette {
-    let colors = |keyword, string, comment, number| CodeColors {
+    let (light_accent, dark_accent) = if theme.is_dark {
+        (Theme::light().accent, theme.accent)
+    } else {
+        (theme.accent, Theme::dark().accent)
+    };
+    let colors = |accent: Color, keyword, string, comment, number| CodeColors {
         keyword: Color::hex(keyword),
-        function: theme.accent,
+        function: accent,
         string: Color::hex(string),
         comment: Color::hex(comment),
         number: Color::hex(number),
-        type_name: theme.accent,
+        type_name: accent,
     };
     CodePalette {
-        light: colors(0xa626a4, 0x2e7d32, 0x6a737d, 0xb35900),
-        dark: colors(0xd291e4, 0x98c379, 0x8b949e, 0xe5a35c),
+        light: colors(light_accent, 0xa626a4, 0x2e7d32, 0x6a737d, 0xb35900),
+        dark: colors(dark_accent, 0xd291e4, 0x98c379, 0x8b949e, 0xe5a35c),
     }
 }
 
@@ -139,8 +146,11 @@ fn close(rest: &str, marker: &str) -> Option<usize> {
 }
 
 /// The pages' inline subset as Markdown: matched `code` and **bold** keep
-/// their meaning, and a marker nothing closes is only text.
+/// their meaning, and a marker nothing closes is only text. Where Markdown
+/// would read a span differently (a code span padded with spaces, bold that
+/// does not flank its text), the span is shown as written instead.
 fn inline(text: &str) -> String {
+    let text = text.trim_start();
     let mut out = String::new();
     let mut rest = text;
     // A line that starts like a list item or a setext underline is text. A
@@ -156,6 +166,7 @@ fn inline(text: &str) -> String {
     while let Some(at) = rest.find(['`', '*']) {
         let (before, from) = rest.split_at(at);
         escape_into(&mut out, before);
+        let prev = text[..text.len() - from.len()].chars().next_back();
         let marker = if from.starts_with("**") {
             "**"
         } else if from.starts_with('`') {
@@ -166,28 +177,54 @@ fn inline(text: &str) -> String {
             continue;
         };
         let inner = &from[marker.len()..];
-        match close(inner, marker) {
-            Some(end) if marker == "`" => {
-                // A code span is verbatim; the subset's spans hold no backtick.
-                out.push('`');
-                out.push_str(&inner[..end]);
-                out.push('`');
-                rest = &inner[end + 1..];
-            }
-            Some(end) => {
-                out.push_str("**");
-                escape_into(&mut out, &inner[..end]);
-                out.push_str("**");
-                rest = &inner[end + 2..];
-            }
-            None => {
-                escape_into(&mut out, marker);
-                rest = inner;
-            }
+        let Some(end) = close(inner, marker) else {
+            escape_into(&mut out, marker);
+            rest = inner;
+            continue;
+        };
+        let (span, after) = (&inner[..end], &inner[end + marker.len()..]);
+        if marker == "`" {
+            code_span(&mut out, span, after);
+        } else if flanks(prev, span, after.chars().next()) {
+            out.push_str("**");
+            escape_into(&mut out, span);
+            out.push_str("**");
+        } else {
+            escape_into(&mut out, from.get(..end + 4).unwrap_or(from));
         }
+        rest = after;
     }
     escape_into(&mut out, rest);
     out
+}
+
+/// A code span of the subset, which holds no backtick, as Markdown that shows
+/// it as written. Markdown strips one space from each end of a span padded on
+/// both, so one more is added there; a span closed by the first backtick of a
+/// longer run would run on in Markdown, so that one is shown as plain text.
+fn code_span(out: &mut String, span: &str, after: &str) {
+    if after.starts_with('`') {
+        escape_into(out, &format!("`{span}`"));
+    } else if span.starts_with(' ') && span.ends_with(' ') && !span.trim().is_empty() {
+        out.push_str(&format!("` {span} `"));
+    } else {
+        out.push('`');
+        out.push_str(span);
+        out.push('`');
+    }
+}
+
+/// Whether `**span**`, between the characters `prev` and `next`, is bold in
+/// Markdown: the opening run must be left-flanking and the closing one
+/// right-flanking (CommonMark's rule, with punctuation taken as ASCII).
+fn flanks(prev: Option<char>, span: &str, next: Option<char>) -> bool {
+    let open = |c: Option<char>| c.is_none_or(|c| c.is_whitespace() || c.is_ascii_punctuation());
+    let (Some(first), Some(last)) = (span.chars().next(), span.chars().next_back()) else {
+        return false;
+    };
+    let left = !first.is_whitespace() && (!first.is_ascii_punctuation() || open(prev));
+    let right = !last.is_whitespace() && (!last.is_ascii_punctuation() || open(next));
+    left && right
 }
 
 /// How many digits start `text` when it starts like an ordered list item

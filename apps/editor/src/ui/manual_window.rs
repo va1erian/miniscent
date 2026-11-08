@@ -130,9 +130,15 @@ impl Manual {
         }
     }
 
-    /// Whether a page is on show.
-    pub fn is_ready(&self) -> bool {
-        self.is_open() && !self.view.get().current_document().blocks().is_empty()
+    /// The title of the page on show (its first block, the page's heading),
+    /// while the window is up.
+    pub fn shown_title(&self) -> Option<String> {
+        if !self.is_open() {
+            return None;
+        }
+        let doc = self.view.get().current_document();
+        let first = doc.blocks().first()?;
+        Some(doc.block_text(first).to_owned())
     }
 
     /// The page on show.

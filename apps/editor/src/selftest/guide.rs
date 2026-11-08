@@ -9,6 +9,7 @@ use xui::xui_canvas::snapshot::Stage;
 use super::{Run, pump};
 use crate::manual;
 use crate::model::Tool;
+use crate::script::guide;
 use crate::ui::script_pane::ScriptMsg;
 use crate::ui::{ManualMsg, Msg, Probe, cmd};
 use xui::widget::DialogAction;
@@ -19,26 +20,32 @@ pub(super) fn leave(stage: &Stage<'_, Msg>, msg: Msg) {
     stage.emit(Msg::Discard(DialogAction::Accept(String::new())));
 }
 
-/// Draws the guide, which lays its page out as it paints; whether it shows one.
-/// The headless backend paints only for a picture, so one is taken here.
-pub(super) fn wait_for_guide(stage: &Stage<'_, Msg>, probe: &Probe) -> bool {
+/// Draws the guide, which lays its page out as it paints, and returns the
+/// title of the page it shows. The headless backend paints only for a
+/// picture, so one is taken here.
+pub(super) fn wait_for_guide(stage: &Stage<'_, Msg>, probe: &Probe) -> Option<String> {
     pump(stage, 1);
     let _ = stage.ui().capture();
     pump(stage, 1);
-    probe.guide_ready()
+    probe.guide_title()
+}
+
+/// The title of the guide's page `topic`.
+fn guide_title(topic: usize) -> Option<String> {
+    guide::pages().get(topic).map(|p| p.title.clone())
 }
 
 pub(super) fn guide(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     stage.emit(Msg::Menu(cmd::GUIDE));
     run.check(
-        wait_for_guide(stage, probe),
-        "the guide's first page is laid out",
+        wait_for_guide(stage, probe) == guide_title(0),
+        "the guide's first page is on show",
     );
     run.shot(stage, "07-guide.png");
     stage.emit(Msg::Script(ScriptMsg::Topic(3)));
     run.check(
-        wait_for_guide(stage, probe),
-        "another page is laid out in its turn",
+        wait_for_guide(stage, probe) == guide_title(3),
+        "another page is on show in its turn",
     );
     run.shot(stage, "08-guide-doors.png");
     stage.emit(Msg::Script(ScriptMsg::Topic(7)));
@@ -88,7 +95,10 @@ pub(super) fn guide(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
 pub(super) fn in_window(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     stage.emit(Msg::Menu(cmd::GUIDE));
     pump(stage, 2);
-    run.check(probe.guide_ready(), "the guide in the window shows a page");
+    run.check(
+        probe.guide_title().is_some(),
+        "the guide in the window shows a page",
+    );
     let shot = probe
         .script_window()
         .and_then(|w| w.capture().ok())
@@ -136,7 +146,10 @@ pub(super) fn scaled(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     for (topic, name) in [(0, "start"), (1, "names"), (3, "doors"), (7, "reference")] {
         stage.emit(Msg::Script(ScriptMsg::Topic(topic)));
         pump(stage, 2);
-        run.check(probe.guide_ready(), &format!("the {name} page is on show"));
+        run.check(
+            probe.guide_title() == guide_title(topic),
+            &format!("the {name} page is on show"),
+        );
         let shot = window
             .capture()
             .map(|img| img.save_png(run.dir.join(format!("{name}.png"))));
@@ -148,12 +161,12 @@ pub(super) fn scaled(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     stage.emit(Msg::Script(ScriptMsg::Float(false)));
 }
 
-/// Draws the manual's page; whether one is on show.
-fn wait_for_page(stage: &Stage<'_, Msg>, probe: &Probe) -> bool {
+/// Draws the manual's page and returns the title of the page on show.
+fn wait_for_page(stage: &Stage<'_, Msg>, probe: &Probe) -> Option<String> {
     pump(stage, 1);
     let _ = probe.manual_picture();
     pump(stage, 1);
-    probe.manual_ready()
+    probe.manual_title()
 }
 
 /// The window's picture as `name`; whether it was written.
@@ -176,8 +189,11 @@ pub(super) fn manual(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     let pages = manual::pages();
     for (i, page) in pages.iter().enumerate() {
         stage.emit(Msg::Manual(ManualMsg::Topic(i)));
-        let ready = wait_for_page(stage, probe);
-        run.check(ready, &format!("the page {:?} is laid out", page.title));
+        let shown = wait_for_page(stage, probe);
+        run.check(
+            shown.as_deref() == Some(page.title.as_str()),
+            &format!("the page {:?} is on show", page.title),
+        );
         let name = format!(
             "manual-{i:02}-{}.png",
             page.title.replace([' ', ':', ','], "-")

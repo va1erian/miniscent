@@ -62,6 +62,35 @@ fn text_shows_as_written_and_only_matched_markers_make_code_and_bold() {
 }
 
 #[test]
+fn spans_markdown_would_read_otherwise_show_as_written() {
+    // A code span padded on both sides keeps its spaces.
+    assert_eq!(
+        shown("a ` b ` c"),
+        (
+            "a  b  c".into(),
+            vec![Inline::NONE, Inline::CODE, Inline::NONE]
+        )
+    );
+    // A span closed by the start of a longer run is shown as text.
+    assert_eq!(shown("`a``b`").0, "`a`b");
+    // Bold that does not flank its text is shown as written.
+    for text in ["**a **", "** a**", "**(x)**y", "x**(y)**", "**\"q\"**x"] {
+        let (shown, styles) = shown(text);
+        assert_eq!(shown, text, "{text:?}");
+        assert!(!styles.contains(&Inline::BOLD), "{text:?}");
+    }
+    assert_eq!(
+        shown("a **(x)** b").1,
+        [Inline::NONE, Inline::BOLD, Inline::NONE]
+    );
+    // Leading whitespace is dropped rather than read as a list or code.
+    assert_eq!(shown("   - x").0, "- x");
+    assert_eq!(shown("  1. x").0, "1. x");
+    assert_eq!(shown("	x").0, "x");
+    assert_eq!(shown(" # x").0, "# x");
+}
+
+#[test]
 fn an_example_is_a_script_block_offered_for_insertion() {
     let made = render(
         &page(vec![
@@ -201,9 +230,17 @@ fn the_reference_lists_every_message() {
     let pages = guide::pages();
     let made = render(pages.last().expect("a reference page"), Script);
     let doc = Document::parse(&made.markdown);
+    let names: Vec<&str> = doc
+        .blocks()
+        .iter()
+        .filter(|b| matches!(b.kind, BlockKind::TableRow { header: false, .. }))
+        .filter_map(|b| doc.cells(b).first())
+        .map(|c| &doc.text()[c.start as usize..c.end as usize])
+        .collect();
     for entry in crate::script::api::API {
-        assert!(doc.text().contains(entry.selector), "{}", entry.selector);
+        assert!(names.contains(&entry.selector), "{}", entry.selector);
     }
+    assert_eq!(names.len(), crate::script::api::API.len());
 }
 
 #[test]
@@ -240,9 +277,11 @@ fn the_highlighter_carries_an_open_string_to_the_next_line() {
 }
 
 #[test]
-fn the_palette_follows_the_theme_accent() {
-    let theme = Theme::dark();
-    let palette = palette(&theme);
-    assert_eq!(palette.dark.function, theme.accent);
-    assert_ne!(palette.light.keyword, palette.dark.keyword);
+fn the_palette_names_messages_in_each_brightness_accent() {
+    let dark = palette(&Theme::dark());
+    assert_eq!(dark.dark.function, Theme::dark().accent);
+    assert_eq!(dark.light.function, Theme::light().accent);
+    let light = palette(&Theme::light());
+    assert_eq!(light, dark);
+    assert_ne!(dark.light.keyword, dark.dark.keyword);
 }
