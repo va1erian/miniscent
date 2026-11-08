@@ -18,10 +18,13 @@ import sys
 
 # 1.6 MB until voxel volumes, which took the game from 1,576,960 to 1,885,184 bytes.
 # The texture generator adds about 140 KB, and replaced 902 KB of PNGs in the assets.
-BUDGET_BYTES = 2_200_000
+# Projectors (M18: the entity, the cone in the baker, the editor-free world code) took
+# the software build to 2,201,088, 1,088 over the old 2.2 MB, so it is 2.3 MB now.
+BUDGET_BYTES = 2_300_000
 # wgpu and the hardware renderer (M14.7) took the default game from 2,126,336 to
-# 5,730,304 bytes; the plan expected about 5.7 MB.
-HARDWARE_BUDGET_BYTES = 6_200_000
+# 5,730,304 bytes; the plan expected about 5.7 MB. With projectors it is 6,088,704
+# (98% of 6.2 MB), so the budget is 6.3 MB.
+HARDWARE_BUDGET_BYTES = 6_300_000
 WARN_FRACTION = 0.8
 
 # Each build: its name, its cargo feature arguments, its own target directory so

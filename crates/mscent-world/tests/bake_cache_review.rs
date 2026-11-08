@@ -28,6 +28,7 @@ fn scene() -> (mscent_world::Bsp, Vec<LightFace>, Vec<PointLight>) {
                 position: pos,
                 color: color * intensity,
                 radius,
+                cone: None,
             }),
             _ => None,
         })

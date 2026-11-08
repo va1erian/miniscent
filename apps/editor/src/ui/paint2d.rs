@@ -35,6 +35,9 @@ pub struct Scene<'a> {
     pub outlines: &'a RefCell<OutlineCache>,
 }
 
+#[path = "paint2d_cone.rs"]
+mod paint2d_cone;
+
 fn clamp(v: f64) -> i32 {
     v.clamp(-1.0e6, 1.0e6) as i32
 }
@@ -328,6 +331,10 @@ fn entities(pen: &mut Pen, scene: &Scene) {
                 pen.canvas.fill_ellipse(c, r, r, col);
                 pen.canvas
                     .stroke_ellipse(c, r, r, Color::rgb(60, 50, 20), 1.0);
+            }
+            Entity::Projector { .. } => {
+                let shown = (selected == Some(e.id)).then_some((a, b));
+                paint2d_cone::projector(pen, (c, r), &e.entity, shown);
             }
             Entity::PlayerStart { yaw, .. } => {
                 let g = Color::rgb(60, 190, 90);

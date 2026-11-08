@@ -325,6 +325,10 @@ fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
             crate::model::EntityKind::Light,
             [s[0] + 1.0, s[1] + 1.0, s[2] + 1.0],
         );
+        st.place_entity(
+            crate::model::EntityKind::Projector,
+            [s[0] + 2.0, s[1] + 1.0, s[2] + 1.5],
+        );
     }
     stage.emit(Msg::Tool(0));
     let edited = probe.state().borrow().doc.clone();

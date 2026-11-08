@@ -243,7 +243,7 @@ fn vista_layers_round_trip() {
     level.entities.push(vista(7, MAX_VISTA_LAYERS - 1, 1.0));
     let bytes = format::write(&level);
     assert_eq!(format::read(&bytes).unwrap(), level);
-    assert_eq!(&bytes[4..6], &5u16.to_le_bytes());
+    assert_eq!(&bytes[4..6], &format::VERSION.to_le_bytes());
 }
 
 /// A good layer with one field changed by `f`.

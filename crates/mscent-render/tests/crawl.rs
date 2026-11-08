@@ -22,7 +22,7 @@ mod voxel_scene;
 
 use crawl::{COARSE, FULL, Motion, REDUCED, Rig};
 use mscent_render::Quality;
-use mscent_world::showcase_level;
+use mscent_world::showcase_base_level;
 use stability::Look;
 
 fn rig(name: &str) -> Rig {
@@ -49,7 +49,7 @@ fn the_line_fit_sees_a_zigzag_and_ignores_a_tilt() {
 
 #[test]
 fn every_rig_finds_its_shadow_edge_and_follows_all_its_points() {
-    let r = stability::build(&showcase_level(), Look::Flat);
+    let r = stability::build(&showcase_base_level(), Look::Flat);
     for name in ["room_near", "cave_mid"] {
         let run = crawl::run(
             &r,
@@ -80,7 +80,7 @@ fn every_rig_finds_its_shadow_edge_and_follows_all_its_points() {
 /// The goal: area-sampled, filtered shadow edges stay straight and steady.
 #[test]
 fn shadow_edges_are_straight_and_steady_at_every_distance_and_scale() {
-    let r = stability::build(&showcase_level(), Look::Flat);
+    let r = stability::build(&showcase_base_level(), Look::Flat);
     // RMS deviation from a straight edge, in pixels, per rig. Close rigs
     // allow a little more since deep shadows make the edge easier to over-read.
     let goal = [

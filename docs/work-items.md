@@ -218,6 +218,19 @@ Design and what was built in [enemies.md](enemies.md). M15.1, M15.2 and M15.11 a
 | M15.10 | Editor: Foundry workspace, placing by name, Open as level | M15.6, M15.4 | L | `--selftest` rolls, locks a gene and promotes; worst UI tick during a roll held by `tick_costs` |
 | M15.11 | Models on the GPU: the same list, drawn through the voxel pipeline in model space; parity cases | M15.2, M14.5 | M | Parity cases pass on the GPU, each failing with its feature taken out; seeded GPU bugs caught; cost recorded |
 
+## M18 Projectors
+
+Design in [projectors.md](projectors.md). Baked spot lights, drawn by both renderers from the lightmap.
+
+| ID | Item | Deps | Size | Done when |
+|---|---|---|---|---|
+| M18.1 | World: `Entity::Projector`, format version 6, level text, validation | M2.6 | S | Round trip in binary and text; hostile and bit-flipped files return errors; a version 5 file holding one is refused |
+| M18.2 | Baker: `Cone`, `PointLight::cone`, cone test before the shadow ray, bake key | M18.1 | S | Light inside the cone only, a soft rim, a wall still shadows it; keys of levels with no cone unchanged |
+| M18.3 | Renderers: setup, fallback lamp lighting; models and lamp maps skip projectors | M18.2 | S | A frame with a projector is lit under it and dark beyond the cone, and a point light of the same strength is not |
+| M18.4 | Editor: Projector tool (J), panel fields, cone in the 2D views, selftest | M18.1 | M | Whatever the fields are given, the entity saves and loads; the selftest saves and reloads one |
+| M18.5 | Showcase gets four projectors | M18.3 | S | Loads, compiles, entities in empty space |
+| M18.6 | Projected shadows: projectors hold the static-lamp maps, the shader applies the cone | M18.3 | M | A mover shades the floor in a projector's pool, and not outside its cone, from real pixels |
+
 ## Suggested order
 
 M0, then M1.1 through M1.4 in parallel with M2.1 through M2.3. The renderer

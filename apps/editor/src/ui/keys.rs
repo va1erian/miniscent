@@ -8,7 +8,7 @@ use super::icons::Glyph;
 use crate::model::{EntityKind, Tool};
 
 /// The palette: tooltip name, shortcut key, icon and tool.
-pub(super) const TOOLS: [(&str, Key, Glyph, Tool); 13] = [
+pub(super) const TOOLS: [(&str, Key, Glyph, Tool); 14] = [
     (
         "Select / move",
         Key::Q,
@@ -23,6 +23,12 @@ pub(super) const TOOLS: [(&str, Key, Glyph, Tool); 13] = [
         Tool::Place(EntityKind::PlayerStart),
     ),
     ("Light", Key::L, Glyph::Bulb, Tool::Place(EntityKind::Light)),
+    (
+        "Projector: a light that shines one way. Set its aim and cone in the panel",
+        Key::J,
+        Glyph::Spot,
+        Tool::Place(EntityKind::Projector),
+    ),
     (
         "Enemy",
         Key::E,

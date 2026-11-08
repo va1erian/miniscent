@@ -15,6 +15,7 @@ mod bounce;
 mod cell_sites;
 mod cells;
 mod cells_bounce;
+mod cone;
 mod filter;
 mod layout;
 mod occluders;
@@ -42,6 +43,7 @@ pub use atlas::{Atlas, AtlasError, PADDING, Rect};
 pub use bake::{FaceGrid, Lightmap, MAX_SHADOW_SAMPLES, bake, bake_cancellable, bake_in};
 pub use cell_sites::{CellKey, CellSites, shape_key};
 pub use cells::{CellLighting, CellRecord, RECORD_BYTES, light_cells};
+pub use cone::Cone;
 pub use occluders::Occluders;
 pub use uv::{FaceProjection, MAX_FACE_LUXELS};
 
@@ -106,6 +108,8 @@ pub struct PointLight {
     /// Distance at which the light reaches zero. Attenuation is
     /// `(1 - d / radius)^3`, times the cosine of the incidence angle.
     pub radius: f32,
+    /// Where the light shines, for a projector; `None` shines all round.
+    pub cone: Option<Cone>,
 }
 
 /// One baked texel: light colour and the dominant direction towards the light.

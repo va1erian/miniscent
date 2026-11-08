@@ -93,13 +93,24 @@ pub(super) fn light_at(
     if facing <= 0.0 {
         return None;
     }
+    // Past the cone nothing arrives, so no ray is worth casting.
+    let beam = match &light.cone {
+        Some(cone) => {
+            let from_light = -dir;
+            if cone.misses(from_light) {
+                return None;
+            }
+            cone.share(from_light)
+        }
+        None => 1.0,
+    };
     let seen = visibility(rx, light.position, cfg.light_radius, cfg.shadow_samples);
     if seen <= 0.0 {
         return None;
     }
     let falloff = 1.0 - dist / light.radius;
     Some((
-        light.color * (falloff * falloff * falloff * facing * seen),
+        light.color * (falloff * falloff * falloff * facing * seen * beam),
         dir,
     ))
 }

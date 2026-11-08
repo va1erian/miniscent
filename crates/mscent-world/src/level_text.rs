@@ -9,6 +9,7 @@
 //! brush add 2 7  6 <plane> ... <plane>            # op, order, material, plane count
 //! player 0 0 0  1.57                              # x y z yaw
 //! light 0 0 8  1 0.9 0.7  16 1.2                  # x y z, r g b, radius, intensity
+//! projector 0 0 8  0 -1.57  1 1 0.9  24 1.5  0.2 0.5   # x y z, yaw pitch, r g b, radius, intensity, inner outer
 //! enemy 5 5 0  0  name guard  tag guards          # x y z kind
 //! goal 8 8 0  1.5                                 # x y z radius
 //! world 0 0 0  4 26                               # x y z, fog start, fog end
@@ -17,6 +18,10 @@
 //! vista 0 0 0  0 0 0  0 0 0.0625  0 0 0.1  0 0  0 1e5  0x8090a0  # see below
 //! mover vault_door  tag doors  brushes 1 2        # brush lines, counted from 0
 //! ```
+//!
+//! A `projector` line is a spot light: yaw and pitch in radians (pitch -1.57 shines
+//! straight down), then the cone's inner and outer half angles in radians, full
+//! light inside the inner and none past the outer.
 //!
 //! A `vista` line is a vista layer: position, centre, slot, layer, parallax, spin
 //! (axis times radians per second), pan, fog start, fog end, fog colour as decimal
@@ -183,6 +188,20 @@ fn entity_text(e: &Entity) -> String {
             radius,
             intensity,
         } => format!("light {} {} {radius} {intensity}", v32(pos), v32(color)),
+        Entity::Projector {
+            pos,
+            yaw,
+            pitch,
+            color,
+            radius,
+            intensity,
+            inner,
+            outer,
+        } => format!(
+            "projector {} {yaw} {pitch} {} {radius} {intensity} {inner} {outer}",
+            v32(pos),
+            v32(color)
+        ),
         Entity::Enemy { pos, kind } => format!("enemy {} {kind}", v32(pos)),
         Entity::Goal { pos, radius } => format!("goal {} {radius}", v32(pos)),
         Entity::World {
@@ -279,6 +298,16 @@ fn read_entity(kind: &str, w: &mut Words) -> Res<Option<Entity>> {
             color: w.v3("a colour")?,
             radius: w.f32("the radius")?,
             intensity: w.f32("the intensity")?,
+        },
+        "projector" => Entity::Projector {
+            pos: pos(w)?,
+            yaw: w.f32("the yaw")?,
+            pitch: w.f32("the pitch")?,
+            color: w.v3("a colour")?,
+            radius: w.f32("the radius")?,
+            intensity: w.f32("the intensity")?,
+            inner: w.f32("the inner angle")?,
+            outer: w.f32("the outer angle")?,
         },
         "enemy" => Entity::Enemy {
             pos: pos(w)?,
