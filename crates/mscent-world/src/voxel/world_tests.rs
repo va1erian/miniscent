@@ -307,6 +307,37 @@ fn the_surface_of_a_level_is_built_the_same_from_the_same_bytes() {
     assert_eq!(world_of(&level), world_of(&level));
 }
 
+/// A tunnel carved along a volume sixteen chunks long: more chunks than one band.
+fn long_tunnel() -> Volume {
+    let mut volume =
+        Volume::new(Op::Subtract, 0, CellSize::Quarter, [0, -8, -8], [16, 1, 1]).expect("valid");
+    let tunnel = Prim::round_cone(v(1.0, 0.0, 0.0), v(63.0, 0.0, 0.0), 1.5, 1.0).expect("valid");
+    let shape = volume.clone();
+    apply_dab(
+        &mut volume,
+        &mut Context::new(&shape, &[]),
+        &tunnel,
+        DabOp::Carve,
+    );
+    volume
+}
+
+#[test]
+fn the_surface_is_the_same_on_one_thread_and_on_many() {
+    let level = level_with(vec![room(ROCK)], vec![long_tunnel()]);
+    let bsp = compile(&level.csg_brushes()).expect("compiles");
+    let brushes = level.static_brushes();
+    let one = VoxelWorld::build_on(1, &level, &brushes, &bsp);
+    assert!(
+        one.chunks.len() > 8,
+        "{} chunks: several bands",
+        one.chunks.len()
+    );
+    for workers in [2, 3, 8] {
+        assert_eq!(VoxelWorld::build_on(workers, &level, &brushes, &bsp), one);
+    }
+}
+
 #[test]
 fn a_volume_alone_in_rock_stays_closed_through_the_world_path() {
     let pair = tunnelled_pair(CellSize::Quarter);

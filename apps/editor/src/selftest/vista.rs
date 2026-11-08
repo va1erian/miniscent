@@ -9,7 +9,7 @@ use mscent_world::materials::view_material;
 use mscent_world::{Entity, level_text};
 use xui::xui_canvas::snapshot::Stage;
 
-use super::faces::{FACE_TOOL, frame_wall};
+use super::faces::{face_tool, frame_wall};
 use super::{Run, pump, wait_for_message, wait_for_preview};
 use crate::model::facetex::FaceEdit;
 use crate::model::pick::FaceRef;
@@ -138,7 +138,7 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     let file = run.dir.join("vista.msl");
     let level = level_text::from_text(LEVEL).expect("the level text");
     std::fs::write(&file, mscent_world::format::write(&level)).expect("writes");
-    stage.emit(Msg::OpenPath(file));
+    super::guide::leave(stage, Msg::OpenPath(file));
     wait_for_preview(stage, probe);
     let state = probe.state();
     let wall = frame_wall(run, stage, probe, |n: Vec3d| n.x > 0.9);
@@ -166,7 +166,7 @@ pub(super) fn script(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     };
 
     // Paint the wall View N as the panel does, after picking it with a click.
-    stage.emit(Msg::Tool(FACE_TOOL));
+    stage.emit(Msg::Tool(face_tool()));
     pick_middle(stage, probe);
     run.check(
         state.borrow().faces.first() == Some(&wall),
@@ -277,7 +277,7 @@ fn mountains(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe, sky: &Pixels)
 /// The painted wall is still found by a click, and painting it back restores it.
 fn still_clickable(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe, wall: FaceRef, view: u16) {
     let state = probe.state();
-    stage.emit(Msg::Tool(FACE_TOOL));
+    stage.emit(Msg::Tool(face_tool()));
     pick_middle(stage, probe);
     run.check(
         state.borrow().faces.first() == Some(&wall),

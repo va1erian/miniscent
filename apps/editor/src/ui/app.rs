@@ -7,9 +7,8 @@ use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use mscent_world::Op;
 use xui::prelude::*;
-use xui::widget::{Dialog, FileDialog, HasText};
+use xui::widget::{Dialog, FileDialog};
 
 pub use super::commands::cmd;
 use super::commands::menus;
@@ -24,7 +23,6 @@ use super::texstudio::Workspace;
 use super::toolbar::IconButton;
 use super::view3d::View3d;
 use super::viewport::ViewEvent;
-use super::wrap::{LOG_COLS, LOG_ROWS, wrap};
 use crate::files;
 use crate::model::{Document, EditorState, state::GRIDS};
 use crate::studio::{HELP, Mode, Preview, Studio};
@@ -45,11 +43,12 @@ pub struct Editor {
     pub(super) disposition: Disposition,
     pub(super) play: Handle<View3d<Msg>>,
     pub(super) script: ScriptPane,
-    /// Asks before unsaved script edits go. Not a modal window: the default
-    /// backend has no modal loop, and `open_modal` returns at once with nothing.
+    /// Asks before unsaved work goes. Not a modal window: the default backend
+    /// has no modal loop, and `open_modal` returns at once with nothing.
     pub(super) discard_dialog: Dialog<Msg>,
-    /// What is waiting on that answer.
+    /// What is waiting on that answer, and whether the answer let it through.
     pub(super) after_discard: Option<Msg>,
+    pub(super) discarded: bool,
     /// The level settings window, once opened. It may have closed itself since.
     pub(super) fog_window: Rc<RefCell<Option<FogWindow>>>,
     /// The manual's window, once opened. It may have been closed since.
@@ -58,10 +57,13 @@ pub struct Editor {
     pub(super) status: Handle<StatusBar<Msg>>,
     tools: [Handle<IconButton<Msg>>; TOOLS.len()],
     ops: [Handle<IconButton<Msg>>; OPS.len()],
+    grid_box: Handle<ComboBox<Msg>>,
     pub(super) panel: Panel,
     pub(super) log_view: Handle<MultilineEdit<Msg>>,
     pub(super) studio: Studio,
     pub(super) log: Vec<String>,
+    /// What stands in the way now, shown above the log (see `log.rs`).
+    pub(super) problems: Vec<String>,
     /// The file the document came from or was last saved to.
     pub(super) path: Option<PathBuf>,
     /// The document as last saved or loaded, to show a modified mark.
@@ -77,6 +79,8 @@ pub struct Editor {
     /// Everything but the menu and the status bar, while the level is showing.
     pub(super) work_host: Handle<xui::widget::Panel<Msg>>,
     pub(super) tex: Workspace,
+    /// The frame tick's beat and `--live-timing`'s script.
+    pub(super) clock: super::live::Clock,
 }
 
 impl Editor {
@@ -112,8 +116,8 @@ impl Editor {
             .on_cancel(|| None);
         let discard_dialog = Dialog::confirm(
             ui,
-            "Discard unsaved script edits?",
-            "The script has edits that are not saved. Discard them?",
+            "Discard unsaved changes?",
+            "Some changes are not saved. Discard them?",
         )?
         .on_action(|action| Some(Msg::Discard(action)));
         let tex = Workspace::new(studio.materials().clone());
@@ -126,16 +130,19 @@ impl Editor {
             script: ScriptPane::new(state.clone()),
             discard_dialog,
             after_discard: None,
+            discarded: false,
             fog_window: Rc::default(),
             manual: Rc::default(),
             menu: Handle::new(),
             status: Handle::new(),
             tools: Default::default(),
             ops: Default::default(),
+            grid_box: Handle::new(),
             panel: Panel::default(),
             log_view: Handle::new(),
             studio,
             log: Vec::new(),
+            problems: Vec::new(),
             path,
             saved,
             open_dialog,
@@ -145,6 +152,7 @@ impl Editor {
             eye_moved: std::time::Instant::now(),
             work_host: Handle::new(),
             tex,
+            clock: super::live::Clock::default(),
         };
         app.panel.attach(ui);
         app.tex.attach(ui);
@@ -182,30 +190,33 @@ impl Editor {
             row().gap(2).children((tool_button(12), tool_button(13))),
         ));
         let op_button = |i: usize| {
-            let (tip, glyph) = OPS[i];
+            let (tip, glyph, _) = OPS[i];
             let root = root.clone();
             build(move |ui| IconButton::new(ui, &root, glyph, tip, Msg::NewOp(i))).bind(&app.ops[i])
         };
         let grid_names: Vec<String> = GRIDS.iter().map(|g| format!("{g}")).collect();
         let grid_refs: Vec<&str> = grid_names.iter().map(String::as_str).collect();
-        let palette = scroll(column().padding(8).gap(8).children((
-            group("Tools", tools),
-            group(
-                "New brush",
-                row().gap(2).children((op_button(0), op_button(1))),
-            ),
-            group(
-                "Grid size",
-                column().child(combo_box(&grid_refs).on_select(Msg::Grid).then(|c| {
-                    c.select(2);
-                    c
-                })),
-            ),
-        )));
+        let palette = scroll(
+            column().padding(8).gap(8).children((
+                group("Tools", tools),
+                group(
+                    "New brush",
+                    row().gap(2).children((op_button(0), op_button(1))),
+                ),
+                group(
+                    "Grid size",
+                    column().child(
+                        combo_box(&grid_refs)
+                            .on_select(Msg::Grid)
+                            .bind(&app.grid_box),
+                    ),
+                ),
+            )),
+        );
         let side = column().gap(4).children((
             scroll(column().child(app.panel.layout())).fill(1),
             group(
-                "Lighting log",
+                "Problems and log",
                 column().child(multiline_edit().bind(&app.log_view).height(LOG_HEIGHT)),
             ),
         ));
@@ -240,7 +251,6 @@ impl Editor {
         )?;
         ui.on_key(shortcut);
         ui.on_close(|| Some(Msg::CloseRequested));
-        ui.every(16, Msg::Tick);
         app.play.get().set_visible(false);
         app.tex.set_visible(false);
         app.set_disposition(Disposition::Quad);
@@ -294,8 +304,10 @@ impl Editor {
         for (i, t) in TOOLS.iter().enumerate() {
             self.tools[i].get().set_checked(t.3 == st.tool);
         }
-        for (i, op) in [Op::Subtract, Op::Add].into_iter().enumerate() {
-            self.ops[i].get().set_checked(st.new_op == op);
+        let grid = GRIDS.iter().position(|g| *g == st.grid).unwrap_or(2);
+        super::quiet::select(&self.grid_box.get(), grid);
+        for (i, op) in OPS.iter().enumerate() {
+            self.ops[i].get().set_checked(st.new_op == op.2);
         }
         drop(st);
         self.sync_tex_menu();
@@ -336,24 +348,6 @@ F5 plays it.
         for arr in [&self.classic, &self.quad] {
             arr.view3d.get().show_text(&text);
         }
-    }
-
-    /// Adds lines to the log panel.
-    pub(super) fn push_log(&mut self, lines: &[String]) {
-        if lines.is_empty() {
-            return;
-        }
-        for line in lines {
-            self.log.extend(wrap(line, LOG_COLS));
-        }
-        let excess = self.log.len().saturating_sub(300);
-        self.log.drain(..excess);
-        // The box cannot be scrolled to its end, so it shows the newest lines.
-        let from = self.log.len().saturating_sub(LOG_ROWS);
-        self.log_view.get().set_text(&self.log[from..].join(
-            "
-",
-        ));
     }
 
     pub(super) fn set_status(&self, text: &str) {
@@ -414,7 +408,7 @@ impl App for Editor {
                 .borrow_mut()
                 .set_tool(TOOLS[i.min(TOOLS.len() - 1)].3),
             Msg::NewOp(i) => {
-                self.state.borrow_mut().new_op = if i == 0 { Op::Subtract } else { Op::Add };
+                self.state.borrow_mut().new_op = OPS[i.min(OPS.len() - 1)].2;
             }
             Msg::Grid(i) => self.state.borrow_mut().grid = GRIDS[i.min(GRIDS.len() - 1)],
             Msg::Face(m) => self.face_message(m),
@@ -441,9 +435,10 @@ impl App for Editor {
             }
             Msg::View(ViewEvent::Changed) => {}
             Msg::Tick | Msg::Step => {
-                self.advance();
+                super::meter::time(super::meter::Lane::Tick, || self.advance());
                 return;
             }
+            Msg::Live => return self.live_message(ui),
             Msg::Guarded(inner) => {
                 // Enter answers what the workspace has on top, from the name field too.
                 if matches!(*inner, Msg::Menu(cmd::SLICE))
@@ -480,7 +475,9 @@ impl App for Editor {
                     }
                 } else {
                     let mut st = self.state.borrow_mut();
-                    st.cancel_drag();
+                    if !st.drop_pending() {
+                        st.cancel_drag();
+                    }
                     st.end_path();
                     drop(st);
                     self.refresh();

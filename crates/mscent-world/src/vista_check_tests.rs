@@ -158,3 +158,14 @@ fn junk_in_the_level_never_panics() {
         assert!(!w.to_string().is_empty());
     }
 }
+
+#[test]
+fn a_second_layer_with_the_same_slot_and_layer_is_reported() {
+    let mut l = level(VIEW_FIRST);
+    l.entities.push(far_layer(0, 0));
+    l.entities.push(far_layer(0, 0));
+    assert_eq!(
+        vista_warnings(&l),
+        [VistaWarning::DuplicateLayer { slot: 0, layer: 0 }]
+    );
+}

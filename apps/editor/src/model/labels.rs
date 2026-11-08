@@ -5,6 +5,7 @@
 use super::command::Command;
 use super::document::{Document, GroupDef, Id, LabelDef};
 use super::state::{EditorState, Selection};
+use crate::errors;
 use mscent_world::Op;
 
 /// The panel's name and tag fields, while being typed in.
@@ -127,15 +128,9 @@ impl EditorState {
             return false;
         }
         let level = trial.to_level();
-        let problem = level.map_err(|e| format!("{e:?}")).and_then(|l| {
-            l.check_labels().map_err(|e| match e {
-                mscent_world::LabelError::BadName => {
-                    "Names and tags are lower-case letters, digits and _, at most 32".to_string()
-                }
-                mscent_world::LabelError::DuplicateName => "That name is already taken".to_string(),
-                other => format!("{other:?}"),
-            })
-        });
+        let problem = level
+            .map_err(|e| format!("A brush is invalid: {}", errors::brush(e)))
+            .and_then(|l| l.check_labels().map_err(errors::label));
         if let Err(why) = problem {
             self.message = why;
             return false;
@@ -202,6 +197,13 @@ impl EditorState {
     /// Which lines of the script name the selection, for the panel. Read only:
     /// the wiring lives in the script, and this shows where.
     pub fn script_uses(&self) -> String {
+        if self
+            .selected_entity()
+            .is_some_and(|e| !named_by_scripts(&e.entity))
+        {
+            return "Scripts cannot find this by name: they know enemies, markers,                     zones and movers"
+                .into();
+        }
         let (name, _) = self.selection_label();
         if name.is_empty() {
             return String::new();
@@ -222,6 +224,16 @@ impl EditorState {
             format!("Script lines: {}", found.join(", "))
         }
     }
+}
+
+/// Whether a script can find `e` by its name. The game lists names only for
+/// these (`mscent_game::arena`); other names are kept, but nothing reads them.
+fn named_by_scripts(e: &mscent_world::Entity) -> bool {
+    use mscent_world::Entity;
+    matches!(
+        e,
+        Entity::Enemy { .. } | Entity::Marker { .. } | Entity::Zone { .. }
+    )
 }
 
 #[cfg(test)]
@@ -376,7 +388,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("mscent-clash-{}.msl", std::process::id()));
         std::fs::write(&path, b"what was there").unwrap();
         let why = crate::files::save(&st.doc, &path).unwrap_err();
-        assert!(why.contains("names"), "{why}");
+        assert!(why.contains("name is already taken"), "{why}");
         assert_eq!(std::fs::read(&path).unwrap(), b"what was there");
         let _ = std::fs::remove_file(path);
     }
@@ -429,6 +441,18 @@ mod tests {
         assert_eq!(st.sync_draft().0, "");
         st.selection = Some(Selection::Entity(a));
         assert_eq!(st.sync_draft().0, "here");
+    }
+
+    #[test]
+    fn a_kind_no_script_can_find_by_name_says_so() {
+        let mut st = EditorState::default();
+        st.place_entity(crate::model::EntityKind::Light, [0.0; 3]);
+        assert!(
+            st.script_uses()
+                .starts_with("Scripts cannot find this by name")
+        );
+        st.place_entity(crate::model::EntityKind::Marker, [0.0; 3]);
+        assert!(!st.script_uses().starts_with("Scripts cannot"));
     }
 
     #[test]

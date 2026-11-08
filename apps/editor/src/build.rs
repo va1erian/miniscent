@@ -18,6 +18,7 @@ use mscent_render::{BakeCache, BakeReport, BuildError, Compiled, LevelRenderer, 
 use mscent_world::lightmap::LightmapError;
 use mscent_world::{Entity, Level, vista_warnings};
 
+use crate::errors;
 use crate::materials::SharedMaterials;
 use crate::model::Document;
 
@@ -56,7 +57,20 @@ pub enum Product {
     /// Can be played; the session also owns the renderer.
     Playable(Box<GameSession>),
     /// Renders but cannot be played (no start or no goal); the text says why.
-    ViewOnly(Box<LevelRenderer>, String),
+    ViewOnly(Box<LevelRenderer>, Unplayable),
+}
+
+/// Why a level cannot be played, and the entity to select for it, by index.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Unplayable {
+    pub why: String,
+    pub entity: Option<usize>,
+}
+
+impl From<String> for Unplayable {
+    fn from(why: String) -> Self {
+        Self { why, entity: None }
+    }
 }
 
 impl Built {
@@ -89,7 +103,13 @@ impl Built {
     }
 
     /// Why the level cannot be played, if it cannot.
+    #[cfg(test)]
     pub fn unplayable(&self) -> Option<&str> {
+        self.problem().map(|u| u.why.as_str())
+    }
+
+    /// As [`Built::unplayable`], with the entity to blame.
+    pub fn problem(&self) -> Option<&Unplayable> {
         match &self.product {
             Product::Playable(_) => None,
             Product::ViewOnly(_, why) => Some(why),
@@ -145,7 +165,7 @@ pub fn validate(doc: &Document) -> Result<Level, String> {
         }
         let brush = def
             .to_brush(i as u32)
-            .map_err(|e| format!("brush {} (id {}) is invalid: {e:?}", i + 1, def.id))?;
+            .map_err(|e| format!("brush {} is invalid: {}", i + 1, errors::brush(e)))?;
         brushes.push(brush);
     }
     let entities: Vec<Entity> = doc.entities().iter().map(|e| e.entity).collect();
@@ -160,12 +180,8 @@ pub fn validate(doc: &Document) -> Result<Level, String> {
         labels: doc.export_labels(),
         mover_groups: doc.export_groups(),
     };
-    level
-        .check_labels()
-        .map_err(|e| format!("names or mover groups are inconsistent: {e:?}"))?;
-    level
-        .check_kinds()
-        .map_err(|e| format!("enemy kinds are inconsistent: {e:?}"))?;
+    level.check_labels().map_err(errors::label)?;
+    level.check_kinds().map_err(errors::kinds)?;
     Ok(level)
 }
 
@@ -232,7 +248,7 @@ fn lock(cache: &SharedCache) -> std::sync::MutexGuard<'_, BakeCache> {
 }
 
 fn compile_level(level: &Level, cfg: &SessionConfig) -> Result<Compiled, String> {
-    Compiled::new(level, &cfg.build).map_err(|e| format!("CSG failed: {e:?}"))
+    Compiled::new(level, &cfg.build).map_err(errors::build)
 }
 
 fn preview(
@@ -254,7 +270,7 @@ fn preview(
             .unwrap_or_else(|p| Err(format!("the build crashed: {}", panic_text(&*p))));
         let (renderer, lit) = picture?;
         Ok(Built {
-            product: product(rules, renderer, cfg),
+            product: product(rules, renderer, cfg, &level.entities),
             light: lit.light,
             light_key: lit.light_key,
             materials: lit.materials,
@@ -291,9 +307,7 @@ fn picture(
     let (map, light, report) = match stored {
         Some((map, report)) => (map, Light::Full, report),
         None => {
-            let draft = compiled
-                .draft()
-                .map_err(|e| format!("draft failed: {e:?}"))?;
+            let draft = compiled.draft().map_err(errors::build)?;
             (Arc::new(draft), Light::Draft, None)
         }
     };
@@ -301,9 +315,7 @@ fn picture(
     // each on a size-optimized build, which a preview should not pay again. The
     // table's clone shares its pixels and mips.
     let (generation, table) = materials.current();
-    let renderer = compiled
-        .into_renderer(map, table?)
-        .map_err(|e| format!("cannot prepare the level: {e:?}"))?;
+    let renderer = compiled.into_renderer(map, table?).map_err(errors::build)?;
     let warnings = vista_warnings(level)
         .iter()
         .map(ToString::to_string)
@@ -329,7 +341,7 @@ fn scripted(
     let mut session = GameSession::with_renderer(arena, renderer, cfg);
     match scripts::start(&mut session, files) {
         Ok(_warnings) => Product::Playable(Box::new(session)),
-        Err(why) => Product::ViewOnly(Box::new(session.into_renderer()), why),
+        Err(why) => Product::ViewOnly(Box::new(session.into_renderer()), why.into()),
     }
 }
 
@@ -347,26 +359,20 @@ fn rules(level: &Level, path: Option<&Path>) -> Rules {
     Ok((files, arena))
 }
 
-fn product(rules: Rules, renderer: LevelRenderer, cfg: &SessionConfig) -> Product {
+fn product(rules: Rules, renderer: LevelRenderer, cfg: &SessionConfig, ents: &[Entity]) -> Product {
     let (files, arena) = match rules {
         Ok(rules) => rules,
-        Err(why) => return Product::ViewOnly(Box::new(renderer), why),
+        Err(why) => return Product::ViewOnly(Box::new(renderer), why.into()),
     };
     match arena {
         Ok(arena) => match &files {
             Some(files) => scripted(arena, renderer, cfg, files),
             None => Product::Playable(Box::new(GameSession::with_renderer(arena, renderer, cfg))),
         },
-        Err(LoadError::NoPlayerStart) => {
-            Product::ViewOnly(Box::new(renderer), "the level has no player start".into())
+        Err(e) => {
+            let (why, entity) = errors::load(e, ents);
+            Product::ViewOnly(Box::new(renderer), Unplayable { why, entity })
         }
-        Err(LoadError::NoGoal) => {
-            Product::ViewOnly(Box::new(renderer), "the level has no goal".into())
-        }
-        Err(other) => Product::ViewOnly(
-            Box::new(renderer),
-            format!("the level cannot be played ({other:?})"),
-        ),
     }
 }
 
@@ -394,7 +400,7 @@ fn bake(
     let baked = match compiled.bake(bake_workers(), cancel) {
         Ok(b) => b,
         Err(BuildError::Bake(LightmapError::Cancelled)) => return Ok(None),
-        Err(e) => return Err(format!("bake failed: {e:?}")),
+        Err(e) => return Err(errors::build(e)),
     };
     if cancel.load(Ordering::Relaxed) {
         return Ok(None);

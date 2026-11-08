@@ -27,8 +27,12 @@ fn press(stage: &Stage<'_, Msg>, key: Key, modifiers: Modifiers) {
     });
 }
 
-/// The model and a number field of the properties panel.
-type Handles = (Rc<RefCell<EditorState>>, Rc<NumberField<Msg>>);
+/// The model, a number field of the properties panel and the top 2D view.
+type Handles = (
+    Rc<RefCell<EditorState>>,
+    Rc<NumberField<Msg>>,
+    xui::backend::WidgetId,
+);
 
 const CTRL: Modifiers = Modifiers {
     ctrl: true,
@@ -57,12 +61,13 @@ fn shortcuts_play_edit_and_select_tools_wherever_focus_is() {
         Snapshot::new(Dip(1280.0), Dip(800.0)).theme(Theme::light()),
         move |ui| {
             let app = Editor::build(ui, Document::from_level(&mscent_world::showcase_level()))?;
-            *p2.borrow_mut() = Some((app.probe().state(), app.panel.min_x()));
+            let top = xui::widget::Placeable::id(&*app.quad.viewports[0].get());
+            *p2.borrow_mut() = Some((app.probe().state(), app.panel.min_x(), top));
             Ok(app)
         },
         move |stage| {
             let probe = probe.borrow();
-            let (state, field) = probe.as_ref().expect("built");
+            let (state, field, top) = probe.as_ref().expect("built");
             let tool = || state.borrow().tool;
             let brushes = || state.borrow().doc.brushes().len();
 
@@ -85,7 +90,15 @@ fn shortcuts_play_edit_and_select_tools_wherever_focus_is() {
             press(stage, Key::ESCAPE, Modifiers::NONE);
             wait(stage, state, |m| m == "Back in the editor");
 
-            // Tool letters.
+            // Play left the keys with the 3D view, where Q and E roll the camera
+            // and must not change the tool under it.
+            let before = tool();
+            for key in [Key::Q, Key::E] {
+                press(stage, key, Modifiers::NONE);
+                assert_eq!(tool(), before, "{key:?} rolled the camera");
+            }
+            // Tool letters, from a 2D view.
+            stage.ui().focus(*top);
             for (key, want) in [
                 (Key::B, Tool::Box),
                 (Key::E, Tool::Place(EntityKind::Enemy)),

@@ -29,6 +29,9 @@ impl Editor {
     /// One UI tick: forwards the active pane's input to the render thread
     /// and shows the newest frame it finished. Nothing here waits.
     pub(super) fn advance(&mut self) {
+        if let Some(t) = &self.clock.ticker {
+            t.arrived();
+        }
         // Esc or focus loss ended the pointer lock: the cursor is back, so
         // Play ends rather than running with a free cursor.
         if self.studio.mode == Mode::Play && self.play.get().take_lock_lost() {
@@ -60,6 +63,7 @@ impl Editor {
         self.light_key.set(self.studio.light_key());
         self.tex_advance();
         self.push_log(&tick.log);
+        self.show_problems(self.studio.problems());
         if let Some(s) = &tick.status {
             self.state.borrow_mut().message = s.clone();
             self.set_status(s);
@@ -80,6 +84,10 @@ impl Editor {
                 Mode::Edit => self.pane3d(),
             };
             target.set_rgba(f.w, f.h, f.rgba);
+            super::super::meter::note(
+                super::super::meter::Lane::Picture,
+                std::time::Instant::now(),
+            );
         }
         if self.studio.mode == Mode::Edit {
             self.sync_script();

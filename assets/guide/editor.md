@@ -23,9 +23,9 @@ The scripting language has a guide of its own, on the Script pane's Guide tab: p
 ## Areas
 
 - The menu bar is at the top. The status bar at the bottom shows, from the left: the last message, the cursor's position in a 2D view, the level's counts and grid (with **[modified]** when there are unsaved changes), and the state of the 3D picture.
-- The tool palette is on the left: the tools, the New brush buttons (carve or solid) and the Grid size.
+- The tool palette is on the left: the tools, the New brush buttons (solid or carve) and the Grid size.
 - The views are in the middle: three 2D views (Top, Front, Side) and the 3D view.
-- The properties panel is on the right. It shows what is selected: a brush, its faces, an entity, a voxel volume's tools. Under it, the Lighting log reports bakes, warnings and errors.
+- The properties panel is on the right. It shows what is selected: a brush, its faces, an entity, a voxel volume's tools. Under it, Problems and log keeps what stands in the way of the level at its top, then reports bakes, warnings and errors.
 - The Script pane opens under the views with **F6**, or in a window of its own.
 
 ## Selection
@@ -58,12 +58,12 @@ One thing is selected at a time: a brush or an entity. There is no multiple sele
 - **Wheel** zooms around the cursor.
 - **Left button** does what the tool in hand does.
 - Each 2D view keeps the whole level framed until you pan, zoom or click in it. View, Fit views to level frames it again.
-- Every position snaps to the grid. There is no way to turn snapping off, so pick a finer grid for finer work.
+- Every position snaps to the grid. There is no way to turn snapping off, so pick a finer grid for finer work: **PgDn** for finer, **PgUp** for coarser.
 - The 3D camera shows in the 2D views as a magenta dot with its view cone.
 
 ## Grid size
 
-Pick 0.25, 0.5, 1, 2, 4 or 8 units in Grid size on the palette. The grid also sets how far Extrude pushes a face and how small a resized box can get. The player's ship is a ball 1 unit across, so a grid of 1 is right for most rooms and corridors.
+Pick 0.25, 0.5, 1, 2, 4 or 8 units in Grid size on the palette, or step through them with **PgDn** (finer) and **PgUp** (coarser). The grid also sets how far Extrude pushes a face and how small a resized box can get. The player's ship is a ball 1 unit across, so a grid of 1 is right for most rooms and corridors.
 
 ## The 3D view
 
@@ -77,19 +77,20 @@ Click it first, so it has the keyboard.
 | R, F | Move up, down |
 | Q, E | Roll |
 | Shift | Move three times as fast |
+| Wheel | Move forward or back, unless the Voxel tool uses it |
 | Left click | Select (Select tool), pick a face (Face tool) or sculpt (Voxel tool) |
 
-Hold the right button while you fly. Without it, Q and E are also the Select and Enemy tool keys, and pressing them changes the tool.
+While the 3D view has the keyboard, W A S D R F Q E fly the camera and pick no tool. Click a 2D view to use the tool keys again.
 
 The keys are by position: on an AZERTY keyboard, ZQSD moves.
 
-View, Reset 3D camera puts the camera at the player start, level and unrolled. It is the only way to undo a roll.
+View, Level 3D camera (**Ctrl+L**) takes the roll out and keeps the camera where it is. View, Reset 3D camera (**Ctrl+Home**) puts it at the player start, level and unrolled.
 
-The wheel in the 3D view does not move the camera. It sets the radius of the Voxel tool, and rolls a new result when a voxel generator's result is waiting.
+With the Voxel tool the wheel sets the radius, and it rolls a new result when a voxel generator's result is waiting.
 
 ## Layouts
 
-View, Quad layout (the default) shows Top and 3D above Front and Side. View, Classic layout shows the three 2D views in a row with the 3D view below. The dividers between views can be dragged.
+View, Quad layout (**Ctrl+2**, the default) shows Top and 3D above Front and Side. View, Classic layout (**Ctrl+1**) shows the three 2D views in a row with the 3D view below. The dividers between views can be dragged.
 
 View, Switch 3D view between GPU and software chooses the renderer of the 3D view. The game plays the same on both; the GPU picture can look better.
 
@@ -100,19 +101,19 @@ View, Switch 3D view between GPU and software chooses the renderer of the 3D vie
 The world starts as solid rock. Brushes are applied in order, first to last. At any point in space, the **last** brush that contains the point decides: if it is a subtract brush the point is empty, if it is an add brush the point is solid. A point no brush contains stays solid.
 
 - A **subtract** brush (blue in the 2D views) carves empty space. Rooms and corridors are subtract brushes.
-- An **add** brush (orange) puts solid back: pillars, ledges, steps, crates.
+- An **add** brush (orange) puts solid back: pillars, ledges, steps, crates. A mover's brushes are green.
 - An add brush only shows where it lies inside empty space carved before it. An add brush with nothing carved around it changes nothing.
 
 ## Order
 
-A new brush goes last, so it wins over everything already there. To change that, select a brush and use Edit, Move later in order or Move earlier in order. The properties panel shows the position as **Brush N of M**.
+A new brush goes last, so it wins over everything already there. To change that, select a brush and use Edit, Move later in order (**Ctrl+PgDn**) or Move earlier in order (**Ctrl+PgUp**). At either end the status says it is already first or last. The properties panel shows the position as **Brush N of M**.
 
 - A pillar is an add brush **after** the room it stands in. Moved before the room, the room carves it away.
 - A doorway is a subtract brush that overlaps two rooms' walls. Its order does not matter as long as nothing solid comes after it.
 
 ## Add or subtract
 
-The New brush buttons on the palette set what the next new brush is: minus carves, plus is solid. To change a brush that exists, use Operation in the properties panel or Edit, Flip add/subtract.
+The New brush buttons on the palette set what the next new brush is: plus is solid, minus carves, in the order of the panel's Operation list. To change a brush that exists, use Operation in the properties panel or Edit, Flip add/subtract (**Ctrl+I**).
 
 ## Shapes
 
@@ -122,9 +123,9 @@ The New brush buttons on the palette set what the next new brush is: minus carve
 
 ## Limits
 
-- Every coordinate stays within -4096 to 4096.
+- Every coordinate stays within -4096 to 4096. A drag that would leave that range stops at the edge and says so.
 - A brush must have a positive size on all three axes: **Brush must have a positive size**.
-- A shape has at most 48 corners for the Move corners tool.
+- A shape has at most 48 corners for the Move corners tool. Selecting a larger one with it says so.
 
 # Brush tools
 
@@ -137,7 +138,7 @@ The New brush buttons on the palette set what the next new brush is: minus carve
 
 ## Box brush (B)
 
-Drag a rectangle in a 2D view. The new box is 4 units deep along the axis the view looks down: Z from 0 to 4 in the Top view, Y from 0 to 4 in the Front view, X from 0 to 4 in the Side view. Resize it in another view, or type its Min and Max. It takes the New brush operation and the last material picked, and it is selected.
+Drag a rectangle in a 2D view. Along the axis the view looks down, the new box spans the selected brush, so a box drawn over a selected room is as tall as the room. With nothing selected it is 4 units deep: Z from 0 to 4 in the Top view, Y from 0 to 4 in the Front view, X from 0 to 4 in the Side view. Resize it in another view, or type its Min and Max. It takes the New brush operation and the last material picked, and it is selected.
 
 ## Slice brush (C)
 
@@ -166,8 +167,8 @@ Pick one or more faces with the Face tool (T), then:
 ## Other Edit commands
 
 - **Delete** removes the selection. It is undoable.
-- **Flip add/subtract** changes the selected brush's operation.
-- **Make mover** turns the selected add brush into a moving part: see Scripts and movers.
+- **Flip add/subtract** (**Ctrl+I**) changes the selected brush's operation.
+- **Make mover** (**Ctrl+M**) turns the selected add brush into a moving part: see Scripts and movers.
 
 # Faces and textures
 
@@ -213,17 +214,17 @@ Entities are points in the level: where the player starts, lights, enemies, the 
 
 ## Where they land
 
-A click sets the two coordinates the view shows. The third is fixed: **Z = 1.5** from the Top view, **Y = 0** from the Front view and **X = 0** from the Side view. Place from the Top view in rooms whose floor is at Z = 0, or set Pos X, Y and Z in the Entity panel afterwards. A box drawn in the Top view runs from Z = 0 to 4, so a Top view click lands inside it.
+A click sets the two coordinates the view shows. The third comes from your last click in another 2D view: click in a room in the Front or Side view, then place from the Top view, and the entity lands at that height. Before any such click it is Z = 1.5, Y = 0 or X = 0. The status bar says where the entity went, such as **Placed light at 4, 2, 1.5**; set Pos X, Y and Z in the Entity panel to move it exactly.
 
 ## The kinds
 
 | Kind (key) | What it is |
 |---|---|
-| Player start (P) | Where the player's ship begins, facing Yaw (the arrow in the Top view). A level has one: placing another replaces it. |
+| Player start (P) | Where the player's ship begins, facing Yaw (the arrow in the Top view). A level has one: placing another moves it, and the status says so. |
 | Light (L) | A lamp, baked into the lighting. See Lighting. |
-| Projector (J) | A spot lamp shining one way. See Lighting. |
+| Projector (J) | A spot lamp shining one way, drawn as a triangle. See Lighting. |
 | Enemy (E) | An enemy. Kind picks one of the level's enemy kinds, counted from 0. A level with no kinds of its own has two: 0 the drone and 1 the hunter. The 3D view shows each enemy as its kind's model, facing +X as it does before it first moves. |
-| Goal (G) | Reaching within its Radius wins. |
+| Goal (G) | Reaching within its Radius wins. Drawn as a diamond. |
 | Marker (M) | A named point for a script: a spawn point, a hinge. |
 | Zone (Z) | A box a script hears about when the player enters or leaves. Half X, Y and Z are half its size. |
 | Vista layer (Y) | The eye of a vista, in a sealed room. See Vistas and mountains. |
@@ -232,18 +233,19 @@ A click sets the two coordinates the view shows. The third is fixed: **Z = 1.5**
 
 Type in a field and press **Enter**, or leave it: that commits one undo step. Text that is not a number goes back to what it was.
 
-- A value an entity cannot have is refused with **Entity value out of range**, and nothing changes. Light colours go from 0 to 1, so use the field, not the arrows, which step by 1. Radius and half sizes must be above 0.
-- A projector's and a vista layer's values are kept in range for you instead: a pitch past 90 becomes 90.
-- An enemy's Kind is kept inside the level's kinds: in a level with the stock two, 5 becomes 1. A level whose enemy names a kind it does not have will not load, so it cannot be saved either.
+- Every field has a range. A value past it is set to the nearest end, and the status says so: **Red must be 0 to 1: set to 1**.
+- The arrows step by what suits the field: colours by 0.05, angles by 15 (pitch by 5), fog by 10, sizes by 0.5. Radius and half sizes stay above 0.
+- A fog's start and end push each other, so the end stays past the start.
+- An enemy's Kind is held to the level's kinds the same way: in a level with the stock two, 5 becomes 1. A level whose enemy names a kind it does not have will not load, so it cannot be saved either.
 - Angles are in degrees.
 
 ## The world entity
 
-Edit, Level settings sets the fog. It makes a World entity, drawn at the origin as a blue circle. Delete it to go back to the default fog.
+Edit, Level settings (**F8**) sets the fog. It makes a World entity, drawn at the origin as a blue circle. Delete it to go back to the default fog.
 
 ## Names and tags
 
-The Script names group gives an enemy, a marker or a zone a name a script can find, and tags it can share. See Scripts and movers.
+The Script names group gives an enemy, a marker or a zone a name a script can find, and tags it can share. Other kinds take a name too, but no script can find them by it, and the group says so. See Scripts and movers.
 
 # Lighting
 
@@ -266,11 +268,11 @@ Lamps are static. Shots and flashes light their surroundings briefly while playi
 
 ## Fog
 
-Edit, Level settings opens the Fog window. Fog starts at **Fog start** units from the eye and is full at **Fog end**, at most 1000. Without a World entity the game uses 4 to 26. Each vista layer has a fog of its own.
+Edit, Level settings (**F8**) opens the Fog window. Fog starts at **Fog start** units from the eye and is full at **Fog end**, at most 1000. Without a World entity the game uses 4 to 26. Each vista layer has a fog of its own.
 
-## The Lighting log
+## Problems and log
 
-The box under the properties panel lists bake times, cache use, warnings and errors. It shows the newest lines.
+The box under the properties panel keeps, at its top, what stands in the way of the level now: the vista warnings and why it cannot be played, such as a missing goal. They stay there while you edit until you fix them. Under a rule come the newest lines of the log: bake times, cache use, warnings and errors.
 
 # Scripts and movers
 
@@ -313,7 +315,7 @@ The Voxel tool works in the 3D view. Choose what a dab does in the Voxel panel, 
 | Ctrl + left drag | Add instead of Carve, or Carve instead of Add |
 | Alt + left drag | Build up: each pass adds to the last, where a plain stroke keeps one even depth |
 | Wheel | Radius, from 0.25 to 8 |
-| Esc | Cancel the stroke, end a tunnel, or drop a generated result |
+| Esc | Cancel the stroke, end a tunnel, or drop a generated result (**Dropped the generated result**) |
 
 There is no need to make a volume first. **Add** where there is none makes an add volume around the dab. **Carve** on a brush wall makes a subtract volume that matches the wall, so nothing changes until the first dab bites. A stroke grows its volume as it goes.
 
@@ -332,11 +334,11 @@ One stroke is one undo step.
 | Copy | Takes a ball of the volume under the click |
 | Stamp | Puts the copy down at the click. The cell size must match |
 
-**Material** is what new solid is made of. **New cells** is the cell size of a volume a stroke creates: 0.125, 0.25 (the default), 0.5 or 1 unit. Smaller is finer but covers less: a volume is at most 256 cells on a side.
+**Material** is what new solid is made of: any material of the table, those made in the Texture Studio too. **New cells** is the cell size of a volume a stroke creates: 0.125, 0.25 (the default), 0.5, 1, 2 or 4 units. Smaller is finer but covers less: a volume is at most 256 cells on a side.
 
 ## Generators
 
-Choose one in **Generate**: Stalactites, Mushrooms, Coral, Tree, Hive or Mountains. Click a surface. The result is held, not kept: the wheel or the Seed field rolls another, **Commit** keeps it as one undo step, and **Esc** drops it. Saving, playing, picking a dab and most other edits keep it; changing tool drops it. The size follows the radius. Stalactites grow along the surface, so they hang from a ceiling and rise from a floor.
+Choose one in **Generate**: Stalactites, Mushrooms, Coral, Tree, Hive or Mountains. Click a surface. The result is held, not kept: the wheel or the Seed field rolls another, **Commit** keeps it as one undo step, and **Esc** drops it. Saving, playing, picking a dab, changing tool and most other edits keep it, and picking a dab keeps the generator chosen. The wheel rolls once per notch. The size follows the radius. Stalactites grow along the surface, so they hang from a ceiling and rise from a floor.
 
 ## Fill
 
@@ -345,9 +347,9 @@ Select a volume and press **Fill selected volume**: every cell is replaced from 
 ## Working with volumes
 
 - Select a volume with Select to see its box. It can be moved, reordered and deleted, but not resized: strokes grow it.
-- Volumes may touch but not overlap. A stroke or a move into another volume is refused.
+- Volumes may touch but not overlap. A stroke or a move into another volume is refused, and the status says so.
 - Flip add/subtract keeps the sculpted shape.
-- Slice, Move corners, Carve with brush and the face panel do not work on volumes.
+- Slice, Move corners, Carve with brush and the face panel do not work on volumes, and Slice and Carve say so.
 - Volumes light and cast shadows as brushes do, and collide exactly as drawn.
 
 # Vistas and mountains
@@ -367,18 +369,19 @@ Edit, New vista builds a 64-unit starry room beyond the level, with a planet, an
 
 ## New mountains
 
-Edit, New mountains builds a 128-unit room beyond the level with a sculpted mountain range, a lamp and a layer at scale 16. It joins the first vista in the level as its next layer, in front of its stars, or takes a slot of its own when there is none. Its floor lines up with the level's floor so the horizon sits right.
+Edit, New mountains builds a 128-unit room beyond the level with a sculpted mountain range, a lamp and a layer at scale 16. It joins the first vista in the level as its first free layer, in front of its stars, or takes a slot of its own when there is none. Its floor lines up with the level's floor so the horizon sits right.
 
 ## Rules
 
-The Lighting log warns, without stopping play, when:
+Problems and log warns, without stopping play, when:
 
 - a layer is in the same space as the player start, so the player could fly into it: seal it with solid;
 - a layer's position is in solid, so it shows nothing: move it into its room;
 - a wall shows a View slot that has no layer: it shows a plain sky gradient;
-- a mover has a View face: a mover does not draw views.
+- a mover has a View face: a mover does not draw views;
+- two layers have the same slot and layer number: only the first counts.
 
-Two layers with the same slot and layer number: only the first counts. The Vista layer tool always starts at slot 0, layer 0, so set them in the panel.
+The Vista layer tool gives a new layer the first free layer of the level's vista.
 
 # Texture Studio
 
@@ -387,7 +390,7 @@ Texture, Texture Studio makes materials from recipes: blocks of noise, bricks, b
 - **New...** starts a material: a name of lower case letters, digits and - and a size from 64 to 1024.
 - **Apply** puts it in the running editor, ready for the face panel. Nothing is written yet.
 - **Save** writes the recipe and adds the material to the material list on disk. A material applied but not saved draws grey next session, and saving the level warns about it.
-- While the studio is open, **Ctrl+Z**, **Ctrl+Y**, **Delete** and **Ctrl+S** act on the recipe, not the level, and Play is off.
+- While the studio is open, **Ctrl+Z**, **Ctrl+Y**, **Delete** and **Ctrl+S** act on the recipe, not the level, and Play is off: F5 says to go back to the level first.
 
 The Texture Studio tutorial in the source tree, docs/texture-studio-tutorial.md, walks through a material from start to finish.
 
@@ -412,7 +415,7 @@ A level whose script is new must be saved before it can play, since the script l
 - **Ctrl+S** saves the level, its script and its lighting. A level with no file yet asks for one.
 - File, Open showcase level opens the demo level, which has no file until you save it.
 - Saving checks the level as the loader will: a level the editor could not open again is not written, and the old file stays.
-- New, Open and closing the window do not ask about unsaved level changes: watch for **[modified]** in the status bar. Unsaved script edits are asked about.
+- New, Open, Open showcase level, a sample and closing the window ask before unsaved changes go, and name them: the level, the script, and on closing, Texture Studio materials.
 
 ## Starting the editor
 
@@ -431,7 +434,7 @@ The first opens a level, the second the showcase, the third keeps the 3D view on
 - A goal, unless the level has a script beside it: a script ends the level its own way, such as with an exit zone.
 - No enemy inside solid.
 
-These are checked when you press F5, and **Cannot play** says which failed.
+Problems and log shows which fails while you edit, and F5 says it with **Cannot play**, selecting the entity at fault.
 
 ## To build
 
@@ -439,11 +442,11 @@ These are checked when you press F5, and **Cannot play** says which failed.
 - Every entity's values are in range.
 - Names follow the naming rules and are not used twice.
 
-A level that breaks one of these shows **Preview not updated**, and the Lighting log has the error.
+A level that breaks one of these shows **Preview not updated**, and Problems and log has the error.
 
 ## Good habits
 
-- Draw rooms at Z = 0 and up, so entities placed from the Top view (at Z = 1.5) land inside them.
+- Before placing from the Top view, click in the room in the Front or Side view, so entities land at its height.
 - Keep the outside solid: the void past the world's edge is solid, so a level cannot leak, but a room the player cannot reach still costs lighting.
 - Keep vista rooms sealed: solid between them and the play space.
 - A player start too close to a wall or floor can be in solid: keep it a unit away.
@@ -527,7 +530,7 @@ For a long passage, use Tunnel: click the mouth, then click along the way, and *
 3. **T**, click the ceiling in the 3D view, and pick **View 0** at the end of the materials. The ceiling becomes a starry sky with a planet.
 4. Edit, New mountains. A range stands in front of the stars.
 5. Paint a wall **View 0** too: the mountains show through it on the horizon.
-6. Watch the Lighting log for vista warnings.
+6. Watch Problems and log for vista warnings.
 
 # Techniques
 
@@ -563,7 +566,7 @@ For a long passage, use Tunnel: click the mouth, then click along the way, and *
 | Z | Zone |
 | Y | Vista layer |
 
-Tool keys do nothing while a text field has the keyboard. While the right button is held in the 3D view, Q and E roll the camera instead of picking Select and Enemy.
+Tool keys do nothing while a text field has the keyboard. While the 3D view has the keyboard, W A S D R F Q E fly the camera instead of picking a tool: click a 2D view first.
 
 ## Commands
 
@@ -573,7 +576,8 @@ Tool keys do nothing while a text field has the keyboard. While the right button
 | F5 or Ctrl+R | Play |
 | F6 | Show or hide the Script pane |
 | F7 | Scripting guide |
-| Esc | Leave play, drop a slice line or a stroke, leave the Texture Studio, close this manual |
+| F8 | Level settings |
+| Esc | Leave play, drop a slice line, a stroke or a generated result, leave the Texture Studio, close this manual |
 | Ctrl+N | New level |
 | Ctrl+O | Open |
 | Ctrl+S | Save |
@@ -585,6 +589,17 @@ Tool keys do nothing while a text field has the keyboard. While the right button
 | Ctrl+Shift+C | Carve with brush |
 | Ctrl+E | Extrude picked faces out |
 | Ctrl+Shift+E | Extrude picked faces in |
+| Ctrl+I | Flip add/subtract |
+| Ctrl+M | Make mover |
+| Ctrl+PgDn | Move later in order |
+| Ctrl+PgUp | Move earlier in order |
+| PgDn | Finer grid |
+| PgUp | Coarser grid |
+| Home | Fit views to level |
+| Ctrl+Home | Reset 3D camera |
+| Ctrl+L | Level 3D camera |
+| Ctrl+1 | Classic layout |
+| Ctrl+2 | Quad layout |
 
 ## Mouse
 
@@ -598,7 +613,7 @@ Tool keys do nothing while a text field has the keyboard. While the right button
 | 3D view, Ctrl + left | Add a face to the picks, or swap Add and Carve |
 | 3D view, Alt + left | Copy a texture, or build up a stroke |
 | 3D view, Alt + right | Paste a texture |
-| 3D view, wheel | Voxel radius, or roll a generator again |
+| 3D view, wheel | Voxel radius, roll a generator again, or move the camera forward and back |
 
 # Troubleshooting
 
@@ -607,20 +622,24 @@ Tool keys do nothing while a text field has the keyboard. While the right button
 | Message | What to do |
 |---|---|
 | Brush must have a positive size | Max must be above Min on every axis. |
-| Entity value out of range | The value is outside what the field allows: colours 0 to 1, sizes above 0. |
+| Red must be 0 to 1: set to 1 | A field was set past its range and was clamped to its end. Every field names its own range. |
 | A corner cannot go there | The move would make the shape concave, merge corners or leave the map. |
-| The line does not cut through the brush | Draw the slice line right across the selected brush. Volumes cannot be sliced. |
-| Select a brush to carve with | Select a box or convex brush. Volumes cannot carve. |
+| The line does not cut through the brush | Draw the slice line right across the selected brush. |
+| Voxel volumes cannot be sliced | Slice works on boxes and convex brushes. |
+| Select a brush to carve with | Select a box or convex brush. |
+| A voxel volume cannot carve | Use the Voxel tool's Carve dab instead. |
 | The brush overlaps nothing to carve | Move it into what it should cut. |
 | Pick faces with the Face tool to extrude | Extrude needs faces picked with T. |
 | Names and tags are lower-case letters, digits and _, at most 32 | Fix the name. |
 | That name is already taken | Every name in a level is different. |
 | A mover must be an add brush | Flip it to add first. |
-| Another volume is in the way | Volumes cannot overlap: move one, or sculpt in the other. |
+| Another volume is in the way, Voxel volumes cannot overlap | Volumes cannot overlap: move one, or sculpt in the other. |
+| That would leave the map | A drag stopped at -4096 or 4096. |
 | The volume has reached its largest size | Use larger cells, or start a second volume beside it. |
-| Cannot play: the level has no player start | Place one with P. |
-| Cannot play: the level has no goal | Place one with G, or add a script with an exit. |
-| SpawnInSolid | The player start or an enemy is inside solid. Check its Z. |
+| Cannot play: the level has no player start: place one | Place one with P. |
+| Cannot play: the level has no goal: place one | Place one with G, or add a script with an exit. |
+| Cannot play: Player start (entity N) is inside solid | The entity named is selected: move it into a room. Entities count from 1. |
+| Cannot open level.msl: ... | The file is not a level this editor can read; the message says why. |
 | Save the level first: its script lives in a file beside it | Save, then play. |
 | The script changed on disk | Something else edited the script: Save overwrites it, Reload on the Script pane takes it. |
 
@@ -636,7 +655,7 @@ Something later in the order covers it. Select it and use Edit, Move later in or
 
 ## An entity is not where I put it
 
-It was placed at Z = 1.5 from the Top view, or at 0 from another view. Set its Pos in the panel.
+Its third coordinate came from your last click in another 2D view: the status bar said where it went. Set its Pos in the panel, or click in the room in another view first and place it again.
 
 ## The light looks blotchy
 
@@ -644,17 +663,13 @@ That is draft lighting while the bake runs: wait for **Lighting up to date**.
 
 ## A vista shows only a gradient
 
-The View slot painted on the wall has no layer, or the layer is in solid. Read the warnings in the Lighting log.
+The View slot painted on the wall has no layer, or the layer is in solid. Read the warnings at the top of Problems and log.
 
 # Known rough edges
 
-These behave in ways that can surprise you. Each is filed to be fixed; until then, here is how to work with it.
+These behave in ways that can surprise you.
 
-- **Unsaved levels are not asked about.** New, Open, the showcase, a sample and closing the window drop unsaved changes to the level. Save first when the status bar says **[modified]**. (Issue 63.)
-- **The hidden coordinate.** New entities land at Z = 1.5 from the Top view, 0 from the others, and new boxes are 4 deep. Check heights in the Front view. (Issue 64.)
-- **Fields refuse or clamp.** A light's colour past 1 is refused; a projector's angle past 90 is clamped. Type values rather than using the arrows. (Issue 65.)
-- **Cryptic messages.** SpawnInSolid(N) counts entities from 0, other messages from 1. (Issue 66.)
-- **Silent edits.** Reordering at either end, moving a volume into another, and a second player start say nothing. (Issue 67.)
-- **Q and E in the 3D view** roll and also pick Select and Enemy, unless the right button is held. (Issue 68.)
-- **Changing tool drops a held generator result.** Commit first. (Issue 69.)
-- **The Vista layer tool always starts at slot 0, layer 0**, and the Lighting log shows only its newest lines. (Issue 70.)
+- **Text that is not a number** typed in a number field goes back to what was there, without a message.
+- **Volumes are not resized** in the 2D views: move them there, and grow them with strokes.
+- **Snapping cannot be turned off.** Use a finer grid (PgDn).
+- **Names on lights, projectors, the player start, goals and vista layers** are kept, but no script can find them.

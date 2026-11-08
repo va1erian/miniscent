@@ -102,8 +102,13 @@ impl Editor {
                 self.set_status(text);
             }
             Err(e) => {
-                self.state.borrow_mut().message = e.clone();
+                let blamed = self.studio.culprit();
+                let mut st = self.state.borrow_mut();
+                st.select_entity_at(blamed);
+                st.message = e.clone();
+                drop(st);
                 self.set_status(&e);
+                self.refresh();
             }
         }
     }

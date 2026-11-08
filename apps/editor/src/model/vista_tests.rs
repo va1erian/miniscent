@@ -144,7 +144,9 @@ fn every_layer_edit_is_one_undo_step_and_undoes() {
     let before = st.doc.clone();
     for i in 0..16 {
         let depth = st.history.depth();
-        let edited = st.edit_selected_entity(|e| set_param(e, i, 2.0));
+        let edited = st.edit_selected_entity(|e| {
+            set_param(e, i, 2.0);
+        });
         assert_eq!(st.history.depth(), depth + usize::from(edited), "field {i}");
         if edited {
             st.undo();
@@ -334,8 +336,11 @@ fn scale_is_the_inverse_of_parallax_with_zero_for_infinite() {
     assert_eq!(scale(&e).1, 16.0);
     set_param(&mut e, 2, 1.0e9);
     assert_eq!(scale(&e).1, 4096.0, "held to the largest scale");
-    set_param(&mut e, 2, -3.0);
+    set_param(&mut e, 2, 0.5);
     assert_eq!(scale(&e).1, 1.0, "held to the smallest scale");
+    let note = set_param(&mut e, 2, -3.0);
+    assert_eq!(scale(&e).1, 0.0, "below the range is its end, infinite");
+    assert_eq!(note.as_deref(), Some("Scale must be 0 to 4096: set to 0"));
     set_param(&mut e, 2, 0.0);
     assert_eq!(scale(&e).1, 0.0, "0 is infinitely far");
     set_param(&mut e, 2, f64::NAN);
@@ -357,4 +362,23 @@ fn only_a_vista_layer_takes_a_value_past_the_plain_limit() {
     set_param(&mut layer, 3, 100_000.0);
     let centre_x = params(&layer)[3].1;
     assert_eq!(centre_x, 100_000.0);
+}
+
+#[test]
+fn a_new_layer_takes_the_first_free_layer_of_the_levels_vista() {
+    let mut st = level_with_room();
+    let slot_layer = |e: Entity| match e {
+        Entity::VistaLayer { slot, layer, .. } => (slot, layer),
+        _ => panic!("not a layer"),
+    };
+    st.place_entity(EntityKind::VistaLayer, [100.0, 8.0, 4.0]);
+    assert_eq!(slot_layer(selected_layer(&st)), (0, 0));
+    st.place_entity(EntityKind::VistaLayer, [120.0, 8.0, 4.0]);
+    assert_eq!(slot_layer(selected_layer(&st)), (0, 1));
+    // Field 1 is the layer: moving it to 3 leaves a gap at 1, which is filled.
+    st.edit_selected_entity(|e| {
+        set_param(e, 1, 3.0);
+    });
+    st.place_entity(EntityKind::VistaLayer, [140.0, 8.0, 4.0]);
+    assert_eq!(slot_layer(selected_layer(&st)), (0, 1));
 }

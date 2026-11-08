@@ -331,7 +331,7 @@ fn a_level_past_the_file_limits_cannot_be_saved_as_if_it_were_fine() {
     level.volumes = vec![a, b];
     let doc = Document::from_level(&level);
     let why = crate::files::save(&doc, &path).expect_err("refused");
-    assert!(why.contains("cannot save"), "{why}");
+    assert!(why.starts_with("Cannot save"), "{why}");
     assert!(!path.exists());
     let _ = std::fs::remove_dir_all(dir);
 }

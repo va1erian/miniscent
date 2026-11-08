@@ -158,6 +158,10 @@ impl Editor {
                 self.tex_close();
                 return;
             }
+            cmd::PLAY => {
+                self.set_status("Play is for the level: Esc goes back to it, then F5");
+                return;
+            }
             _ => {}
         }
         self.tex_refresh();

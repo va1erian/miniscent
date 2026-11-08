@@ -4,7 +4,7 @@
 //! a View material and has a sky.
 
 use mscent_math::{Vec3, Vec3d};
-use mscent_world::entity::MAX_VISTA_FOG;
+use mscent_world::entity::{MAX_VISTA_FOG, MAX_VISTA_LAYERS};
 use mscent_world::materials::{SKY_PLANET, SKY_STARS, VIEW_SLOTS};
 use mscent_world::{Entity, Op, TexInfo};
 
@@ -46,6 +46,34 @@ impl EditorState {
                 .any(|e| matches!(e.entity, Entity::VistaLayer { slot: s, .. } if s == slot))
         };
         (0..VIEW_SLOTS).find(|&slot| !used(slot))
+    }
+
+    /// The first free layer of `slot`.
+    pub(super) fn free_layer_in(&self, slot: u8) -> Option<u8> {
+        let taken = |layer: u8| {
+            self.doc.entities().iter().any(|e| {
+                matches!(e.entity, Entity::VistaLayer { slot: s, layer: l, .. }
+                    if s == slot && l == layer)
+            })
+        };
+        (0..MAX_VISTA_LAYERS).find(|&l| !taken(l))
+    }
+
+    /// The slot of the level's first vista layer, which new layers join.
+    pub fn vista_slot(&self) -> Option<u8> {
+        self.doc.entities().iter().find_map(|e| match e.entity {
+            Entity::VistaLayer { slot, .. } => Some(slot),
+            _ => None,
+        })
+    }
+
+    /// The slot and layer a new layer takes: the first free layer of the level's
+    /// vista, or of the first slot with one free.
+    pub fn free_vista_layer(&self) -> Option<(u8, u8)> {
+        let joined = self.vista_slot().into_iter();
+        joined
+            .chain(0..VIEW_SLOTS)
+            .find_map(|slot| Some((slot, self.free_layer_in(slot)?)))
     }
 
     /// The point of the play space a new layer maps to its own position: the

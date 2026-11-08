@@ -8,8 +8,7 @@ use mscent_world::entity::{
 use mscent_world::materials::VIEW_SLOTS;
 use mscent_world::vista_scale::{parallax_of_scale, scale_of_parallax};
 
-/// Largest value a field of any entity but a vista layer takes.
-const MAX_PLAIN_PARAM: f64 = 4096.0;
+use super::fields::{held, limits};
 
 /// What the entity tools can place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -177,7 +176,7 @@ pub fn params(e: &Entity) -> Vec<(&'static str, f64)> {
         Entity::World {
             fog_start, fog_end, ..
         } => vec![("Fog start", short(fog_start)), ("Fog end", short(fog_end))],
-        Entity::Enemy { kind, .. } => vec![("Kind", kind as f64)],
+        Entity::Enemy { kind, .. } => vec![("Kind (0 drone, 1 hunter)", kind as f64)],
         Entity::PlayerStart { yaw, .. } | Entity::Marker { yaw, .. } => {
             vec![("Yaw (deg)", short(yaw.to_degrees()))]
         }
@@ -218,23 +217,34 @@ pub fn params(e: &Entity) -> Vec<(&'static str, f64)> {
     }
 }
 
-/// Sets field `i` of [`params`]; out-of-range indices change nothing.
-/// Holds an enemy's kind inside a table of `count` kinds: a level whose enemy
-/// names a kind past its table does not load.
-pub fn clamp_kind(e: &mut Entity, count: usize) {
-    if let Entity::Enemy { kind, .. } = e {
-        let last = u8::try_from(count.saturating_sub(1)).unwrap_or(u8::MAX);
-        *kind = (*kind).min(last);
-    }
+/// Holds an enemy's kind inside a table of `count` kinds, since a level whose
+/// enemy names a kind past its table does not load. What to tell the user when
+/// it had to.
+pub fn clamp_kind(e: &mut Entity, count: usize) -> Option<String> {
+    let Entity::Enemy { kind, .. } = e else {
+        return None;
+    };
+    let last = u8::try_from(count.saturating_sub(1)).unwrap_or(u8::MAX);
+    (*kind > last).then(|| {
+        *kind = last;
+        format!("Kind must be 0 to {last}: set to {last}")
+    })
 }
 
-pub fn set_param(e: &mut Entity, i: usize, v: f64) {
-    // The panel's fields are wide for a vista layer's fog, which holds its own limits.
-    let v = if matches!(e, Entity::VistaLayer { .. }) {
-        v
-    } else {
-        v.clamp(-MAX_PLAIN_PARAM, MAX_PLAIN_PARAM)
+/// Sets field `i` of [`params`], held to its limits. What to tell the user: the
+/// value was clamped, or was not a number and changed nothing. Out-of-range
+/// indices change nothing.
+pub fn set_param(e: &mut Entity, i: usize, v: f64) -> Option<String> {
+    let label = params(e).get(i)?.0;
+    let Some((v, note)) = held(label, *limits(e).get(i)?, v) else {
+        return Some(format!("{label} must be a number"));
     };
+    set_held(e, i, v);
+    note
+}
+
+/// Field `i` set to `v`, which is already within its limits.
+fn set_held(e: &mut Entity, i: usize, v: f64) {
     match e {
         Entity::Light {
             color,
@@ -251,9 +261,21 @@ pub fn set_param(e: &mut Entity, i: usize, v: f64) {
         },
         Entity::Projector { .. } => set_projector_param(e, i, v),
         Entity::Goal { radius, .. } if i == 0 => *radius = v as f32,
-        Entity::World { fog_start, .. } if i == 0 => *fog_start = v as f32,
-        Entity::World { fog_end, .. } if i == 1 => *fog_end = v as f32,
-        Entity::Enemy { kind, .. } if i == 0 => *kind = v.clamp(0.0, 255.0) as u8,
+        // The end must stay above the start, so each pushes the other.
+        Entity::World {
+            fog_start, fog_end, ..
+        } => match i {
+            0 => {
+                *fog_start = v as f32;
+                *fog_end = fog_end.max(*fog_start + 1.0);
+            }
+            1 => {
+                *fog_end = v as f32;
+                *fog_start = fog_start.min(*fog_end - 1.0).max(0.0);
+            }
+            _ => {}
+        },
+        Entity::Enemy { kind, .. } if i == 0 => *kind = v.round() as u8,
         Entity::PlayerStart { yaw, .. } | Entity::Marker { yaw, .. } if i == 0 => {
             *yaw = (v as f32).to_radians()
         }

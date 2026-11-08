@@ -18,6 +18,8 @@ use crate::model::{Camera2D, EditorState, Selection, Shape, View};
 
 /// Colour of an additive brush.
 const ADD: Color = Color::rgb(235, 150, 55);
+/// Colour of a mover's brushes, far from both.
+const MOVER: Color = Color::rgb(80, 185, 90);
 /// Colour of a subtractive brush.
 const SUBTRACT: Color = Color::rgb(55, 150, 230);
 /// Colour of the 3D pane's camera.
@@ -278,7 +280,7 @@ fn brushes(pen: &mut Pen, scene: &Scene) {
         // A mover stands out: it is no part of the world.
         let moves = scene.state.doc.group_of(br.id).is_some();
         let color = match br.op {
-            Op::Add if moves => Color::rgb(230, 150, 40),
+            Op::Add if moves => MOVER,
             Op::Add => ADD,
             Op::Subtract => SUBTRACT,
         };

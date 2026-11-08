@@ -82,7 +82,7 @@ fn sample_script(probe: &Probe) -> std::path::PathBuf {
 
 /// Opening a sample shows its level and script, and it plays at once.
 fn sample(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
-    stage.emit(Msg::Script(ScriptMsg::Sample(0)));
+    super::guide::leave(stage, Msg::Script(ScriptMsg::Sample(0)));
     pump(stage, 3);
     let text = probe.code().text();
     run.check(
@@ -316,7 +316,7 @@ fn kit(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
 /// A level with no file has nowhere to keep a script, so F5 asks for one.
 fn unsaved(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     stage.emit(Msg::Menu(cmd::SAVE));
-    stage.emit(Msg::Menu(cmd::NEW));
+    super::guide::leave(stage, Msg::Menu(cmd::NEW));
     pump(stage, 1);
     run.check(
         probe.code().text().is_empty(),

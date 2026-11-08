@@ -44,23 +44,32 @@ fn a_level_with_no_kinds_offers_the_stock_two() {
 
 #[test]
 fn no_kind_field_value_names_a_kind_past_the_table() {
-    for (count, v, want) in [
-        (2, 255.0, 1),
-        (2, 1.0, 1),
-        (5, 9.0, 4),
-        (5, -3.0, 0),
-        (300, 255.0, 255),
-    ] {
+    let cases = [
+        (2, 255.0, 1, true),
+        (2, 1.0, 1, false),
+        (5, 9.0, 4, true),
+        (5, -3.0, 0, false),
+        (32, 255.0, 31, false),
+    ];
+    for (count, v, want, told) in cases {
         let mut e = EntityKind::Enemy.make([0.0; 3]);
         set_param(&mut e, 0, v);
-        clamp_kind(&mut e, count);
+        let note = clamp_kind(&mut e, count);
+        let kind = want;
         assert_eq!(
             e,
             Entity::Enemy {
                 pos: Vec3::ZERO,
-                kind: want
+                kind
             },
             "{count} {v}"
         );
+        assert_eq!(note.is_some(), told, "{count} {v}: {note:?}");
     }
+    let mut e = EntityKind::Enemy.make([0.0; 3]);
+    set_param(&mut e, 0, 9.0);
+    assert_eq!(
+        clamp_kind(&mut e, 2).as_deref(),
+        Some("Kind must be 0 to 1: set to 1")
+    );
 }
