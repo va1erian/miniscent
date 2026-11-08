@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use super::app::{Editor, Msg};
 use super::level_dialog::FogWindow;
+use super::manual_window::Manual;
 use super::script_pane::ProbeHandles;
 use super::view3d::View3d;
 use crate::materials::SharedMaterials;
@@ -27,6 +28,7 @@ pub struct Probe {
     pub(super) tex_preview: Rc<super::texstudio::TexPreview>,
     pub(super) script: ProbeHandles,
     pub(super) fog_window: Rc<RefCell<Option<FogWindow>>>,
+    pub(super) manual: Rc<RefCell<Option<Manual>>>,
 }
 
 impl Editor {
@@ -43,6 +45,7 @@ impl Editor {
             tex_preview: self.tex.preview.get(),
             script: self.script.probe_handles(),
             fog_window: self.fog_window.clone(),
+            manual: self.manual.clone(),
         }
     }
 }
@@ -130,5 +133,20 @@ impl Probe {
     /// The editor's 3D pane.
     pub fn view_pane(&self) -> Rc<View3d<Msg>> {
         self.view3d.clone()
+    }
+
+    /// Whether the manual's window is up and its page laid out.
+    pub fn manual_ready(&self) -> bool {
+        self.manual.borrow().as_ref().is_some_and(Manual::is_ready)
+    }
+
+    /// The manual's page on show, if its window is up.
+    pub fn manual_topic(&self) -> Option<usize> {
+        self.manual.borrow().as_ref().map(Manual::topic)
+    }
+
+    /// A picture of the manual's window, if it is up.
+    pub fn manual_picture(&self) -> Option<xui::backend::Result<xui::Image>> {
+        self.manual.borrow().as_ref().map(Manual::capture)
     }
 }

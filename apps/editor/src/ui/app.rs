@@ -16,6 +16,7 @@ use super::commands::menus;
 use super::keys::{OPS, TOOLS, key_name, shortcut};
 use super::layouts::{self, Arrangement, Disposition};
 use super::level_dialog::FogWindow;
+use super::manual_window::ManualMsg;
 pub use super::messages::Msg;
 use super::props::{Panel, apply};
 use super::script_pane::{ScriptMsg, ScriptPane};
@@ -51,6 +52,8 @@ pub struct Editor {
     pub(super) after_discard: Option<Msg>,
     /// The level settings window, once opened. It may have closed itself since.
     pub(super) fog_window: Rc<RefCell<Option<FogWindow>>>,
+    /// The manual's window, once opened. It may have been closed since.
+    pub(super) manual: Rc<RefCell<Option<super::manual_window::Manual>>>,
     pub(super) menu: Handle<Menu<Msg>>,
     pub(super) status: Handle<StatusBar<Msg>>,
     tools: [Handle<IconButton<Msg>>; TOOLS.len()],
@@ -124,6 +127,7 @@ impl Editor {
             discard_dialog,
             after_discard: None,
             fog_window: Rc::default(),
+            manual: Rc::default(),
             menu: Handle::new(),
             status: Handle::new(),
             tools: Default::default(),
@@ -397,6 +401,8 @@ impl App for Editor {
                 return;
             }
             Msg::Menu(cmd::LEVEL_SETTINGS) => self.level_settings(ui),
+            Msg::Menu(cmd::MANUAL) => return self.manual_message(ManualMsg::Open, ui),
+            Msg::Manual(m) => return self.manual_message(m, ui),
             Msg::SetFog(start, end) => self.set_fog(start, end),
             Msg::CloseRequested => {
                 ui.quit();

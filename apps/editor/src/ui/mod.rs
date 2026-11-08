@@ -9,6 +9,7 @@ mod icons;
 mod keys;
 mod layouts;
 mod level_dialog;
+mod manual_window;
 mod material_list;
 mod messages;
 mod paint2d;
@@ -29,6 +30,7 @@ mod probe;
 mod quiet;
 
 pub use app::{Editor, Msg, cmd};
+pub use manual_window::ManualMsg;
 pub use probe::Probe;
 pub use props::Prop;
 pub use view3d::{Click, PaneDrag};
