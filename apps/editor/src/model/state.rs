@@ -1,6 +1,7 @@
 //! The editor model: document, selection, tool settings and every edit
 //! operation. Each operation goes through the undo history.
 
+use mscent_world::entity::MAX_FOG_DEPTH;
 use mscent_world::{Entity, Op};
 
 use super::command::{Command, History};
@@ -163,6 +164,21 @@ impl EditorState {
         }
     }
 
+    /// The next grid size up (`dir` > 0) or down, held to the sizes offered.
+    pub fn step_grid(&mut self, dir: i32) {
+        let at = GRIDS.iter().position(|g| *g >= self.grid).unwrap_or(0);
+        let to = at.saturating_add_signed(dir.signum() as isize).min(GRIDS.len() - 1);
+        self.grid = GRIDS[to];
+        self.message = format!("Grid {}", self.grid);
+    }
+
+    /// Selects the entity at `index` in the level's order, if there is one.
+    pub fn select_entity_at(&mut self, index: Option<usize>) {
+        if let Some(e) = index.and_then(|i| self.doc.entities().get(i)) {
+            self.selection = Some(Selection::Entity(e.id));
+        }
+    }
+
     fn drop_stale_selection(&mut self) {
         let alive = match self.selection {
             Some(Selection::Brush(id)) => self.doc.brush(id).is_some(),
@@ -239,7 +255,7 @@ impl EditorState {
     pub fn set_fog(&mut self, fog_start: f32, fog_end: f32) -> bool {
         let world = fog_entity(fog_start, fog_end);
         if !world.is_valid() {
-            self.message = "Fog needs 0 <= start < end <= the maximum depth".into();
+            self.message = format!("Fog needs 0 <= start < end <= {MAX_FOG_DEPTH}");
             return false;
         }
         let existing = self

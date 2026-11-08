@@ -3,6 +3,7 @@
 //! before it is applied, so the document stays one that can be saved.
 
 use super::command::Command;
+use crate::errors;
 use super::document::{Document, GroupDef, Id, LabelDef};
 use super::state::{EditorState, Selection};
 use mscent_world::Op;
@@ -127,15 +128,9 @@ impl EditorState {
             return false;
         }
         let level = trial.to_level();
-        let problem = level.map_err(|e| format!("{e:?}")).and_then(|l| {
-            l.check_labels().map_err(|e| match e {
-                mscent_world::LabelError::BadName => {
-                    "Names and tags are lower-case letters, digits and _, at most 32".to_string()
-                }
-                mscent_world::LabelError::DuplicateName => "That name is already taken".to_string(),
-                other => format!("{other:?}"),
-            })
-        });
+        let problem = level
+            .map_err(|e| format!("A brush is invalid: {}", errors::brush(e)))
+            .and_then(|l| l.check_labels().map_err(errors::label));
         if let Err(why) = problem {
             self.message = why;
             return false;
@@ -376,7 +371,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("mscent-clash-{}.msl", std::process::id()));
         std::fs::write(&path, b"what was there").unwrap();
         let why = crate::files::save(&st.doc, &path).unwrap_err();
-        assert!(why.contains("names"), "{why}");
+        assert!(why.contains("name is already taken"), "{why}");
         assert_eq!(std::fs::read(&path).unwrap(), b"what was there");
         let _ = std::fs::remove_file(path);
     }

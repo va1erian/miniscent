@@ -15,7 +15,7 @@ use std::time::Instant;
 use miniscent_game::{SessionConfig, lightcache};
 use mscent_platform::Event;
 
-use crate::build::{BakeJob, Built, Job, Light, SharedCache};
+use crate::build::{BakeJob, Built, Job, Light, SharedCache, Unplayable};
 use crate::materials::SharedMaterials;
 use crate::model::{Document, FlyCam};
 
@@ -89,7 +89,7 @@ pub struct Studio {
     empty: bool,
     /// The note last sent to the picture.
     banner: Option<&'static str>,
-    unplayable: Option<String>,
+    unplayable: Option<Unplayable>,
     worker: Option<Worker>,
     handle: Option<JoinHandle<()>>,
     /// Threads told to stop, dropped once they have finished.
@@ -315,8 +315,8 @@ impl Studio {
         let Some(w) = &self.worker else {
             return Err("the level is not ready yet".into());
         };
-        if let Some(why) = &self.unplayable {
-            return Err(format!("cannot play: {why}"));
+        if let Some(u) = &self.unplayable {
+            return Err(format!("Cannot play: {}", u.why));
         }
         w.mode(Mode::Play);
         self.mode = Mode::Play;
@@ -334,7 +334,7 @@ impl Studio {
 
     /// Shows a finished level: on the running render thread, or a new one
     /// when there is none yet.
-    fn attach(&mut self, scene: Box<dyn Scene>, doc: Document, unplayable: Option<String>) {
+    fn attach(&mut self, scene: Box<dyn Scene>, doc: Document, unplayable: Option<Unplayable>) {
         let delay = worker::slow_ms();
         let scene: Box<dyn Scene> = if delay > 0 {
             Box::new(Slow {
