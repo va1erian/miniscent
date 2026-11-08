@@ -1,6 +1,6 @@
 # Enemy designer: design
 
-Status: accepted; M19.1 is built ([as built](#as-built)). Work items are [M19](work-items.md#m19-enemy-designer). It takes the
+Status: accepted; M19.1 and M19.2 are built ([as built](#as-built)). Work items are [M19](work-items.md#m19-enemy-designer). It takes the
 foundry in [enemies.md](enemies.md) (blueprints, the model path on both renderers) and makes it something a
 level designer uses: enemies are designed in the editor, by generator, by hand or both, saved **in the level**,
 and placed as real enemies that play and draw as designed. It replaces M15.4, M15.10 and the editor half of
@@ -24,6 +24,30 @@ M15.6, and drops the red horned ball (`Mesh::enemy`) altogether.
   editor holds the Kind field inside the table, and Save already refuses a level the loader would.
 - **Text** blocks take every stat by name, in any order, and the blueprint behind `|` exactly as its file has it.
   A blueprint's error names its line in the level text.
+
+### M19.2
+
+`crates/mscent-game/src/kind.rs` (`KindPlay`, `kinds_of`, `stats_of`) and `facing.rs`, with these changes from the
+design below:
+
+- **Building models at load moves to M19.3**, with the renderers that draw them. The simulation needs only stats
+  and hit spheres, which reading gives, so the game does no build yet.
+- **Stats in steps.** Times are rounded to whole 120 Hz steps. `stats_for(0)` and `stats_for(1)` now come from
+  `KindStats::DRONE` and `HUNTER` and equal the old literals exactly, which a test holds.
+- **Body radius** is the kind's radius or the reach of its farthest hit sphere, whichever is larger: about 3.7 world
+  units for the stock mantis, so a mantis needs a room to match.
+- **Every hit sphere is tested**, not only those of an enemy whose body sphere the shot meets first. Up to 8 an enemy
+  is cheap, and it makes the nearest sphere win across enemies. Only the player's shots use hit spheres; an enemy's
+  shot at another enemy (friendly against hostile) still aims at the body, as before.
+- **Facing** is a `Quat` eased each step toward the target while attacking and otherwise toward where it moves. It is
+  built from square roots alone, never a sine, since IEEE rounds a square root the same everywhere and a replay's hits
+  depend on it. The stock table has no hit spheres, so for old levels facing changes nothing that is played.
+- **Scripts.** `defineEnemy:base:` takes a kind's name, whose stats it copies as they stand, or a number below the
+  level's kind count; the new kind wears its base's hit spheres.
+- **Binary.** The software-only game went from 2,201,088 bytes (main, measured) to 2,281,472, 99% of its
+  2.3 MB budget; the default build from 6,088,704 to 6,125,568. Most of it is the blueprint reader and writer, which
+  the game now links to read a level's kinds. M19.3 links the builder too, so it has under 19 KB left before the budget
+  has to be raised or something shrunk.
 
 ## The design in brief
 

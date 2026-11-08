@@ -61,7 +61,7 @@ impl Weapon {
             .iter()
             .enumerate()
             .filter(|(_, e)| e.alive())
-            .map(|(i, e)| (i, e.sphere()))
+            .flat_map(|(i, e)| e.shot_spheres().map(move |s| (i, s)))
             .collect();
         let shootable = props.iter().enumerate().filter(|(_, p)| p.shootable());
         let shootable: Vec<(usize, Sphere)> = shootable.map(|(i, p)| (i, p.sphere())).collect();

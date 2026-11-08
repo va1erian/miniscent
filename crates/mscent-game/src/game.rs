@@ -133,7 +133,7 @@ impl Game {
     pub fn new(arena: Arena) -> Self {
         let (player, enemies) = spawn(&arena);
         let (movers, solids) = spawn_movers(&arena);
-        let script = ScriptState::new(arena.zones.len(), enemies.len());
+        let script = ScriptState::new(arena.zones.len(), enemies.len(), &arena.kinds);
         Self {
             arena,
             player,
@@ -462,7 +462,12 @@ fn spawn(arena: &Arena) -> (Player, Vec<Enemy>) {
         .enemies
         .iter()
         .enumerate()
-        .map(|(i, s)| Enemy::new(i, s.pos, s.kind))
+        .map(|(i, s)| match arena.kinds.get(usize::from(s.kind)) {
+            Some(k) => Enemy::with_stats(i, s.pos, s.kind, k.stats).with_hits(k.hits.clone()),
+            // `Arena::from_level` checked every kind, so this is a level built
+            // in code with no load: it plays the stock table.
+            None => Enemy::new(i, s.pos, s.kind),
+        })
         .collect();
     (player, enemies)
 }

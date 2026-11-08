@@ -6,10 +6,14 @@
 //! after `lose_steps`; seeing the player again at any point re-acquires.
 //! Randomness comes from a per-enemy seeded generator, so replays match.
 
+use std::sync::Arc;
+
 use crate::combat::{Hitscan, Sphere, hitscan, line_of_sight};
-use mscent_collide::{Body, STEP_HZ, Solids, sweep_sphere};
-use mscent_math::Vec3;
+use crate::kind::stats_of;
+use mscent_collide::{Body, Solids, sweep_sphere};
 use mscent_math::rng::Rng;
+use mscent_math::{Quat, Vec3};
+use mscent_world::KindStats;
 
 /// Which side an enemy is on. A friendly one fights the hostile ones.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,29 +43,13 @@ pub struct EnemyStats {
     pub lose_steps: u32,
 }
 
-/// Stats for an entity `kind`. Unknown kinds use the basic drone, so a level
-/// from a newer editor still loads.
+/// Stats of the stock `kind`, which a level with no kinds of its own plays: 1
+/// is the hunter, and anything else the drone.
 pub fn stats_for(kind: u8) -> EnemyStats {
-    let drone = EnemyStats {
-        max_hp: 50,
-        radius: 0.75,
-        speed: 5.0,
-        sight_range: 40.0,
-        attack_range: 9.0,
-        attack_damage: 6,
-        attack_cooldown: (STEP_HZ / 2) as u32,
-        lose_steps: (STEP_HZ * 3) as u32,
-    };
-    match kind {
-        1 => EnemyStats {
-            max_hp: 100,
-            speed: 7.0,
-            attack_damage: 12,
-            attack_cooldown: STEP_HZ as u32,
-            ..drone
-        },
-        _ => drone,
-    }
+    stats_of(match kind {
+        1 => &KindStats::HUNTER,
+        _ => &KindStats::DRONE,
+    })
 }
 
 /// Distance at which a chaser counts as having reached the last-seen spot.
@@ -74,6 +62,11 @@ const LOOKAHEAD: f32 = 3.0;
 const TURN_TRIES: usize = 8;
 /// An attacker keeps firing until the player is this much farther than range.
 const ATTACK_HYSTERESIS: f32 = 1.25;
+/// How much of the way to where it wants to face an enemy turns each step:
+/// about a quarter of a second to come round.
+const FACING_EASE: f32 = 0.08;
+/// Slower than this, in world units a second, an enemy keeps its facing.
+const FACING_MIN_SPEED: f32 = 0.05;
 
 #[derive(Clone, Debug)]
 pub struct Enemy {
@@ -89,6 +82,11 @@ pub struct Enemy {
     /// A disabled enemy stays where it is, can still be shot, and does nothing.
     pub enabled: bool,
     pub faction: Faction,
+    /// Which way it points: its model's +X. Eased toward where it goes, or
+    /// toward its target while it attacks. Turns the hit spheres.
+    pub facing: Quat,
+    /// Spheres a shot strikes, about the body facing +X; empty for the body.
+    hits: Arc<[Sphere]>,
     stats: EnemyStats,
     lost_steps: u32,
     cooldown: u32,
@@ -115,12 +113,31 @@ impl Enemy {
             last_shot: None,
             enabled: true,
             faction: Faction::Hostile,
+            facing: Quat::IDENTITY,
+            hits: Arc::new([]),
             stats,
             lost_steps: 0,
             cooldown: stats.attack_cooldown,
             patrol_dir,
             rng,
         }
+    }
+
+    /// The same enemy, struck by `hits` in place of its body.
+    pub fn with_hits(mut self, hits: Arc<[Sphere]>) -> Self {
+        self.hits = hits;
+        self
+    }
+
+    /// The spheres a shot strikes, in the world: its hit spheres turned by its
+    /// facing, or its body if its kind has none.
+    pub fn shot_spheres(&self) -> impl Iterator<Item = Sphere> + '_ {
+        let body = self.hits.is_empty().then(|| self.sphere());
+        let turned = self.hits.iter().map(|h| Sphere {
+            centre: self.body.pos + self.facing.rotate(h.centre),
+            radius: h.radius,
+        });
+        body.into_iter().chain(turned)
     }
 
     pub fn alive(&self) -> bool {
@@ -186,6 +203,7 @@ impl Enemy {
                 AiState::Chase | AiState::Attack => self.chase(bsp),
                 AiState::Dead => {}
             }
+            self.turn(None);
             return None;
         };
         let to_player = player.centre - self.body.pos;
@@ -194,13 +212,31 @@ impl Enemy {
             dist <= self.stats.sight_range && line_of_sight(bsp, self.body.pos, player.centre);
         self.track(sees, player.centre);
         self.transition(sees, dist);
-        match self.state {
-            AiState::Patrol => self.patrol(bsp),
-            AiState::Chase => self.chase(bsp),
-            AiState::Attack => return self.attack(bsp, player),
-            AiState::Dead => {}
+        let dealt = match self.state {
+            AiState::Patrol => {
+                self.patrol(bsp);
+                None
+            }
+            AiState::Chase => {
+                self.chase(bsp);
+                None
+            }
+            AiState::Attack => self.attack(bsp, player),
+            AiState::Dead => None,
+        };
+        let aim = (self.state == AiState::Attack).then(|| player.centre - self.body.pos);
+        self.turn(aim);
+        dealt
+    }
+
+    /// Eases the facing toward `aim`, or else toward where it is going. One
+    /// standing still with nothing to aim at keeps its facing.
+    fn turn(&mut self, aim: Option<Vec3>) {
+        let moving = self.body.vel.length() > FACING_MIN_SPEED;
+        let want = aim.or_else(|| moving.then_some(self.body.vel));
+        if let Some(to) = want.and_then(crate::facing::toward) {
+            self.facing = crate::facing::ease(self.facing, to, FACING_EASE);
         }
-        None
     }
 
     /// Remembers the player while visible, otherwise counts down to giving up.

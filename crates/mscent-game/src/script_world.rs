@@ -12,6 +12,7 @@ use crate::script_props::{set_prop_hp, set_prop_radius, spawn_prop};
 use mscent_collide::STEP_HZ;
 use mscent_math::Vec3;
 use mscent_script::{Flow, Heap, Native, Value};
+use std::sync::Arc;
 
 /// Most distinct tags in a run.
 const MAX_TAGS: usize = 256;
@@ -218,7 +219,10 @@ fn spawn_at(g: &mut Game, kind: &str, pos: Vec3, tag: u16) -> Result<Value, Stri
         ));
     }
     let index = g.enemies.len();
-    g.enemies.push(Enemy::with_stats(index, pos, base, stats));
+    let hits = g.arena.kinds.get(usize::from(base)).map(|k| k.hits.clone());
+    let enemy = Enemy::with_stats(index, pos, base, stats);
+    g.enemies
+        .push(enemy.with_hits(hits.unwrap_or_else(|| Arc::new([]))));
     g.script.enemy_tags.push(vec![tag]);
     g.events.push(crate::Event::EnemySpawned(index));
     Ok(Value::Handle(ENEMY, index as u32))
@@ -253,16 +257,14 @@ fn spawn_all(g: &mut Game, h: &mut Heap, _: Value, args: &[Value]) -> Res {
     nil()
 }
 
-/// A new enemy kind, starting from the built-in one numbered `base`.
+/// A new enemy kind, starting from `base`: a kind's name, which it copies as
+/// it stands, or the number of one of the level's kinds.
 fn define_enemy(g: &mut Game, h: &mut Heap, _: Value, args: &[Value]) -> Res {
     let &[name, base] = args else {
         return Err("defineEnemy:base: wants a name and a base".into());
     };
     let name = short_name(h, name, "a kind")?;
-    let base = number(h, base, "base:")?;
-    if !(0.0..=1.0).contains(&base) || base.fract() != 0.0 {
-        return Err("base: must be 0 (drone) or 1 (hunter)".into());
-    }
+    let (base, stats) = base_kind(g, h, base)?;
     let kinds = &mut g.script.kinds;
     let taken = g.script.prop_kinds.iter().any(|(n, _)| *n == name);
     if taken || kinds.iter().any(|(n, _, _)| *n == name) {
@@ -271,9 +273,29 @@ fn define_enemy(g: &mut Game, h: &mut Heap, _: Value, args: &[Value]) -> Res {
     if kinds.len() >= MAX_KINDS {
         return Err(format!("too many enemy kinds: the limit is {MAX_KINDS}"));
     }
-    let base = base as u8;
-    kinds.push((name, base, crate::stats_for(base)));
+    kinds.push((name, base, stats));
     val(Value::Handle(KIND, (kinds.len() - 1) as u32))
+}
+
+/// The look and stats a new kind starts from.
+fn base_kind(g: &Game, h: &Heap, base: Value) -> Result<(u8, EnemyStats), String> {
+    if let Ok(named) = string(h, base, "base:") {
+        let found = g.script.kinds.iter().find(|(n, _, _)| *n == named);
+        return found
+            .map(|&(_, b, s)| (b, s))
+            .ok_or_else(|| format!("base: there is no kind '{named}'"));
+    }
+    let n = number(h, base, "base:")?;
+    let count = g.arena.kinds.len();
+    let index = (n.fract() == 0.0 && n >= 0.0 && n < count as f32).then_some(n as usize);
+    let kind = index.and_then(|i| Some((u8::try_from(i).ok()?, g.arena.kinds.get(i)?)));
+    let (i, k) = kind.ok_or_else(|| {
+        format!(
+            "base: must be a kind's name, or a number from 0 to {}",
+            count.saturating_sub(1)
+        )
+    })?;
+    Ok((i, k.stats))
 }
 
 fn kind_stats(g: &mut Game, r: Value) -> Result<&mut EnemyStats, String> {

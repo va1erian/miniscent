@@ -3,10 +3,11 @@
 //! [`crate::Game`], so a restart never has to reload the level.
 
 use crate::fx::FxWorld;
+use crate::kind::{KindPlay, kinds_of};
 use mscent_collide::{MoverShape, MoverSolid, Solids};
 use mscent_math::{Vec3, Vec3d};
 use mscent_world::voxel::{Volume, VoxelWorld};
-use mscent_world::{Brush, Bsp, CsgError, Entity, LabelError, Level, compile};
+use mscent_world::{Brush, Bsp, CsgError, Entity, KindError, LabelError, Level, compile};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -120,6 +121,8 @@ pub enum LoadError {
     SpawnInSolid(usize),
     /// Names, tags or mover groups are inconsistent.
     Labels(LabelError),
+    /// The enemy kinds are malformed, or an enemy names none of them.
+    Kinds(KindError),
 }
 
 /// Immutable per-level game data.
@@ -137,6 +140,8 @@ pub struct Arena {
     pub goals: Vec<Goal>,
     pub lights: Vec<LightSpec>,
     pub enemies: Vec<EnemySpawn>,
+    /// The kinds an enemy's `kind` indexes: the level's own, or the stock two.
+    pub kinds: Vec<KindPlay>,
     pub movers: Vec<MoverSpec>,
     pub markers: Vec<MarkerSpec>,
     pub zones: Vec<ZoneSpec>,
@@ -175,6 +180,7 @@ impl Arena {
 
     fn build(level: &Level, goal_required: bool) -> Result<Self, LoadError> {
         level.check_labels().map_err(LoadError::Labels)?;
+        level.check_kinds().map_err(LoadError::Kinds)?;
         let bsp = compile(&level.csg_brushes()).map_err(LoadError::Csg)?;
         let voxels = VoxelWorld::build(level, &level.static_brushes(), &bsp);
         let world = Solids::new(&bsp, &[]).with_voxels(&voxels);
@@ -245,6 +251,7 @@ impl Arena {
             goals,
             lights,
             enemies,
+            kinds: kinds_of(level),
             movers: movers_of(level),
             markers,
             zones,
