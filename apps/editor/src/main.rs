@@ -11,6 +11,10 @@
 //! * `--ui-timing [dir] [WxH]` prints what the UI thread's everyday work costs,
 //!   in a window of 1280x800 or `WxH` pixels.
 
+// `--selftest` and `--ui-timing` need the canvas backend, so without it the probes and
+// accessors they alone use would warn as dead code.
+#![cfg_attr(not(feature = "canvas"), allow(dead_code, unused_imports))]
+
 mod build;
 mod files;
 mod materials;

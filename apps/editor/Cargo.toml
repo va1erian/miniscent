@@ -19,14 +19,14 @@ mscent-script.workspace = true
 mscent-platform = { workspace = true }
 # Its desktop feature for the GPU window Play presents into, as the game does.
 miniscent-game = { path = "../game", default-features = false, features = ["desktop", "hardware"] }
-xui = { path = "C:/repos/xui/.claude/worktrees/xui-d2d-native-surface-31cdf1/crates/xui", default-features = false }
-xui-code-editor = { path = "C:/repos/xui/.claude/worktrees/xui-d2d-native-surface-31cdf1/crates/xui-code-editor" }
+xui = { git = "https://github.com/va1erian/xui", rev = "d67549fdf0d54e1e5f27559957144cfb0bb947fb", default-features = false }
+xui-code-editor = { git = "https://github.com/va1erian/xui", rev = "d67549fdf0d54e1e5f27559957144cfb0bb947fb" }
 # The guide is an HTML page: it replaces a pile of text widgets (docs/scripting.md). Blitz over
 # xui-litehtml, which measures text at 96 dpi and paints it at the display's, so words drift when scaled.
-xui-blitz = { path = "C:/repos/xui/.claude/worktrees/xui-d2d-native-surface-31cdf1/crates/xui-blitz" }
+xui-blitz = { git = "https://github.com/va1erian/xui", rev = "d67549fdf0d54e1e5f27559957144cfb0bb947fb" }
 
 [target.'cfg(windows)'.dependencies]
-xui-d2d = { path = "C:/repos/xui/.claude/worktrees/xui-d2d-native-surface-31cdf1/crates/xui-d2d", optional = true }
+xui-d2d = { git = "https://github.com/va1erian/xui", rev = "d67549fdf0d54e1e5f27559957144cfb0bb947fb", optional = true }
 
 [features]
 # The software backend (winit + tiny-skia) and the headless selftest harness.
