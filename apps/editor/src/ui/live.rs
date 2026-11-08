@@ -47,6 +47,14 @@ const SCRIPT: [Phase; 7] = [
     Phase::Idle,
 ];
 
+/// What paces the editor in a real window: the frame tick, and while it runs,
+/// `--live-timing`'s script. Both stay empty in scripted runs, which step by hand.
+#[derive(Default)]
+pub struct Clock {
+    pub live: Option<LiveRun>,
+    pub ticker: Option<Pacer>,
+}
+
 /// Where the script is.
 pub struct LiveRun {
     at: usize,
@@ -88,26 +96,26 @@ impl Editor {
     /// Turns the meter on and starts the script and its pacing thread.
     pub fn start_live(&mut self, ui: &xui::app::Ui<Msg>) {
         meter::set_on(true);
-        self.live = Some(LiveRun::new(Pacer::start(ui.proxy(), Msg::Live, STEP)));
+        self.clock.live = Some(LiveRun::new(Pacer::start(ui.proxy(), Msg::Live, STEP)));
     }
 
     /// Starts the frame tick, 60 times a second, for a real window. Scripted
     /// runs send `Msg::Step` themselves instead.
     pub fn start_ticks(&mut self, ui: &xui::app::Ui<Msg>) {
-        self.ticker = Some(Pacer::start(ui.proxy(), Msg::Tick, FRAME));
+        self.clock.ticker = Some(Pacer::start(ui.proxy(), Msg::Tick, FRAME));
     }
 
     /// A step of the script; the editor quits after the last.
     pub(super) fn live_message(&mut self, ui: &xui::app::Ui<Msg>) {
-        if !self.live_step() && self.live.is_some() {
-            self.live = None;
+        if !self.live_step() && self.clock.live.is_some() {
+            self.clock.live = None;
             ui.quit();
         }
     }
 
     /// One step of `--live-timing`. False once the script is over.
     pub(super) fn live_step(&mut self) -> bool {
-        let Some(mut run) = self.live.take() else {
+        let Some(mut run) = self.clock.live.take() else {
             return false;
         };
         run.pacer.arrived();
@@ -142,7 +150,7 @@ impl Editor {
             meter::time(Lane::Step, || self.live_gesture(phase, &run));
         }
         let more = run.at < SCRIPT.len();
-        self.live = Some(run);
+        self.clock.live = Some(run);
         more
     }
 

@@ -52,6 +52,7 @@ pub mod cmd {
     pub const NEW_VISTA: MenuId = MenuId::new(30);
     pub const NEW_MOUNTAINS: MenuId = MenuId::new(31);
     pub const GPU_TOGGLE: MenuId = MenuId::new(32);
+    pub const MANUAL: MenuId = MenuId::new(33);
 }
 
 /// Fog the dialog starts from for a level without a world entity.
@@ -121,6 +122,7 @@ pub(super) fn menus(m: &mut xui::widget::MenuScope<'_>) {
         });
     });
     m.submenu(MenuId::new(107), "&Help", |h| {
+        h.item(cmd::MANUAL, "Editor &manual   F1");
         h.item(cmd::GUIDE, "Scripting &guide   F7");
     });
 }

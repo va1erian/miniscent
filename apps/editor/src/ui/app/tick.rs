@@ -29,7 +29,7 @@ impl Editor {
     /// One UI tick: forwards the active pane's input to the render thread
     /// and shows the newest frame it finished. Nothing here waits.
     pub(super) fn advance(&mut self) {
-        if let Some(t) = &self.ticker {
+        if let Some(t) = &self.clock.ticker {
             t.arrived();
         }
         // Esc or focus loss ended the pointer lock: the cursor is back, so

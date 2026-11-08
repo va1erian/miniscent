@@ -122,7 +122,7 @@ out-specular** under it at row 1. Now the gaps have no shine, and the tiles do. 
 
 A stroke is one undo step. A stroke is saved as coordinates, not pixels, so the recipe
 stays small and the drawing stays sharp at any size. Its points are rounded to 1/4096
-of the tile, and one stroke stops growing after about 2000 of them, with a message:
+of the tile, and one stroke stops growing after 4096 of them, with a message:
 lift the pen and start another. If you draw so much that a `paint` block goes over its
 work limit, the page says so, and **Ctrl+Z** recovers it.
 

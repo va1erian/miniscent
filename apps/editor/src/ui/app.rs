@@ -16,6 +16,7 @@ use super::commands::menus;
 use super::keys::{OPS, TOOLS, key_name, shortcut};
 use super::layouts::{self, Arrangement, Disposition};
 use super::level_dialog::FogWindow;
+use super::manual_window::ManualMsg;
 pub use super::messages::Msg;
 use super::props::{Panel, apply};
 use super::script_pane::{ScriptMsg, ScriptPane};
@@ -51,6 +52,8 @@ pub struct Editor {
     pub(super) after_discard: Option<Msg>,
     /// The level settings window, once opened. It may have closed itself since.
     pub(super) fog_window: Rc<RefCell<Option<FogWindow>>>,
+    /// The manual's window, once opened. It may have been closed since.
+    pub(super) manual: Rc<RefCell<Option<super::manual_window::Manual>>>,
     pub(super) menu: Handle<Menu<Msg>>,
     pub(super) status: Handle<StatusBar<Msg>>,
     tools: [Handle<IconButton<Msg>>; TOOLS.len()],
@@ -74,10 +77,8 @@ pub struct Editor {
     /// Everything but the menu and the status bar, while the level is showing.
     pub(super) work_host: Handle<xui::widget::Panel<Msg>>,
     pub(super) tex: Workspace,
-    /// `--live-timing`'s script, while it runs.
-    pub(super) live: Option<super::live::LiveRun>,
-    /// The frame tick's beat, in a real window (scripted runs step by hand).
-    pub(super) ticker: Option<super::pace::Pacer>,
+    /// The frame tick's beat and `--live-timing`'s script.
+    pub(super) clock: super::live::Clock,
 }
 
 impl Editor {
@@ -128,6 +129,7 @@ impl Editor {
             discard_dialog,
             after_discard: None,
             fog_window: Rc::default(),
+            manual: Rc::default(),
             menu: Handle::new(),
             status: Handle::new(),
             tools: Default::default(),
@@ -145,8 +147,7 @@ impl Editor {
             eye_moved: std::time::Instant::now(),
             work_host: Handle::new(),
             tex,
-            live: None,
-            ticker: None,
+            clock: super::live::Clock::default(),
         };
         app.panel.attach(ui);
         app.tex.attach(ui);
@@ -402,6 +403,8 @@ impl App for Editor {
                 return;
             }
             Msg::Menu(cmd::LEVEL_SETTINGS) => self.level_settings(ui),
+            Msg::Menu(cmd::MANUAL) => return self.manual_message(ManualMsg::Open, ui),
+            Msg::Manual(m) => return self.manual_message(m, ui),
             Msg::SetFog(start, end) => self.set_fog(start, end),
             Msg::CloseRequested => {
                 ui.quit();

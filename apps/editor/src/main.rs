@@ -21,8 +21,10 @@
 
 mod build;
 mod files;
+mod manual;
 mod materials;
 mod model;
+mod pages;
 mod script;
 #[cfg(feature = "canvas")]
 mod selftest;

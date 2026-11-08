@@ -119,6 +119,7 @@ pub(super) fn shortcut(key: Key, mods: Modifiers) -> Option<Msg> {
         return None;
     }
     match key {
+        Key::F1 => Some(Msg::Menu(cmd::MANUAL)),
         Key::F5 => Some(Msg::Menu(cmd::PLAY)),
         Key::F6 => Some(Msg::Menu(cmd::SCRIPT_PANE)),
         Key::F7 => Some(Msg::Menu(cmd::GUIDE)),

@@ -18,6 +18,8 @@ pub enum Msg {
     Prop(super::props::Prop),
     Face(super::facepanel::FaceMsg),
     Script(super::script_pane::ScriptMsg),
+    /// Something about the editor manual's window.
+    Manual(super::manual_window::ManualMsg),
     /// Something in the Texture Studio.
     Tex(TexMsg),
     /// The window's close button.

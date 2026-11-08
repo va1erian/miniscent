@@ -1,4 +1,5 @@
-//! A page of the guide as one HTML document, for `xui-blitz` to lay out.
+//! A page of the scripting guide or of the editor manual as one HTML document,
+//! for `xui-blitz` to lay out.
 //!
 //! The page is made here and shown by a single view, so it costs the window's
 //! re-flow nothing, where the same words as separate widgets cost 100 ms. All
@@ -12,10 +13,18 @@ use xui::theme::Theme;
 use xui_code_editor::{Highlighter, LineState, Token, TokenClass};
 
 use super::script_lexer::ScriptColours;
-use crate::script::guide::{Block, Page};
+use crate::pages::{Block, Page};
 
 /// What a link in the page starts with, when it asks for an example.
 const INSERT: &str = "insert:";
+
+/// What a page's examples are: script to offer for the script pane, or text
+/// shown as it is, with no link.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Examples {
+    Script,
+    Plain,
+}
 
 /// A page as HTML, and the examples its links stand for.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -63,6 +72,8 @@ fn style(theme: &Theme) -> String {
          table {{ border-collapse: collapse; width: 100%; margin: 4px 0 10px 0; }}\n\
          td {{ padding: 3px 8px; vertical-align: middle; line-height: 20px; \
          border: 1px solid {border}; }}\n\
+         th {{ padding: 3px 8px; text-align: left; border: 1px solid {border}; \
+         background-color: {surface}; }}\n\
          td.sel {{ width: 280px; font-family: Consolas, monospace; font-size: 13px; \
          color: {accent}; }}\n\
          .k {{ color: {keyword}; }} .f {{ color: {accent}; }} .s {{ color: {string}; }}\n\
@@ -188,7 +199,7 @@ fn list(out: &mut String, ordered: bool, items: &[String]) {
 }
 
 /// The page as HTML.
-pub(super) fn render(page: &Page, theme: &Theme) -> HtmlPage {
+pub(super) fn render(page: &Page, theme: &Theme, kind: Examples) -> HtmlPage {
     let mut html = format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"><style>{}</style></head><body>\n<h1>",
         style(theme)
@@ -199,7 +210,7 @@ pub(super) fn render(page: &Page, theme: &Theme) -> HtmlPage {
     let mut in_table = false;
     for block in &page.blocks {
         // Rows in a run are one table, which anything else ends.
-        let is_row = matches!(block, Block::Row(..));
+        let is_row = matches!(block, Block::Row(..) | Block::Head(..));
         if is_row != in_table {
             html.push_str(if is_row { "<table>\n" } else { "</table>\n" });
             in_table = is_row;
@@ -208,6 +219,11 @@ pub(super) fn render(page: &Page, theme: &Theme) -> HtmlPage {
             Block::Heading(text) => html.push_str(&format!("<h2>{}</h2>\n", inline(text))),
             Block::Text(text) => html.push_str(&format!("<p>{}</p>\n", inline(text))),
             Block::List { ordered, items } => list(&mut html, *ordered, items),
+            Block::Code(code) if kind == Examples::Plain => {
+                html.push_str("<pre>");
+                escape_into(&mut html, code);
+                html.push_str("</pre>\n");
+            }
             Block::Code(code) => {
                 html.push_str(&format!("<pre>{}</pre>\n", highlight(code)));
                 html.push_str(&format!(
@@ -216,6 +232,11 @@ pub(super) fn render(page: &Page, theme: &Theme) -> HtmlPage {
                 ));
                 examples.push(format!("{code}\n"));
             }
+            Block::Head(a, b) => html.push_str(&format!(
+                "<tr><th>{}</th><th>{}</th></tr>\n",
+                inline(a),
+                inline(b)
+            )),
             Block::Row(selector, help) => {
                 html.push_str("<tr><td class=\"sel\">");
                 escape_into(&mut html, selector);
@@ -236,6 +257,7 @@ pub(super) fn render(page: &Page, theme: &Theme) -> HtmlPage {
 mod tests {
     use super::*;
     use crate::script::guide;
+    use Examples::{Plain, Script};
 
     fn page(blocks: Vec<Block>) -> Page {
         Page {
@@ -267,6 +289,7 @@ mod tests {
                 Block::Code("say: 'hi'.".into()),
             ]),
             &Theme::light(),
+            Script,
         );
         assert_eq!(html.examples, ["x := 1 < 2.\n", "say: 'hi'.\n"]);
         assert!(html.html.contains(" &lt; "), "{}", html.html);
@@ -275,6 +298,21 @@ mod tests {
         assert!(html.html.contains("<span class=\"s\">'hi'</span>"));
         assert!(html.html.contains("<h1>T &amp; &lt;U&gt;</h1>"));
         assert!(html.html.contains("href=\"insert:1\""));
+    }
+
+    #[test]
+    fn a_plain_example_is_escaped_and_offers_nothing() {
+        let html = render(
+            &page(vec![Block::Code("Ctrl+<wheel> & drag".into())]),
+            &Theme::light(),
+            Plain,
+        );
+        assert!(html.examples.is_empty());
+        assert!(!html.html.contains("href="), "{}", html.html);
+        assert!(
+            html.html
+                .contains("<pre>Ctrl+&lt;wheel&gt; &amp; drag</pre>")
+        );
     }
 
     #[test]
@@ -300,8 +338,8 @@ mod tests {
             Block::Row("b:".into(), "two".into()),
             Block::Text("After.".into()),
         ];
-        let light = render(&page(rows.clone()), &Theme::light());
-        let dark = render(&page(rows), &Theme::dark());
+        let light = render(&page(rows.clone()), &Theme::light(), Script);
+        let dark = render(&page(rows), &Theme::dark(), Script);
         assert_eq!(light.html.matches("<tr>").count(), 2);
         assert_eq!(light.html.matches("<table>").count(), 1);
         assert_eq!(light.html.matches("</table>").count(), 1);
@@ -314,7 +352,7 @@ mod tests {
     #[test]
     fn every_page_makes_html_with_a_link_for_each_example() {
         for page in guide::pages() {
-            let made = render(&page, &Theme::dark());
+            let made = render(&page, &Theme::dark(), Script);
             let codes = page
                 .blocks
                 .iter()
@@ -328,7 +366,11 @@ mod tests {
     #[test]
     fn the_reference_lists_every_message() {
         let pages = guide::pages();
-        let made = render(pages.last().expect("a reference page"), &Theme::light());
+        let made = render(
+            pages.last().expect("a reference page"),
+            &Theme::light(),
+            Script,
+        );
         for entry in crate::script::api::API {
             let mut escaped = String::new();
             escape_into(&mut escaped, entry.selector);

@@ -216,7 +216,7 @@ impl PaneWidgets {
             return;
         };
         let theme = ui.theme();
-        let made = guide_html::render(&page, &theme);
+        let made = guide_html::render(&page, &theme, guide_html::Examples::Script);
         let view = self.guide.get();
         view.set_background(guide_html::background(&theme));
         view.load_html(made.html, "about:blank");
