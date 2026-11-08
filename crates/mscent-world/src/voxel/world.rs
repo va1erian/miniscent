@@ -17,12 +17,23 @@ use super::volume::Volume;
 use crate::brush::{Brush, Op};
 use crate::bsp::{Bsp, Child, LeafId, LeafKind};
 use crate::entity::Level;
+use crate::lightmap::parallel::par_map;
 
 /// Cells past its box a volume's surface can reach: the two rows of its ring.
 const RING_REACH_CELLS: f64 = 3.0;
 
 /// Marks a chunk of a volume's table that has no surface.
 pub const NO_CHUNK: u32 = u32::MAX;
+
+/// Chunks one thread meshes in a row with one mesher and one context, which
+/// keep what neighbouring chunks share. Small enough that a cave's few hundred
+/// chunks spread over every core.
+const BAND: usize = 8;
+
+/// What meshing one chunk gave, or `None` where its cells hold no surface: its
+/// air, whether its air lies in rock, and its surface once buried triangles are
+/// gone (`None` when air sees none of it).
+type Meshed = Option<(AirMask, bool, Option<VoxelChunk>)>;
 
 /// One chunk's surface at each level of detail, and where it can be seen from.
 #[derive(Clone, Debug, PartialEq)]
@@ -77,39 +88,42 @@ pub struct VoxelWorld {
 impl VoxelWorld {
     /// Meshes `level`'s volumes. `brushes` are its static brushes, and `bsp` was
     /// compiled from those and the shells.
+    ///
+    /// Chunks are meshed on every core: each one's surface depends only on the
+    /// level, so the world is the same, chunk for chunk, on any number of them.
     pub fn build(level: &Level, brushes: &[Brush], bsp: &Bsp) -> Self {
+        Self::build_on(cores(), level, brushes, bsp)
+    }
+
+    /// As [`Self::build`] on up to `workers` threads.
+    pub fn build_on(workers: usize, level: &Level, brushes: &[Brush], bsp: &Bsp) -> Self {
         let mut world = Self::default();
-        let mut mesher = Mesher::new();
         for volume in &level.volumes {
-            let mut ctx = Context::in_level(volume, brushes, &level.volumes);
-            let geometry = world.add_volume(volume, &mut ctx, &mut mesher, bsp);
+            let [cx, cy, cz] = volume.chunks();
+            let coords: Vec<[u16; 3]> = (0..cz)
+                .flat_map(|z| (0..cy).flat_map(move |y| (0..cx).map(move |x| [x, y, z])))
+                .collect();
+            let meshed = mesh_chunks(workers, volume, brushes, &level.volumes, bsp, &coords);
+            let geometry = world.add_volume(volume, meshed);
             world.volumes.push(geometry);
         }
         world
     }
 
-    fn add_volume(
-        &mut self,
-        volume: &Volume,
-        ctx: &mut Context,
-        mesher: &mut Mesher,
-        bsp: &Bsp,
-    ) -> VolumeGeometry {
-        let [cx, cy, cz] = volume.chunks();
-        let count = usize::from(cx) * usize::from(cy) * usize::from(cz);
+    fn add_volume(&mut self, volume: &Volume, meshed: Vec<Meshed>) -> VolumeGeometry {
+        let count = meshed.len();
         let (mut air, mut table) = (Vec::with_capacity(count), Vec::with_capacity(count));
-        let margin = buried_margin(volume);
         let mut rock = Vec::with_capacity(count);
-        for z in 0..cz {
-            for y in 0..cy {
-                for x in 0..cx {
-                    let coord = [x, y, z];
-                    let mesh = mesher.mesh(volume, ctx, coord);
-                    rock.push(mesh.is_some() && probe_rock(volume, mesher, bsp, coord));
-                    air.push(mesh.as_ref().map_or(AirMask::NONE, |m| m.air));
-                    table.push(mesh.map_or(NO_CHUNK, |m| self.add_chunk(m, bsp, margin)));
-                }
-            }
+        for m in meshed {
+            let Some((a, r, chunk)) = m else {
+                air.push(AirMask::NONE);
+                rock.push(false);
+                table.push(NO_CHUNK);
+                continue;
+            };
+            air.push(a);
+            rock.push(r);
+            table.push(chunk.map_or(NO_CHUNK, |c| self.add_chunk(c)));
         }
         let (lo, _) = volume.bounds();
         VolumeGeometry {
@@ -122,10 +136,7 @@ impl VoxelWorld {
         }
     }
 
-    fn add_chunk(&mut self, mesh: ChunkMesh, bsp: &Bsp, margin: f64) -> u32 {
-        let Some(chunk) = finish_chunk(&mesh, bsp, margin) else {
-            return NO_CHUNK;
-        };
+    fn add_chunk(&mut self, chunk: VoxelChunk) -> u32 {
         let index = self.chunks.len() as u32;
         self.chunks.push(Arc::new(chunk));
         index
@@ -139,24 +150,22 @@ impl VoxelWorld {
         bsp: &Bsp,
         wanted: &[(usize, Vec<[u16; 3]>)],
     ) -> Vec<RemeshedChunk> {
-        let mut mesher = Mesher::new();
         let mut out = Vec::new();
         for (v, chunks) in wanted {
             let Some(volume) = volumes.get(*v) else {
                 continue;
             };
-            let mut ctx = Context::in_level(volume, brushes, volumes);
-            let margin = buried_margin(volume);
-            for &c in chunks {
-                let Some(mesh) = mesher.mesh(volume, &mut ctx, c) else {
+            let meshed = mesh_chunks(cores(), volume, brushes, volumes, bsp, chunks);
+            for (&coord, m) in chunks.iter().zip(meshed) {
+                let Some((air, rock, chunk)) = m else {
                     continue;
                 };
                 out.push(RemeshedChunk {
                     volume: *v,
-                    coord: c,
-                    air: mesh.air,
-                    rock: probe_rock(volume, &mesher, bsp, c),
-                    chunk: finish_chunk(&mesh, bsp, margin).map(Arc::new),
+                    coord,
+                    air,
+                    rock,
+                    chunk: chunk.map(Arc::new),
                 });
             }
         }
@@ -203,6 +212,37 @@ impl VoxelWorld {
         }
         changed
     }
+}
+
+/// The threads to mesh on: one per core.
+fn cores() -> usize {
+    std::thread::available_parallelism().map_or(1, usize::from)
+}
+
+/// Meshes `coords` of `volume`, in their order, on up to `workers` threads.
+fn mesh_chunks(
+    workers: usize,
+    volume: &Volume,
+    brushes: &[Brush],
+    volumes: &[Volume],
+    bsp: &Bsp,
+    coords: &[[u16; 3]],
+) -> Vec<Meshed> {
+    let margin = buried_margin(volume);
+    let bands: Vec<&[[u16; 3]]> = coords.chunks(BAND).collect();
+    let done = par_map(workers, bands.len(), |b| {
+        let mut mesher = Mesher::new();
+        let mut ctx = Context::in_level(volume, brushes, volumes);
+        let band = bands.get(b).copied().unwrap_or_default();
+        band.iter()
+            .map(|&c| {
+                let mesh = mesher.mesh(volume, &mut ctx, c)?;
+                let rock = probe_rock(volume, &mesher, bsp, c);
+                Some((mesh.air, rock, finish_chunk(&mesh, bsp, margin)))
+            })
+            .collect::<Vec<Meshed>>()
+    });
+    done.into_iter().flatten().collect()
 }
 
 /// One chunk's new surface, or `None` for a chunk with none left.

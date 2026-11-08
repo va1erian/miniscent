@@ -19,7 +19,7 @@ mod cone;
 mod filter;
 mod layout;
 mod occluders;
-mod parallel;
+pub(crate) mod parallel;
 pub mod ray;
 mod soft;
 pub mod store;

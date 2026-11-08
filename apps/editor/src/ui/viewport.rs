@@ -70,7 +70,7 @@ impl<M: 'static> Viewport<M> {
                     theme: theme.get(),
                     outlines: &outlines,
                 };
-                paint(canvas, &scene);
+                super::meter::time(super::meter::Lane::View, || paint(canvas, &scene));
             }));
         }
         {
