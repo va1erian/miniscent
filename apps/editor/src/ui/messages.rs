@@ -39,4 +39,6 @@ pub enum Msg {
     SavePath(PathBuf),
     /// Puts the free-fly camera somewhere (scripted runs frame a face).
     Camera(Box<crate::model::FlyCam>),
+    /// A step of `--live-timing`'s script, from its pacing thread.
+    Live,
 }
