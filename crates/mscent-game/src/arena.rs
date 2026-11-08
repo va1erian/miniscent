@@ -211,6 +211,8 @@ impl Arena {
                 Entity::Goal { pos, radius } => goals.push(Goal { pos, radius }),
                 // Look settings only; the renderer reads them.
                 Entity::World { .. } => {}
+                // A baked spot light: scripts cannot reach it, only the renderer.
+                Entity::Projector { .. } => {}
                 // Drawn by the renderer's viewport faces, which come later.
                 Entity::VistaLayer { .. } => {}
                 Entity::Marker { pos, yaw } => {

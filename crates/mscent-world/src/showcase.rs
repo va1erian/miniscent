@@ -1,7 +1,8 @@
 //! A hand-authored demo level that exercises every renderer feature: four
 //! rooms joined by doorways and corridors (with a loop), a pillar casting
 //! shadows, a stepped platform and a ramp, light panels, four coloured point
-//! lights, two enemies and a goal.
+//! lights, four projectors (spot lights) aimed at the pillar, the platform, the
+//! goal and the ramp, two enemies and a goal.
 //!
 //! Plan view, x east and y north, one unit is about a metre:
 //!
@@ -22,6 +23,27 @@ use crate::entity::{Entity, Level};
 use crate::materials::{BRICK, FLOOR, METAL, ROCK};
 use crate::texinfo::TexInfo;
 use mscent_math::{DPlane, Vec3, Vec3d};
+
+/// A projector at `pos` aimed at `target`, with half angles `cone` = (inner, outer).
+fn projector(
+    pos: [f32; 3],
+    target: [f32; 3],
+    color: [f32; 3],
+    (radius, intensity): (f32, f32),
+    (inner, outer): (f32, f32),
+) -> Entity {
+    let d = at(target[0], target[1], target[2]) - at(pos[0], pos[1], pos[2]);
+    Entity::Projector {
+        pos: at(pos[0], pos[1], pos[2]),
+        yaw: d.y.atan2(d.x),
+        pitch: d.z.atan2(d.x.hypot(d.y)),
+        color: Vec3::new(color[0], color[1], color[2]),
+        radius,
+        intensity,
+        inner,
+        outer,
+    }
+}
 
 fn light(pos: [f32; 3], color: [f32; 3], radius: f32, intensity: f32) -> Entity {
     Entity::Light {
@@ -120,7 +142,7 @@ fn brushes() -> Vec<crate::Brush> {
     out
 }
 
-fn entities() -> Vec<Entity> {
+fn base_entities() -> Vec<Entity> {
     vec![
         Entity::PlayerStart {
             pos: at(3.0, 3.0, 2.0),
@@ -151,12 +173,58 @@ fn entities() -> Vec<Entity> {
     ]
 }
 
-/// The showcase level. Always valid: see `showcase_tests`.
-pub fn showcase_level() -> Level {
+/// The projectors: a cold stage spot from room A's north west corner at the
+/// pillar (and its shadow), a white one on the platform in B, a warm narrow one
+/// on the goal in C and a red-white one down D's ramp.
+fn projectors() -> Vec<Entity> {
+    vec![
+        projector(
+            [2.0, 18.0, 7.5],
+            [12.0, 12.0, 0.0],
+            [0.7, 0.8, 1.0],
+            (30.0, 2.2),
+            (0.12, 0.3),
+        ),
+        projector(
+            [41.0, 2.0, 9.5],
+            [42.0, 10.0, 3.0],
+            [1.0, 1.0, 0.95],
+            (22.0, 2.0),
+            (0.2, 0.45),
+        ),
+        projector(
+            [48.0, 38.0, 11.0],
+            [52.0, 51.0, 1.5],
+            [1.0, 0.8, 0.4],
+            (24.0, 2.6),
+            (0.08, 0.22),
+        ),
+        projector(
+            [10.0, 40.0, 7.5],
+            [18.0, 44.0, 0.5],
+            [1.0, 0.45, 0.4],
+            (20.0, 2.0),
+            (0.15, 0.4),
+        ),
+    ]
+}
+
+/// The showcase before it had projectors: the fixture of the tests that hold the
+/// renderers to each other and measure shadow edges, which a spot's cone would
+/// move. Always valid: see `showcase_tests`.
+pub fn showcase_base_level() -> Level {
     Level {
         brushes: brushes(),
-        entities: entities(),
+        entities: base_entities(),
         ..Default::default()
+    }
+}
+
+/// The showcase level, with its projectors. Always valid: see `showcase_tests`.
+pub fn showcase_level() -> Level {
+    Level {
+        entities: [base_entities(), projectors()].concat(),
+        ..showcase_base_level()
     }
 }
 

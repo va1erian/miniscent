@@ -25,6 +25,22 @@ pub enum Entity {
         radius: f32,
         intensity: f32,
     },
+    /// A spot light that shines one way, a projector. It lights as a point light
+    /// of the same `color`, `radius` and `intensity` does, but only inside a
+    /// cone about the direction given by `yaw` (radians about +Z from +X) and
+    /// `pitch` (radians up from the horizon, within a quarter turn either way).
+    /// The light is full within `inner` of the axis, fades to nothing at `outer`,
+    /// and both are half angles in radians, `0 <= inner <= outer <= PI / 2`.
+    Projector {
+        pos: Vec3,
+        yaw: f32,
+        pitch: f32,
+        color: Vec3,
+        radius: f32,
+        intensity: f32,
+        inner: f32,
+        outer: f32,
+    },
     /// Enemy spawn; `kind` indexes the game's enemy table.
     Enemy { pos: Vec3, kind: u8 },
     /// Reaching within `radius` of `pos` wins the level.
@@ -78,6 +94,13 @@ pub const MAX_VISTA_PAN: f32 = 1.0e4;
 /// Largest fog distance a level may ask for.
 pub const MAX_FOG_DEPTH: f32 = 1000.0;
 
+/// Unit vector a projector at `yaw` and `pitch` shines along.
+pub fn projector_dir(yaw: f32, pitch: f32) -> Vec3 {
+    let (sy, cy) = yaw.sin_cos();
+    let (sp, cp) = pitch.sin_cos();
+    Vec3::new(cp * cy, cp * sy, sp)
+}
+
 fn coord_ok(p: Vec3) -> bool {
     p.is_finite()
         && p.x.abs() <= MAX_ENTITY_COORD
@@ -130,6 +153,28 @@ impl Entity {
                     && radius_ok(radius)
                     && (0.0..=MAX_ENTITY_COORD).contains(&intensity)
             }
+            Entity::Projector {
+                pos,
+                yaw,
+                pitch,
+                color,
+                radius,
+                intensity,
+                inner,
+                outer,
+            } => {
+                let half_turn = core::f32::consts::FRAC_PI_2;
+                coord_ok(pos)
+                    && yaw.is_finite()
+                    && (-half_turn..=half_turn).contains(&pitch)
+                    && [color.x, color.y, color.z].into_iter().all(unit_ok)
+                    && radius_ok(radius)
+                    && (0.0..=MAX_ENTITY_COORD).contains(&intensity)
+                    && inner >= 0.0
+                    && inner <= outer
+                    && outer > 0.0
+                    && outer <= half_turn
+            }
             Entity::Enemy { pos, .. } => coord_ok(pos),
             Entity::Goal { pos, radius } => coord_ok(pos) && radius_ok(radius),
             Entity::World {
@@ -171,6 +216,7 @@ impl Entity {
         match *self {
             Entity::PlayerStart { pos, .. }
             | Entity::Light { pos, .. }
+            | Entity::Projector { pos, .. }
             | Entity::Enemy { pos, .. }
             | Entity::Goal { pos, .. }
             | Entity::World { pos, .. }

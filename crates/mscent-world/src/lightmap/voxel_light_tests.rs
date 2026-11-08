@@ -78,6 +78,7 @@ fn lamp(x: f32, y: f32, z: f32) -> PointLight {
         position: v3(x, y, z),
         color: v3(1.0, 1.0, 1.0),
         radius: 40.0,
+        cone: None,
     }
 }
 

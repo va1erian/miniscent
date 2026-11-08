@@ -24,6 +24,9 @@ pub const VERSION: u16 = 5;
 pub const MAX_BYTES: usize = 256 << 20;
 const MAX_ATLAS_SIDE: u32 = 1 << 16;
 const MAX_FACES: usize = 1 << 20;
+/// Marks a light with a cone in the bake key; no radius is this many bits of a float
+/// the key would otherwise hold at that place.
+const CONE_MARK: u32 = 0xC0DE_5907;
 /// Magic, version and key: enough to tell a file from other inputs without
 /// reading its atlas.
 pub const HEADER_BYTES: usize = 14;
@@ -101,6 +104,15 @@ pub fn input_key(
         h.vec3(l.position);
         h.vec3(l.color);
         h.f32(l.radius);
+        // Only a cone adds to the key, so every key made before projectors
+        // existed is still the key of the same bake.
+        if let Some(cone) = &l.cone {
+            h.u32(CONE_MARK);
+            h.vec3(cone.dir());
+            let (inner, outer) = cone.edge_cosines();
+            h.f32(inner);
+            h.f32(outer);
+        }
     }
     h.u32(faces.len() as u32);
     for f in faces {

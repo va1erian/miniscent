@@ -26,6 +26,8 @@ pub enum Glyph {
     Bulb,
     /// A pennant on a pole: the goal.
     Flag,
+    /// A lamp head with a widening beam: a projector.
+    Spot,
 }
 
 // Head circle (centre 12,7 radius 3.5) and shoulders.
@@ -77,11 +79,27 @@ const FLAG: &[PathSeg] = &[
     Close,
 ];
 
+// A lamp head, then the beam spreading below it.
+const SPOT: &[PathSeg] = &[
+    M(8.5, 3.0),
+    L(15.5, 3.0),
+    L(15.5, 8.0),
+    L(8.5, 8.0),
+    Close,
+    M(8.5, 11.0),
+    L(3.5, 21.0),
+    M(15.5, 11.0),
+    L(20.5, 21.0),
+    M(12.0, 11.5),
+    L(12.0, 21.0),
+];
+
 fn path(glyph: Glyph) -> &'static [PathSeg] {
     match glyph {
         Glyph::Person => PERSON,
         Glyph::Bulb => BULB,
         Glyph::Flag => FLAG,
+        Glyph::Spot => SPOT,
         Glyph::Lucide(_) => &[],
     }
 }
@@ -113,7 +131,7 @@ mod tests {
 
     #[test]
     fn custom_icons_stay_on_the_grid() {
-        for glyph in [Glyph::Person, Glyph::Bulb, Glyph::Flag] {
+        for glyph in [Glyph::Person, Glyph::Bulb, Glyph::Flag, Glyph::Spot] {
             let segs = path(glyph);
             assert!(!segs.is_empty());
             for seg in segs {

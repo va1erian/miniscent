@@ -41,11 +41,13 @@ fn scene(workers: usize, samples: u32, radius: f32) -> Lightmap {
             position: v3(6.0, 10.0, 9.0),
             color: v3(1.0, 1.0, 1.0),
             radius: 40.0,
+            cone: None,
         },
         PointLight {
             position: v3(4.0, 3.0, 7.0),
             color: v3(0.0, 0.6, 0.2),
             radius: 40.0,
+            cone: None,
         },
     ];
     let cfg = BakeConfig {

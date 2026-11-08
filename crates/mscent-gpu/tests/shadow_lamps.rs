@@ -35,6 +35,15 @@ fn lit_room() -> Room {
     }
 }
 
+/// The same room, the lamp a projector aimed at the floor with a cone wide enough
+/// to hold the box's whole shadow in full light.
+fn projector_room() -> Room {
+    Room {
+        cone: Some(0.9),
+        ..lit_room()
+    }
+}
+
 fn shot(spec: Room) -> Shot {
     Shot::new(&gpu_support::gpu().expect("a gpu"), room(spec))
 }
@@ -92,6 +101,75 @@ fn a_box_shades_the_floor_under_a_baked_lamp_and_not_beside_it() {
         assert!(
             (shaded - lit).abs() <= 0.03 * lit + 1.0,
             "({x}, {y}) is beside the shadow: {shaded} of {lit}"
+        );
+    }
+}
+
+#[test]
+fn a_box_shades_the_floor_under_a_projector_and_not_beside_its_shadow() {
+    with_gpu!();
+    let mut shot = shot(projector_room());
+    let boxes = [box_at(v(0.0, 0.0, -1.0))];
+    let contents = Contents {
+        boxes: &boxes,
+        ..Contents::default()
+    };
+    let (off, on) = (
+        shot.frame(&view(), OFF, &contents),
+        shot.frame(&view(), ON, &contents),
+    );
+    keep("projector_box_off.png", &off);
+    keep("projector_box_on.png", &on);
+    let (inside, outside) = (SHADOW_HALF - 0.9, SHADOW_HALF + 0.9);
+    for (x, y) in [(-inside, -inside), (inside, -inside), (0.0, -inside - 0.2)] {
+        let (lit, shaded) = (
+            floor_level(&shot, &off, x, y),
+            floor_level(&shot, &on, x, y),
+        );
+        assert!(lit > 40.0, "({x}, {y}) is lit by the projector: {lit}");
+        assert!(
+            shaded < 0.5 * lit,
+            "({x}, {y}) is in the shadow: {shaded} of {lit}"
+        );
+    }
+    for (x, y) in [(-outside, -inside), (outside, -inside), (0.0, -outside)] {
+        let (lit, shaded) = (
+            floor_level(&shot, &off, x, y),
+            floor_level(&shot, &on, x, y),
+        );
+        assert!(
+            (shaded - lit).abs() <= 0.03 * lit + 1.0,
+            "({x}, {y}) is beside the shadow: {shaded} of {lit}"
+        );
+    }
+}
+
+#[test]
+fn a_projector_aimed_away_from_a_box_leaves_its_floor_as_it_was() {
+    with_gpu!();
+    // The cone is 0.2 wide about straight down: the box's shadow, 7/3 to the side
+    // on a floor 5 below, is far outside it, and nothing there was lit to take from.
+    let mut shot = shot(Room {
+        cone: Some(0.2),
+        ..lit_room()
+    });
+    let boxes = [box_at(v(0.0, 0.0, -1.0))];
+    let contents = Contents {
+        boxes: &boxes,
+        ..Contents::default()
+    };
+    let (off, on) = (
+        shot.frame(&view(), OFF, &contents),
+        shot.frame(&view(), ON, &contents),
+    );
+    for (x, y) in [(-2.0, -2.0), (2.0, -2.0), (0.0, -3.0), (4.0, 4.0)] {
+        let (before, after) = (
+            floor_level(&shot, &off, x, y),
+            floor_level(&shot, &on, x, y),
+        );
+        assert!(
+            (after - before).abs() <= 1.0,
+            "({x}, {y}) is outside the cone: {after} of {before}"
         );
     }
 }

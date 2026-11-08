@@ -28,6 +28,11 @@ struct Frame {
     // A sphere, as a position and radius, that holds all that casts into a lamp's
     // map: a point whose line to the lamp misses it is in no shadow.
     lamp_bounds: array<vec4f, 2>,
+    // A projector's cone, by lamp: the axis and the cosine of the outer angle, then
+    // the cosine of the inner angle, 1 for a lamp that has a cone (0 for one that
+    // shines all round), and 1 when the cone's edge is a step.
+    lamp_aims: array<vec4f, 2>,
+    lamp_edges: array<vec4f, 2>,
 }
 
 @group(0) @binding(0) var<uniform> frame: Frame;

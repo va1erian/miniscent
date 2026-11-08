@@ -54,6 +54,7 @@ fn white_light(pos: Vec3, radius: f32) -> PointLight {
         position: pos,
         color: v3(1.0, 1.0, 1.0),
         radius,
+        cone: None,
     }
 }
 
