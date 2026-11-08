@@ -10,7 +10,6 @@ use mscent_world::vista_scale::{parallax_of_scale, scale_of_parallax};
 
 use super::fields::{held, limits};
 
-
 /// What the entity tools can place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EntityKind {

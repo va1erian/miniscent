@@ -4,8 +4,7 @@
 
 use mscent_world::Entity;
 use mscent_world::entity::{
-    MAX_ENTITY_COORD, MAX_FOG_DEPTH, MAX_VISTA_FOG, MAX_VISTA_LAYERS, MAX_VISTA_PAN,
-    MAX_VISTA_SPIN,
+    MAX_ENTITY_COORD, MAX_FOG_DEPTH, MAX_VISTA_FOG, MAX_VISTA_LAYERS, MAX_VISTA_PAN, MAX_VISTA_SPIN,
 };
 use mscent_world::materials::VIEW_SLOTS;
 

@@ -172,7 +172,9 @@ impl EditorState {
     /// The next grid size up (`dir` > 0) or down, held to the sizes offered.
     pub fn step_grid(&mut self, dir: i32) {
         let at = GRIDS.iter().position(|g| *g >= self.grid).unwrap_or(0);
-        let to = at.saturating_add_signed(dir.signum() as isize).min(GRIDS.len() - 1);
+        let to = at
+            .saturating_add_signed(dir.signum() as isize)
+            .min(GRIDS.len() - 1);
         self.grid = GRIDS[to];
         self.message = format!("Grid {}", self.grid);
     }
@@ -343,10 +345,13 @@ impl EditorState {
         cmds.push(Command::AddEntity { index, entity });
         self.history.run(&mut self.doc, Command::Batch(cmds));
         self.selection = Some(Selection::Entity(id));
-        let at = p.map(|v| format!("{}", (v * 100.0).round() / 100.0)).join(", ");
+        let at = p
+            .map(|v| format!("{}", (v * 100.0).round() / 100.0))
+            .join(", ");
         self.message = format!("{verb} {} at {at}", k.name().to_lowercase());
         if verb != "Placed" {
-            self.message.push_str(": a level has one, so the old one went");
+            self.message
+                .push_str(": a level has one, so the old one went");
         }
         id
     }

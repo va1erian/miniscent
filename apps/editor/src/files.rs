@@ -25,8 +25,7 @@ pub fn save(doc: &Document, path: &Path) -> Result<String, String> {
         .map_err(|e| format!("Cannot save: {}", errors::label(e)))?;
     let bytes = format::write(&level);
     // A file the loader refuses is worse than no save: the old one stays.
-    format::read(&bytes)
-        .map_err(|e| format!("Cannot save: {}", errors::format(e)))?;
+    format::read(&bytes).map_err(|e| format!("Cannot save: {}", errors::format(e)))?;
     let tmp = path.with_extension("msl.tmp");
     std::fs::write(&tmp, &bytes).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
     if let Err(e) = std::fs::rename(&tmp, path) {

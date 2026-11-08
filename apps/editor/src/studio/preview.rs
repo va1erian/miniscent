@@ -134,7 +134,10 @@ impl Studio {
     /// cannot be played, if it cannot.
     pub fn problems(&self) -> Vec<String> {
         let warnings = self.warned.iter().map(|w| format!("WARNING: {w}"));
-        let play = self.unplayable.iter().map(|u| format!("Cannot play: {}", u.why));
+        let play = self
+            .unplayable
+            .iter()
+            .map(|u| format!("Cannot play: {}", u.why));
         warnings.chain(play).collect()
     }
 

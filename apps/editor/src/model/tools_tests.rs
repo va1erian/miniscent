@@ -324,11 +324,19 @@ fn edits_that_do_nothing_say_why() {
     assert_eq!(s.message, "Already first in order");
     s.set_tool(Tool::Slice);
     drag(&mut s, View::Top, [2.0, 2.0], [2.0, 2.0]);
-    assert!(s.message.starts_with("The slice line has no length"), "{}", s.message);
+    assert!(
+        s.message.starts_with("The slice line has no length"),
+        "{}",
+        s.message
+    );
     s.place_entity(EntityKind::PlayerStart, [1.0, 1.0, 1.0]);
     assert_eq!(s.message, "Placed player start at 1, 1, 1");
     s.place_entity(EntityKind::PlayerStart, [2.0, 2.0, 1.0]);
-    assert!(s.message.starts_with("Moved the player start"), "{}", s.message);
+    assert!(
+        s.message.starts_with("Moved the player start"),
+        "{}",
+        s.message
+    );
 }
 
 #[test]
@@ -338,7 +346,11 @@ fn a_drag_past_the_map_stops_at_the_edge_and_says_so() {
     drag(&mut s, View::Top, [2.0, 2.0], [5000.0, 2.0]);
     let (lo, hi) = bounds(&s, id);
     assert!(hi[0] <= 4096.0 && lo[0] >= 0.0, "{lo:?} {hi:?}");
-    assert!(s.message.starts_with("That would leave the map"), "{}", s.message);
+    assert!(
+        s.message.starts_with("That would leave the map"),
+        "{}",
+        s.message
+    );
 }
 
 #[test]

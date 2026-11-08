@@ -125,9 +125,11 @@ fn params_grid(
     let mut rows = grid([Track::Auto, Track::Fill(1)]).gap(6);
     for i in 0..PARAMS {
         let step = steps.get(i).copied().unwrap_or(1.0);
-        rows = rows
-            .child(label("-").bind(&labels[i]))
-            .child(param_field(&fields[i], step, move |v| Prop::Param(i, v)));
+        rows = rows.child(label("-").bind(&labels[i])).child(param_field(
+            &fields[i],
+            step,
+            move |v| Prop::Param(i, v),
+        ));
     }
     column().child(rows)
 }
@@ -267,10 +269,9 @@ impl Panel {
                 .child(field(&self.pos[a], move |v| Prop::Pos(a, v)));
         }
         let rows = params_grid(&self.param_labels, &self.params, &[]);
-        let ent = column().gap(6).children((
-            place,
-            panel(rows).plain().bind(&self.params_host),
-        ));
+        let ent = column()
+            .gap(6)
+            .children((place, panel(rows).plain().bind(&self.params_host)));
         let names = grid([Track::Auto, Track::Fill(1)])
             .gap(6)
             .child(label("Name"))

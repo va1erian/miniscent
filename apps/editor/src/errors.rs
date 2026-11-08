@@ -111,10 +111,7 @@ pub fn load(e: LoadError, entities: &[Entity]) -> (String, Option<usize>) {
         LoadError::Csg(c) => (csg(c).into(), None),
         LoadError::NoPlayerStart => ("the level has no player start: place one".into(), None),
         LoadError::NoGoal => ("the level has no goal: place one".into(), None),
-        LoadError::InvalidEntity(i) => (
-            format!("{} has a value out of range", named(i)),
-            Some(i),
-        ),
+        LoadError::InvalidEntity(i) => (format!("{} has a value out of range", named(i)), Some(i)),
         LoadError::SpawnInSolid(i) => (
             format!("{} is inside solid: move it into a room", named(i)),
             Some(i),
@@ -135,7 +132,10 @@ mod tests {
             yaw: 0.0,
         };
         let (text, who) = load(LoadError::SpawnInSolid(1), &[start, start]);
-        assert_eq!(text, "Player start (entity 2) is inside solid: move it into a room");
+        assert_eq!(
+            text,
+            "Player start (entity 2) is inside solid: move it into a room"
+        );
         assert_eq!(who, Some(1));
     }
 

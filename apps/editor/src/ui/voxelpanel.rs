@@ -195,7 +195,10 @@ impl VoxelPanel {
         let at = |list: &[VoxelOp]| list.iter().position(|&o| o == tool.op).unwrap_or(0);
         quiet::select(&self.op.get(), at(&VoxelOp::ALL));
         self.radius.get().set_value(tool.radius);
-        let material = self.materials.iter().position(|(id, _)| *id == tool.material);
+        let material = self
+            .materials
+            .iter()
+            .position(|(id, _)| *id == tool.material);
         quiet::select(&self.material.get(), material.unwrap_or(0));
         let cell = CELLS.iter().position(|&c| c == tool.cell).unwrap_or(1);
         quiet::select(&self.cell.get(), cell);

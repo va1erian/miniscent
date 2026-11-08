@@ -179,9 +179,7 @@ pub fn validate(doc: &Document) -> Result<Level, String> {
         labels: doc.export_labels(),
         mover_groups: doc.export_groups(),
     };
-    level
-        .check_labels()
-        .map_err(errors::label)?;
+    level.check_labels().map_err(errors::label)?;
     Ok(level)
 }
 
@@ -307,9 +305,7 @@ fn picture(
     let (map, light, report) = match stored {
         Some((map, report)) => (map, Light::Full, report),
         None => {
-            let draft = compiled
-                .draft()
-                .map_err(errors::build)?;
+            let draft = compiled.draft().map_err(errors::build)?;
             (Arc::new(draft), Light::Draft, None)
         }
     };
@@ -317,9 +313,7 @@ fn picture(
     // each on a size-optimized build, which a preview should not pay again. The
     // table's clone shares its pixels and mips.
     let (generation, table) = materials.current();
-    let renderer = compiled
-        .into_renderer(map, table?)
-        .map_err(errors::build)?;
+    let renderer = compiled.into_renderer(map, table?).map_err(errors::build)?;
     let warnings = vista_warnings(level)
         .iter()
         .map(ToString::to_string)

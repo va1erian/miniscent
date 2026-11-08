@@ -110,7 +110,11 @@ impl Editor {
         }
         if closing {
             let rows = self.tex.studio.borrow().rows();
-            let names: Vec<String> = rows.into_iter().filter(|r| r.dirty).map(|r| r.name).collect();
+            let names: Vec<String> = rows
+                .into_iter()
+                .filter(|r| r.dirty)
+                .map(|r| r.name)
+                .collect();
             if !names.is_empty() {
                 lost.push(format!("the materials {}", names.join(", ")));
             }
@@ -312,7 +316,10 @@ mod tests {
     fn losses_read_as_a_sentence() {
         let words = |v: &[&str]| list(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
         assert_eq!(words(&["the level"]), "the level");
-        assert_eq!(words(&["the level", "the script"]), "the level and the script");
+        assert_eq!(
+            words(&["the level", "the script"]),
+            "the level and the script"
+        );
         assert_eq!(words(&["a", "b", "c"]), "a, b and c");
     }
 }

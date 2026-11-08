@@ -329,7 +329,10 @@ impl EditorState {
             return true;
         }
         self.selection = self.pick(p).filter(|s| matches!(s, Selection::Brush(_)));
-        if self.selected_brush().is_some_and(|b| ops::vertices(b).is_none()) {
+        if self
+            .selected_brush()
+            .is_some_and(|b| ops::vertices(b).is_none())
+        {
             self.message = format!(
                 "This brush has more than {} corners, or is a volume: its corners cannot be moved",
                 ops::MAX_VERTS

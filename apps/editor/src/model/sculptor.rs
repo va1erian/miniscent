@@ -168,9 +168,8 @@ impl<'a> Sculptor<'a> {
         };
         let Some((t, on_brush)) = self.hit(&ray) else {
             // Mid-stroke the pointer may leave the surface; at the start it says why.
-            if self.target.is_none() {
-                self.note = Some(format!("Nothing under the pointer within {MAX_REACH} units"));
-            }
+            let why = format!("Nothing under the pointer within {MAX_REACH} units");
+            self.note = self.note.take().or(self.target.is_none().then_some(why));
             return;
         };
         let p = ray.origin + ray.dir * t;
