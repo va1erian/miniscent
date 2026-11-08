@@ -102,6 +102,19 @@ impl FlyCam {
         }
     }
 
+    /// Moves `dist` along the view, as the wheel does.
+    pub fn dolly(&mut self, dist: f32) {
+        let step = self.view().orientation.rotate(Vec3::new(0.0, 0.0, -dist));
+        if step.is_finite() {
+            self.pos = self.pos + step;
+        }
+    }
+
+    /// Takes the roll out, keeping where the camera is and where it looks.
+    pub fn level(&mut self) {
+        self.roll = 0.0;
+    }
+
     /// Whether any movement key is held.
     pub fn moving(&self) -> bool {
         self.held.iter().any(|k| {

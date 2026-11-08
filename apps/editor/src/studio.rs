@@ -468,9 +468,9 @@ impl Drop for Studio {
 }
 
 /// What the 3D pane's controls are, for its placeholder text.
-pub const HELP: &str = "RMB drag or arrows: look
-W/A/S/D: move   R/F: up/down
-Q/E: roll   Shift: fast";
+pub const HELP: &str = "RMB drag or arrows: look   Wheel: forward/back
+W/A/S/D: move   R/F: up/down   Shift: fast
+Q/E: roll   Ctrl+L: level";
 
 #[cfg(test)]
 mod cache_lock_tests;

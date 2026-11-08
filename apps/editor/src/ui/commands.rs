@@ -7,6 +7,7 @@ use xui::prelude::Ui;
 use xui::widget::MenuId;
 
 use super::app::{Editor, Msg};
+use super::keys::menu_label;
 use super::level_dialog;
 use super::script_actions::{KIT_MENU, SAMPLE_MENU};
 use crate::files;
@@ -53,6 +54,9 @@ pub mod cmd {
     pub const NEW_MOUNTAINS: MenuId = MenuId::new(31);
     pub const GPU_TOGGLE: MenuId = MenuId::new(32);
     pub const MANUAL: MenuId = MenuId::new(33);
+    pub const LEVEL_CAMERA: MenuId = MenuId::new(36);
+    pub const GRID_FINER: MenuId = MenuId::new(34);
+    pub const GRID_COARSER: MenuId = MenuId::new(35);
 }
 
 /// Fog the dialog starts from for a level without a world entity.
@@ -60,43 +64,50 @@ const DEFAULT_FOG: (f32, f32) = (4.0, 26.0);
 
 /// The menu bar.
 pub(super) fn menus(m: &mut xui::widget::MenuScope<'_>) {
+    // Every label with keys takes them from the keys module's table.
+    let item = |s: &mut xui::widget::MenuScope<'_>, id, text: &str| {
+        s.item(id, &menu_label(text, id));
+    };
     m.submenu(MenuId::new(100), "&File", |f| {
-        f.item(cmd::NEW, "&New   Ctrl+N");
-        f.item(cmd::OPEN, "&Open...   Ctrl+O");
+        item(f, cmd::NEW, "&New");
+        item(f, cmd::OPEN, "&Open...");
         f.item(cmd::SHOWCASE, "Open &showcase level");
-        f.item(cmd::SAVE, "&Save   Ctrl+S");
+        item(f, cmd::SAVE, "&Save");
         f.item(cmd::SAVE_AS, "Save &as...");
     });
     m.submenu(MenuId::new(101), "&Edit", |e| {
-        e.item(cmd::UNDO, "&Undo   Ctrl+Z");
-        e.item(cmd::REDO, "&Redo   Ctrl+Y");
+        item(e, cmd::UNDO, "&Undo");
+        item(e, cmd::REDO, "&Redo");
         e.separator();
-        e.item(cmd::DELETE, "&Delete   Del");
-        e.item(cmd::FLIP, "&Flip add/subtract");
-        e.item(cmd::MAKE_MOVER, "Make &mover");
-        e.item(cmd::FORWARD, "Move &later in order");
-        e.item(cmd::BACK, "Move &earlier in order");
+        item(e, cmd::DELETE, "&Delete");
+        item(e, cmd::FLIP, "&Flip add/subtract");
+        item(e, cmd::MAKE_MOVER, "Make &mover");
+        item(e, cmd::FORWARD, "Move &later in order");
+        item(e, cmd::BACK, "Move &earlier in order");
         e.separator();
-        e.item(cmd::SLICE, "&Apply slice   Enter");
-        e.item(cmd::SLICE_SIDE, "Slice &keeps...   K");
-        e.item(cmd::CARVE, "&Carve with brush   Ctrl+Shift+C");
-        e.item(cmd::EXTRUDE, "Extrude face &out   Ctrl+E");
-        e.item(cmd::EXTRUDE_IN, "Extrude face &in   Ctrl+Shift+E");
+        item(e, cmd::SLICE, "&Apply slice");
+        item(e, cmd::SLICE_SIDE, "Slice &keeps...");
+        item(e, cmd::CARVE, "&Carve with brush");
+        item(e, cmd::EXTRUDE, "Extrude face &out");
+        item(e, cmd::EXTRUDE_IN, "Extrude face &in");
         e.separator();
         e.item(cmd::NEW_VISTA, "New &vista");
         e.item(cmd::NEW_MOUNTAINS, "New &mountains");
-        e.item(cmd::LEVEL_SETTINGS, "Level &settings...");
+        item(e, cmd::LEVEL_SETTINGS, "Level &settings...");
     });
     m.submenu(MenuId::new(102), "&View", |v| {
-        v.item(cmd::FIT, "&Fit views to level");
-        v.item(cmd::RESET_CAMERA, "&Reset 3D camera");
+        item(v, cmd::FIT, "&Fit views to level");
+        item(v, cmd::GRID_FINER, "F&iner grid");
+        item(v, cmd::GRID_COARSER, "C&oarser grid");
+        item(v, cmd::RESET_CAMERA, "&Reset 3D camera");
+        item(v, cmd::LEVEL_CAMERA, "&Level 3D camera");
         v.item(cmd::GPU_TOGGLE, "Switch 3D view between &GPU and software");
         v.separator();
-        v.item(cmd::LAYOUT_CLASSIC, "&Classic layout");
-        v.item(cmd::LAYOUT_QUAD, "&Quad layout (2 x 2)");
+        item(v, cmd::LAYOUT_CLASSIC, "&Classic layout");
+        item(v, cmd::LAYOUT_QUAD, "&Quad layout (2 x 2)");
     });
     m.submenu(MenuId::new(103), "&Play", |p| {
-        p.item(cmd::PLAY, "&Play   F5");
+        item(p, cmd::PLAY, "&Play");
     });
     m.submenu(MenuId::new(108), "&Texture", |t| {
         t.item(cmd::TEX_OPEN, "Texture &Studio");
@@ -107,7 +118,7 @@ pub(super) fn menus(m: &mut xui::widget::MenuScope<'_>) {
         t.item(cmd::TEX_SAVE, "&Save material   Ctrl+S");
     });
     m.submenu(MenuId::new(104), "S&cript", |s| {
-        s.item(cmd::SCRIPT_PANE, "Show or hide &script   F6");
+        item(s, cmd::SCRIPT_PANE, "Show or hide &script");
         s.item(cmd::SCRIPT_WINDOW, "Script in its own &window, or docked");
         s.separator();
         s.submenu(MenuId::new(105), "&Add entity", |a| {
@@ -122,8 +133,8 @@ pub(super) fn menus(m: &mut xui::widget::MenuScope<'_>) {
         });
     });
     m.submenu(MenuId::new(107), "&Help", |h| {
-        h.item(cmd::MANUAL, "Editor &manual   F1");
-        h.item(cmd::GUIDE, "Scripting &guide   F7");
+        item(h, cmd::MANUAL, "Editor &manual");
+        item(h, cmd::GUIDE, "Scripting &guide");
     });
 }
 
@@ -156,6 +167,13 @@ impl Editor {
             cmd::RESET_CAMERA => {
                 self.studio.reset_camera(&self.state.borrow().doc);
             }
+            cmd::LEVEL_CAMERA => {
+                let mut cam = self.studio.fly_camera();
+                cam.level();
+                self.studio.set_camera(cam);
+            }
+            cmd::GRID_FINER => self.state.borrow_mut().step_grid(-1),
+            cmd::GRID_COARSER => self.state.borrow_mut().step_grid(1),
             cmd::FIT => self.refit(),
             cmd::SCRIPT_PANE => self.toggle_script(),
             cmd::GUIDE => self.show_guide(),

@@ -59,6 +59,7 @@ pub struct Editor {
     pub(super) status: Handle<StatusBar<Msg>>,
     tools: [Handle<IconButton<Msg>>; TOOLS.len()],
     ops: [Handle<IconButton<Msg>>; OPS.len()],
+    grid_box: Handle<ComboBox<Msg>>,
     pub(super) panel: Panel,
     pub(super) log_view: Handle<MultilineEdit<Msg>>,
     pub(super) studio: Studio,
@@ -134,6 +135,7 @@ impl Editor {
             status: Handle::new(),
             tools: Default::default(),
             ops: Default::default(),
+            grid_box: Handle::new(),
             panel: Panel::default(),
             log_view: Handle::new(),
             studio,
@@ -198,10 +200,7 @@ impl Editor {
             ),
             group(
                 "Grid size",
-                column().child(combo_box(&grid_refs).on_select(Msg::Grid).then(|c| {
-                    c.select(2);
-                    c
-                })),
+                column().child(combo_box(&grid_refs).on_select(Msg::Grid).bind(&app.grid_box)),
             ),
         )));
         let side = column().gap(4).children((
@@ -296,6 +295,8 @@ impl Editor {
         for (i, t) in TOOLS.iter().enumerate() {
             self.tools[i].get().set_checked(t.3 == st.tool);
         }
+        let grid = GRIDS.iter().position(|g| *g == st.grid).unwrap_or(2);
+        super::quiet::select(&self.grid_box.get(), grid);
         for (i, op) in [Op::Subtract, Op::Add].into_iter().enumerate() {
             self.ops[i].get().set_checked(st.new_op == op);
         }

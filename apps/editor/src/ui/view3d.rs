@@ -251,10 +251,13 @@ impl<M: 'static> View3d<M> {
         self.control.set_visible(visible);
     }
 
-    /// Whether `key` currently flies the camera rather than picking a tool:
-    /// the right button is held to look around and it is a movement letter.
+    /// Whether `key` currently flies the camera rather than picking a tool: it
+    /// is a movement letter and the pane has the keys, or is being looked
+    /// around with. The pane flies with them either way, so a tool must not
+    /// change under the camera.
     pub fn flies(&self, key: Key) -> bool {
-        self.shared.looking.get() && is_fly_key(key)
+        let keys_here = self.ui.focus_holder() == Some(self.control.id());
+        is_fly_key(key) && (keys_here || self.shared.looking.get())
     }
 
     pub fn focus(&self) {
