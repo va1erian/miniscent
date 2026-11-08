@@ -226,6 +226,51 @@ with a viewport face. `vista_warnings` in
 `mscent-world` finds them; the editor puts them in its log when they change. A sky or
 cutout material on a voxel volume is not checked.
 
+### The play space's lamps in a layer's room
+
+A miniature that continues the level (a floor running on past a viewport wall, a
+range rising behind the arena) must meet the play space at the same brightness, or the
+viewport reads as a seam. So the bake lights each layer's room with the play space's
+own lamps as well as the room's, carried through the layer's map
+(`level/vista_light.rs`):
+
+```
+image position = pos + (lamp - centre) * parallax
+image radius   = radius * parallax
+```
+
+Colour, intensity and cone stay. The baker's falloff, `(1 - d / radius)^3` times the
+cosine, depends only on `d / radius` and on directions, so a point of the room
+receives from the image exactly what its twin in the play space receives from the
+lamp. Shadows and bounce inside the room then come from the bake as for any of its
+own lamps, and voxels in the room are lit the same way. Both renderers read the one
+lightmap, so both show it.
+
+- Only a lamp of the play space that **shines on a viewport face** of a slot showing
+  the room is carried: in front of the face, in range and in its cone, with a clear
+  line to one of a few points of it (the nearest, the middle, each corner drawn in a
+  little). A lamp behind the viewport wall, or in another room, lights nothing of
+  the view. The test is per lamp, not per ray, so the frame around a small window
+  does not shade what the lamp lights through it.
+- An image that falls outside the room, in solid or another island, is dropped.
+- A room seen by several layers takes the map of the first with a finite scale, so
+  no lamp lights it twice. An infinitely far layer (`parallax` 0) takes none.
+- The images are in the light key, so a level with a lit vista bakes again once; a
+  level with no viewport face, or only infinite layers, keeps its key.
+- Images stay out of `play_lights`, so they light no actor and no live voxel edit of
+  the play space.
+
+`tests/vista_seam.rs` reads twin luxels, a play floor and its image beyond the
+viewport at scale 4: they agree within 5 % (luxels in the room are 8 times larger),
+and the floor past the wall goes from 0.007 (ambient) to 0.62 with the lamp. Taking
+the carry out fails two of its four tests, and taking out the window test fails the
+lamp-behind-the-wall one.
+
+Not carried: dynamic lights (a shot passing the window lights the play floor, not
+the floor beyond), the play fog (a layer keeps its own; matching it to the level's
+would fog a large range out of sight, see "Risks"), and light the other way, from
+the room's lamps onto the play space (see "Later").
+
 ## Self-lit and cutout materials
 
 **Self-lit.** `materials::is_self_lit(id)`, a table of the game's own materials like
@@ -436,8 +481,11 @@ Pixel reads through the renderer, as everywhere else:
 
 Each stands on its own and none is needed for the goal:
 
-- **Sky light.** Viewport faces lighting a room during the bake. Until then, a far lamp
-  with a large radius plays the sun.
+- **Sky light.** Viewport faces lighting a room during the bake: a layer's lamps
+  carried out through the inverse map, with shadow rays that cross a viewport face
+  into the layer's room (so a range shades the arena). The same rays would make the
+  carry in exact behind a window's frame. Until then, a far lamp with a large radius
+  plays the sun.
 - **Actors and movers in a view:** a passing ship, a turning wheel, driven by script.
 - **Script control:** switch a slot's layers, or change `spin`, for a day that turns to
   night.

@@ -6,6 +6,8 @@
 //! never shifts, like a distant sky; at 1/16 a room reads as 16 times its size.
 //! See `docs/viewports.md`.
 
+#[path = "vista_light.rs"]
+mod light;
 #[path = "vista_views.rs"]
 mod views;
 pub use views::VistaView;
