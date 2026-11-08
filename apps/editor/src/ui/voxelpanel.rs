@@ -1,14 +1,16 @@
 //! The Voxel tool's section of the properties panel: the dab and its settings,
 //! the generators with their seed and Commit, and Fill.
 
+use mscent_render::MaterialTable;
 use mscent_world::materials::NAMES;
 use mscent_world::voxel::CellSize;
-use xui::backend::WidgetId;
+use xui::backend::{Result as XuiResult, WidgetId};
 use xui::prelude::*;
 use xui::widget::GroupBox;
 
 use super::Msg;
 use super::faces::{MAX_RADIUS, MIN_RADIUS};
+use super::props::Mount;
 use super::quiet;
 use crate::model::generators::{FieldKind, Kind};
 use crate::model::stroke::VoxelOp;
@@ -19,7 +21,8 @@ use crate::model::{EditorState, Tool};
 pub enum VoxelProp {
     Op(usize),
     Radius(f64),
-    Material(usize),
+    /// A material id.
+    Material(u8),
     Cell(usize),
     /// 0 is no generator: clicks dab.
     Generator(usize),
@@ -30,12 +33,14 @@ pub enum VoxelProp {
     Fill,
 }
 
-const CELL_NAMES: [&str; 4] = ["0.125", "0.25", "0.5", "1"];
-const CELLS: [CellSize; 4] = [
+const CELL_NAMES: [&str; 6] = ["0.125", "0.25", "0.5", "1", "2", "4"];
+const CELLS: [CellSize; 6] = [
     CellSize::Eighth,
     CellSize::Quarter,
     CellSize::Half,
     CellSize::One,
+    CellSize::Two,
+    CellSize::Four,
 ];
 const MAX_SEED: f64 = u32::MAX as f64;
 
@@ -46,6 +51,10 @@ pub struct VoxelPanel {
     op: Handle<ComboBox<Msg>>,
     radius: Handle<NumberField<Msg>>,
     material: Handle<ComboBox<Msg>>,
+    /// Holds `material`, which is made again for a new material table.
+    material_host: Handle<xui::widget::Panel<Msg>>,
+    /// The material list's rows: an id a voxel can hold, and its name.
+    materials: Vec<(u8, String)>,
     cell: Handle<ComboBox<Msg>>,
     generator: Handle<ComboBox<Msg>>,
     seed: Handle<NumberField<Msg>>,
@@ -55,6 +64,28 @@ pub struct VoxelPanel {
 
 fn send(p: VoxelProp) -> Msg {
     Msg::Prop(super::props::Prop::Voxel(p))
+}
+
+/// Every material a voxel can hold: the table's ids that fit a byte, or the
+/// stock ones without a table.
+fn voxel_materials(table: Option<&MaterialTable>) -> Vec<(u8, String)> {
+    match table {
+        Some(t) => t
+            .iter()
+            .filter_map(|(id, m)| Some((u8::try_from(id.0).ok()?, m.name.clone())))
+            .collect(),
+        None => (0u8..).zip(NAMES.map(String::from)).collect(),
+    }
+}
+
+/// The material list, in a layout of its own to mount in its container.
+fn material_list(rows: &[(u8, String)], handle: &Handle<ComboBox<Msg>>) -> Layout<Msg> {
+    let ids: Vec<u8> = rows.iter().map(|(id, _)| *id).collect();
+    let names: Vec<&str> = rows.iter().map(|(_, n)| n.as_str()).collect();
+    let list = combo_box(&names)
+        .on_select(move |row| send(VoxelProp::Material(ids.get(row).copied().unwrap_or(0))))
+        .bind(handle);
+    column().child(list)
 }
 
 impl VoxelPanel {
@@ -93,9 +124,9 @@ impl VoxelPanel {
             )
             .child(label("Material"))
             .child(
-                combo_box(&NAMES)
-                    .on_select(|i| send(VoxelProp::Material(i)))
-                    .bind(&self.material),
+                panel(material_list(&self.materials, &self.material))
+                    .plain()
+                    .bind(&self.material_host),
             )
             .child(label("New cells"))
             .child(
@@ -141,14 +172,31 @@ impl VoxelPanel {
         column().gap(8).children((dabs, growth, fill))
     }
 
+    /// Makes the material list again from `table`. After an error the old list
+    /// stays, and works as it did.
+    pub fn show_materials(
+        &mut self,
+        table: Option<&MaterialTable>,
+        mount: &Mount<'_>,
+    ) -> XuiResult<()> {
+        let rows = voxel_materials(table);
+        let list = Handle::new();
+        if let Some(host) = self.material_host.try_get() {
+            mount(&host, material_list(&rows, &list))?;
+            self.material = list;
+        }
+        self.materials = rows;
+        Ok(())
+    }
+
     pub fn sync(&self, st: &EditorState, show: impl Fn(WidgetId, bool)) {
         show(self.group.get().id(), st.tool == Tool::Voxel);
         let tool = &st.voxel;
         let at = |list: &[VoxelOp]| list.iter().position(|&o| o == tool.op).unwrap_or(0);
         quiet::select(&self.op.get(), at(&VoxelOp::ALL));
         self.radius.get().set_value(tool.radius);
-        let material = usize::from(tool.material).min(NAMES.len() - 1);
-        quiet::select(&self.material.get(), material);
+        let material = self.materials.iter().position(|(id, _)| *id == tool.material);
+        quiet::select(&self.material.get(), material.unwrap_or(0));
         let cell = CELLS.iter().position(|&c| c == tool.cell).unwrap_or(1);
         quiet::select(&self.cell.get(), cell);
         let generator = tool
@@ -171,15 +219,14 @@ pub fn apply(st: &mut EditorState, prop: VoxelProp) -> bool {
             st.commit_pending();
             st.voxel.path = None;
             st.voxel.op = VoxelOp::ALL[i.min(VoxelOp::ALL.len() - 1)];
-            st.voxel.generator = None;
             false
         }
         VoxelProp::Radius(v) => {
             st.voxel.radius = v.clamp(MIN_RADIUS, MAX_RADIUS);
             false
         }
-        VoxelProp::Material(i) => {
-            st.voxel.material = u8::try_from(i).unwrap_or(0);
+        VoxelProp::Material(id) => {
+            st.voxel.material = id;
             false
         }
         VoxelProp::Cell(i) => {

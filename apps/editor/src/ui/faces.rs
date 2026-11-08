@@ -66,8 +66,8 @@ impl Editor {
     pub(super) fn pane_wheel(&mut self, notches: i32) {
         let mut st = self.state.borrow_mut();
         if st.pending() && notches != 0 {
-            // A held generation: the wheel rolls another seed.
-            let seed = st.voxel.seed.wrapping_add_signed(notches.signum());
+            // A held generation: the wheel rolls another seed, a notch apiece.
+            let seed = st.voxel.seed.wrapping_add_signed(notches);
             st.reroll_to(seed);
             st.message = format!("Seed {}", st.voxel.seed);
         } else if st.rolling() {

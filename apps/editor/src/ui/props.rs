@@ -192,6 +192,7 @@ impl Panel {
             ui.invalidate_layout();
         }
         let sizes = self.face.show_materials(table, self.ui.as_ref(), mount)?;
+        self.voxel.show_materials(table, mount)?;
         let choices = table.map(MaterialChoices::from_table).unwrap_or_default();
         let list = Handle::new();
         if let Some(host) = self.material_host.try_get() {

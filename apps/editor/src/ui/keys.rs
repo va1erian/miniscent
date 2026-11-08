@@ -68,7 +68,7 @@ pub(super) const TOOLS: [(&str, Key, Glyph, Tool); 14] = [
         Tool::Place(EntityKind::Zone),
     ),
     (
-        "Voxel: sculpt in the 3D view. Wheel sets the radius, Ctrl swaps add and carve",
+        "Voxel: sculpt in the 3D view. Wheel sets the radius, Ctrl swaps Add and Carve,          Alt lets one stroke build up",
         Key::X,
         Glyph::Lucide(Lucide::CircleX),
         Tool::Voxel,

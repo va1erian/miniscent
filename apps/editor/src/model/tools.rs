@@ -54,6 +54,8 @@ impl EditorState {
     /// Switches tool, dropping a half-made slice.
     pub fn set_tool(&mut self, tool: Tool) {
         if tool != self.tool {
+            // A held result is kept, as every other action but Esc keeps it.
+            self.commit_pending();
             self.cancel_drag();
         }
         self.tool = tool;

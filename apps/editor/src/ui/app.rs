@@ -483,7 +483,9 @@ impl App for Editor {
                     }
                 } else {
                     let mut st = self.state.borrow_mut();
-                    st.cancel_drag();
+                    if !st.drop_pending() {
+                        st.cancel_drag();
+                    }
                     st.end_path();
                     drop(st);
                     self.refresh();
