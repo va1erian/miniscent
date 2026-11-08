@@ -97,6 +97,11 @@ pub(super) const OPS: [(&str, Glyph, Op); 2] = [
     ),
 ];
 
+/// Where `tool` is on the palette, for scripted runs that press its button.
+pub(crate) fn palette_index(tool: Tool) -> usize {
+    TOOLS.iter().position(|t| t.3 == tool).unwrap_or(0)
+}
+
 /// A key's name for a tooltip.
 pub(super) fn key_name(key: Key) -> String {
     char::from_u32(u32::from(key.code())).map_or_else(String::new, String::from)

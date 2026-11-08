@@ -7,6 +7,7 @@ mod faces;
 mod guide_html;
 mod icons;
 mod keys;
+pub(crate) use keys::palette_index;
 mod layouts;
 mod level_dialog;
 mod log;
