@@ -1,8 +1,8 @@
 //! Pages of help text from Markdown, a small subset of it: `# ` starts a page,
 //! `## ` a heading, `- ` and `1. ` list items, `| a | b |` a row of a two-column
 //! table (a row over `|---|---|` heads its columns), four spaces an example, and anything else is a paragraph on one line.
-//! Inline `code` and **bold** are left in the text for `ui/guide_html.rs` to turn
-//! into HTML. The scripting guide and the editor manual are both written in it.
+//! Inline `code` and **bold** are left in the text for `ui/guide_md.rs` to turn
+//! into the Markdown the page view shows. The scripting guide and the editor manual are both written in it.
 //!
 //! It is read here and not by a Markdown crate because the help needs nothing
 //! more, and every extra feature is one more thing to escape.

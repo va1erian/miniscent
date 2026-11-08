@@ -35,10 +35,6 @@ pub enum ScriptMsg {
     Sample(usize),
     /// The guide's example, by its number on the page, to put in the script.
     Example(usize),
-    /// The guide has laid a page out and wants it drawn.
-    GuideFrame,
-    /// Text selected in the guide, for the clipboard.
-    Copy(String),
     Reload,
     Save,
     Play,
@@ -269,18 +265,6 @@ impl ScriptPane {
         self.widgets().example(n)
     }
 
-    /// Draws what the guide has laid out.
-    pub fn guide_frame(&self) {
-        self.widgets().guide.get().update();
-    }
-
-    /// Puts text the guide has selected on the clipboard.
-    pub fn copy(&self, text: &str) {
-        if let Some(ui) = &self.ui {
-            ui.set_clipboard_text(text);
-        }
-    }
-
     pub fn show_script(&self) {
         let widgets = self.widgets();
         widgets.tabs.get().select(0);
@@ -382,9 +366,10 @@ impl ProbeHandles {
         self.open.get()
     }
 
-    /// Whether the guide's page has been laid out.
+    /// Whether the guide shows a page.
     pub fn guide_ready(&self) -> bool {
-        self.active.borrow().guide.get().is_ready()
+        let view = self.active.borrow().guide.get();
+        !view.current_document().blocks().is_empty()
     }
 
     /// The pane's own window, if it is up.

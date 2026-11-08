@@ -4,7 +4,7 @@ mod app;
 mod commands;
 pub mod facepanel;
 mod faces;
-mod guide_html;
+mod guide_md;
 mod icons;
 mod keys;
 pub(crate) use keys::palette_index;
