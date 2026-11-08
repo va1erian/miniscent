@@ -19,11 +19,21 @@ mscent-script.workspace = true
 mscent-platform = { workspace = true }
 # Its desktop feature for the GPU window Play presents into, as the game does.
 miniscent-game = { path = "../game", default-features = false, features = ["desktop", "hardware"] }
-xui = { git = "https://github.com/va1erian/xui", rev = "5b916279044b7c8352941b3b13e5fa08a5fe2c4d" }
-xui-code-editor = { git = "https://github.com/va1erian/xui", rev = "5b916279044b7c8352941b3b13e5fa08a5fe2c4d" }
+xui = { git = "https://github.com/va1erian/xui", rev = "91eea5418203251a5c23cd6a06e96f2f7d1650b3", default-features = false }
+xui-code-editor = { git = "https://github.com/va1erian/xui", rev = "91eea5418203251a5c23cd6a06e96f2f7d1650b3" }
 # The guide is an HTML page: it replaces a pile of text widgets (docs/scripting.md). Blitz over
 # xui-litehtml, which measures text at 96 dpi and paints it at the display's, so words drift when scaled.
-xui-blitz = { git = "https://github.com/va1erian/xui", rev = "5b916279044b7c8352941b3b13e5fa08a5fe2c4d" }
+xui-blitz = { git = "https://github.com/va1erian/xui", rev = "91eea5418203251a5c23cd6a06e96f2f7d1650b3" }
+
+[target.'cfg(windows)'.dependencies]
+xui-d2d = { git = "https://github.com/va1erian/xui", rev = "91eea5418203251a5c23cd6a06e96f2f7d1650b3", optional = true }
+
+[features]
+# The software backend (winit + tiny-skia) and the headless selftest harness.
+default = ["canvas"]
+canvas = ["xui/canvas"]
+# The lightweight Windows backend: Direct2D and DirectWrite, native file dialogs.
+d2d = ["dep:xui-d2d"]
 
 [dev-dependencies]
 # A stand-in window for the render thread's surface tests; already in the tree

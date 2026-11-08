@@ -1890,6 +1890,7 @@ dependencies = [
  "xui",
  "xui-blitz",
  "xui-code-editor",
+ "xui-d2d",
 ]
 
 [[package]]
@@ -4680,7 +4681,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 [[package]]
 name = "xui"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=5b916279044b7c8352941b3b13e5fa08a5fe2c4d#5b916279044b7c8352941b3b13e5fa08a5fe2c4d"
+source = "git+https://github.com/va1erian/xui?rev=91eea5418203251a5c23cd6a06e96f2f7d1650b3#91eea5418203251a5c23cd6a06e96f2f7d1650b3"
 dependencies = [
  "xui-canvas",
  "xui-core",
@@ -4689,7 +4690,7 @@ dependencies = [
 [[package]]
 name = "xui-blitz"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=5b916279044b7c8352941b3b13e5fa08a5fe2c4d#5b916279044b7c8352941b3b13e5fa08a5fe2c4d"
+source = "git+https://github.com/va1erian/xui?rev=91eea5418203251a5c23cd6a06e96f2f7d1650b3#91eea5418203251a5c23cd6a06e96f2f7d1650b3"
 dependencies = [
  "anyrender",
  "anyrender_vello_cpu",
@@ -4712,7 +4713,7 @@ dependencies = [
 [[package]]
 name = "xui-canvas"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=5b916279044b7c8352941b3b13e5fa08a5fe2c4d#5b916279044b7c8352941b3b13e5fa08a5fe2c4d"
+source = "git+https://github.com/va1erian/xui?rev=91eea5418203251a5c23cd6a06e96f2f7d1650b3#91eea5418203251a5c23cd6a06e96f2f7d1650b3"
 dependencies = [
  "arboard",
  "cosmic-text",
@@ -4729,7 +4730,7 @@ dependencies = [
 [[package]]
 name = "xui-code-editor"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=5b916279044b7c8352941b3b13e5fa08a5fe2c4d#5b916279044b7c8352941b3b13e5fa08a5fe2c4d"
+source = "git+https://github.com/va1erian/xui?rev=91eea5418203251a5c23cd6a06e96f2f7d1650b3#91eea5418203251a5c23cd6a06e96f2f7d1650b3"
 dependencies = [
  "regex",
  "ropey",
@@ -4739,7 +4740,7 @@ dependencies = [
 [[package]]
 name = "xui-core"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=5b916279044b7c8352941b3b13e5fa08a5fe2c4d#5b916279044b7c8352941b3b13e5fa08a5fe2c4d"
+source = "git+https://github.com/va1erian/xui?rev=91eea5418203251a5c23cd6a06e96f2f7d1650b3#91eea5418203251a5c23cd6a06e96f2f7d1650b3"
 dependencies = [
  "png 0.17.16",
  "raw-window-handle",
@@ -4747,9 +4748,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "xui-d2d"
+version = "0.1.0"
+source = "git+https://github.com/va1erian/xui?rev=91eea5418203251a5c23cd6a06e96f2f7d1650b3#91eea5418203251a5c23cd6a06e96f2f7d1650b3"
+dependencies = [
+ "raw-window-handle",
+ "windows",
+ "windows-numerics",
+ "xui-core",
+]
+
+[[package]]
 name = "xui-gpu"
 version = "0.1.0"
-source = "git+https://github.com/va1erian/xui?rev=5b916279044b7c8352941b3b13e5fa08a5fe2c4d#5b916279044b7c8352941b3b13e5fa08a5fe2c4d"
+source = "git+https://github.com/va1erian/xui?rev=91eea5418203251a5c23cd6a06e96f2f7d1650b3#91eea5418203251a5c23cd6a06e96f2f7d1650b3"
 dependencies = [
  "glow",
  "xui-core",
