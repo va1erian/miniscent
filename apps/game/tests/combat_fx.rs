@@ -41,6 +41,7 @@ fn renderer(divider: bool) -> LevelRenderer {
         ));
     }
     let level = Level {
+        kinds: Vec::new(),
         brushes,
         entities: vec![Entity::Light {
             pos: v(-5.0, 0.0, 5.0),

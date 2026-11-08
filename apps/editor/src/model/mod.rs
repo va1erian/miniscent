@@ -30,6 +30,8 @@ mod growth_tests;
 #[cfg(test)]
 mod hostile_tests;
 #[cfg(test)]
+mod kind_tests;
+#[cfg(test)]
 mod outline_tests;
 #[cfg(test)]
 mod projector_tests;

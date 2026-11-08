@@ -6,6 +6,7 @@
 //! reordering and deleting cannot point them at the wrong thing.
 
 use mscent_math::DPlane;
+use mscent_world::kinds::{Kind, STOCK_KINDS};
 use mscent_world::voxel::Volume;
 use mscent_world::{BrushError, Entity, EntityLabel, Level, MoverGroup, Op, TexInfo};
 use std::collections::BTreeMap;
@@ -85,6 +86,8 @@ pub struct Document {
     entities: Vec<EntityDef>,
     labels: BTreeMap<Id, LabelDef>,
     groups: Vec<GroupDef>,
+    /// Enemy kinds, kept as the level had them. Empty plays the stock table.
+    kinds: Vec<Kind>,
     next_id: Id,
     /// Where the level is saved; its script is beside it. `None` until saved.
     level_path: Option<PathBuf>,
@@ -119,6 +122,7 @@ impl Document {
             doc.entities.push(EntityDef { id, entity: *e });
         }
         doc.import_labels(level, &brush_ids);
+        doc.kinds = level.kinds.clone();
         doc
     }
 
@@ -193,6 +197,7 @@ impl Document {
             }
         }
         Ok(Level {
+            kinds: self.kinds.clone(),
             brushes,
             entities: self.entities.iter().map(|e| e.entity).collect(),
             volumes,
@@ -238,6 +243,20 @@ impl Document {
             .flat_map(|b| b.full_texinfos())
             .map(|t| t.material)
             .collect()
+    }
+
+    /// The level's own enemy kinds; empty means the stock table.
+    pub fn kinds(&self) -> &[Kind] {
+        &self.kinds
+    }
+
+    /// How many kinds an enemy may name, counting the stock table.
+    pub fn kind_count(&self) -> usize {
+        if self.kinds.is_empty() {
+            STOCK_KINDS
+        } else {
+            self.kinds.len()
+        }
     }
 
     pub fn entities(&self) -> &[EntityDef] {

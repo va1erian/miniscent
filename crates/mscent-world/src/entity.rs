@@ -5,6 +5,7 @@
 //! never carries NaN, infinite or non-positive-radius values.
 
 use crate::brush::Brush;
+use crate::kinds::Kind;
 use crate::labels::{EntityLabel, MoverGroup};
 use crate::materials::VIEW_SLOTS;
 use crate::voxel::Volume;
@@ -41,7 +42,7 @@ pub enum Entity {
         inner: f32,
         outer: f32,
     },
-    /// Enemy spawn; `kind` indexes the game's enemy table.
+    /// Enemy spawn; `kind` indexes the level's kinds, [`Level::kind_table`].
     Enemy { pos: Vec3, kind: u8 },
     /// Reaching within `radius` of `pos` wins the level.
     Goal { pos: Vec3, radius: f32 },
@@ -285,4 +286,7 @@ pub struct Level {
     pub labels: Vec<EntityLabel>,
     /// Named brushes that move; they stay out of the CSG.
     pub mover_groups: Vec<MoverGroup>,
+    /// Enemy kinds, indexed by `Entity::Enemy::kind`. Empty plays the stock
+    /// table (`crate::kinds::stock_kinds`).
+    pub kinds: Vec<Kind>,
 }

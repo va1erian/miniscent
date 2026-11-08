@@ -24,6 +24,7 @@ fn renderer() -> LevelRenderer {
     let d = |x, y, z| Vec3d::new(x, y, z);
     let cuboid = |a, b, op, order| Brush::cuboid(a, b, op, order).expect("a brush");
     let level = Level {
+        kinds: Vec::new(),
         brushes: vec![
             cuboid(d(-30.0, -30.0, -20.0), d(30.0, 30.0, 20.0), Op::Subtract, 0),
             cuboid(d(-1.0, 0.0, -21.0), d(1.0, 2.0, 21.0), Op::Add, 1),

@@ -49,6 +49,7 @@ fn room() -> LevelRenderer {
     let brush = Brush::cuboid(d(-20.0, -20.0, -20.0), d(20.0, 20.0, 20.0), Op::Subtract, 0)
         .expect("a room");
     let level = Level {
+        kinds: Vec::new(),
         brushes: vec![brush],
         entities: vec![Entity::Light {
             pos: Vec3::new(-5.0, 0.0, 5.0),

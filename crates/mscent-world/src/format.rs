@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! magic   "MSLV"           4 bytes
-//! version u16              currently 5 (1 to 4 are still read)
+//! version u16              currently 7 (1 to 6 are still read)
 //! flags   u16              reserved, must be 0
 //! count   u32              number of sections (<= MAX_SECTIONS)
 //! section*: id u32, len u32, payload[len]
@@ -13,7 +13,8 @@
 //! Sections: `1` brushes (required), `2` entities (required); `3` is
 //! reserved for compiled data, which the loader skips because it recompiles
 //! from brushes; `4` labels (`format_labels.rs`, version 3, written only when
-//! there are any); `5` voxel volumes (`voxel/wire.rs`, version 4, likewise).
+//! there are any); `5` voxel volumes (`voxel/wire.rs`, version 4, likewise); `6`
+//! enemy kinds (`format_kinds.rs`, version 7, likewise: none means the stock table).
 //! Unknown section ids are skipped for forward compatibility. Entity tag `7`, a
 //! vista layer, is version 5; an older file with it is rejected.
 //! Brushes are stored as raw planes and rebuilt through [`Brush::new`], so a
@@ -25,17 +26,19 @@
 
 use crate::brush::{Brush, BrushError, MAX_PLANES, Op};
 use crate::entity::{Entity, Level};
+use crate::format_kinds::{read_kinds, write_kinds};
 use crate::format_labels::{read_labels, write_labels};
 use crate::format_wire::{
     Cursor, TEXINFO_BYTES, len_u32, put_f32, put_f64, put_texinfo, put_u16, put_u32, put_vec3,
 };
+use crate::kinds::KindError;
 use crate::labels::LabelError;
 use crate::texinfo::TexInfo;
 use crate::voxel::wire::{check_orders, read_volumes, write_volumes};
 use mscent_math::{DPlane, Vec3d};
 
 pub const MAGIC: [u8; 4] = *b"MSLV";
-pub const VERSION: u16 = 6;
+pub const VERSION: u16 = 7;
 /// Oldest version [`read`] still accepts.
 const MIN_VERSION: u16 = 1;
 pub const MAX_FILE_BYTES: usize = 64 << 20;
@@ -47,6 +50,7 @@ const SEC_BRUSHES: u32 = 1;
 const SEC_ENTITIES: u32 = 2;
 const SEC_LABELS: u32 = 4;
 const SEC_VOLUMES: u32 = 5;
+const SEC_KINDS: u32 = 6;
 /// First version whose labels section the reader understands.
 const LABELS_VERSION: u16 = 3;
 /// First version whose volumes section the reader understands.
@@ -55,6 +59,8 @@ const VOLUMES_VERSION: u16 = 4;
 const VISTA_VERSION: u16 = 5;
 /// First version with [`Entity::Projector`], entity tag 8.
 const PROJECTOR_VERSION: u16 = 6;
+/// First version whose kinds section the reader understands.
+const KINDS_VERSION: u16 = 7;
 
 /// Smallest brush record: op, order, material, plane count.
 const BRUSH_HEAD: usize = 1 + 4 + 2 + 4;
@@ -90,6 +96,8 @@ pub enum FormatError {
     BadVolume,
     /// Names, tags or mover groups are inconsistent.
     Labels(LabelError),
+    /// Enemy kinds are malformed, too costly, or an enemy names none of them.
+    Kinds(KindError),
 }
 
 /// Serialises a level (source data only).
@@ -102,6 +110,9 @@ pub fn write(level: &Level) -> Vec<u8> {
     }
     if !level.volumes.is_empty() {
         sections.push((SEC_VOLUMES, write_volumes(&level.volumes)));
+    }
+    if !level.kinds.is_empty() {
+        sections.push((SEC_KINDS, write_kinds(&level.kinds)));
     }
     let bodies: usize = sections.iter().map(|(_, body)| body.len()).sum();
     let mut out = Vec::with_capacity(32 + bodies);
@@ -239,6 +250,7 @@ pub fn read(data: &[u8]) -> Result<Level, FormatError> {
         return Err(FormatError::TooMany);
     }
     let (mut brushes, mut entities, mut labels, mut volumes) = (None, None, None, None);
+    let mut kinds = None;
     for _ in 0..count {
         let id = c.u32()?;
         let len = usize::try_from(c.u32()?).map_err(|_| FormatError::TooLarge)?;
@@ -250,6 +262,7 @@ pub fn read(data: &[u8]) -> Result<Level, FormatError> {
             SEC_VOLUMES if version >= VOLUMES_VERSION => {
                 store(&mut volumes, id, read_volumes(body))?;
             }
+            SEC_KINDS if version >= KINDS_VERSION => store(&mut kinds, id, read_kinds(body))?,
             _ => {}
         }
     }
@@ -266,9 +279,11 @@ pub fn read(data: &[u8]) -> Result<Level, FormatError> {
         volumes,
         labels,
         mover_groups,
+        kinds: kinds.unwrap_or_default(),
     };
-    // Labels refer to brushes and entities, so this waits until all are read.
+    // Labels and kinds refer to entities, so this waits until all are read.
     level.check_labels().map_err(FormatError::Labels)?;
+    level.check_kinds().map_err(FormatError::Kinds)?;
     Ok(level)
 }
 

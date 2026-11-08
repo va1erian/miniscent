@@ -219,6 +219,15 @@ pub fn params(e: &Entity) -> Vec<(&'static str, f64)> {
 }
 
 /// Sets field `i` of [`params`]; out-of-range indices change nothing.
+/// Holds an enemy's kind inside a table of `count` kinds: a level whose enemy
+/// names a kind past its table does not load.
+pub fn clamp_kind(e: &mut Entity, count: usize) {
+    if let Entity::Enemy { kind, .. } = e {
+        let last = u8::try_from(count.saturating_sub(1)).unwrap_or(u8::MAX);
+        *kind = (*kind).min(last);
+    }
+}
+
 pub fn set_param(e: &mut Entity, i: usize, v: f64) {
     // The panel's fields are wide for a vista layer's fog, which holds its own limits.
     let v = if matches!(e, Entity::VistaLayer { .. }) {

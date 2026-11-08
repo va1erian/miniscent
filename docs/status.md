@@ -474,6 +474,14 @@ Design in [projectors.md](projectors.md).
 | M18.6 | Done on the GPU; not looked at in a real window | Projectors hold static-lamp shadow maps (`lamp_shadows.rs`: `LampFrame::cone`, `Frame::lamp_aims` and `lamp_edges`; `cone_share` in `face.wgsl`). `tests/shadow_lamps.rs`, real pixels: a box under a projector shades the floor in its pool as it does under a point lamp (3 probes under half of lit, 3 beside the shadow within 3%), and a projector whose cone misses the box leaves the floor within 1 level. **Seeded**: cone ignored (share 1) is caught by the aimed-away test, share 0 by 6 tests. Not measured: frame cost of the 32 bytes, a cube map spent on a cone |
 | M18.5 | Done | `showcase.rs`: four projectors (the pillar in A, the platform in B, the goal in C, the ramp in D); `assets/levels/showcase.msl` and `corridor.msl` rewritten at version 6. `showcase_base_level()` is the showcase without them: the GPU parity scenes and the shadow-crawl test use it, because with the projectors `crawl` read 0.295 against its 0.08 limit and parity's `light_mips` worst block 3.02, so those gates have not been run against the projectors and a look at why (the cone rim, or the pillar's second shadow) is open |
 
+## M19 Enemy designer
+
+Design in [enemy-designer.md](enemy-designer.md).
+
+| ID | Status | Evidence |
+|---|---|---|
+| M19.1 | Done | `mscent-world/src/kinds.rs` (`Kind`, `KindStats`, `stock_kinds`, `Level::check_kinds`), `format_kinds.rs` (section 6, format version 7), `level_text/kinds.rs` (`kind` blocks). `kinds_tests.rs`: binary and text round trip, the shipped levels read the stock table, a version 6 file skips section 6, a cut at every byte is an error, 5000 flipped bytes never panic, and every limit (33 kinds, 5 bad names, a repeated name, 12 stats out of range, an enemy past the table with and without kinds, a bad blueprint, a level too costly to build, refused in under 100 ms), 6 text errors on their lines. Seeded: taking out the cost or the enemy check fails its test. Editor: `Document` keeps a level's kinds through open and save, and the Kind field is held inside the table (`model/kind_tests.rs`). `facility.msl` and `facing.msl` repacked at version 7, which changed their version byte alone. Not done: nothing plays or draws a kind yet (M19.2, M19.3); the stock table's blueprints are read but not built |
+
 ## Deviations from the plan
 
 - Platform layer: the game does not use xui. `mscent-platform` is a small trait with a desktop (winit + softbuffer) and a headless backend; xui is used only by `apps/editor`. A LazyOS backend is not written.

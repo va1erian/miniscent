@@ -14,7 +14,7 @@ use super::facepanel::FacePanel;
 use super::material_list::MaterialChoices;
 use super::quiet;
 use super::voxelpanel::{VoxelPanel, VoxelProp, apply as apply_voxel};
-use crate::model::entity::{entity_name, params, pos, set_param, with_pos};
+use crate::model::entity::{clamp_kind, entity_name, params, pos, set_param, with_pos};
 use crate::model::{EditorState, Shape, Tool};
 
 /// The container a list is remade in.
@@ -394,7 +394,13 @@ pub fn apply(st: &mut EditorState, prop: Prop) -> bool {
             p[a] = v;
             *e = with_pos(e, p);
         }),
-        Prop::Param(i, v) => st.edit_selected_entity(|e| set_param(e, i, v)),
+        Prop::Param(i, v) => {
+            let kinds = st.doc.kind_count();
+            st.edit_selected_entity(|e| {
+                set_param(e, i, v);
+                clamp_kind(e, kinds);
+            })
+        }
         Prop::NameText(text) => {
             st.sync_draft();
             st.draft.name = text;

@@ -153,6 +153,7 @@ pub fn validate(doc: &Document) -> Result<Level, String> {
         return Err(format!("entity {} has an out-of-range value", i + 1));
     }
     let level = Level {
+        kinds: doc.kinds().to_vec(),
         brushes,
         entities,
         volumes,
@@ -162,6 +163,9 @@ pub fn validate(doc: &Document) -> Result<Level, String> {
     level
         .check_labels()
         .map_err(|e| format!("names or mover groups are inconsistent: {e:?}"))?;
+    level
+        .check_kinds()
+        .map_err(|e| format!("enemy kinds are inconsistent: {e:?}"))?;
     Ok(level)
 }
 

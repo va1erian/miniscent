@@ -26,6 +26,7 @@ fn divided_room() -> LevelRenderer {
     let d = Vec3d::new;
     let cuboid = |a, b, op, order| Brush::cuboid(a, b, op, order).expect("a brush");
     let level = Level {
+        kinds: Vec::new(),
         brushes: vec![
             cuboid(d(-20.0, -20.0, -20.0), d(20.0, 20.0, 20.0), Op::Subtract, 0),
             cuboid(d(-1.0, -21.0, -21.0), d(1.0, 21.0, 21.0), Op::Add, 1),
