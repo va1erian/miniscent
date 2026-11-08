@@ -1,11 +1,11 @@
 //! The editor manual's window: the pages on the left, the page on show as one
-//! HTML view on the right, as the script pane's guide is. It is a window of its
+//! Markdown view on the right, as the script pane's guide is. It is a window of its
 //! own so it can sit beside the views while the reader tries what it says.
 //! Like the script pane's window it has no app of its own: what happens in it
 //! comes to the editor as `Msg::Manual`, which the headless backend of scripted
 //! runs can deliver, where it runs no second window's messages.
 //!
-//! The page is made from the manual's own text by `guide_html.rs`, escaped, with
+//! The page is made from the manual's own text by `guide_md.rs`, escaped, with
 //! no links: a click in it does nothing but select text, and Ctrl+C copies that.
 
 use std::cell::Cell;
@@ -16,10 +16,11 @@ use xui::geometry::Rect;
 use xui::prelude::*;
 use xui::widget::{Fill, ListView};
 use xui::{Key, dip};
-use xui_blitz::{BlitzView, BlitzViewEvent};
+use xui_markdown::MarkdownView;
 
 use super::app::{Editor, Msg};
-use super::guide_html::{self, Examples};
+use super::guide_md::{self, Examples};
+use super::script_widgets::MONO;
 use crate::manual;
 use crate::pages::Page;
 use crate::studio::Mode;
@@ -31,10 +32,6 @@ pub enum ManualMsg {
     Open,
     /// A page, by index.
     Topic(usize),
-    /// The view has laid a page out and wants it drawn.
-    Frame,
-    /// Text selected in the page, for the clipboard.
-    Copy(String),
     /// Esc or the close button.
     Close,
 }
@@ -53,7 +50,7 @@ fn manual_msg(m: ManualMsg) -> Msg {
 pub struct Manual {
     window: WindowHandle<Msg>,
     pages: Vec<Page>,
-    view: Handle<BlitzView<Msg>>,
+    view: Handle<MarkdownView<Msg>>,
     topics: Handle<ListView<Msg>>,
     /// The page on show.
     topic: Cell<usize>,
@@ -72,17 +69,10 @@ impl App for ManualWindow {
     }
 }
 
-/// The page view. Its pages have no links, and a link the view reports anyway
-/// is dropped: the only thing a page can ask for is a copy of its text.
-fn page_view(ui: &Ui<Msg>) -> XuiResult<BlitzView<Msg>> {
-    BlitzView::builder(
-        || manual_msg(ManualMsg::Frame),
-        |event| match event {
-            BlitzViewEvent::CopyRequested(text) => Some(manual_msg(ManualMsg::Copy(text))),
-            _ => None,
-        },
-    )
-    .build(ui, Rect::default())
+/// The page view. Its pages have no links, so it reports nothing; it selects
+/// and copies text by itself.
+fn page_view(ui: &Ui<Msg>) -> XuiResult<MarkdownView<Msg>> {
+    Ok(MarkdownView::new(ui, Rect::default())?.style(guide_md::style(MONO)))
 }
 
 impl Manual {
@@ -125,26 +115,30 @@ impl Manual {
     }
 
     /// Shows page `topic`; one past the end, or the page on show, changes nothing.
-    fn show(&self, topic: usize, theme: &xui::theme::Theme) {
+    fn show(&self, topic: usize) {
         let Some(page) = self.pages.get(topic) else {
             return;
         };
         if topic == self.topic.replace(topic) {
             return;
         }
-        let made = guide_html::render(page, theme, Examples::Plain);
-        let view = self.view.get();
-        view.set_background(guide_html::background(theme));
-        view.load_html(made.html, "about:blank");
+        let made = guide_md::render(page, Examples::Plain);
+        self.view.get().set_markdown(&made.markdown);
         let list = self.topics.get();
         if list.selected() != Some(topic) {
             list.select(Some(topic));
         }
     }
 
-    /// Whether the page on show has been laid out.
-    pub fn is_ready(&self) -> bool {
-        self.is_open() && self.view.get().is_ready()
+    /// The title of the page on show (its first block, the page's heading),
+    /// while the window is up.
+    pub fn shown_title(&self) -> Option<String> {
+        if !self.is_open() {
+            return None;
+        }
+        let doc = self.view.get().current_document();
+        let first = doc.blocks().first()?;
+        Some(doc.block_text(first).to_owned())
     }
 
     /// The page on show.
@@ -165,21 +159,15 @@ impl Editor {
             ManualMsg::Open => self.open_manual(ui),
             ManualMsg::Topic(topic) if open => {
                 if let Some(m) = self.manual.borrow().as_ref() {
-                    m.show(topic, &ui.theme());
+                    m.show(topic);
                 }
             }
-            ManualMsg::Frame if open => {
-                if let Some(m) = self.manual.borrow().as_ref() {
-                    m.view.get().update();
-                }
-            }
-            ManualMsg::Copy(text) => ui.set_clipboard_text(&text),
             ManualMsg::Close => {
                 if let Some(m) = self.manual.borrow_mut().take() {
                     m.window.close();
                 }
             }
-            ManualMsg::Topic(_) | ManualMsg::Frame => {}
+            ManualMsg::Topic(_) => {}
         }
     }
 
@@ -201,7 +189,7 @@ impl Editor {
             }
         }
         if let Some(m) = self.manual.borrow().as_ref() {
-            m.show(topic, &ui.theme());
+            m.show(topic);
         }
     }
 }

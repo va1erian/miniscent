@@ -52,8 +52,6 @@ impl Editor {
             ScriptMsg::Edited => self.script_edited(),
             ScriptMsg::Problem(row) => self.go_to_problem(row),
             ScriptMsg::Example(n) => self.insert_example(n),
-            ScriptMsg::GuideFrame => self.script.guide_frame(),
-            ScriptMsg::Copy(text) => self.script.copy(&text),
             ScriptMsg::Reload => self.reload_script(),
             ScriptMsg::Save => self.save_command(),
             ScriptMsg::Play => self.play_command(),

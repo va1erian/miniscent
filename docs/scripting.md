@@ -448,7 +448,7 @@ another program is followed, or offered as a choice if there are edits in the wa
 decision to have no script editor: placing a door and then leaving the program to wire it was the weak
 step in the loop.
 
-The pane sits under the views or in a window of its own, and only its widgets differ: a widget cannot move between windows, so each place has its own over one model, and moving starts the code editor's undo over. Play closes the window until it ends, since the game takes the keyboard and pointer through the main window. The guide is one `xui-blitz` view showing a page of HTML: as separate widgets a page cost 100 ms on every re-flow, on a window whose labels ask for one whenever their text changes, and a view is one widget that measures nothing, with the page laid out on its own thread and only when it is on show (a re-flow takes 3.1 ms with the guide open, as with the pane alone, in `--ui-timing`).
+The pane sits under the views or in a window of its own, and only its widgets differ: a widget cannot move between windows, so each place has its own over one model, and moving starts the code editor's undo over. Play closes the window until it ends, since the game takes the keyboard and pointer through the main window. The guide is one `xui-markdown` view showing a page of Markdown: as separate widgets a page cost 100 ms on every re-flow, on a window whose labels ask for one whenever their text changes, and a view is one widget that measures nothing, laying out the blocks on show first and the rest in slices.
 
 **Basic entities.** Script > Add entity places a door, lift, wave and so on. Each is ordinary level content
 (named brushes, zones and markers) and a few lines added to the script, mostly calls into
@@ -462,11 +462,15 @@ and compare the table with the game's own, so neither can drift.
 
 The guide's file is Markdown, a small subset read by `script/guide.rs`: `# ` starts a page, `## ` a heading, `- ` and
 `1. ` list items, four spaces an example, any other line a paragraph, and inline `code` and **bold**. There is no Markdown
-crate, as the guide needs nothing more and every feature is one more thing to escape. `ui/guide_html.rs` makes a page into HTML
-(escaped, coloured from the window's theme, examples coloured as the code editor colours them) and the view lays it out.
+crate, as the guide needs nothing more and every feature is one more thing to escape. `ui/guide_md.rs` makes a page into the
+Markdown the view shows (the subset's `code` and **bold** kept, every other markup character escaped, so a page shows what its
+text says), and the view colours examples with the code editor's own lexer and the pane's colours, in the window's theme.
 Each example has an "Insert in script" link, a link `insert:N` the editor answers by putting the Nth example of the page above the
-caret's line; no other link does anything, and the view fetches nothing: its images and style sheets are not loaded, and the page
-has none. A view in each place the pane can be, as for the other widgets. The view is `xui-blitz`, at the rev already pinned, in `apps/editor` only. It was tried after `xui-litehtml`, which measures text at 96 dpi and paints it at the display's, so words drifted on a scaled display and monospace text lost its grid, and which reused one page's fonts on the next. Blitz is pure Rust, so no C++ compiler is needed. It costs 147 crates and takes the editor's binary from 7.9 to 16.5 MB, with no change the timing can tell.
+caret's line; no other link does anything, and the view fetches nothing. Text selects with the mouse, and Ctrl+C copies it. A view in
+each place the pane can be, as for the other widgets. The view is `xui-markdown`, at the rev already pinned, in `apps/editor` only.
+It replaced `xui-blitz`, a whole web engine (Stylo, Taffy) for five kinds of block, which had replaced `xui-litehtml` (it measured
+text at 96 dpi and painted it at the display's). The move took the release editor from 21.4 to 11.4 MB and its dependency
+tree from 308 crates to 154, and the guide's pages, light, dark and at 150%, were looked at in the selftest's pictures.
 
 ## Not covered
 

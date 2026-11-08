@@ -19,14 +19,15 @@ mscent-script.workspace = true
 mscent-platform = { workspace = true }
 # Its desktop feature for the GPU window Play presents into, as the game does.
 miniscent-game = { path = "../game", default-features = false, features = ["desktop", "hardware"] }
-xui = { git = "https://github.com/va1erian/xui", rev = "91eea5418203251a5c23cd6a06e96f2f7d1650b3", default-features = false }
-xui-code-editor = { git = "https://github.com/va1erian/xui", rev = "91eea5418203251a5c23cd6a06e96f2f7d1650b3" }
-# The guide is an HTML page: it replaces a pile of text widgets (docs/scripting.md). Blitz over
-# xui-litehtml, which measures text at 96 dpi and paints it at the display's, so words drift when scaled.
-xui-blitz = { git = "https://github.com/va1erian/xui", rev = "91eea5418203251a5c23cd6a06e96f2f7d1650b3" }
+xui = { git = "https://github.com/va1erian/xui", rev = "26a95d06a4bf0a3cb3ddd57a6d400bfa2279b8b3", default-features = false }
+xui-code-editor = { git = "https://github.com/va1erian/xui", rev = "26a95d06a4bf0a3cb3ddd57a6d400bfa2279b8b3" }
+# The guide and the manual are Markdown in one view each: a pile of text widgets cost the window a
+# re-flow (docs/scripting.md). xui-markdown over xui-blitz, a whole web engine (Stylo, Taffy) for
+# five kinds of block; it selects and copies, and colours examples with the script lexer.
+xui-markdown = { git = "https://github.com/va1erian/xui", rev = "26a95d06a4bf0a3cb3ddd57a6d400bfa2279b8b3" }
 
 [target.'cfg(windows)'.dependencies]
-xui-d2d = { git = "https://github.com/va1erian/xui", rev = "91eea5418203251a5c23cd6a06e96f2f7d1650b3", optional = true }
+xui-d2d = { git = "https://github.com/va1erian/xui", rev = "26a95d06a4bf0a3cb3ddd57a6d400bfa2279b8b3", optional = true }
 
 [features]
 # Both backends: Direct2D draws the window on Windows (`--canvas` for the

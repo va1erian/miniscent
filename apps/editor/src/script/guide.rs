@@ -34,6 +34,10 @@ fn reference() -> Page {
         let mut rows = API.iter().filter(|e| e.on == on).peekable();
         if rows.peek().is_some() {
             blocks.push(Block::Heading(on.title().to_string()));
+            blocks.push(Block::Head(
+                "Message".to_string(),
+                "What it does".to_string(),
+            ));
         }
         blocks.extend(rows.map(|e| Block::Row(e.selector.to_string(), e.help.to_string())));
     }

@@ -1,18 +1,15 @@
-//! The guide of the script pane: pages laid out by their own thread and drawn,
-//! examples put in the script by a click on their link, and the guide in the
-//! pane's own window. And the editor manual: F1 opens it on the page about the
-//! tool in hand, each page is laid out and drawn in its window, and Esc's
-//! message closes it. The headless backend runs no second window's own
-//! messages, so the view's frames come here as the editor's message, as the
-//! window would forward them.
-
-use std::time::{Duration, Instant};
+//! The guide of the script pane: pages drawn, examples put in the script by a
+//! click on their link, and the guide in the pane's own window. And the editor
+//! manual: F1 opens it on the page about the tool in hand, each page is drawn
+//! in its window, and Esc's message closes it. The page views lay out what they
+//! show when painted, so drawing a picture is all a page needs.
 
 use xui::xui_canvas::snapshot::Stage;
 
 use super::{Run, pump};
 use crate::manual;
 use crate::model::Tool;
+use crate::script::guide;
 use crate::ui::script_pane::ScriptMsg;
 use crate::ui::{ManualMsg, Msg, Probe, cmd};
 use xui::widget::DialogAction;
@@ -23,36 +20,32 @@ pub(super) fn leave(stage: &Stage<'_, Msg>, msg: Msg) {
     stage.emit(Msg::Discard(DialogAction::Accept(String::new())));
 }
 
-/// Paints until the guide has laid its page out, and once more to show it. The
-/// view hands its page to its thread when painted and picks the frame up when
-/// painted again, and the headless backend paints only for a picture and has no
-/// wake for the thread to ask for one, so both are done here.
-pub(super) fn wait_for_guide(stage: &Stage<'_, Msg>, probe: &Probe) -> bool {
-    let end = Instant::now() + Duration::from_secs(10);
-    while !probe.guide_ready() {
-        if Instant::now() > end {
-            return false;
-        }
-        let _ = stage.ui().capture();
-        stage.emit(Msg::Script(ScriptMsg::GuideFrame));
-        pump(stage, 1);
-    }
-    stage.emit(Msg::Script(ScriptMsg::GuideFrame));
-    pump(stage, 2);
-    true
+/// Draws the guide, which lays its page out as it paints, and returns the
+/// title of the page it shows. The headless backend paints only for a
+/// picture, so one is taken here.
+pub(super) fn wait_for_guide(stage: &Stage<'_, Msg>, probe: &Probe) -> Option<String> {
+    pump(stage, 1);
+    let _ = stage.ui().capture();
+    pump(stage, 1);
+    probe.guide_title()
+}
+
+/// The title of the guide's page `topic`.
+fn guide_title(topic: usize) -> Option<String> {
+    guide::pages().get(topic).map(|p| p.title.clone())
 }
 
 pub(super) fn guide(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     stage.emit(Msg::Menu(cmd::GUIDE));
     run.check(
-        wait_for_guide(stage, probe),
-        "the guide's first page is laid out",
+        wait_for_guide(stage, probe) == guide_title(0),
+        "the guide's first page is on show",
     );
     run.shot(stage, "07-guide.png");
     stage.emit(Msg::Script(ScriptMsg::Topic(3)));
     run.check(
-        wait_for_guide(stage, probe),
-        "another page is laid out in its turn",
+        wait_for_guide(stage, probe) == guide_title(3),
+        "another page is on show in its turn",
     );
     run.shot(stage, "08-guide-doors.png");
     stage.emit(Msg::Script(ScriptMsg::Topic(7)));
@@ -97,23 +90,18 @@ pub(super) fn guide(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     run.shot(stage, "09-closed.png");
 }
 
-/// The guide in the pane's own window: a view of its own, laid out on its own
-/// thread, drawn by the window's picture.
+/// The guide in the pane's own window: a view of its own, drawn by the
+/// window's picture.
 pub(super) fn in_window(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     stage.emit(Msg::Menu(cmd::GUIDE));
-    let mut window_picture = None;
-    let end = Instant::now() + Duration::from_secs(10);
-    while !probe.guide_ready() && Instant::now() < end {
-        window_picture = probe.script_window().and_then(|w| w.capture().ok());
-        stage.emit(Msg::Script(ScriptMsg::GuideFrame));
-        pump(stage, 1);
-    }
-    stage.emit(Msg::Script(ScriptMsg::GuideFrame));
-    run.check(probe.guide_ready(), "the guide in the window is laid out");
+    pump(stage, 2);
+    run.check(
+        probe.guide_title().is_some(),
+        "the guide in the window shows a page",
+    );
     let shot = probe
         .script_window()
         .and_then(|w| w.capture().ok())
-        .or(window_picture)
         .map(|img| img.save_png(run.dir.join("10b-own-window-guide.png")));
     run.check(
         matches!(shot, Some(Ok(()))),
@@ -157,19 +145,11 @@ pub(super) fn scaled(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     };
     for (topic, name) in [(0, "start"), (1, "names"), (3, "doors"), (7, "reference")] {
         stage.emit(Msg::Script(ScriptMsg::Topic(topic)));
-        let end = Instant::now() + Duration::from_secs(10);
-        while Instant::now() < end {
-            let _ = window.capture();
-            stage.emit(Msg::Script(ScriptMsg::GuideFrame));
-            pump(stage, 1);
-            if probe.guide_ready() {
-                break;
-            }
-        }
-        pump(stage, 5);
-        let _ = window.capture();
-        stage.emit(Msg::Script(ScriptMsg::GuideFrame));
         pump(stage, 2);
+        run.check(
+            probe.guide_title() == guide_title(topic),
+            &format!("the {name} page is on show"),
+        );
         let shot = window
             .capture()
             .map(|img| img.save_png(run.dir.join(format!("{name}.png"))));
@@ -181,20 +161,12 @@ pub(super) fn scaled(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     stage.emit(Msg::Script(ScriptMsg::Float(false)));
 }
 
-/// Draws frames until the page on show is laid out; whether it was.
-fn wait_for_page(stage: &Stage<'_, Msg>, probe: &Probe) -> bool {
-    let end = Instant::now() + Duration::from_secs(10);
-    while !probe.manual_ready() && Instant::now() < end {
-        let _ = probe.manual_picture();
-        stage.emit(Msg::Manual(ManualMsg::Frame));
-        pump(stage, 1);
-    }
-    // Once more, so the picture taken next has the page in it.
-    pump(stage, 3);
+/// Draws the manual's page and returns the title of the page on show.
+fn wait_for_page(stage: &Stage<'_, Msg>, probe: &Probe) -> Option<String> {
+    pump(stage, 1);
     let _ = probe.manual_picture();
-    stage.emit(Msg::Manual(ManualMsg::Frame));
-    pump(stage, 2);
-    probe.manual_ready()
+    pump(stage, 1);
+    probe.manual_title()
 }
 
 /// The window's picture as `name`; whether it was written.
@@ -217,8 +189,11 @@ pub(super) fn manual(run: &mut Run, stage: &Stage<'_, Msg>, probe: &Probe) {
     let pages = manual::pages();
     for (i, page) in pages.iter().enumerate() {
         stage.emit(Msg::Manual(ManualMsg::Topic(i)));
-        let ready = wait_for_page(stage, probe);
-        run.check(ready, &format!("the page {:?} is laid out", page.title));
+        let shown = wait_for_page(stage, probe);
+        run.check(
+            shown.as_deref() == Some(page.title.as_str()),
+            &format!("the page {:?} is on show", page.title),
+        );
         let name = format!(
             "manual-{i:02}-{}.png",
             page.title.replace([' ', ':', ','], "-")

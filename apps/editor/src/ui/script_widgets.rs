@@ -4,8 +4,8 @@
 //!
 //! A widget costs on every re-flow of its window, hidden or not, and a label
 //! changing its text asks for one. A page of wrapped text as separate widgets took
-//! 100 ms a re-flow, so the guide is one HTML view, which measures nothing: the
-//! page is laid out on the view's own thread, and only when it is on show.
+//! 100 ms a re-flow, so the guide is one Markdown view, which measures nothing: it
+//! lays out the blocks on show first and the rest in slices.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -15,11 +15,11 @@ use xui::backend::Result as XuiResult;
 use xui::geometry::Rect;
 use xui::prelude::*;
 use xui::widget::{Fill, ListView, Tabs};
-use xui_blitz::{BlitzView, BlitzViewEvent};
 use xui_code_editor::{Editor as CodeEditor, FontConfig, Options};
+use xui_markdown::MarkdownView;
 
 use super::app::Msg;
-use super::guide_html;
+use super::guide_md;
 use super::script_lexer::{ScriptColours, ScriptCompleter};
 use super::script_pane::ScriptMsg;
 use crate::model::EditorState;
@@ -34,7 +34,7 @@ pub(super) const GUIDE_TAB: usize = 1;
 const DETAIL_HEIGHT: i32 = 70;
 
 /// The monospace family the code is set in; a backend without it picks one.
-const MONO: &str = "Consolas";
+pub(super) const MONO: &str = "Consolas";
 
 /// What the widgets are built over.
 #[derive(Clone)]
@@ -50,7 +50,7 @@ fn script_msg(m: ScriptMsg) -> Msg {
 #[derive(Default)]
 pub struct PaneWidgets {
     pub code: Handle<CodeEditor<Msg>>,
-    pub(super) guide: Handle<BlitzView<Msg>>,
+    pub(super) guide: Handle<MarkdownView<Msg>>,
     pub(super) tabs: Handle<Tabs<Msg>>,
     pub(super) problems: Handle<ListView<Msg>>,
     pub(super) detail: Handle<MultilineEdit<Msg>>,
@@ -86,23 +86,13 @@ fn code_editor(ui: &Ui<Msg>, shared: Shared) -> XuiResult<CodeEditor<Msg>> {
     )
 }
 
-/// The guide's page. A click on one of its links asks for an example, and
-/// nothing else a page can report does anything but copy what is selected.
-fn guide_view(ui: &Ui<Msg>) -> XuiResult<BlitzView<Msg>> {
-    let example =
-        |href: &str| guide_html::example_of(href).map(|i| script_msg(ScriptMsg::Example(i)));
-    BlitzView::builder(
-        || script_msg(ScriptMsg::GuideFrame),
-        move |event| match event {
-            // Our links have a scheme of their own, which the view may report as
-            // one it cannot open. Either way only `example_of` can act on one.
-            BlitzViewEvent::LinkClicked(href) => example(&href),
-            BlitzViewEvent::LaunchUrl { url, .. } => example(&url),
-            BlitzViewEvent::CopyRequested(text) => Some(script_msg(ScriptMsg::Copy(text))),
-            _ => None,
-        },
-    )
-    .build(ui, Rect::default())
+/// The guide's page. A click on one of its links asks for an example; the view
+/// selects and copies text by itself.
+fn guide_view(ui: &Ui<Msg>) -> XuiResult<MarkdownView<Msg>> {
+    Ok(MarkdownView::new(ui, Rect::default())?
+        .style(guide_md::style(MONO))
+        .highlighter(guide_md::ScriptHighlight)
+        .on_link(|href| guide_md::example_of(href).map(|i| script_msg(ScriptMsg::Example(i)))))
 }
 
 impl PaneWidgets {
@@ -215,11 +205,10 @@ impl PaneWidgets {
         let (Some(ui), Some(page)) = (ui.as_ref(), guide::pages().get(topic).cloned()) else {
             return;
         };
-        let theme = ui.theme();
-        let made = guide_html::render(&page, &theme, guide_html::Examples::Script);
+        let made = guide_md::render(&page, guide_md::Examples::Script);
         let view = self.guide.get();
-        view.set_background(guide_html::background(&theme));
-        view.load_html(made.html, "about:blank");
+        view.set_code_palette(Some(guide_md::palette(&ui.theme())));
+        view.set_markdown(&made.markdown);
         *self.examples.borrow_mut() = made.examples;
     }
 
