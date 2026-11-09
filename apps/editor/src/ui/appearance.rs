@@ -129,6 +129,8 @@ pub(super) fn system_accent() -> Option<Color> {
     None
 }
 
+// Only the Windows lookup calls it; the tests run it everywhere.
+#[cfg(any(windows, test))]
 /// The colour in `reg query` output: `AccentColor  REG_DWORD  0xAABBGGRR`.
 fn parse_accent(text: &str) -> Option<Color> {
     let line = text.lines().find(|l| l.contains("AccentColor"))?;
