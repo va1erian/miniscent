@@ -252,6 +252,10 @@ lightmap, so both show it.
   little). A lamp behind the viewport wall, or in another room, lights nothing of
   the view. The test is per lamp, not per ray, so the frame around a small window
   does not shade what the lamp lights through it.
+- The sight lines are budgeted at `MAX_CARRY_RAYS` (65 536, about 13 ms), since a
+  level may hold 65 536 lamps. Past it no more lamps are carried: the level loads
+  with darker vistas rather than stalling. Lamps out of range of a face, or behind
+  it, cost no ray.
 - An image that falls outside the room, in solid or another island, is dropped.
 - A room seen by several layers takes the map of the first with a finite scale, so
   no lamp lights it twice. An infinitely far layer (`parallax` 0) takes none.
@@ -259,12 +263,17 @@ lightmap, so both show it.
   level with no viewport face, or only infinite layers, keeps its key.
 - Images stay out of `play_lights`, so they light no actor and no live voxel edit of
   the play space.
+- A layer with `spin` turns its room under the lit picture, so the seam matches
+  only at spin 0. A spinning layer is a sky or a far ring, which continues nothing.
 
 `tests/vista_seam.rs` reads twin luxels, a play floor and its image beyond the
-viewport at scale 4: they agree within 5 % (luxels in the room are 8 times larger),
-and the floor past the wall goes from 0.007 (ambient) to 0.62 with the lamp. Taking
-the carry out fails two of its four tests, and taking out the window test fails the
-lamp-behind-the-wall one.
+viewport at scale 4: they agree within 5 % as measured, and the test allows 12 % (luxels in
+the room are 8 times larger). The floor past the wall goes from 0.007 (ambient) to
+0.62 with the lamp. A room shown by an infinite layer first is still lit by the
+finite one after it. Unit tests in `level/vista_light_tests.rs` set each reason a
+lamp is kept out (behind the face's plane with a clear sight line, hidden by a
+wall, a projector aimed away, out of range, the ray budget spent) beside a lamp
+carried. Taking out any one check fails its test.
 
 Not carried: dynamic lights (a shot passing the window lights the play floor, not
 the floor beyond), the play fog (a layer keeps its own; matching it to the level's
