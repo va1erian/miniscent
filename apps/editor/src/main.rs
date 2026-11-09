@@ -97,6 +97,7 @@ fn main() -> xui::backend::Result<()> {
     let make = move |ui: &mut xui::app::Ui<ui::Msg>| {
         let mut editor = open(ui, path.as_deref(), showcase)?;
         editor.start_ticks(ui);
+        editor.use_system_accent(ui);
         if live {
             editor.start_live(ui);
         }

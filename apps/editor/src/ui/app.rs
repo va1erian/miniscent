@@ -54,6 +54,7 @@ pub struct Editor {
     /// The manual's window, once opened. It may have been closed since.
     pub(super) manual: Rc<RefCell<Option<super::manual_window::Manual>>>,
     pub(super) menu: Handle<Menu<Msg>>,
+    pub(super) appearance: super::appearance::Appearance,
     pub(super) status: Handle<StatusBar<Msg>>,
     tools: [Handle<IconButton<Msg>>; TOOLS.len()],
     ops: [Handle<IconButton<Msg>>; OPS.len()],
@@ -134,6 +135,7 @@ impl Editor {
             fog_window: Rc::default(),
             manual: Rc::default(),
             menu: Handle::new(),
+            appearance: super::appearance::Appearance::new(ui.theme()),
             status: Handle::new(),
             tools: Default::default(),
             ops: Default::default(),
@@ -386,6 +388,7 @@ impl App for Editor {
                 self.tex_message(m, ui);
                 return;
             }
+            Msg::Menu(id) if self.appearance_command(id, ui) => {}
             Msg::Menu(cmd::TEX_OPEN) if self.studio.mode == Mode::Edit => self.tex_open(),
             Msg::Menu(id) if self.tex.is_open() => self.tex_menu(id, ui),
             Msg::Discard(action) => {

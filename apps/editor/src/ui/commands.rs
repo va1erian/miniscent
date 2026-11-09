@@ -105,6 +105,7 @@ pub(super) fn menus(m: &mut xui::widget::MenuScope<'_>) {
         v.separator();
         item(v, cmd::LAYOUT_CLASSIC, "&Classic layout");
         item(v, cmd::LAYOUT_QUAD, "&Quad layout (2 x 2)");
+        super::appearance::menu(v);
     });
     m.submenu(MenuId::new(103), "&Play", |p| {
         item(p, cmd::PLAY, "&Play");
