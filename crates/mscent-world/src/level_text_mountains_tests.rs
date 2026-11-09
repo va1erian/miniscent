@@ -138,3 +138,37 @@ fn a_clear_road_is_read_and_a_bad_one_refused() {
         );
     }
 }
+
+#[test]
+fn layers_and_jitter_are_read_and_bad_ones_refused() {
+    let plain = from_text(&text(&[LINE])).unwrap();
+    let snow = format!("{LINE}  layer 17 0.5 1e6 0 1.4  layer 16 -1e6 1e6 0.9 1e6  jitter 0.05");
+    let layered = from_text(&text(&[&snow])).unwrap();
+    // The same text paints the same samples, and paints them differently.
+    let again = from_text(&text(&[&snow])).unwrap();
+    assert_eq!(format::write(&layered), format::write(&again));
+    assert_ne!(format::write(&plain), format::write(&layered));
+    let nine = " layer 14 0 1 0 1".repeat(9);
+    for bad in [
+        "layer 17 0.5 1e6 0",
+        "layer 300 0 1 0 1",
+        "layer -1 0 1 0 1",
+        "layer 17 0.8 0.2 0 1",
+        "layer 17 0 1 -1 1",
+        "layer 17 nan 1 0 1",
+        "layer 17 0 inf 0 1",
+        "layer 17 -1e300 1 0 1",
+        "jitter",
+        "jitter nan",
+        "jitter 2",
+        "jitter -0.1",
+        "jitter 0.1 layer 17 0 1 0 1",
+        "layer 17 0 1 0 1 edge 8",
+        nine.as_str(),
+    ] {
+        assert!(
+            from_text(&text(&[&format!("{LINE} {bad}")])).is_err(),
+            "{bad}"
+        );
+    }
+}

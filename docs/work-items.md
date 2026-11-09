@@ -182,6 +182,7 @@ Design in [viewports.md](viewports.md); status in [status.md](status.md#m13-view
 | M13.9 | Sky materials as recipes, `out-alpha`, Studio preview of a mask; demo mountains in budget | M13.8, M12.11 | M | The sky PNGs are gone; masked recipes load, preview and save; the demo stays under `VISTA_VOXEL_TRIS` across its platform |
 | M13.12 | Sky light: a layer's room's lamps light the play space through its viewport faces, shadowed in both; the demo's hills brought in | M13.11 | M | A play floor and its image agree; rock in the room and walls of the level shade; an infinite layer sheds nothing; no sky keeps the key |
 | M13.11 | The demo's plain as terrain: `mountains` `clear` and `edge`, one range for the ground, relit | M13.10 | S | The road is flat and the rest rises; the demo stays under `VISTA_VOXEL_TRIS` across its platform; looked at on both renderers |
+| M13.13 | Terrain layers: grass, scree, cliff and snow recipes; `Layers` by height, slope and jitter; `layer` and `jitter` in level text; New mountains layered; the demo's ground layered | M13.12 | S | Deterministic bytes, hostile layers refused without a panic, the keywords read and rejected; the demo looked at on both renderers and still under `VISTA_VOXEL_TRIS` |
 | M13.10 | Play lamps carried into layers' rooms through the layer's map, for lamps that shine on a viewport face | M13.8 | S | Twin luxels across a viewport agree; a lamp behind the wall and an infinite layer change nothing |
 
 ## M14 Hardware renderer

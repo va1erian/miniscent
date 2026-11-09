@@ -3,7 +3,7 @@
 
 use mscent_math::Vec3d;
 use mscent_world::Op;
-use mscent_world::voxel::{CellSize, MountainRange, fill, mountains};
+use mscent_world::voxel::{CellSize, Layers, MountainRange, fill, mountains};
 
 use super::document::{BrushDef, Id, Shape};
 use super::generators::{FieldKind, Kind, Site, field, generate};
@@ -98,6 +98,7 @@ impl Sculptor<'_> {
             order,
             clear: None,
             edge: None,
+            layers: Layers::NONE,
         };
         let volume = match mountains(&range) {
             Ok(v) => v,

@@ -11,7 +11,7 @@ use super::*;
 use crate::model::Selection;
 
 /// How many ids the stock manifest fills: the first new material gets this id.
-const STOCK: u16 = mscent_world::materials::LAST_SKY + 1;
+const STOCK: u16 = mscent_world::materials::LAST_STOCK + 1;
 
 /// The stock materials, a new one after them, a retired id and another new one.
 fn extended(stock: &MaterialTable) -> MaterialTable {

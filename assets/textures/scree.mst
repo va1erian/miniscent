@@ -1,0 +1,17 @@
+miniscent-recipe 1
+size 128 128
+gloss 12
+# Loose stones between turf and cliff: a crowd of pebbles, each its own shade.
+op 0 0 1 cells count=256 seed=91 mode=distance
+op 0 1 1 invert
+op 0 2 1 range in_low=0.35 in_high=0.9
+op 1 2 1 noise freq_x=16 freq_y=16 octaves=3 persistence=0.5 seed=92 color1=0.3,0.3,0.3
+op 0 3 2 merge mode=add
+op 0 4 1 store name=height
+op 0 5 1 out-height normal_strength=6
+# Colour: warm grey stones, a shade apiece, dark in the gaps.
+op 0 7 1 cells count=256 seed=91 mode=id color0=0.36,0.33,0.29 color1=0.62,0.58,0.52
+op 1 6 1 load name=height
+op 1 7 1 range out_low=0.45
+op 0 8 2 merge mode=multiply
+op 0 9 1 out-albedo

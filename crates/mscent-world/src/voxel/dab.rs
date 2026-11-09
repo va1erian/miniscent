@@ -166,6 +166,16 @@ pub fn fill(
     field: impl Fn(Vec3d) -> f64,
     material: u8,
 ) -> Vec<[u16; 3]> {
+    fill_with(volume, ctx, |p| (field(p), material))
+}
+
+/// [`fill`] with a material per sample: `field` gives each sample's distance and
+/// material together.
+pub fn fill_with(
+    volume: &mut Volume,
+    ctx: &mut Context,
+    field: impl Fn(Vec3d) -> (f64, u8),
+) -> Vec<[u16; 3]> {
     if ctx.lattice != volume.lattice {
         return Vec::new();
     }
@@ -175,6 +185,7 @@ pub fn fill(
     };
     let cell = volume.lattice.cell.units();
     edit_samples(volume, ctx, span, &mut |_, p, _, _| {
-        (quantize(field(p), cell), material)
+        let (distance, material) = field(p);
+        (quantize(distance, cell), material)
     })
 }

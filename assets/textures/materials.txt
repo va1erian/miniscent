@@ -22,3 +22,7 @@
 11 sky-clouds 0
 12 sky-ridge 0
 13 sky-planet 0
+14 grass 6
+15 scree 12
+16 cliff 14
+17 snow 40
