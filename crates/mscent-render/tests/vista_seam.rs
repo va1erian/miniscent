@@ -71,11 +71,16 @@ fn lamp(pos: Vec3) -> Entity {
 }
 
 fn layer(parallax: f32) -> Entity {
+    layer_at(parallax, 0)
+}
+
+/// A layer of slot 0 drawn `index`-th, showing the one room.
+fn layer_at(parallax: f32, index: u8) -> Entity {
     Entity::VistaLayer {
         pos: Vec3::new(AWAY, 0.0, 0.0),
         centre: Vec3::ZERO,
         slot: 0,
-        layer: 0,
+        layer: index,
         parallax,
         spin: Vec3::ZERO,
         pan: [0.0, 0.0],
@@ -205,4 +210,18 @@ fn an_infinitely_far_layer_takes_no_play_lamp() {
         let p = image(Vec3::new(0.0, y, FLOOR));
         assert_eq!(floor_light(&with, p), floor_light(&without, p), "y {y}");
     }
+}
+
+#[test]
+fn a_room_shown_by_an_infinite_layer_first_is_lit_by_the_finite_one() {
+    // The first layer cannot carry a lamp; the room still takes the second's.
+    let shown = vec![layer_at(0.0, 0), layer_at(PARALLAX, 1)];
+    let lit = renderer(Vec::new(), [vec![near_lamp()], shown.clone()].concat());
+    let dark = renderer(Vec::new(), shown);
+    let p = image(Vec3::new(0.0, 52.0, FLOOR));
+    let (a, b) = (
+        luminance(floor_light(&lit, p)),
+        luminance(floor_light(&dark, p)),
+    );
+    assert!(a > b * 3.0, "{a} against {b}");
 }

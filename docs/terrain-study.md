@@ -18,8 +18,8 @@ figures marked *estimate* are reasoning, not measurements, and were not prototyp
   system's 12 300.
 - **Today it would buy little.** The only height-field terrain in the repository is
   the three `mountains` ranges of the vista demo. They sit in a layer, where nothing
-  collides, and after M13.9 they already cost 272 chunks, 380 KB and 197 ms of bake at
-  scale 16. What they still cost on screen is raster time, and a height field changes
+  collides, and after M13.9 they already cost 272 chunks and 380 KB at 4-unit cells.
+  One 256-wide range at scale 16 bakes in 197 ms. What they still cost on screen is raster time, and a height field changes
   that little.
 - **Recommendation:** do not build it now. Build it when levels get large walkable
   outdoor ground. Then build it as a voxel *volume kind* that shares the voxel draw

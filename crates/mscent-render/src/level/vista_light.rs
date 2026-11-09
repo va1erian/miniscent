@@ -15,14 +15,23 @@
 //! lights nothing that face shows. The test is per lamp, not per ray, so a lamp
 //! that sees part of a window also lights what the frame around it would hide.
 //! An infinitely far layer (`parallax` 0) gets nothing: no lamp reaches it.
+//!
+//! The work is lamps times layers times viewport faces times sight lines, and a
+//! level may hold tens of thousands of lamps, so the sight lines are budgeted:
+//! past [`MAX_CARRY_RAYS`] no more lamps are carried. The level still loads; its
+//! vistas are only darker than its own lamps would make them.
 
-use mscent_math::epsilon::WINDOW_PROBE_OFFSET;
+use mscent_math::epsilon::{WINDOW_PROBE_INSET, WINDOW_PROBE_OFFSET};
 use mscent_math::{Vec3, Vec3d};
 use mscent_world::lightmap::PointLight;
 use mscent_world::lightmap::ray::segment_clear;
 use mscent_world::{Bsp, Face};
 
 use super::{Layer, Vistas};
+
+/// The most sight lines traced to decide which lamps are carried: about 13 ms
+/// at the BSP's 0.2 µs a ray, and far more than a hand-made level asks for.
+const MAX_CARRY_RAYS: usize = 1 << 16;
 
 impl Vistas {
     /// `lights` followed by the images of its play-space lamps in each layer's
@@ -34,7 +43,10 @@ impl Vistas {
         holes: &[(Face, u8)],
         mut lights: Vec<PointLight>,
     ) -> Vec<PointLight> {
-        let own = lights.len();
+        let play: Vec<PointLight> = (lights.iter().copied())
+            .filter(|l| self.in_play_space(bsp, l.position))
+            .collect();
+        let mut rays = MAX_CARRY_RAYS;
         for (index, layer) in self.layers.iter().enumerate() {
             if !self.carries_into(index) {
                 continue;
@@ -44,15 +56,11 @@ impl Vistas {
                 .filter(|(_, slot)| slots.contains(slot))
                 .map(|(face, _)| face)
                 .collect();
-            for i in 0..own {
-                let lamp = lights[i];
-                if !self.in_play_space(bsp, lamp.position) {
+            for lamp in &play {
+                let Some(image) = self.image_in(bsp, layer, lamp) else {
                     continue;
-                }
-                if !windows.iter().any(|w| shines_on(bsp, &lamp, w)) {
-                    continue;
-                }
-                if let Some(image) = self.image_in(bsp, layer, &lamp) {
+                };
+                if windows.iter().any(|w| shines_on(bsp, lamp, w, &mut rays)) {
                     lights.push(image);
                 }
             }
@@ -109,10 +117,16 @@ impl Vistas {
 
 /// Whether `lamp` lights some of `window`: a point of it within range, in front
 /// of it, in the lamp's cone and in clear sight. The points tried are the nearest
-/// to the lamp, the middle, and each corner drawn a little towards the middle.
-fn shines_on(bsp: &Bsp, lamp: &PointLight, window: &Face) -> bool {
+/// to the lamp, the middle, and each corner, all drawn a little towards the
+/// middle. Each sight line spends one of `rays`; none left means no.
+fn shines_on(bsp: &Bsp, lamp: &PointLight, window: &Face, rays: &mut usize) -> bool {
     let from = lamp.position.to_f64();
     if window.plane.signed_distance(from) <= WINDOW_PROBE_OFFSET {
+        return false;
+    }
+    // Out of range of the nearest point is out of range of all: no ray needed.
+    let nearest = nearest_on(window, from);
+    if (nearest - from).length() >= f64::from(lamp.radius) {
         return false;
     }
     let verts = window.polygon.vertices();
@@ -120,8 +134,10 @@ fn shines_on(bsp: &Bsp, lamp: &PointLight, window: &Face) -> bool {
         return false;
     };
     let lift = window.plane.normal * WINDOW_PROBE_OFFSET;
-    let inset = verts.iter().map(|&v| v.lerp(middle, 0.01));
-    let mut probes = [nearest_on(window, from), middle].into_iter().chain(inset);
+    let mut probes = std::iter::once(nearest)
+        .chain(verts.iter().copied())
+        .map(|v| v.lerp(middle, WINDOW_PROBE_INSET))
+        .chain(std::iter::once(middle));
     probes.any(|p| {
         let at = p + lift;
         let to = (at - from).to_f32();
@@ -129,8 +145,15 @@ fn shines_on(bsp: &Bsp, lamp: &PointLight, window: &Face) -> bool {
             Some(cone) => to.normalized().is_some_and(|d| !cone.misses(d)),
             None => true,
         };
-        to.length() < lamp.radius && in_cone && segment_clear(bsp, from, at)
+        to.length() < lamp.radius && in_cone && spend(rays) && segment_clear(bsp, from, at)
     })
+}
+
+/// Takes one ray from the budget, or says there is none left.
+fn spend(rays: &mut usize) -> bool {
+    let left = rays.checked_sub(1);
+    *rays = left.unwrap_or(0);
+    left.is_some()
 }
 
 fn centroid(verts: &[Vec3d]) -> Option<Vec3d> {
@@ -166,3 +189,7 @@ fn nearest_on(face: &Face, p: Vec3d) -> Vec3d {
         .min_by(|a, b| dist(a).total_cmp(&dist(b)))
         .unwrap_or(on_plane)
 }
+
+#[cfg(test)]
+#[path = "vista_light_tests.rs"]
+mod tests;
