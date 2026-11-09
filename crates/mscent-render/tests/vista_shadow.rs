@@ -12,7 +12,7 @@ use mscent_math::{Vec3, Vec3d};
 use mscent_render::{BuildConfig, Framebuffer, LevelRenderer, MaterialTable, Quality, View};
 use mscent_world::materials::{BRICK, METAL, ROCK, VIEW_FIRST};
 use mscent_world::vista_scale::{luxel_factor, parallax_of_scale};
-use mscent_world::voxel::{CellSize, Context, MountainRange, Volume, fill, mountains};
+use mscent_world::voxel::{CellSize, Context, Layers, MountainRange, Volume, fill, mountains};
 use mscent_world::{Brush, Entity, Level, MAX_VISTA_FOG, Op};
 
 const W: u32 = 160;
@@ -106,6 +106,9 @@ impl Rig {
                 seed: 5,
                 material: 4,
                 order: 4,
+                clear: None,
+                edge: None,
+                layers: Layers::NONE,
             };
             out.push(mountains(&range).expect("a hill"));
         }

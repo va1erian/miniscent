@@ -83,6 +83,11 @@ pub const SURFACE_PROBE: f32 = 0.05;
 /// light the vista behind it, so that the face's own wall does not block them.
 pub const WINDOW_PROBE_OFFSET: f64 = 0.05;
 
+/// Fraction of the way towards a viewport face's middle that its probe points
+/// are drawn, so that none sits on an edge, where the floor or a side wall
+/// meets the face and a sight line would end on that wall's plane.
+pub const WINDOW_PROBE_INSET: f64 = 0.01;
+
 /// Distance from a face's plane within which a shot's end point counts as on
 /// it: the probe distance again, since the end point may be off by that much.
 pub const FACE_MATCH_DISTANCE: f32 = 0.05;

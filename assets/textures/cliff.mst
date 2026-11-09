@@ -1,0 +1,14 @@
+miniscent-recipe 1
+size 128 128
+gloss 14
+# Bare rock for steep faces: strata stretched across the tile, broken by cracks.
+op 0 0 1 noise freq_x=2 freq_y=10 octaves=5 persistence=0.55 seed=101 color1=0.75,0.75,0.75
+op 1 0 1 noise freq_x=6 freq_y=6 octaves=4 persistence=0.5 seed=102 mode=ridged color1=0.35,0.35,0.35
+op 0 1 2 merge mode=add
+op 0 2 1 store name=height
+op 0 3 1 out-height normal_strength=8
+# Colour: dark slate, a little blue, lighter on the ledges.
+op 0 4 1 load name=height
+op 0 5 1 range out_low=0.16 out_high=0.42
+op 0 6 1 color gain=0.92,0.95,1
+op 0 7 1 out-albedo

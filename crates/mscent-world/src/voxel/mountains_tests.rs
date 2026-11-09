@@ -1,4 +1,5 @@
 use super::*;
+use crate::voxel::layers::{Layer, MAX_BOUND};
 use crate::voxel::test_util::{mesh_all, open_edges};
 
 fn range() -> Range {
@@ -10,6 +11,9 @@ fn range() -> Range {
         seed: 7,
         material: 4,
         order: 5,
+        clear: None,
+        edge: None,
+        layers: Layers::NONE,
     }
 }
 
@@ -74,8 +78,8 @@ fn the_range_falls_to_the_ground_at_the_edges() {
         .unwrap();
     let (x, y) = ((i as f64 - 1.0) * h.cell, (j as f64 - 1.0) * h.cell);
     let crest = h.at(i, j).unwrap();
-    assert!(h.field(Vec3d::new(x, y, crest - 3.0)) > 0.0);
-    assert!(h.field(Vec3d::new(x, y, crest + 3.0)) < 0.0);
+    assert!(h.field(Vec3d::new(x, y, crest - 3.0)).0 > 0.0);
+    assert!(h.field(Vec3d::new(x, y, crest + 3.0)).0 < 0.0);
 }
 
 #[test]
@@ -151,5 +155,178 @@ fn coarse_cells_still_close_the_surface_and_reach_the_peak() {
             .flat_map(|(_, m)| m.vertices.iter().map(|v| v.pos.z))
             .fold(f32::MIN, f32::max);
         assert!(top >= 200.0 - cell.units() as f32 * 2.0, "{cell:?}: {top}");
+    }
+}
+
+#[test]
+fn a_clearing_leaves_its_road_at_the_ground_and_the_rest_rising() {
+    let road = Clearing {
+        a: [64.0, 0.0],
+        b: [64.0, 128.0],
+        radius: 12.0,
+    };
+    let r = Range {
+        clear: Some(road),
+        ..range()
+    };
+    let h = Heights::new(&mountains(&r).unwrap(), &r);
+    let column = |x: f64, y: f64| {
+        let i = (x / h.cell) as usize + 1;
+        let j = (y / h.cell) as usize + 1;
+        h.at(i, j).unwrap()
+    };
+    let ground = 2.0;
+    for y in [10.0, 40.0, 64.0, 90.0, 118.0] {
+        for x in [52.0, 58.0, 64.0, 70.0, 76.0] {
+            assert_eq!(column(x, y), ground, "on the road at {x}, {y}");
+        }
+    }
+    // Off the road the range still stands, as tall as its peak.
+    let top = h.z.iter().copied().fold(f64::MIN, f64::max);
+    assert!((top - (ground + r.peak)).abs() < 1e-9, "top {top}");
+}
+
+#[test]
+fn a_hostile_clearing_is_an_error() {
+    let with = |radius: f64, end: f64| Range {
+        clear: Some(Clearing {
+            a: [0.0, 0.0],
+            b: [end, 0.0],
+            radius,
+        }),
+        ..range()
+    };
+    for (radius, end) in [
+        (0.0, 1.0),
+        (-1.0, 1.0),
+        (f64::NAN, 1.0),
+        (1.0, f64::INFINITY),
+        (1.0, 1.0e9),
+    ] {
+        assert_eq!(
+            mountains(&with(radius, end)),
+            Err(MountainError::BadBounds),
+            "{radius} {end}"
+        );
+    }
+    // A road of no length is a clearing round one point.
+    assert!(mountains(&with(8.0, 0.0)).is_ok());
+    // An edge under a cell rounds to nothing; one in the smallest float made NaN.
+    for edge in [5e-324, 0.5, 0.0, -1.0, f64::NAN] {
+        let r = Range {
+            edge: Some(edge),
+            ..range()
+        };
+        assert_eq!(mountains(&r), Err(MountainError::BadBounds), "edge {edge}");
+    }
+    assert!(
+        mountains(&Range {
+            edge: Some(1.0),
+            ..range()
+        })
+        .is_ok()
+    );
+}
+
+/// The materials a volume's detail chunks hold, and how many samples hold each.
+fn material_counts(v: &Volume) -> std::collections::BTreeMap<u8, usize> {
+    let mut counts = std::collections::BTreeMap::new();
+    let [nx, ny, nz] = v.chunks();
+    for z in 0..nz {
+        for y in 0..ny {
+            for x in 0..nx {
+                let Some(chunk) = v.chunk([x, y, z]) else {
+                    continue;
+                };
+                for i in 0..super::super::CHUNK_SAMPLES {
+                    *counts.entry(chunk.sample(i).1).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    counts
+}
+
+#[test]
+fn layers_paint_the_surface_the_same_way_every_time() {
+    let r = Range {
+        layers: Layers::alpine(),
+        ..range()
+    };
+    let (a, b) = (mountains(&r).unwrap(), mountains(&r).unwrap());
+    assert_eq!(a, b);
+    let counts = material_counts(&a);
+    for m in [14, 15, 16, 17, 4] {
+        assert!(counts.get(&m).is_some_and(|&n| n > 0), "{m}: {counts:?}");
+    }
+    // Only the samples that show are painted: the shape is the plain range's, and
+    // no chunk a plain range keeps uniform has to hold detail for the paint.
+    let plain = mountains(&range()).unwrap();
+    assert_eq!(chunks_with_detail(&a), chunks_with_detail(&plain));
+    assert_eq!(a.chunks(), plain.chunks());
+}
+
+#[test]
+fn bad_layers_are_refused_without_a_panic() {
+    let mut nan = Layers::NONE;
+    nan.push(super::super::Layer {
+        material: 17,
+        height: [f64::NAN, 1.0],
+        slope: [0.0, 1.0],
+    })
+    .unwrap();
+    let mut wild = Layers::NONE;
+    wild.jitter = f64::INFINITY;
+    for layers in [nan, wild] {
+        let r = Range { layers, ..range() };
+        assert_eq!(mountains(&r), Err(MountainError::BadLayers));
+    }
+}
+
+/// Top-surface triangles inside the box that keep the base material, with one
+/// layer that covers every height and slope, and all of them.
+fn unpainted(cell: CellSize, peak: f64) -> (usize, usize) {
+    let mut layers = Layers::NONE;
+    let all = Layer {
+        material: 99,
+        height: [-MAX_BOUND, MAX_BOUND],
+        slope: [0.0, MAX_BOUND],
+    };
+    layers.push(all).unwrap();
+    let r = Range {
+        max: Vec3d::new(256.0, 256.0, peak + 16.0),
+        cell,
+        peak,
+        layers,
+        ..range()
+    };
+    let v = mountains(&r).unwrap();
+    let (mut base, mut total) = (0, 0);
+    let lift = 3.0 * cell.units() as f32;
+    let inside = |p: f32| p > 4.0 && p < 252.0;
+    for (_, mesh) in mesh_all(&v, &[]) {
+        for (t, &m) in mesh.triangles.iter().zip(&mesh.materials) {
+            let p = t.map(|i| mesh.vertices[i as usize].pos);
+            let high = (p[0].z + p[1].z + p[2].z) / 3.0 > lift;
+            if high && p.iter().all(|v| inside(v.x) && inside(v.y)) {
+                total += 1;
+                base += usize::from(m != 99);
+            }
+        }
+    }
+    (base, total)
+}
+
+#[test]
+fn every_sample_of_the_surface_takes_its_layer_even_on_a_sharp_crest() {
+    // On a ridge the central difference is flat, so the field reads deep where
+    // the rock shows: the paint depth is from the lowest neighbour instead.
+    for (cell, peak) in [(CellSize::Two, 200.0), (CellSize::Four, 400.0)] {
+        let (base, total) = unpainted(cell, peak);
+        assert!(total > 1000, "{cell:?}: a range was meshed");
+        assert_eq!(
+            base, 0,
+            "{cell:?}: {base} of {total} keep the base material"
+        );
     }
 }

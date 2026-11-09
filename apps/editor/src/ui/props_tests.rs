@@ -16,7 +16,7 @@ use crate::model::{Document, Selection};
 use crate::ui::Editor;
 
 /// How many ids the stock manifest fills.
-const STOCK: usize = mscent_world::materials::LAST_SKY as usize + 1;
+const STOCK: usize = mscent_world::materials::LAST_STOCK as usize + 1;
 /// The View rows and thumbnails that follow the textures.
 const VIEWS: usize = mscent_world::materials::VIEW_SLOTS as usize;
 

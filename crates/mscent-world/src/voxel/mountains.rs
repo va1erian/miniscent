@@ -10,30 +10,44 @@
 //! the peak with ridged crests (sharp where the noise crosses zero, each octave
 //! weighted by the one before so crests carry the detail and valleys stay smooth)
 //! riding on them, squared so that few reach the top. An envelope takes it to nothing
-//! at the box's edges, so no cliff shows there. It is divided by its own highest
-//! point, so the tallest peak is exactly `peak`.
+//! at the box's edges, so no cliff shows there. A [`Clearing`] does the same along a
+//! road through the range, so a whole room's ground can be one range with a flat way
+//! through it. It is divided by its own highest point, so the tallest peak is
+//! exactly `peak`.
 //!
-//! The field handed to [`fill`] is the height above the surface over the slope's
-//! length, which keeps its value near a true distance so the mesher places steep
-//! flanks where the formula says. Heights are computed once per column of the
-//! lattice, not once per sample.
+//! The field handed to [`fill_with`] is the height above the surface over the
+//! slope's length, which keeps its value near a true distance so the mesher places
+//! steep flanks where the formula says. Heights are computed once per column of the
+//! lattice, not once per sample, and so are the [`Layers`]' materials: only the
+//! solid samples near the surface take them (`PAINT_DEPTH_CELLS`), as only those
+//! show, and the rest keep the range's own material so that buried and empty
+//! chunks stay uniform.
 
 use mscent_math::Vec3d;
 
+use super::layers::Layers;
 use super::noise::noise3;
 use super::volume::{CellSize, Volume, VolumeError};
 use super::wire::MAX_DETAIL_CHUNKS;
-use super::{CHUNK_EDGE, Chunk, Context, MAX_CHUNKS_PER_AXIS, fill};
+use super::{CHUNK_EDGE, Chunk, Context, MAX_CHUNKS_PER_AXIS, fill_with, quantize};
 use crate::brush::Op;
 use crate::polytope::MAX_COORD;
 
 /// Solid under the lowest ground, in cells, so the range has a floor to stand on.
 const GROUND_CELLS: f64 = 2.0;
+/// How far, in cells, below the lowest of a column's and its four neighbours'
+/// tops a sample still takes the column's layer. The side of a steep column shows
+/// down to its lowest neighbour's top, so depth is measured from there, not from
+/// the field, which a ridge's flat central difference leaves too large.
+const PAINT_DEPTH_CELLS: f64 = 2.0;
 /// Octaves of ridged noise.
 const OCTAVES: u32 = 5;
 /// How far in from the box's edge, as a share of its width, the range reaches
-/// full height.
+/// full height, unless the range says how far in world units.
 const FALLOFF: f64 = 0.3;
+/// How far past a clearing's edge, as a share of its radius, the range is back
+/// to its own height.
+const CLEAR_EASE: f64 = 0.5;
 /// Wavelengths across the longer side, of the first octave.
 const RIDGES_ACROSS: f64 = 2.5;
 /// Height of the lowlands, and the relief the crests add to them, as shares of
@@ -61,9 +75,53 @@ pub struct Range {
     /// Height of the tallest peak above the ground, in world units.
     pub peak: f64,
     pub seed: u32,
-    /// Voxel material of the rock.
+    /// Voxel material of the rock, where no layer takes the ground.
     pub material: u8,
     pub order: u32,
+    /// A road left flat at the ground, if any.
+    pub clear: Option<Clearing>,
+    /// How far in from the box's sides the range reaches full height, in world
+    /// units; `None` is `FALLOFF` of each side. A range that is a room's whole
+    /// ground wants a narrow edge, or its walls take most of it.
+    pub edge: Option<f64>,
+    /// Materials by height and slope; [`Layers::NONE`] leaves it all `material`.
+    pub layers: Layers,
+}
+
+/// A road through a range, flat at its ground: every column within `radius` of the
+/// segment from `a` to `b` (in plan, world units), easing back to the range's own
+/// height over `CLEAR_EASE` of that again.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Clearing {
+    pub a: [f64; 2],
+    pub b: [f64; 2],
+    pub radius: f64,
+}
+
+impl Clearing {
+    fn is_valid(&self) -> bool {
+        let ends = [self.a, self.b].concat();
+        let in_range = ends.iter().all(|v| v.is_finite() && v.abs() <= MAX_COORD);
+        in_range && self.radius.is_finite() && self.radius > 0.0 && self.radius <= MAX_COORD
+    }
+
+    /// 0 on the road, 1 once past its ease, smooth at both ends.
+    fn share(&self, x: f64, y: f64) -> f64 {
+        let (ab, ap) = (
+            [self.b[0] - self.a[0], self.b[1] - self.a[1]],
+            [x - self.a[0], y - self.a[1]],
+        );
+        let len2 = ab[0] * ab[0] + ab[1] * ab[1];
+        let t = if len2 > 0.0 {
+            ((ap[0] * ab[0] + ap[1] * ab[1]) / len2).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let (dx, dy) = (ap[0] - ab[0] * t, ap[1] - ab[1] * t);
+        let ease = self.radius * CLEAR_EASE;
+        let s = (((dx * dx + dy * dy).sqrt() - self.radius) / ease).clamp(0.0, 1.0);
+        s * s * (3.0 - 2.0 * s)
+    }
 }
 
 /// Why a range was refused.
@@ -71,8 +129,11 @@ pub struct Range {
 pub enum MountainError {
     /// A bound or the peak is not a finite number, or the peak is not above zero.
     NotFinite,
-    /// A side of the box has no length, or the box lies past the range brushes may use.
+    /// A side of the box has no length, the box lies past the range brushes may
+    /// use, or the clearing or the edge is not finite, positive and within it.
     BadBounds,
+    /// A layer's bound or the jitter is not a finite number in range.
+    BadLayers,
     /// A side needs more than [`MAX_CHUNKS_PER_AXIS`] chunks at this cell size.
     TooLarge,
     /// The box is not tall enough for the ground and the peak.
@@ -87,6 +148,7 @@ impl std::fmt::Display for MountainError {
         match self {
             Self::NotFinite => write!(f, "a bound or the peak is not a finite number"),
             Self::BadBounds => write!(f, "the box is empty or out of range"),
+            Self::BadLayers => write!(f, "a layer's bound or the jitter is out of range"),
             Self::TooLarge => write!(
                 f,
                 "the box needs more than {MAX_CHUNKS_PER_AXIS} chunks on a side at this cell size"
@@ -121,8 +183,14 @@ pub fn mountains(r: &Range) -> Result<Volume, MountainError> {
     if !(corners.iter().all(|v| v.is_finite()) && r.peak.is_finite() && r.peak > 0.0) {
         return Err(MountainError::NotFinite);
     }
-    if corners.iter().any(|v| v.abs() > MAX_COORD) {
+    // An edge under a cell would round to nothing, and one past every number to NaN.
+    let edge_ok = |e: f64| e.is_finite() && e >= r.cell.units() && e <= MAX_COORD;
+    let extras_ok = r.clear.is_none_or(|c| c.is_valid()) && r.edge.is_none_or(edge_ok);
+    if corners.iter().any(|v| v.abs() > MAX_COORD) || !extras_ok {
         return Err(MountainError::BadBounds);
+    }
+    if !r.layers.is_valid() {
+        return Err(MountainError::BadLayers);
     }
     let cell = r.cell.units();
     let size = [r.max.x - r.min.x, r.max.y - r.min.y, r.max.z - r.min.z];
@@ -135,7 +203,11 @@ pub fn mountains(r: &Range) -> Result<Volume, MountainError> {
         Volume::new(Op::Add, r.order, r.cell, origin, chunks).map_err(MountainError::Volume)?;
     let heights = Heights::new(&volume, r);
     let mut ctx = Context::new(&volume, &[]);
-    fill(&mut volume, &mut ctx, |p| heights.field(p), r.material);
+    fill_with(&mut volume, &mut ctx, |p| {
+        let (distance, layered) = heights.field(p);
+        let solid = quantize(distance, cell) >= 0;
+        (distance, layered.filter(|_| solid).unwrap_or(r.material))
+    });
     let detailed = chunks_with_detail(&volume);
     if detailed > MAX_DETAIL_CHUNKS {
         return Err(MountainError::TooDetailed);
@@ -166,6 +238,8 @@ struct Heights {
     /// Columns per row, ring included.
     stride: usize,
     z: Vec<f64>,
+    /// The material of each column, parallel to `z`.
+    material: Vec<u8>,
 }
 
 impl Heights {
@@ -177,6 +251,8 @@ impl Heights {
         let stride = lattice[0] + 2;
         let rows = lattice[1] + 2;
         let wave = (hi.x - lo.x).max(hi.y - lo.y) / RIDGES_ACROSS;
+        let falloff = |side: f64| r.edge.map_or(FALLOFF, |e| e / side);
+        let (fx, fy) = (falloff(hi.x - lo.x), falloff(hi.y - lo.y));
         let mut raw = Vec::with_capacity(stride * rows);
         for j in 0..rows {
             for i in 0..stride {
@@ -184,20 +260,63 @@ impl Heights {
                 let y = (origin[1] + j as i64 - 1) as f64 * cell;
                 let (u, v) = ((x - lo.x) / (hi.x - lo.x), (y - lo.y) / (hi.y - lo.y));
                 let q = Vec3d::new(x - lo.x, y - lo.y, 0.0) * (1.0 / wave);
-                raw.push(range_shape(r.seed, q) * envelope(u) * envelope(v));
+                let road = r.clear.map_or(1.0, |c| c.share(x, y));
+                raw.push(range_shape(r.seed, q) * envelope(u, fx) * envelope(v, fy) * road);
             }
         }
         // The tallest crest is the peak, however the noise fell.
         let top = raw.iter().copied().fold(0.0, f64::max);
         let scale = if top > 0.0 { r.peak / top } else { 0.0 };
         let ground = lo.z + GROUND_CELLS * cell;
-        let z = raw.into_iter().map(|h| ground + h * scale).collect();
-        Self {
+        let z: Vec<f64> = raw.into_iter().map(|h| ground + h * scale).collect();
+        let mut heights = Self {
             cell,
             origin,
             stride,
             z,
+            material: Vec::new(),
+        };
+        heights.material = heights.layered(r, ground, lo, wave);
+        heights
+    }
+
+    /// Each column's material by the range's layers, reading its height above
+    /// `ground` as a share of the peak and its slope from the neighbours' heights.
+    fn layered(&self, r: &Range, ground: f64, lo: Vec3d, wave: f64) -> Vec<u8> {
+        if r.layers.is_empty() {
+            return vec![r.material; self.z.len()];
         }
+        let mut out = Vec::with_capacity(self.z.len());
+        for (at, &h) in self.z.iter().enumerate() {
+            let (i, j) = (at % self.stride, at / self.stride);
+            let slope = self
+                .gradient(i, j)
+                .map_or(0.0, |[gx, gy]| (gx * gx + gy * gy).sqrt());
+            let x = (self.origin[0] + i as i64 - 1) as f64 * self.cell;
+            let y = (self.origin[1] + j as i64 - 1) as f64 * self.cell;
+            let q = Vec3d::new(x - lo.x, y - lo.y, 0.0) * (1.0 / wave);
+            let share = (h - ground) / r.peak;
+            out.push(r.layers.pick(r.seed, q, share, slope, r.material));
+        }
+        out
+    }
+
+    /// The tops of the columns west, east, south and north of `(i, j)`, if it
+    /// has neighbours on all sides.
+    fn neighbours(&self, i: usize, j: usize) -> Option<[f64; 4]> {
+        let (w, e) = (self.at(i.checked_sub(1)?, j)?, self.at(i + 1, j)?);
+        let (s, n) = (self.at(i, j.checked_sub(1)?)?, self.at(i, j + 1)?);
+        Some([w, e, s, n])
+    }
+
+    /// Rise over run across column `(i, j)`, if it has neighbours on all sides.
+    fn gradient(&self, i: usize, j: usize) -> Option<[f64; 2]> {
+        self.neighbours(i, j).map(|n| self.rise(n))
+    }
+
+    /// Rise over run from the tops west, east, south and north of a column.
+    fn rise(&self, [w, e, s, n]: [f64; 4]) -> [f64; 2] {
+        [(e - w) / (2.0 * self.cell), (n - s) / (2.0 * self.cell)]
     }
 
     fn at(&self, i: usize, j: usize) -> Option<f64> {
@@ -209,30 +328,34 @@ impl Heights {
     }
 
     /// Height above the surface at `p` over the length of the slope, positive
-    /// below it. Off the table, or on a non-finite point, it is air.
-    fn field(&self, p: Vec3d) -> f64 {
+    /// below it, and the material of its column where the sample can show (see
+    /// `PAINT_DEPTH_CELLS`). Off the table, or on a non-finite point, it is air.
+    fn field(&self, p: Vec3d) -> (f64, Option<u8>) {
         let col =
             |v: f64, origin: i64| usize::try_from((v / self.cell).round() as i64 - origin + 1);
+        let air = (-self.cell, None);
         let (Ok(i), Ok(j)) = (col(p.x, self.origin[0]), col(p.y, self.origin[1])) else {
-            return -self.cell;
+            return air;
         };
-        let (Some(h), Some(w), Some(e), Some(s), Some(n)) = (
+        let at = j.checked_mul(self.stride).and_then(|a| a.checked_add(i));
+        let (Some(h), Some([w, e, s, n]), Some(&m)) = (
             self.at(i, j),
-            self.at(i.wrapping_sub(1), j),
-            self.at(i + 1, j),
-            self.at(i, j.wrapping_sub(1)),
-            self.at(i, j + 1),
+            self.neighbours(i, j),
+            at.and_then(|a| self.material.get(a)),
         ) else {
-            return -self.cell;
+            return air;
         };
-        let (gx, gy) = ((e - w) / (2.0 * self.cell), (n - s) / (2.0 * self.cell));
-        (h - p.z) / (1.0 + gx * gx + gy * gy).sqrt()
+        let [gx, gy] = self.rise([w, e, s, n]);
+        let lowest = [w, e, s, n].into_iter().fold(h, f64::min);
+        let shows = p.z >= lowest - PAINT_DEPTH_CELLS * self.cell;
+        let distance = (h - p.z) / (1.0 + gx * gx + gy * gy).sqrt();
+        (distance, shows.then_some(m))
     }
 }
 
-/// 0 at the box's edge to 1 once `FALLOFF` of its width in, smooth at both ends.
-fn envelope(t: f64) -> f64 {
-    let edge = t.min(1.0 - t) / FALLOFF;
+/// 0 at the box's edge to 1 once `falloff` of its width in, smooth at both ends.
+fn envelope(t: f64, falloff: f64) -> f64 {
+    let edge = t.min(1.0 - t) / falloff;
     let s = edge.clamp(0.0, 1.0);
     s * s * (3.0 - 2.0 * s)
 }

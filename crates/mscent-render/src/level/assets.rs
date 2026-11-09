@@ -63,6 +63,8 @@ impl LevelAssets {
             portals,
             lights: all_lights,
             play_lights: lights,
+            // Only the bake reads the sky; meshes and live voxels go without it.
+            sky: _,
             actors,
             designs,
             spawns,

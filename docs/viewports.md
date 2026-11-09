@@ -252,6 +252,10 @@ lightmap, so both show it.
   little). A lamp behind the viewport wall, or in another room, lights nothing of
   the view. The test is per lamp, not per ray, so the frame around a small window
   does not shade what the lamp lights through it.
+- The sight lines are budgeted at `MAX_CARRY_RAYS` (65 536, about 13 ms), since a
+  level may hold 65 536 lamps. Past it no more lamps are carried: the level loads
+  with darker vistas rather than stalling. Lamps out of range of a face, or behind
+  it, cost no ray.
 - An image that falls outside the room, in solid or another island, is dropped.
 - A room seen by several layers takes the map of the first with a finite scale, so
   no lamp lights it twice. An infinitely far layer (`parallax` 0) takes none.
@@ -259,17 +263,56 @@ lightmap, so both show it.
   level with no viewport face, or only infinite layers, keeps its key.
 - Images stay out of `play_lights`, so they light no actor and no live voxel edit of
   the play space.
+- A layer with `spin` turns its room under the lit picture, so the seam matches
+  only at spin 0. A spinning layer is a sky or a far ring, which continues nothing.
 
 `tests/vista_seam.rs` reads twin luxels, a play floor and its image beyond the
-viewport at scale 4: they agree within 5 % (luxels in the room are 8 times larger),
-and the floor past the wall goes from 0.007 (ambient) to 0.62 with the lamp. Taking
-the carry out fails two of its four tests, and taking out the window test fails the
-lamp-behind-the-wall one.
+viewport at scale 4: they agree within 5 % as measured, and the test allows 12 % (luxels in
+the room are 8 times larger). The floor past the wall goes from 0.007 (ambient) to
+0.62 with the lamp. A room shown by an infinite layer first is still lit by the
+finite one after it. Unit tests in `level/vista_light_tests.rs` set each reason a
+lamp is kept out (behind the face's plane with a clear sight line, hidden by a
+wall, a projector aimed away, out of range, the ray budget spent) beside a lamp
+carried. Taking out any one check fails its test.
 
 Not carried: dynamic lights (a shot passing the window lights the play floor, not
-the floor beyond), the play fog (a layer keeps its own; matching it to the level's
-would fog a large range out of sight, see "Risks"), and light the other way, from
-the room's lamps onto the play space (see "Later").
+the floor beyond) and the play fog (a layer keeps its own; matching it to the level's
+would fog a large range out of sight, see "Risks").
+
+### Sky light: a layer's lamps in the play space
+
+The other way round, as a Source level is lit through its sky faces: the lamps of a
+layer's room light the play space through its viewport faces, so the room's sun is the
+level's sun (`lightmap/sky.rs` in `mscent-world`, built by `Vistas::sky`). A lamp at
+`L` of radius `r` in the room is, seen from the play space, a lamp at
+
+```
+centre + (L - pos) / parallax,   radius r / parallax
+```
+
+far beyond the windows, and by the same scale invariance it lights a play point as the
+lamp lights that point's image in the room. Its shadow ray from a play point must cross
+a **window**: a viewport face of a slot showing the room that looks into the play
+space. The part up to the window is traced in the play space, and the rest, mapped by
+the layer's map, in the room, against its brushes and voxels. So a range in a view
+shades the arena behind it, a wall of the level shades its floor, and a point no window
+looks at gets no sun. A lamp's disc for soft shadows widens by the same `1 / parallax`.
+
+- The room is lit by the layer that carries lamps into it (the first of its room with
+  a finite scale); an infinitely far layer sheds no light. Only the level's own lamps
+  in the room go out, never the images carried in, so nothing comes back.
+- Faces and voxel cells take it in the bake, through `Occluders::with_sky`, and bounce
+  spreads it. Meshes, live voxel edits and the GPU's lamp shadows do not: they light
+  from the play space's own lamps, so an actor in the sun is lit as in shade.
+- The sky's rooms, windows and lamps hash into the light key; a level with no sky adds
+  nothing to it, so its cache stays valid.
+
+`tests/vista_sky.rs`, in the room of the seam tests with a lamp beyond the viewport:
+a play floor and its image in the room agree within 15 % (measured 4 % to 13 %, the
+room's bounce being the larger), a rock wall in the room and a wall of the play space
+each leave a floor as dark as without the lamp, and an infinite layer sheds nothing.
+With the shadow rays left out, both shading tests fail. `lightmap/sky_tests.rs` checks
+a window's crossing, the map and hostile rooms alone.
 
 ## Self-lit and cutout materials
 
@@ -354,8 +397,21 @@ material lists.
 **Mountains: a range past the platform.** **New mountains** does this in one step. By
 hand: subtract a 128-unit room with View walls, add a floor, drop in a volume from
 `mountains` (or the Mountains generator), a lamp, and a layer at scale 16 (`x16`) of
-the same slot, after the stars. The demo's plain has three such ranges, one on each
-flank and one behind the gate, which leave the avenue of towers clear.
+the same slot, after the stars. The demo goes further: its plain has no flat floor at
+all. One range is the room's whole ground, rolling foothills rising to massifs, with
+`clear` keeping a flat road 55 units wide (in the room) from the platform to past the
+gate, where the towers stand at the foot of the slopes and the ground meets the
+platform's floor, and `edge 64` so that the walls do not take most of the room. A road
+of 70 left a flat plain around the platform; one of 40 buried the towers in canyon
+walls. A thin floor brush under it keeps the room sealed. A low sun from the south-west
+and a dim sky fill from above give it relief and long shadows, and through the sky
+light below they light the platform too, so the pillars cast the sun's shadows on it.
+Its ground is layered by height and slope with the bands of `Layers::alpine`: olive
+grass on the road and the low flats, scree on the gentle slopes above, dark cliff on the
+steep faces, snow on the high crests and the beige rock on the middling slopes between,
+where it was all rock before.
+The lamps before them had intensities of 120, which drove every surface of the plain to
+the same white.
 
 **Original Unreal: clouds over a horizon.** Add a third room with one big plate in
 `sky-clouds`, layer 2, a `pan`, walls painted **View 0**. It costs no lightmap.
@@ -380,8 +436,11 @@ layer's list may submit `LAYER_VOXEL_TRIS` (12 000) before the rest take the low
 level, all layers together `VISTA_VOXEL_TRIS` (24 000), and the main scene keeps its
 own `MAX_VOXEL_TRIS`. The lowest level still has a cost (cells on a chunk's border never
 merge), so a frame can pass these; the first demo, with one-unit cells, submitted 70 253
-triangles to its layers at the gate. It now has 13 168 at the gate, and no pose of a sweep
-over its platform passes 17 200. `SceneStats::vista_triangles` reports it.
+triangles to its layers at the gate. Its three ranges of four-unit cells had 13 168. Its
+ground, one range over the whole room, has 14 446 at the gate, and no pose of
+`vista_bench --sweep` (6 places on the platform, 36 yaws, 4 pitches) passes 21 764. Over a
+1024 by 1024 room it was 27 111, past `VISTA_VOXEL_TRIS`, so the room was cut to 704 by
+768: fog hides the rest. `SceneStats::vista_triangles` reports it.
 
 `mountains` in `mscent-world` (`voxel/mountains.rs`) fills an add volume from a ridged
 heightfield: low foothills everywhere, broad swells of noise that rise to massifs with
@@ -392,13 +451,28 @@ gives the same bytes. The box grows to whole chunks; at most 16 chunks a side, s
 units at one-unit cells and 1024 at cells of 4. A range seen far off wants the coarse
 cells (`CellSize::Two` and `Four`): the demo's plain is seen at scale 16, where a cell of
 4 is a pixel or two. With one-unit cells its three ranges were 7 900 chunks, 70 253 triangles at
-the gate and a 4.8 MB level; with cells of 4 they are 272 chunks, 13 168 triangles and 380 KB.
+the gate and a 4.8 MB level; with cells of 4 they were 272 chunks, 13 168 triangles and
+380 KB. The ground that replaced them is a 414 KB level.
 Bad input is
 a `MountainError`. Level text has a line for it, expanded at parse into a `Volume`:
 
 ```
-mountains <order> <material> <min x y z> <max x y z> <cell> <peak> <seed>
+mountains <order> <material> <min x y z> <max x y z> <cell> <peak> <seed> [clear <ax ay> <bx by> <radius>] [edge <units>] [layer <material> <height lo hi> <slope lo hi>]* [jitter <share>]
 ```
+
+`clear` leaves a road at the ground: every column within `radius` of the segment from `a`
+to `b` (in plan), easing back to the range's height over half the radius again. `edge`
+is how far in from the box's sides the range reaches full height, in world units; without
+it, 0.3 of each side. Both are `None` from the editor's commands, so their ranges are
+unchanged. A road that is not finite, or of no width, is a `MountainError`.
+
+Each `layer` paints the ground whose height (a share of the peak above the range's ground)
+and slope (rise over run) lie in its bands with its material; the first that holds wins, and
+ground none takes keeps the line's material. Up to eight, then an optional `jitter`: seeded
+noise of up to that share of the peak moves each column's height before the layers read it
+(design in [voxels.md](voxels.md), "Terrain layers"). A bound that is not finite, past
+1e6 either way, a band whose ends are out of order, a negative slope, a jitter outside 0 to 1
+or a ninth layer is an error on its line.
 
 Dumping cannot turn a volume back into this line (a sculpted range is no longer one),
 so `--dump-level` refuses a level with volumes, as it did.
@@ -407,7 +481,8 @@ The editor has a Mountains generator beside the others (it builds a whole volume
 aimed place, wide in proportion to the radius), and **New mountains** (Edit menu), which
 adds a miniature room at scale 16 beyond the level: a sealed 128-unit room whose walls
 and ceiling are the slot's View material, a rock floor, a range, one large lamp, and a
-layer that is the next of the existing vista's slot (or the next free slot). The layer's
+layer that is the next of the existing vista's slot (or the next free slot). Its range is
+layered by `Layers::alpine`: snow, cliff, grass and scree over the rock. The layer's
 height makes the room's floor continue the play floor. One undo step; with the slot's
 layers full it does nothing and says so.
 
@@ -481,11 +556,10 @@ Pixel reads through the renderer, as everywhere else:
 
 Each stands on its own and none is needed for the goal:
 
-- **Sky light.** Viewport faces lighting a room during the bake: a layer's lamps
-  carried out through the inverse map, with shadow rays that cross a viewport face
-  into the layer's room (so a range shades the arena). The same rays would make the
-  carry in exact behind a window's frame. Until then, a far lamp with a large radius
-  plays the sun.
+- **More sky light.** Sky light lights faces and voxel cells (see above). Still to
+  do: an ambient term from every direction a window shows, as Source's
+  `light_environment` adds; actors and live voxel edits in the sun; and the same
+  windowed rays for the carry in, which would make it exact behind a window's frame.
 - **Actors and movers in a view:** a passing ship, a turning wheel, driven by script.
 - **Script control:** switch a slot's layers, or change `spin`, for a day that turns to
   night.

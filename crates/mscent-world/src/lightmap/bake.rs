@@ -9,7 +9,7 @@ use super::filter;
 use super::layout::{Layout, lay_out};
 use super::occluders::Occluders;
 use super::parallel::par_map;
-use super::soft::{self, Footprint, light_at};
+use super::soft::{self, Footprint, each_light};
 use super::uv::FaceProjection;
 use super::{BakeConfig, LightFace, LightmapError, Luxel, PointLight};
 use crate::bsp::Bsp;
@@ -346,12 +346,10 @@ fn direct_at(s: &Scene, rx: &soft::Receiver, proj: &FaceProjection) -> Luxel {
         color: Vec3::ZERO,
         dir: Vec3::ZERO,
     };
-    for light in s.lights {
-        if let Some((c, to_light)) = light_at(rx, light, s.cfg) {
-            acc.color = acc.color + c;
-            acc.dir = acc.dir + proj.to_tangent(to_light) * luminance(c);
-        }
-    }
+    each_light(rx, s.lights, s.cfg, |c, to_light| {
+        acc.color = acc.color + c;
+        acc.dir = acc.dir + proj.to_tangent(to_light) * luminance(c);
+    });
     acc
 }
 

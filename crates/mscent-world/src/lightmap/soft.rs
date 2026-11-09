@@ -10,7 +10,7 @@
 use super::occluders::Occluders;
 use super::uv::FaceProjection;
 use super::{BakeConfig, PointLight};
-use mscent_math::Vec3;
+use mscent_math::{Vec3, Vec3d};
 
 /// Samples tested first: the lamp centre and three on its rim. If they agree
 /// the luxel is fully lit or fully shadowed and the rest are skipped, which
@@ -76,12 +76,41 @@ pub(super) struct Receiver<'a> {
     pub centre: Vec3,
 }
 
-/// Light arriving at the receiver from one lamp and the unit direction towards
-/// it, or `None` when out of range, facing away or shadowed.
-pub(super) fn light_at(
+/// Calls `f` with the light and the unit direction towards it of every lamp
+/// that reaches the receiver: `lights`, then the sky's, through its windows.
+pub(super) fn each_light(
+    rx: &Receiver,
+    lights: &[PointLight],
+    cfg: &BakeConfig,
+    mut f: impl FnMut(Vec3, Vec3),
+) {
+    let plain = |a: Vec3d, b: Vec3d| rx.occ.segment_clear(a, b);
+    for light in lights {
+        if let Some((c, dir)) = light_at(rx, light, cfg, cfg.light_radius, &plain) {
+            f(c, dir);
+        }
+    }
+    for room in rx.occ.sky().rooms() {
+        let through = |a: Vec3d, b: Vec3d| room.sees(a, b, plain);
+        // The room's lamp disc, seen from the play space, is as wide as its image.
+        let disc = cfg.light_radius * room.widen();
+        for light in room.lamps() {
+            if let Some((c, dir)) = light_at(rx, light, cfg, disc, &through) {
+                f(c, dir);
+            }
+        }
+    }
+}
+
+/// Light arriving at the receiver from one lamp, a disc of `disc` for shadows
+/// whose rays `clear` traces, and the unit direction towards it, or `None` when
+/// out of range, facing away or shadowed.
+fn light_at(
     rx: &Receiver,
     light: &PointLight,
     cfg: &BakeConfig,
+    disc: f32,
+    clear: &dyn Fn(Vec3d, Vec3d) -> bool,
 ) -> Option<(Vec3, Vec3)> {
     let to = light.position - rx.centre;
     let dist = to.length();
@@ -104,7 +133,7 @@ pub(super) fn light_at(
         }
         None => 1.0,
     };
-    let seen = visibility(rx, light.position, cfg.light_radius, cfg.shadow_samples);
+    let seen = visibility(rx, light.position, disc, cfg.shadow_samples, clear);
     if seen <= 0.0 {
         return None;
     }
@@ -118,13 +147,16 @@ pub(super) fn light_at(
 /// Fraction of a lamp of `radius` at `light` visible from the luxel.
 /// `samples` rays at most; 1 (or a zero radius) is one hard ray from the
 /// luxel centre.
-pub(super) fn visibility(r: &Receiver, light: Vec3, radius: f32, samples: u32) -> f32 {
+pub(super) fn visibility(
+    r: &Receiver,
+    light: Vec3,
+    radius: f32,
+    samples: u32,
+    clear: &dyn Fn(Vec3d, Vec3d) -> bool,
+) -> f32 {
     let samples = samples.max(1);
     let normal = r.foot.normal();
-    let ray = |from: Vec3, to: Vec3| {
-        r.occ
-            .segment_clear((from + normal * r.bias).to_f64(), to.to_f64())
-    };
+    let ray = |from: Vec3, to: Vec3| clear((from + normal * r.bias).to_f64(), to.to_f64());
     if radius <= 0.0 || samples == 1 {
         return f32::from(u8::from(ray(r.centre, light)));
     }

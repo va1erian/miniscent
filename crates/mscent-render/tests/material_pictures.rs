@@ -38,6 +38,10 @@ fn stock_names_with_no_manifest_keep_their_gloss_and_draw_the_same() {
             (11, "sky-clouds", 0),
             (12, "sky-ridge", 0),
             (13, "sky-planet", 0),
+            (14, "grass", 6),
+            (15, "scree", 12),
+            (16, "cliff", 14),
+            (17, "snow", 40),
         ]
     );
     let stock = MaterialTable::load_dir(&stock_dir()).expect("stock");

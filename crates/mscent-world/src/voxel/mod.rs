@@ -25,6 +25,7 @@
 //! * [`capture`], [`stamp`] (`clip.rs`): Copy and Stamp.
 //! * [`noise3`] (`noise.rs`): seeded noise for roughening and generated fields.
 //! * [`mountains`] (`mountains.rs`): a ridged-noise range as an add volume, for views.
+//! * [`Layers`] (`layers.rs`): a range's materials by height and slope.
 //! * [`Mesher`] (`surface.rs`): surface nets, one [`ChunkMesh`] per chunk.
 //! * [`ChunkMesh::clustered`] (`lod.rs`): level of detail without cracks.
 //! * [`AirMask`] (`connectivity.rs`): which chunk faces air joins.
@@ -41,6 +42,7 @@ mod context;
 mod dab;
 mod edit;
 mod index;
+mod layers;
 mod lod;
 mod mountains;
 mod noise;
@@ -76,11 +78,12 @@ pub use chunk::{Chunk, ChunkData};
 pub use clip::{Clip, MAX_CLIP_HALF, capture, stamp};
 pub use connectivity::{AirMask, Face};
 pub use context::Context;
-pub use dab::{DabOp, apply_dab, fill};
+pub use dab::{DabOp, apply_dab, fill, fill_with};
 pub use edit::{first_solid, solid_material_near};
 pub use index::{CellIndex, INDEX_EDGE};
+pub use layers::{Layer, Layers, MAX_BOUND, MAX_JITTER, MAX_LAYERS, TooManyLayers};
 pub use lod::Lod;
-pub use mountains::{MountainError, Range as MountainRange, mountains};
+pub use mountains::{Clearing, MountainError, Range as MountainRange, mountains};
 pub use noise::noise3;
 pub use parts::{MIN_ISLAND_SAMPLES, remove_islands, solid_parts};
 pub use prim::Prim;

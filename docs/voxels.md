@@ -455,6 +455,26 @@ code a stroke uses (`generators::surface_normal`), so it works on brushes and on
 Not done: a generator does not snap each drip or stem to the surface with a ray of its own, so on a
 strongly curved surface a root can float or sink. Roots are sunk a little and flared to hide that.
 
+**Terrain layers.** A range from `mountains` (`voxel/mountains.rs`) is one heightfield, so it
+takes its materials by rule rather than by brush: `Layers` (`voxel/layers.rs`) is up to eight
+rules, each a material and a band of height (as a share of the peak above the range's ground)
+and of slope (rise over run, from the heightfield's central differences). The first rule a
+column falls in decides, and a column none takes keeps the range's material, so the order is
+the priority. A seeded noise moves each column's height by up to `jitter` of the peak before
+the rules read it, so a snow line wanders. Materials are chosen once per column, and only the
+solid samples within 2 cells below the lowest of their column's and its four neighbours' tops
+take them, which is everything that can show, a sharp crest's flanks included (a depth read
+from the field missed 34 of 70 303 such triangles at cells of 2): the rest keep the range's
+material, so buried and empty chunks stay uniform and a layered range has exactly the
+plain range's detail chunks; it is bigger on disk only by the material runs it breaks. Like the
+range it is pure (integer-hash noise, IEEE arithmetic), so the same text gives the same bytes.
+The renderers need nothing new: a triangle whose corners disagree on material is already drawn
+by the blend path. `Layers::alpine` is snow (14 to 17 are `grass`, `scree`, `cliff` and `snow`,
+recipes in `assets/textures/`) above 0.45 of the peak unless sheerer than 2.4, cliff steeper than
+1, grass below 0.18 and flatter than 0.45, scree below 0.35 and flatter than 0.8, and the rock
+between. New mountains uses it; the Mountains generator does not, as it paints with the tool's
+material.
+
 **Held result instead of a ghost.** The design asked for a wireframe of the primitives in the 3D view.
 The highlight overlay (`studio/highlight.rs`) fills and outlines polygons with the frame's depth test
 and has no wire primitive, so a wireframe of a few hundred spheres and cones would have needed a second

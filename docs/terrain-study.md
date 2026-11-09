@@ -17,9 +17,9 @@ figures marked *estimate* are reasoning, not measurements, and were not prototyp
   the editor. That is roughly 3 000 to 4 000 new lines (*estimate*) against the voxel
   system's 12 300.
 - **Today it would buy little.** The only height-field terrain in the repository is
-  the three `mountains` ranges of the vista demo. They sit in a layer, where nothing
-  collides, and after M13.9 they already cost 272 chunks, 380 KB and 197 ms of bake at
-  scale 16. What they still cost on screen is raster time, and a height field changes
+  the vista demo's ground, one `mountains` range over its room. It sits in a layer,
+  where nothing collides, and costs a 414 KB level, a bake of under 0.6 s and at most
+  21 764 vista triangles. One 256-wide range at scale 16 bakes in 197 ms. What they still cost on screen is raster time, and a height field changes
   that little.
 - **Recommendation:** do not build it now. Build it when levels get large walkable
   outdoor ground. Then build it as a voxel *volume kind* that shares the voxel draw
@@ -34,7 +34,7 @@ figures marked *estimate* are reasoning, not measurements, and were not prototyp
 | A volume is i8 deltas over the brush CSG, 1/32 cell per step, one material per sample, in 16³ chunks, at most 16 chunks a side | `voxel/mod.rs`, [voxels.md](voxels.md) |
 | Meshing is surface nets per chunk, LOD by 2³ and 4³ clustering, and border cells never merge, so triangle caps are soft | `voxel/surface.rs`, `voxel/lod.rs` |
 | Light is one 9-byte record per surface cell, lit from 1.5 cells off the surface, Gouraud between vertices. Brush faces are lit per luxel | `lightmap/cells.rs` |
-| Levels that need 3D: `voxel-cave`, `voxel-hive`, `voxel-mushrooms`, `voxel-tree`, `voxel-coral`, and the game's arena. Pure height field: the three ranges of `facing.txt` | `assets/levels`, `crates/mscent-game/src/arena.rs` |
+| Levels that need 3D: `voxel-cave`, `voxel-hive`, `voxel-mushrooms`, `voxel-tree`, `voxel-coral`, and the game's arena. Pure height field: the ground of `facing.txt` | `assets/levels`, `crates/mscent-game/src/arena.rs` |
 
 ## Where the voxel system pays, and what a height field would pay
 
@@ -46,7 +46,7 @@ figures marked *estimate* are reasoning, not measurements, and were not prototyp
 | Shadow ray | about 2 µs against voxels and 0.2 against the BSP; a bake with voxel shadows takes 410 to 450 ms against 70 to 81 | A 2D walk over a min/max height tree that stops where the ray is above the tallest point of a block. Long rays over open ground leave the tree almost at once (*estimate*) |
 | Meshing | about 108 µs a chunk; 70 ms for 256 chunks single-threaded | A regular grid: no search, nearly free (*estimate*) |
 | LOD | Clustering; caps are soft because borders never merge | Geomipmapping or CDLOD with skirts: hard caps, and far flat ground collapses to a few triangles |
-| Storage | The demo's ranges: 272 chunks, 380 KB at 4-unit cells (4.8 MB at 1-unit cells) | One u16 a column: a 256 by 256 range is 128 KB raw, less after RLE |
+| Storage | The demo's old three ranges: 272 chunks, 380 KB at 4-unit cells (4.8 MB at 1-unit cells); its ground now, a 414 KB level | One u16 a column: a 256 by 256 range is 128 KB raw, less after RLE |
 | Raster | Voxel pixels 51 to 57 ns against 30 to 50 for a brush; the gate pose 13 168 triangles, 1.4 times a wall at High | Same pixels if it reuses the voxel span path; fewer triangles far away. Pixels dominate, so the gain is small |
 
 ## Two ways to build it

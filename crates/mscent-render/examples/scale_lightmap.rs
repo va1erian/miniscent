@@ -14,7 +14,7 @@ use mscent_math::{Vec3, Vec3d};
 use mscent_render::{BuildConfig, LevelRenderer, MaterialTable};
 use mscent_world::materials::{METAL, ROCK, VIEW_FIRST};
 use mscent_world::vista_scale::{luxel_factor, parallax_of_scale};
-use mscent_world::voxel::{CellSize, MountainRange, mountains};
+use mscent_world::voxel::{CellSize, Layers, MountainRange, mountains};
 use mscent_world::{Brush, Entity, Level, MAX_VISTA_FOG, Op};
 
 const AWAY: f64 = 1000.0;
@@ -60,6 +60,9 @@ fn scene(shrink: f64) -> Level {
         seed: 11,
         material: 4,
         order: 4,
+        clear: None,
+        edge: None,
+        layers: Layers::NONE,
     };
     let pillar = |x: f64, order: u32| {
         let (a, b) = (

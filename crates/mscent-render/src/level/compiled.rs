@@ -13,7 +13,7 @@ use mscent_math::Vec3;
 use mscent_world::lightmap::store::input_key;
 use mscent_world::lightmap::{
     BakeConfig, CellRecord, CellSites, LightFace, Lightmap, LightmapError, Occluders, PointLight,
-    bake_in, shape_key,
+    Sky, bake_in, shape_key,
 };
 use mscent_world::materials::{NO_DRAW, view_slot};
 use mscent_world::voxel::{ChunkMesh, VoxelWorld};
@@ -74,6 +74,8 @@ pub(super) struct Parts {
     pub lights: Vec<PointLight>,
     /// The lamps of the play space: meshes and voxels light without shadows.
     pub play_lights: Vec<PointLight>,
+    /// The layers' rooms' lamps, lighting the play space through its windows.
+    pub sky: Sky,
     pub actors: Vec<Actor>,
     /// The enemy kinds, built, and where the level's enemies start.
     pub designs: Vec<Design>,
@@ -184,6 +186,7 @@ impl Compiled {
         vistas.set_densities(&faces, &mut light_faces);
         let lights = lights_of(level, cfg.light_gain);
         let play_lights = vistas.play_lights(&bsp, &lights);
+        let sky = vistas.sky(&bsp, &holes, &lights);
         // The images land in the layers' rooms, so they stay out of `play_lights`.
         let lights = vistas.with_carried(&bsp, &holes, lights);
         let bake_cfg = BakeConfig {
@@ -205,6 +208,7 @@ impl Compiled {
             portals,
             lights,
             play_lights,
+            sky,
             actors: actors_of(level),
             designs: designs_of(level)?,
             spawns: spawns_of(level),
@@ -224,11 +228,12 @@ impl Compiled {
     /// key can share one. It holds the shape of the voxel surfaces and not
     /// their materials, so painting a volume keeps it.
     pub fn light_key(&self) -> u64 {
+        // A level without a sky adds 0, so its key is the one it always had.
         input_key(
             &self.light_faces,
             &self.parts.lights,
             &self.bake_cfg,
-            self.voxel_shape,
+            self.voxel_shape ^ self.parts.sky.shape_key(),
         )
     }
 
@@ -254,7 +259,8 @@ impl Compiled {
 
     /// Bakes with `cfg`: brush faces and voxel cells, each shadowing the other.
     fn bake_with(&self, cfg: &BakeConfig, cancel: &AtomicBool) -> Result<Lightmap, LightmapError> {
-        let occ = Occluders::new(&self.parts.bsp, &self.parts.voxels);
+        let occ =
+            Occluders::new(&self.parts.bsp, &self.parts.voxels).with_sky(self.parts.sky.clone());
         let (faces, lights) = (&self.light_faces, &self.parts.lights);
         bake_in(&occ, &self.parts.sites, faces, lights, cfg, cancel)
     }

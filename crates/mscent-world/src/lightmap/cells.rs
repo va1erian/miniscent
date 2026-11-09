@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use super::bake::luminance;
 use super::occluders::Occluders;
 use super::parallel::par_map;
-use super::soft::{Footprint, Receiver, light_at};
+use super::soft::{Footprint, Receiver, each_light};
 use super::{BakeConfig, PointLight};
 use crate::voxel::VoxelWorld;
 
@@ -153,12 +153,10 @@ pub(super) fn direct_cell(env: &CellLighting, sites: &CellSites, i: usize) -> Di
         centre: pos,
     };
     let (mut color, mut dir) = (Vec3::ZERO, Vec3::ZERO);
-    for light in env.lights {
-        if let Some((c, to_light)) = light_at(&rx, light, env.cfg) {
-            color = color + c;
-            dir = dir + to_light * luminance(c);
-        }
-    }
+    each_light(&rx, env.lights, env.cfg, |c, to_light| {
+        color = color + c;
+        dir = dir + to_light * luminance(c);
+    });
     Direct::Lit { color, dir }
 }
 
