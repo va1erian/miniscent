@@ -174,10 +174,6 @@ impl Sky {
         &self.rooms
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.rooms.is_empty()
-    }
-
     /// A hash of everything the sky lights with, for a bake's key: 0 for no sky,
     /// so a level without one keeps the key it had.
     pub fn shape_key(&self) -> u64 {

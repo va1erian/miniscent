@@ -1,4 +1,5 @@
 use super::*;
+use crate::voxel::layers::{Layer, MAX_BOUND};
 use crate::voxel::test_util::{mesh_all, open_edges};
 
 fn range() -> Range {
@@ -210,6 +211,21 @@ fn a_hostile_clearing_is_an_error() {
     }
     // A road of no length is a clearing round one point.
     assert!(mountains(&with(8.0, 0.0)).is_ok());
+    // An edge under a cell rounds to nothing; one in the smallest float made NaN.
+    for edge in [5e-324, 0.5, 0.0, -1.0, f64::NAN] {
+        let r = Range {
+            edge: Some(edge),
+            ..range()
+        };
+        assert_eq!(mountains(&r), Err(MountainError::BadBounds), "edge {edge}");
+    }
+    assert!(
+        mountains(&Range {
+            edge: Some(1.0),
+            ..range()
+        })
+        .is_ok()
+    );
 }
 
 /// The materials a volume's detail chunks hold, and how many samples hold each.
@@ -264,5 +280,53 @@ fn bad_layers_are_refused_without_a_panic() {
     for layers in [nan, wild] {
         let r = Range { layers, ..range() };
         assert_eq!(mountains(&r), Err(MountainError::BadLayers));
+    }
+}
+
+/// Top-surface triangles inside the box that keep the base material, with one
+/// layer that covers every height and slope, and all of them.
+fn unpainted(cell: CellSize, peak: f64) -> (usize, usize) {
+    let mut layers = Layers::NONE;
+    let all = Layer {
+        material: 99,
+        height: [-MAX_BOUND, MAX_BOUND],
+        slope: [0.0, MAX_BOUND],
+    };
+    layers.push(all).unwrap();
+    let r = Range {
+        max: Vec3d::new(256.0, 256.0, peak + 16.0),
+        cell,
+        peak,
+        layers,
+        ..range()
+    };
+    let v = mountains(&r).unwrap();
+    let (mut base, mut total) = (0, 0);
+    let lift = 3.0 * cell.units() as f32;
+    let inside = |p: f32| p > 4.0 && p < 252.0;
+    for (_, mesh) in mesh_all(&v, &[]) {
+        for (t, &m) in mesh.triangles.iter().zip(&mesh.materials) {
+            let p = t.map(|i| mesh.vertices[i as usize].pos);
+            let high = (p[0].z + p[1].z + p[2].z) / 3.0 > lift;
+            if high && p.iter().all(|v| inside(v.x) && inside(v.y)) {
+                total += 1;
+                base += usize::from(m != 99);
+            }
+        }
+    }
+    (base, total)
+}
+
+#[test]
+fn every_sample_of_the_surface_takes_its_layer_even_on_a_sharp_crest() {
+    // On a ridge the central difference is flat, so the field reads deep where
+    // the rock shows: the paint depth is from the lowest neighbour instead.
+    for (cell, peak) in [(CellSize::Two, 200.0), (CellSize::Four, 400.0)] {
+        let (base, total) = unpainted(cell, peak);
+        assert!(total > 1000, "{cell:?}: a range was meshed");
+        assert_eq!(
+            base, 0,
+            "{cell:?}: {base} of {total} keep the base material"
+        );
     }
 }

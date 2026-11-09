@@ -56,9 +56,25 @@ fn rock_in_the_room_shades_the_play_space() {
     let rock = || cuboid(arr(lo), arr(hi), Op::Add, 3, METAL);
     let shaded = renderer(vec![rock()], vec![sun(), layer(PARALLAX)]);
     let dark = renderer(vec![rock()], vec![layer(PARALLAX)]);
+    // The same sun with the rock moved past it, where it shades nothing: lit, so
+    // the darkness above is the rock's and not a missing sun.
+    let behind = |y: f32| image(Vec3::new(0.0, y, FLOOR));
+    let (blo, bhi) = (behind(150.0), image(Vec3::new(48.0, 154.0, 24.0)));
+    let past = cuboid(
+        arr(Vec3::new(lo.x, blo.y, lo.z)),
+        arr(bhi),
+        Op::Add,
+        3,
+        METAL,
+    );
+    let open = renderer(vec![past], vec![sun(), layer(PARALLAX)]);
     for p in floor_points() {
-        let (a, b) = (lum(&shaded, p), lum(&dark, p));
+        let (a, b, c) = (lum(&shaded, p), lum(&dark, p), lum(&open, p));
         assert!((a - b).abs() <= 0.01, "{p:?}: {a} against {b}");
+        assert!(
+            c > b * 3.0,
+            "{p:?}: the sun reaches it past the rock, {c} against {b}"
+        );
     }
 }
 

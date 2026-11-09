@@ -462,8 +462,10 @@ and of slope (rise over run, from the heightfield's central differences). The fi
 column falls in decides, and a column none takes keeps the range's material, so the order is
 the priority. A seeded noise moves each column's height by up to `jitter` of the peak before
 the rules read it, so a snow line wanders. Materials are chosen once per column, and only the
-samples near the surface (those not at the sample range's limit) take them: the rest keep the
-range's material, so buried and empty chunks stay uniform and a layered range has exactly the
+solid samples within 2 cells below the lowest of their column's and its four neighbours' tops
+take them, which is everything that can show, a sharp crest's flanks included (a depth read
+from the field missed 34 of 70 303 such triangles at cells of 2): the rest keep the range's
+material, so buried and empty chunks stay uniform and a layered range has exactly the
 plain range's detail chunks; it is bigger on disk only by the material runs it breaks. Like the
 range it is pure (integer-hash noise, IEEE arithmetic), so the same text gives the same bytes.
 The renderers need nothing new: a triangle whose corners disagree on material is already drawn
