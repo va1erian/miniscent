@@ -184,6 +184,8 @@ impl Compiled {
         vistas.set_densities(&faces, &mut light_faces);
         let lights = lights_of(level, cfg.light_gain);
         let play_lights = vistas.play_lights(&bsp, &lights);
+        // The images land in the layers' rooms, so they stay out of `play_lights`.
+        let lights = vistas.with_carried(&bsp, &holes, lights);
         let bake_cfg = BakeConfig {
             luxel_size: cfg.luxel_size,
             ambient: cfg.ambient,

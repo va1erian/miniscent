@@ -79,6 +79,10 @@ pub const MIN_POLYGON_AREA: f64 = 1.0e-8;
 /// the collision skin, so a shot's end point is on the empty side.
 pub const SURFACE_PROBE: f32 = 0.05;
 
+/// How far in front of a viewport face the points are that a lamp must see to
+/// light the vista behind it, so that the face's own wall does not block them.
+pub const WINDOW_PROBE_OFFSET: f64 = 0.05;
+
 /// Distance from a face's plane within which a shot's end point counts as on
 /// it: the probe distance again, since the end point may be off by that much.
 pub const FACE_MATCH_DISTANCE: f32 = 0.05;
