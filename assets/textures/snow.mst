@@ -1,0 +1,12 @@
+miniscent-recipe 1
+size 128 128
+gloss 40
+# Snow for the crests: soft drifts, faintly blue in their hollows.
+op 0 0 1 noise freq_x=3 freq_y=3 octaves=4 persistence=0.45 seed=111
+op 0 1 1 store name=height
+op 0 2 1 out-height normal_strength=2
+op 0 3 1 flat color=0.7,0.76,0.86
+op 1 3 1 flat color=0.95,0.96,0.98
+op 2 3 1 load name=height
+op 0 4 3 mask
+op 0 5 1 out-albedo

@@ -54,7 +54,11 @@ box add 23 0  16488 288 0  16512 312 152
 box add 24 0  16344 380 0  16364 404 190
 box add 25 0  16404 380 0  16424 404 190
 box add 26 3  16336 374 190  16432 410 220
-mountains 28 4  16032 -160 -8  16736 608 248  4 140 7  clear 16384 -4 16384 430 55  edge 64
+# Its ground is layered by height and slope (materials 14 to 17 are grass, scree, cliff and
+# snow), as the editor's New Mountains does: snow on the high ground that is not sheer, cliff
+# on the steep faces, grass on the low flats, scree on the gentle slopes above them, and the
+# rock (4) on the middling slopes between.
+mountains 28 4  16032 -160 -8  16736 608 248  4 140 7  clear 16384 -4 16384 430 55  edge 64  layer 17 0.45 1e6 0 2.4  layer 16 -1e6 1e6 1 1e6  layer 14 -1e6 0.18 0 0.45  layer 15 -1e6 0.35 0 0.8  jitter 0.06
 # A low sun from the south-west, far enough that its falloff is gentle across the plain, for the
 # ridges' relief and long shadows; a dim blue sky fill from above, so shade is not black.
 light 16052 -140 244  1 0.86 0.66  6000 1.8

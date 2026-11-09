@@ -1,14 +1,15 @@
 //! New Mountains: a miniature room of mountains, built small and shown large.
-//! A sealed room beyond the level with a rock floor, a ridged-noise range and
-//! one big lamp, and a layer at scale 16 as the next of the level's vista. Its
-//! walls and ceiling carry the slot's View material, so the layers behind it (the
+//! A sealed room beyond the level with a rock floor, a ridged-noise range
+//! layered by height and slope (snow, cliff, grass and scree over rock, by
+//! [`Layers::alpine`]) and one big lamp, and a layer at scale 16 as the next of
+//! the level's vista. Its walls and ceiling carry the slot's View material, so the layers behind it (the
 //! stars of New Vista) show through them. All of it is one undo step.
 
 use mscent_math::{Vec3, Vec3d};
 use mscent_world::entity::{MAX_VISTA_FOG, MAX_VISTA_LAYERS};
 use mscent_world::materials::{ROCK, VIEW_SLOTS, view_material};
 use mscent_world::vista_scale::parallax_of_scale;
-use mscent_world::voxel::{CellSize, MountainRange, mountains};
+use mscent_world::voxel::{CellSize, Layers, MountainRange, mountains};
 use mscent_world::{Entity, Op};
 
 use super::command::Command;
@@ -26,7 +27,7 @@ const WALL_GAP: f64 = 8.0;
 /// Sides of the range (seven chunks of one-unit cells), and its tallest peak.
 const RANGE: f64 = 112.0;
 const PEAK: f64 = 64.0;
-/// Voxel material of the rock.
+/// Voxel material of the rock, where no layer takes the ground.
 const VOXEL_ROCK: u8 = 4;
 
 impl EditorState {
@@ -178,6 +179,7 @@ impl EditorState {
             order,
             clear: None,
             edge: None,
+            layers: Layers::alpine(),
         })
     }
 
