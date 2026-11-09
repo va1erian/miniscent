@@ -1,6 +1,7 @@
 //! The xui shell around the editor model.
 
 mod app;
+mod appearance;
 mod commands;
 pub mod facepanel;
 mod faces;
