@@ -18,8 +18,8 @@ figures marked *estimate* are reasoning, not measurements, and were not prototyp
   system's 12 300.
 - **Today it would buy little.** The only height-field terrain in the repository is
   the vista demo's ground, one `mountains` range over its room. It sits in a layer,
-  where nothing collides, and costs a 470 KB level, a bake of under 0.6 s and at most
-  22 790 vista triangles. One 256-wide range at scale 16 bakes in 197 ms. What they still cost on screen is raster time, and a height field changes
+  where nothing collides, and costs a 414 KB level, a bake of under 0.6 s and at most
+  21 764 vista triangles. One 256-wide range at scale 16 bakes in 197 ms. What they still cost on screen is raster time, and a height field changes
   that little.
 - **Recommendation:** do not build it now. Build it when levels get large walkable
   outdoor ground. Then build it as a voxel *volume kind* that shares the voxel draw
@@ -46,7 +46,7 @@ figures marked *estimate* are reasoning, not measurements, and were not prototyp
 | Shadow ray | about 2 µs against voxels and 0.2 against the BSP; a bake with voxel shadows takes 410 to 450 ms against 70 to 81 | A 2D walk over a min/max height tree that stops where the ray is above the tallest point of a block. Long rays over open ground leave the tree almost at once (*estimate*) |
 | Meshing | about 108 µs a chunk; 70 ms for 256 chunks single-threaded | A regular grid: no search, nearly free (*estimate*) |
 | LOD | Clustering; caps are soft because borders never merge | Geomipmapping or CDLOD with skirts: hard caps, and far flat ground collapses to a few triangles |
-| Storage | The demo's old three ranges: 272 chunks, 380 KB at 4-unit cells (4.8 MB at 1-unit cells); its ground now, a 470 KB level | One u16 a column: a 256 by 256 range is 128 KB raw, less after RLE |
+| Storage | The demo's old three ranges: 272 chunks, 380 KB at 4-unit cells (4.8 MB at 1-unit cells); its ground now, a 414 KB level | One u16 a column: a 256 by 256 range is 128 KB raw, less after RLE |
 | Raster | Voxel pixels 51 to 57 ns against 30 to 50 for a brush; the gate pose 13 168 triangles, 1.4 times a wall at High | Same pixels if it reuses the voxel span path; fewer triangles far away. Pixels dominate, so the gain is small |
 
 ## Two ways to build it

@@ -21,6 +21,7 @@ mod layout;
 mod occluders;
 pub(crate) mod parallel;
 pub mod ray;
+mod sky;
 mod soft;
 pub mod store;
 pub mod uv;
@@ -45,6 +46,7 @@ pub use cell_sites::{CellKey, CellSites, shape_key};
 pub use cells::{CellLighting, CellRecord, RECORD_BYTES, light_cells};
 pub use cone::Cone;
 pub use occluders::Occluders;
+pub use sky::{RoomMap, Sky, SkyRoom, Window};
 pub use uv::{FaceProjection, MAX_FACE_LUXELS};
 
 use mscent_math::Vec3;
