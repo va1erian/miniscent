@@ -80,7 +80,7 @@ pub use dab::{DabOp, apply_dab, fill};
 pub use edit::{first_solid, solid_material_near};
 pub use index::{CellIndex, INDEX_EDGE};
 pub use lod::Lod;
-pub use mountains::{MountainError, Range as MountainRange, mountains};
+pub use mountains::{Clearing, MountainError, Range as MountainRange, mountains};
 pub use noise::noise3;
 pub use parts::{MIN_ISLAND_SAMPLES, remove_islands, solid_parts};
 pub use prim::Prim;

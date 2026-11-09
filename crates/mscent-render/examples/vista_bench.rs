@@ -6,7 +6,10 @@
 //!   cargo run --release -p mscent-render --example vista_bench -- --workers 0 --quality low
 //!
 //! `--workers N` sets the worker count, 0 for the renderer's default (every
-//! hardware thread); `--quality low|medium|high`.
+//! hardware thread); `--quality low|medium|high`. `--sweep` instead renders the
+//! level from 6 places on the platform at 36 yaws and 4 pitches and prints the most
+//! vista triangles any pose submits, the figure the layers' budgets are held to,
+//! and the slowest pose's frame time (the fastest of 3 frames there).
 //!
 //! - `wall`: the sky faces are plain metal, and nothing else differs.
 //! - `holes`: viewport faces with no layers, so a frame marks and resolves its
@@ -65,6 +68,51 @@ fn option(flag: &str) -> Option<String> {
     args.get(at + 1).cloned()
 }
 
+/// The most vista triangles any pose of a sweep over the platform submits.
+fn sweep(level: &Level, materials: MaterialTable, quality: Quality, workers: usize) {
+    let mut r =
+        LevelRenderer::from_level(level, materials, &BuildConfig::default()).expect("builds");
+    r.set_tiling(H, workers.max(1));
+    let mut fb = Framebuffer::new(W, H).expect("fb");
+    let places = [
+        (0.0, -22.0),
+        (0.0, 0.0),
+        (0.0, 22.0),
+        (-14.0, 0.0),
+        (14.0, 0.0),
+        (0.0, 10.0),
+    ];
+    let mut worst = (0, Vec3::ZERO, 0.0, 0.0);
+    let mut slowest = (0.0_f64, Vec3::ZERO, 0.0, 0.0);
+    for (x, y) in places {
+        let eye = Vec3::new(x, y, 0.0);
+        for yaw in (0..36).map(|i| i as f32 * std::f32::consts::TAU / 36.0) {
+            for pitch in [-0.4, 0.0, 0.4, 0.9] {
+                let view = View::from_angles(eye, yaw, pitch, 0.0);
+                let stats = r
+                    .render(&mut fb, &view, quality, &[], None)
+                    .expect("renders");
+                if stats.vista_triangles > worst.0 {
+                    worst = (stats.vista_triangles, eye, yaw, pitch);
+                }
+                let ms = (0..3).fold(f64::MAX, |m, _| {
+                    let t = Instant::now();
+                    r.render(&mut fb, &view, quality, &[], None)
+                        .expect("renders");
+                    m.min(t.elapsed().as_secs_f64() * 1e3)
+                });
+                if ms > slowest.0 {
+                    slowest = (ms, eye, yaw, pitch);
+                }
+            }
+        }
+    }
+    let (tris, eye, yaw, pitch) = worst;
+    println!("sweep: at most {tris} vista triangles, at {eye:?} yaw {yaw:.2} pitch {pitch:.1}");
+    let (ms, eye, yaw, pitch) = slowest;
+    println!("sweep: slowest {ms:.2} ms, at {eye:?} yaw {yaw:.2} pitch {pitch:.1}");
+}
+
 fn main() {
     let workers: usize = option("--workers")
         .and_then(|v| v.parse().ok())
@@ -77,6 +125,9 @@ fn main() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures");
     let materials = MaterialTable::load_dir(&dir).expect("textures");
     let level = demo();
+    if std::env::args().any(|a| a == "--sweep") {
+        return sweep(&level, materials, quality, workers);
+    }
     let cfg = BuildConfig::default();
     let variants = [
         ("wall", walled(&level)),

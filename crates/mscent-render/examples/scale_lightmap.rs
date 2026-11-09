@@ -60,6 +60,8 @@ fn scene(shrink: f64) -> Level {
         seed: 11,
         material: 4,
         order: 4,
+        clear: None,
+        edge: None,
     };
     let pillar = |x: f64, order: u32| {
         let (a, b) = (

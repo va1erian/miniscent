@@ -10,6 +10,8 @@ fn range() -> Range {
         seed: 7,
         material: 4,
         order: 5,
+        clear: None,
+        edge: None,
     }
 }
 
@@ -152,4 +154,59 @@ fn coarse_cells_still_close_the_surface_and_reach_the_peak() {
             .fold(f32::MIN, f32::max);
         assert!(top >= 200.0 - cell.units() as f32 * 2.0, "{cell:?}: {top}");
     }
+}
+
+#[test]
+fn a_clearing_leaves_its_road_at_the_ground_and_the_rest_rising() {
+    let road = Clearing {
+        a: [64.0, 0.0],
+        b: [64.0, 128.0],
+        radius: 12.0,
+    };
+    let r = Range {
+        clear: Some(road),
+        ..range()
+    };
+    let h = Heights::new(&mountains(&r).unwrap(), &r);
+    let column = |x: f64, y: f64| {
+        let i = (x / h.cell) as usize + 1;
+        let j = (y / h.cell) as usize + 1;
+        h.at(i, j).unwrap()
+    };
+    let ground = 2.0;
+    for y in [10.0, 40.0, 64.0, 90.0, 118.0] {
+        for x in [52.0, 58.0, 64.0, 70.0, 76.0] {
+            assert_eq!(column(x, y), ground, "on the road at {x}, {y}");
+        }
+    }
+    // Off the road the range still stands, as tall as its peak.
+    let top = h.z.iter().copied().fold(f64::MIN, f64::max);
+    assert!((top - (ground + r.peak)).abs() < 1e-9, "top {top}");
+}
+
+#[test]
+fn a_hostile_clearing_is_an_error() {
+    let with = |radius: f64, end: f64| Range {
+        clear: Some(Clearing {
+            a: [0.0, 0.0],
+            b: [end, 0.0],
+            radius,
+        }),
+        ..range()
+    };
+    for (radius, end) in [
+        (0.0, 1.0),
+        (-1.0, 1.0),
+        (f64::NAN, 1.0),
+        (1.0, f64::INFINITY),
+        (1.0, 1.0e9),
+    ] {
+        assert_eq!(
+            mountains(&with(radius, end)),
+            Err(MountainError::BadBounds),
+            "{radius} {end}"
+        );
+    }
+    // A road of no length is a clearing round one point.
+    assert!(mountains(&with(8.0, 0.0)).is_ok());
 }

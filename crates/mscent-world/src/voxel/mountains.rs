@@ -10,8 +10,10 @@
 //! the peak with ridged crests (sharp where the noise crosses zero, each octave
 //! weighted by the one before so crests carry the detail and valleys stay smooth)
 //! riding on them, squared so that few reach the top. An envelope takes it to nothing
-//! at the box's edges, so no cliff shows there. It is divided by its own highest
-//! point, so the tallest peak is exactly `peak`.
+//! at the box's edges, so no cliff shows there. A [`Clearing`] does the same along a
+//! road through the range, so a whole room's ground can be one range with a flat way
+//! through it. It is divided by its own highest point, so the tallest peak is
+//! exactly `peak`.
 //!
 //! The field handed to [`fill`] is the height above the surface over the slope's
 //! length, which keeps its value near a true distance so the mesher places steep
@@ -32,8 +34,11 @@ const GROUND_CELLS: f64 = 2.0;
 /// Octaves of ridged noise.
 const OCTAVES: u32 = 5;
 /// How far in from the box's edge, as a share of its width, the range reaches
-/// full height.
+/// full height, unless the range says how far in world units.
 const FALLOFF: f64 = 0.3;
+/// How far past a clearing's edge, as a share of its radius, the range is back
+/// to its own height.
+const CLEAR_EASE: f64 = 0.5;
 /// Wavelengths across the longer side, of the first octave.
 const RIDGES_ACROSS: f64 = 2.5;
 /// Height of the lowlands, and the relief the crests add to them, as shares of
@@ -64,6 +69,48 @@ pub struct Range {
     /// Voxel material of the rock.
     pub material: u8,
     pub order: u32,
+    /// A road left flat at the ground, if any.
+    pub clear: Option<Clearing>,
+    /// How far in from the box's sides the range reaches full height, in world
+    /// units; `None` is `FALLOFF` of each side. A range that is a room's whole
+    /// ground wants a narrow edge, or its walls take most of it.
+    pub edge: Option<f64>,
+}
+
+/// A road through a range, flat at its ground: every column within `radius` of the
+/// segment from `a` to `b` (in plan, world units), easing back to the range's own
+/// height over `CLEAR_EASE` of that again.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Clearing {
+    pub a: [f64; 2],
+    pub b: [f64; 2],
+    pub radius: f64,
+}
+
+impl Clearing {
+    fn is_valid(&self) -> bool {
+        let ends = [self.a, self.b].concat();
+        let in_range = ends.iter().all(|v| v.is_finite() && v.abs() <= MAX_COORD);
+        in_range && self.radius.is_finite() && self.radius > 0.0 && self.radius <= MAX_COORD
+    }
+
+    /// 0 on the road, 1 once past its ease, smooth at both ends.
+    fn share(&self, x: f64, y: f64) -> f64 {
+        let (ab, ap) = (
+            [self.b[0] - self.a[0], self.b[1] - self.a[1]],
+            [x - self.a[0], y - self.a[1]],
+        );
+        let len2 = ab[0] * ab[0] + ab[1] * ab[1];
+        let t = if len2 > 0.0 {
+            ((ap[0] * ab[0] + ap[1] * ab[1]) / len2).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let (dx, dy) = (ap[0] - ab[0] * t, ap[1] - ab[1] * t);
+        let ease = self.radius * CLEAR_EASE;
+        let s = (((dx * dx + dy * dy).sqrt() - self.radius) / ease).clamp(0.0, 1.0);
+        s * s * (3.0 - 2.0 * s)
+    }
 }
 
 /// Why a range was refused.
@@ -71,7 +118,8 @@ pub struct Range {
 pub enum MountainError {
     /// A bound or the peak is not a finite number, or the peak is not above zero.
     NotFinite,
-    /// A side of the box has no length, or the box lies past the range brushes may use.
+    /// A side of the box has no length, the box lies past the range brushes may
+    /// use, or the clearing or the edge is not finite, positive and within it.
     BadBounds,
     /// A side needs more than [`MAX_CHUNKS_PER_AXIS`] chunks at this cell size.
     TooLarge,
@@ -121,7 +169,9 @@ pub fn mountains(r: &Range) -> Result<Volume, MountainError> {
     if !(corners.iter().all(|v| v.is_finite()) && r.peak.is_finite() && r.peak > 0.0) {
         return Err(MountainError::NotFinite);
     }
-    if corners.iter().any(|v| v.abs() > MAX_COORD) {
+    let edge_ok = |e: f64| e.is_finite() && e > 0.0 && e <= MAX_COORD;
+    let extras_ok = r.clear.is_none_or(|c| c.is_valid()) && r.edge.is_none_or(edge_ok);
+    if corners.iter().any(|v| v.abs() > MAX_COORD) || !extras_ok {
         return Err(MountainError::BadBounds);
     }
     let cell = r.cell.units();
@@ -177,6 +227,8 @@ impl Heights {
         let stride = lattice[0] + 2;
         let rows = lattice[1] + 2;
         let wave = (hi.x - lo.x).max(hi.y - lo.y) / RIDGES_ACROSS;
+        let falloff = |side: f64| r.edge.map_or(FALLOFF, |e| e / side);
+        let (fx, fy) = (falloff(hi.x - lo.x), falloff(hi.y - lo.y));
         let mut raw = Vec::with_capacity(stride * rows);
         for j in 0..rows {
             for i in 0..stride {
@@ -184,7 +236,8 @@ impl Heights {
                 let y = (origin[1] + j as i64 - 1) as f64 * cell;
                 let (u, v) = ((x - lo.x) / (hi.x - lo.x), (y - lo.y) / (hi.y - lo.y));
                 let q = Vec3d::new(x - lo.x, y - lo.y, 0.0) * (1.0 / wave);
-                raw.push(range_shape(r.seed, q) * envelope(u) * envelope(v));
+                let road = r.clear.map_or(1.0, |c| c.share(x, y));
+                raw.push(range_shape(r.seed, q) * envelope(u, fx) * envelope(v, fy) * road);
             }
         }
         // The tallest crest is the peak, however the noise fell.
@@ -230,9 +283,9 @@ impl Heights {
     }
 }
 
-/// 0 at the box's edge to 1 once `FALLOFF` of its width in, smooth at both ends.
-fn envelope(t: f64) -> f64 {
-    let edge = t.min(1.0 - t) / FALLOFF;
+/// 0 at the box's edge to 1 once `falloff` of its width in, smooth at both ends.
+fn envelope(t: f64, falloff: f64) -> f64 {
+    let edge = t.min(1.0 - t) / falloff;
     let s = edge.clamp(0.0, 1.0);
     s * s * (3.0 - 2.0 * s)
 }
