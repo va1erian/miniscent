@@ -54,7 +54,7 @@ box add 23 0  16488 288 0  16512 312 152
 box add 24 0  16344 380 0  16364 404 190
 box add 25 0  16404 380 0  16424 404 190
 box add 26 3  16336 374 190  16432 410 220
-mountains 28 4  16032 -160 -8  16736 608 248  4 140 11  clear 16384 -16 16384 430 70  edge 64
+mountains 28 4  16032 -160 -8  16736 608 248  4 140 7  clear 16384 -4 16384 430 55  edge 64
 # A low sun from the south-west, far enough that its falloff is gentle across the plain, for the
 # ridges' relief and long shadows; a dim blue sky fill from above, so shade is not black.
 light 16052 -140 244  1 0.86 0.66  6000 1.8

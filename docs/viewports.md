@@ -276,9 +276,43 @@ wall, a projector aimed away, out of range, the ray budget spent) beside a lamp
 carried. Taking out any one check fails its test.
 
 Not carried: dynamic lights (a shot passing the window lights the play floor, not
-the floor beyond), the play fog (a layer keeps its own; matching it to the level's
-would fog a large range out of sight, see "Risks"), and light the other way, from
-the room's lamps onto the play space (see "Later").
+the floor beyond) and the play fog (a layer keeps its own; matching it to the level's
+would fog a large range out of sight, see "Risks").
+
+### Sky light: a layer's lamps in the play space
+
+The other way round, as a Source level is lit through its sky faces: the lamps of a
+layer's room light the play space through its viewport faces, so the room's sun is the
+level's sun (`lightmap/sky.rs` in `mscent-world`, built by `Vistas::sky`). A lamp at
+`L` of radius `r` in the room is, seen from the play space, a lamp at
+
+```
+centre + (L - pos) / parallax,   radius r / parallax
+```
+
+far beyond the windows, and by the same scale invariance it lights a play point as the
+lamp lights that point's image in the room. Its shadow ray from a play point must cross
+a **window**: a viewport face of a slot showing the room that looks into the play
+space. The part up to the window is traced in the play space, and the rest, mapped by
+the layer's map, in the room, against its brushes and voxels. So a range in a view
+shades the arena behind it, a wall of the level shades its floor, and a point no window
+looks at gets no sun. A lamp's disc for soft shadows widens by the same `1 / parallax`.
+
+- The room is lit by the layer that carries lamps into it (the first of its room with
+  a finite scale); an infinitely far layer sheds no light. Only the level's own lamps
+  in the room go out, never the images carried in, so nothing comes back.
+- Faces and voxel cells take it in the bake, through `Occluders::with_sky`, and bounce
+  spreads it. Meshes, live voxel edits and the GPU's lamp shadows do not: they light
+  from the play space's own lamps, so an actor in the sun is lit as in shade.
+- The sky's rooms, windows and lamps hash into the light key; a level with no sky adds
+  nothing to it, so its cache stays valid.
+
+`tests/vista_sky.rs`, in the room of the seam tests with a lamp beyond the viewport:
+a play floor and its image in the room agree within 15 % (measured 4 % to 13 %, the
+room's bounce being the larger), a rock wall in the room and a wall of the play space
+each leave a floor as dark as without the lamp, and an infinite layer sheds nothing.
+With the shadow rays left out, both shading tests fail. `lightmap/sky_tests.rs` checks
+a window's crossing, the map and hostile rooms alone.
 
 ## Self-lit and cutout materials
 
@@ -365,12 +399,15 @@ hand: subtract a 128-unit room with View walls, add a floor, drop in a volume fr
 `mountains` (or the Mountains generator), a lamp, and a layer at scale 16 (`x16`) of
 the same slot, after the stars. The demo goes further: its plain has no flat floor at
 all. One range is the room's whole ground, rolling foothills rising to massifs, with
-`clear` keeping a flat road from the platform to past the gate, where the towers stand
-and the ground meets the platform's floor, and `edge 64` so that the walls do not take
-most of the room. A thin floor brush under it keeps the room sealed. A low sun from the
-south-west and a dim sky fill from above give it relief and long shadows. The lamps
-before it had intensities of 120, which drove every surface of the plain to the same
-white.
+`clear` keeping a flat road 55 units wide (in the room) from the platform to past the
+gate, where the towers stand at the foot of the slopes and the ground meets the
+platform's floor, and `edge 64` so that the walls do not take most of the room. A road
+of 70 left a flat plain around the platform; one of 40 buried the towers in canyon
+walls. A thin floor brush under it keeps the room sealed. A low sun from the south-west
+and a dim sky fill from above give it relief and long shadows, and through the sky
+light below they light the platform too, so the pillars cast the sun's shadows on it.
+The lamps before them had intensities of 120, which drove every surface of the plain to
+the same white.
 
 **Original Unreal: clouds over a horizon.** Add a third room with one big plate in
 `sky-clouds`, layer 2, a `pan`, walls painted **View 0**. It costs no lightmap.
@@ -396,8 +433,8 @@ level, all layers together `VISTA_VOXEL_TRIS` (24 000), and the main scene keeps
 own `MAX_VOXEL_TRIS`. The lowest level still has a cost (cells on a chunk's border never
 merge), so a frame can pass these; the first demo, with one-unit cells, submitted 70 253
 triangles to its layers at the gate. Its three ranges of four-unit cells had 13 168. Its
-ground, one range over the whole room, has 16 572 at the gate, and no pose of
-`vista_bench --sweep` (6 places on the platform, 36 yaws, 4 pitches) passes 22 790. Over a
+ground, one range over the whole room, has 14 446 at the gate, and no pose of
+`vista_bench --sweep` (6 places on the platform, 36 yaws, 4 pitches) passes 21 764. Over a
 1024 by 1024 room it was 27 111, past `VISTA_VOXEL_TRIS`, so the room was cut to 704 by
 768: fog hides the rest. `SceneStats::vista_triangles` reports it.
 
@@ -411,7 +448,7 @@ units at one-unit cells and 1024 at cells of 4. A range seen far off wants the c
 cells (`CellSize::Two` and `Four`): the demo's plain is seen at scale 16, where a cell of
 4 is a pixel or two. With one-unit cells its three ranges were 7 900 chunks, 70 253 triangles at
 the gate and a 4.8 MB level; with cells of 4 they were 272 chunks, 13 168 triangles and
-380 KB. The ground that replaced them is a 470 KB level.
+380 KB. The ground that replaced them is a 414 KB level.
 Bad input is
 a `MountainError`. Level text has a line for it, expanded at parse into a `Volume`:
 
@@ -506,11 +543,10 @@ Pixel reads through the renderer, as everywhere else:
 
 Each stands on its own and none is needed for the goal:
 
-- **Sky light.** Viewport faces lighting a room during the bake: a layer's lamps
-  carried out through the inverse map, with shadow rays that cross a viewport face
-  into the layer's room (so a range shades the arena). The same rays would make the
-  carry in exact behind a window's frame. Until then, a far lamp with a large radius
-  plays the sun.
+- **More sky light.** Sky light lights faces and voxel cells (see above). Still to
+  do: an ambient term from every direction a window shows, as Source's
+  `light_environment` adds; actors and live voxel edits in the sun; and the same
+  windowed rays for the carry in, which would make it exact behind a window's frame.
 - **Actors and movers in a view:** a passing ship, a turning wheel, driven by script.
 - **Script control:** switch a slot's layers, or change `spin`, for a day that turns to
   night.
