@@ -54,7 +54,11 @@ fn assets_load_and_texels_read_back() {
             "sky-stars",
             "sky-clouds",
             "sky-ridge",
-            "sky-planet"
+            "sky-planet",
+            "grass",
+            "scree",
+            "cliff",
+            "snow"
         ]
     );
 
@@ -239,7 +243,8 @@ fn a_retired_id_holds_its_place_and_finds_nothing() {
 #[test]
 fn the_living_and_sky_materials_keep_their_ids_in_the_real_manifest() {
     use mscent_world::materials::{
-        BARK, CAP, CORAL, SKY_CLOUDS, SKY_PLANET, SKY_RIDGE, SKY_STARS, STEM, WAX,
+        BARK, CAP, CLIFF, CORAL, GRASS, SCREE, SKY_CLOUDS, SKY_PLANET, SKY_RIDGE, SKY_STARS, SNOW,
+        STEM, WAX,
     };
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures");
     let table = MaterialTable::load_dir(&dir).expect("loads");
@@ -253,6 +258,10 @@ fn the_living_and_sky_materials_keep_their_ids_in_the_real_manifest() {
         (SKY_CLOUDS, "sky-clouds"),
         (SKY_RIDGE, "sky-ridge"),
         (SKY_PLANET, "sky-planet"),
+        (GRASS, "grass"),
+        (SCREE, "scree"),
+        (CLIFF, "cliff"),
+        (SNOW, "snow"),
     ] {
         assert_eq!(table.find(name), Some(MaterialId(id)), "{name}");
     }

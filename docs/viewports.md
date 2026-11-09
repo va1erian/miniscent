@@ -368,7 +368,10 @@ all. One range is the room's whole ground, rolling foothills rising to massifs, 
 `clear` keeping a flat road from the platform to past the gate, where the towers stand
 and the ground meets the platform's floor, and `edge 64` so that the walls do not take
 most of the room. A thin floor brush under it keeps the room sealed. A low sun from the
-south-west and a dim sky fill from above give it relief and long shadows. The lamps
+south-west and a dim sky fill from above give it relief and long shadows. Its ground is
+layered by height and slope with the bands of `Layers::alpine`: olive grass on the road and
+the low flats, scree on the gentle slopes above, dark cliff on the steep faces, snow on the
+high crests and the beige rock on the middling slopes between, where it was all rock before. The lamps
 before it had intensities of 120, which drove every surface of the plain to the same
 white.
 
@@ -416,7 +419,7 @@ Bad input is
 a `MountainError`. Level text has a line for it, expanded at parse into a `Volume`:
 
 ```
-mountains <order> <material> <min x y z> <max x y z> <cell> <peak> <seed> [clear <ax ay> <bx by> <radius>] [edge <units>]
+mountains <order> <material> <min x y z> <max x y z> <cell> <peak> <seed> [clear <ax ay> <bx by> <radius>] [edge <units>] [layer <material> <height lo hi> <slope lo hi>]* [jitter <share>]
 ```
 
 `clear` leaves a road at the ground: every column within `radius` of the segment from `a`
@@ -425,6 +428,14 @@ is how far in from the box's sides the range reaches full height, in world units
 it, 0.3 of each side. Both are `None` from the editor's commands, so their ranges are
 unchanged. A road that is not finite, or of no width, is a `MountainError`.
 
+Each `layer` paints the ground whose height (a share of the peak above the range's ground)
+and slope (rise over run) lie in its bands with its material; the first that holds wins, and
+ground none takes keeps the line's material. Up to eight, then an optional `jitter`: seeded
+noise of up to that share of the peak moves each column's height before the layers read it
+(design in [voxels.md](voxels.md), "Terrain layers"). A bound that is not finite, past
+1e6 either way, a band whose ends are out of order, a negative slope, a jitter outside 0 to 1
+or a ninth layer is an error on its line.
+
 Dumping cannot turn a volume back into this line (a sculpted range is no longer one),
 so `--dump-level` refuses a level with volumes, as it did.
 
@@ -432,7 +443,8 @@ The editor has a Mountains generator beside the others (it builds a whole volume
 aimed place, wide in proportion to the radius), and **New mountains** (Edit menu), which
 adds a miniature room at scale 16 beyond the level: a sealed 128-unit room whose walls
 and ceiling are the slot's View material, a rock floor, a range, one large lamp, and a
-layer that is the next of the existing vista's slot (or the next free slot). The layer's
+layer that is the next of the existing vista's slot (or the next free slot). Its range is
+layered by `Layers::alpine`: snow, cliff, grass and scree over the rock. The layer's
 height makes the room's floor continue the play floor. One undo step; with the slot's
 layers full it does nothing and says so.
 

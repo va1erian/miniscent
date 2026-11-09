@@ -288,13 +288,17 @@ fn listed_gloss(name: &str) -> u8 {
         "stem" => 20,
         "bark" => 8,
         "sky-stars" | "sky-clouds" | "sky-ridge" | "sky-planet" => 0,
+        "grass" => 6,
+        "scree" => 12,
+        "cliff" => 14,
+        "snow" => 40,
         _ => DEFAULT_GLOSS,
     }
 }
 
 /// Where the stock names go in a directory with no manifest: the ids of
 /// `assets/textures/materials.txt`.
-const LISTING_ORDER: [&str; 14] = [
+const LISTING_ORDER: [&str; 18] = [
     "brick",
     "floor",
     "lightpanel",
@@ -309,6 +313,10 @@ const LISTING_ORDER: [&str; 14] = [
     "sky-clouds",
     "sky-ridge",
     "sky-planet",
+    "grass",
+    "scree",
+    "cliff",
+    "snow",
 ];
 
 /// The entries of a directory with no manifest: every base texture, the stock

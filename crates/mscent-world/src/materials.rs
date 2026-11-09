@@ -3,8 +3,9 @@
 //! `assets/textures/materials.txt` decides every id, and may list more materials
 //! after these. It must keep the five in [`NAMES`] where they are: the renderer
 //! checks those names when it builds a level, so a mismatch is reported there.
-//! The living materials the voxel generators grow and the four sky materials come
-//! after them, and their ids are held to the manifest by a test.
+//! The living materials the voxel generators grow, the four sky materials and the
+//! terrain layers' materials come after them, and their ids are held to the
+//! manifest by a test.
 
 /// Red brick walls.
 pub const BRICK: u16 = 0;
@@ -37,10 +38,21 @@ pub const SKY_RIDGE: u16 = 12;
 /// An Earth-like disc, clear outside it.
 pub const SKY_PLANET: u16 = 13;
 
+/// Turf for flat, low ground: the terrain layers' grass.
+pub const GRASS: u16 = 14;
+/// Loose stones, between turf and cliff.
+pub const SCREE: u16 = 15;
+/// Dark bare rock for steep faces.
+pub const CLIFF: u16 = 16;
+/// Snow for high crests.
+pub const SNOW: u16 = 17;
+
 /// The first of the four stock sky materials.
 pub const FIRST_SKY: u16 = SKY_STARS;
 /// The last of the sky materials.
 pub const LAST_SKY: u16 = SKY_PLANET;
+/// The last material the game ships: ids above it are a mapper's own.
+pub const LAST_STOCK: u16 = SNOW;
 
 /// A face with this material is never drawn or lit: the shell of a voxel volume,
 /// where the voxel surface closes in front of it. Not a texture.

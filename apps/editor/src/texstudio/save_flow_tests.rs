@@ -17,7 +17,7 @@ use super::*;
 const TICKS: u32 = 200;
 
 #[test]
-fn the_stock_list_is_the_shipped_manifests_first_fourteen_rows() {
+fn the_stock_list_is_the_shipped_manifests_first_eighteen_rows() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures/materials.txt");
     let entries = manifest::parse(&std::fs::read(path).expect("reads")).expect("parses");
     let names: Vec<&str> = entries
@@ -51,7 +51,7 @@ fn save_asks_about_every_stock_material_and_nothing_else() {
     }
     s.create("mine", 16).expect("creates");
     assert_eq!(s.save(), SaveStart::Started);
-    assert!(wait_bake(&mut s).starts_with("Saved mine (id 14)"));
+    assert!(wait_bake(&mut s).starts_with("Saved mine (id 18)"));
     let _ = std::fs::remove_dir_all(d);
 }
 

@@ -1,0 +1,17 @@
+miniscent-recipe 1
+size 128 128
+gloss 6
+# Turf for flat, low ground: fine tufts over a gentle swell.
+op 0 0 1 noise freq_x=4 freq_y=4 octaves=4 persistence=0.5 seed=81 color1=0.6,0.6,0.6
+op 1 0 1 noise freq_x=32 freq_y=32 octaves=2 persistence=0.5 seed=82 color1=0.4,0.4,0.4
+op 0 1 2 merge mode=add
+op 0 2 1 store name=height
+op 0 3 1 out-height normal_strength=3
+# Colour: olive turf, darker in the hollows, with drier patches here and there.
+op 0 4 1 flat color=0.12,0.15,0.07
+op 1 4 1 flat color=0.3,0.33,0.17
+op 2 4 1 load name=height
+op 0 5 3 mask
+op 3 5 1 noise freq_x=6 freq_y=6 octaves=3 persistence=0.5 seed=83 color0=1,0.86,0.62 color1=0.86,1,0.8
+op 0 6 4 merge mode=multiply
+op 0 7 1 out-albedo

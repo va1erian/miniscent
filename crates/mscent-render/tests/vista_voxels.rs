@@ -8,7 +8,7 @@ use mscent_math::{Vec3, Vec3d};
 use mscent_render::{BuildConfig, Framebuffer, LevelRenderer, MaterialTable, Quality, View};
 use mscent_world::materials::{METAL, NO_DRAW, ROCK, VIEW_FIRST};
 use mscent_world::vista_scale::parallax_of_scale;
-use mscent_world::voxel::{CellSize, MountainRange, Volume, mountains};
+use mscent_world::voxel::{CellSize, Layers, MountainRange, Volume, mountains};
 use mscent_world::{Brush, Entity, Level, MAX_VISTA_FOG, Op};
 
 const W: u32 = 160;
@@ -82,6 +82,7 @@ fn range_at(x: f64, order: u32, seed: u32) -> Volume {
         order,
         clear: None,
         edge: None,
+        layers: Layers::NONE,
     };
     mountains(&range).expect("a range")
 }
@@ -376,6 +377,7 @@ fn a_range_has_no_hole_to_the_gradient_from_above() {
         order: 3,
         clear: None,
         edge: None,
+        layers: Layers::NONE,
     };
     let play = cuboid(
         vd(-100.0, -16.0, -16.0),

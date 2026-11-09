@@ -12,6 +12,7 @@ fn range() -> Range {
         order: 5,
         clear: None,
         edge: None,
+        layers: Layers::NONE,
     }
 }
 
@@ -76,8 +77,8 @@ fn the_range_falls_to_the_ground_at_the_edges() {
         .unwrap();
     let (x, y) = ((i as f64 - 1.0) * h.cell, (j as f64 - 1.0) * h.cell);
     let crest = h.at(i, j).unwrap();
-    assert!(h.field(Vec3d::new(x, y, crest - 3.0)) > 0.0);
-    assert!(h.field(Vec3d::new(x, y, crest + 3.0)) < 0.0);
+    assert!(h.field(Vec3d::new(x, y, crest - 3.0)).0 > 0.0);
+    assert!(h.field(Vec3d::new(x, y, crest + 3.0)).0 < 0.0);
 }
 
 #[test]
@@ -209,4 +210,59 @@ fn a_hostile_clearing_is_an_error() {
     }
     // A road of no length is a clearing round one point.
     assert!(mountains(&with(8.0, 0.0)).is_ok());
+}
+
+/// The materials a volume's detail chunks hold, and how many samples hold each.
+fn material_counts(v: &Volume) -> std::collections::BTreeMap<u8, usize> {
+    let mut counts = std::collections::BTreeMap::new();
+    let [nx, ny, nz] = v.chunks();
+    for z in 0..nz {
+        for y in 0..ny {
+            for x in 0..nx {
+                let Some(chunk) = v.chunk([x, y, z]) else {
+                    continue;
+                };
+                for i in 0..super::super::CHUNK_SAMPLES {
+                    *counts.entry(chunk.sample(i).1).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    counts
+}
+
+#[test]
+fn layers_paint_the_surface_the_same_way_every_time() {
+    let r = Range {
+        layers: Layers::alpine(),
+        ..range()
+    };
+    let (a, b) = (mountains(&r).unwrap(), mountains(&r).unwrap());
+    assert_eq!(a, b);
+    let counts = material_counts(&a);
+    for m in [14, 15, 16, 17, 4] {
+        assert!(counts.get(&m).is_some_and(|&n| n > 0), "{m}: {counts:?}");
+    }
+    // Only the samples that show are painted: the shape is the plain range's, and
+    // no chunk a plain range keeps uniform has to hold detail for the paint.
+    let plain = mountains(&range()).unwrap();
+    assert_eq!(chunks_with_detail(&a), chunks_with_detail(&plain));
+    assert_eq!(a.chunks(), plain.chunks());
+}
+
+#[test]
+fn bad_layers_are_refused_without_a_panic() {
+    let mut nan = Layers::NONE;
+    nan.push(super::super::Layer {
+        material: 17,
+        height: [f64::NAN, 1.0],
+        slope: [0.0, 1.0],
+    })
+    .unwrap();
+    let mut wild = Layers::NONE;
+    wild.jitter = f64::INFINITY;
+    for layers in [nan, wild] {
+        let r = Range { layers, ..range() };
+        assert_eq!(mountains(&r), Err(MountainError::BadLayers));
+    }
 }
