@@ -106,6 +106,8 @@ impl Rig {
                 seed: 5,
                 material: 4,
                 order: 4,
+                clear: None,
+                edge: None,
             };
             out.push(mountains(&range).expect("a hill"));
         }

@@ -33,9 +33,13 @@ box subtract 10 65520  7168 -1024 -64  9216 1024 64
 brush add 11 11  6  -1 0 0 -7168 11 0 1 0 0 0 -1 0 0 0.5 0.5 0 0  1 0 0 9216 11 0 1 0 0 0 -1 0 0 0.5 0.5 0 0  0 -1 0 1024 11 1 0 0 0 0 -1 0 0 0.5 0.5 0 0  0 1 0 1024 11 1 0 0 0 0 -1 0 0 0.5 0.5 0 0  0 0 -1 -56 11 1 0 0 0 1 0 0 0 0.5 0.5 0 0  0 0 1 57 11 1 0 0 0 1 0 0 0 0.5 0.5 0 0
 vista 8192 0 0  0 0 -4  0 1 0  0 0 0  12 4  0 100000 0
 
-# Layer 2: the plain, at scale 16 (x16): 1024 units here read as 16384. The floor meets the platform's.
-box subtract 12 65520  15872 -512 -8  16896 704 248
-box add 13 4  15872 -512 -8  16896 704 0
+# Layer 2: the plain, at scale 16 (x16): 1024 units here read as 16384. The ground is one
+# range of noise voxels (material 4 is rock) over the whole room: rolling foothills that rise
+# to massifs, with a road left flat from behind the platform to past the gate, where the
+# towers stand and the ground meets the platform's floor. A thin floor brush under it keeps
+# the room sealed. A cell of 4 units reads as 64 here and is a pixel or two.
+box subtract 12 65520  16032 -160 -8  16736 608 248
+box add 13 4  16032 -160 -8  16736 608 -6
 box add 14 0  16308 48 0  16320 60 48
 box add 15 0  16448 48 0  16460 60 48
 box add 16 3  16295 96 0  16310 111 74
@@ -50,16 +54,9 @@ box add 23 0  16488 288 0  16512 312 152
 box add 24 0  16344 380 0  16364 404 190
 box add 25 0  16404 380 0  16424 404 190
 box add 26 3  16336 374 190  16432 410 220
-# Ranges of noise voxels (material 4 is rock): one on each flank of the avenue of towers,
-# which stays clear, and a wide one behind the gate. The plain is seen at scale 16, so a
-# cell of 4 units reads as 64 and is a pixel or two: coarse cells keep each range to a few
-# dozen chunks, and the level to a few hundred KB.
-mountains 28 4  15970 0 -3  16226 256 205  4 200 11
-mountains 29 4  16542 0 -3  16798 256 205  4 200 13
-mountains 30 4  16100 416 -3  16668 672 205  4 200 15
-# A low sun from the west, for the ridges' relief and their shadows.
-light 15930 -380 230  1 0.85 0.62  1100 2.2
-light 16294 60 160  1 0.9 0.75  560 120
-light 16474 60 160  1 0.9 0.75  560 120
-light 16384 240 160  1 0.9 0.75  560 120
+mountains 28 4  16032 -160 -8  16736 608 248  4 140 11  clear 16384 -16 16384 430 70  edge 64
+# A low sun from the south-west, far enough that its falloff is gentle across the plain, for the
+# ridges' relief and long shadows; a dim blue sky fill from above, so shade is not black.
+light 16052 -140 244  1 0.86 0.66  6000 1.8
+light 16384 200 246  0.7 0.78 0.95  3000 0.55
 vista 16384 0 1  0 0 12  0 2 x16  0 0 0  0 0  60 700 0x24304c

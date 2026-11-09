@@ -119,3 +119,22 @@ fn a_vista_scale_reads_as_its_inverse() {
     assert!(!dumped.contains(" x3 "));
     assert_eq!(from_text(&dumped).unwrap(), level);
 }
+
+#[test]
+fn a_clear_road_is_read_and_a_bad_one_refused() {
+    let plain = from_text(&text(&[LINE])).unwrap();
+    let road = from_text(&text(&[&format!("{LINE}  clear 64 100 64 228 12")])).unwrap();
+    assert_ne!(format::write(&plain), format::write(&road));
+    for bad in [
+        "clear 64 100 64 228",
+        "clear 64 100 64 228 0",
+        "clear 64 100 64 228 nan",
+        "clear 1 2 3 4 5 6",
+        "clean 1 2 3 4 5",
+    ] {
+        assert!(
+            from_text(&text(&[&format!("{LINE} {bad}")])).is_err(),
+            "{bad}"
+        );
+    }
+}

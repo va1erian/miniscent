@@ -176,6 +176,8 @@ impl EditorState {
             seed: order,
             material: VOXEL_ROCK,
             order,
+            clear: None,
+            edge: None,
         })
     }
 

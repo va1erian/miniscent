@@ -80,6 +80,8 @@ fn range_at(x: f64, order: u32, seed: u32) -> Volume {
         seed,
         material: 4,
         order,
+        clear: None,
+        edge: None,
     };
     mountains(&range).expect("a range")
 }
@@ -372,6 +374,8 @@ fn a_range_has_no_hole_to_the_gradient_from_above() {
         seed: 21,
         material: 4,
         order: 3,
+        clear: None,
+        edge: None,
     };
     let play = cuboid(
         vd(-100.0, -16.0, -16.0),

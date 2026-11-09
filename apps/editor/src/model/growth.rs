@@ -96,6 +96,8 @@ impl Sculptor<'_> {
             seed,
             material,
             order,
+            clear: None,
+            edge: None,
         };
         let volume = match mountains(&range) {
             Ok(v) => v,

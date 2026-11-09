@@ -363,8 +363,14 @@ material lists.
 **Mountains: a range past the platform.** **New mountains** does this in one step. By
 hand: subtract a 128-unit room with View walls, add a floor, drop in a volume from
 `mountains` (or the Mountains generator), a lamp, and a layer at scale 16 (`x16`) of
-the same slot, after the stars. The demo's plain has three such ranges, one on each
-flank and one behind the gate, which leave the avenue of towers clear.
+the same slot, after the stars. The demo goes further: its plain has no flat floor at
+all. One range is the room's whole ground, rolling foothills rising to massifs, with
+`clear` keeping a flat road from the platform to past the gate, where the towers stand
+and the ground meets the platform's floor, and `edge 64` so that the walls do not take
+most of the room. A thin floor brush under it keeps the room sealed. A low sun from the
+south-west and a dim sky fill from above give it relief and long shadows. The lamps
+before it had intensities of 120, which drove every surface of the plain to the same
+white.
 
 **Original Unreal: clouds over a horizon.** Add a third room with one big plate in
 `sky-clouds`, layer 2, a `pan`, walls painted **View 0**. It costs no lightmap.
@@ -389,8 +395,11 @@ layer's list may submit `LAYER_VOXEL_TRIS` (12 000) before the rest take the low
 level, all layers together `VISTA_VOXEL_TRIS` (24 000), and the main scene keeps its
 own `MAX_VOXEL_TRIS`. The lowest level still has a cost (cells on a chunk's border never
 merge), so a frame can pass these; the first demo, with one-unit cells, submitted 70 253
-triangles to its layers at the gate. It now has 13 168 at the gate, and no pose of a sweep
-over its platform passes 17 200. `SceneStats::vista_triangles` reports it.
+triangles to its layers at the gate. Its three ranges of four-unit cells had 13 168. Its
+ground, one range over the whole room, has 16 572 at the gate, and no pose of
+`vista_bench --sweep` (6 places on the platform, 36 yaws, 4 pitches) passes 22 790. Over a
+1024 by 1024 room it was 27 111, past `VISTA_VOXEL_TRIS`, so the room was cut to 704 by
+768: fog hides the rest. `SceneStats::vista_triangles` reports it.
 
 `mountains` in `mscent-world` (`voxel/mountains.rs`) fills an add volume from a ridged
 heightfield: low foothills everywhere, broad swells of noise that rise to massifs with
@@ -401,13 +410,20 @@ gives the same bytes. The box grows to whole chunks; at most 16 chunks a side, s
 units at one-unit cells and 1024 at cells of 4. A range seen far off wants the coarse
 cells (`CellSize::Two` and `Four`): the demo's plain is seen at scale 16, where a cell of
 4 is a pixel or two. With one-unit cells its three ranges were 7 900 chunks, 70 253 triangles at
-the gate and a 4.8 MB level; with cells of 4 they are 272 chunks, 13 168 triangles and 380 KB.
+the gate and a 4.8 MB level; with cells of 4 they were 272 chunks, 13 168 triangles and
+380 KB. The ground that replaced them is a 470 KB level.
 Bad input is
 a `MountainError`. Level text has a line for it, expanded at parse into a `Volume`:
 
 ```
-mountains <order> <material> <min x y z> <max x y z> <cell> <peak> <seed>
+mountains <order> <material> <min x y z> <max x y z> <cell> <peak> <seed> [clear <ax ay> <bx by> <radius>] [edge <units>]
 ```
+
+`clear` leaves a road at the ground: every column within `radius` of the segment from `a`
+to `b` (in plan), easing back to the range's height over half the radius again. `edge`
+is how far in from the box's sides the range reaches full height, in world units; without
+it, 0.3 of each side. Both are `None` from the editor's commands, so their ranges are
+unchanged. A road that is not finite, or of no width, is a `MountainError`.
 
 Dumping cannot turn a volume back into this line (a sculpted range is no longer one),
 so `--dump-level` refuses a level with volumes, as it did.
