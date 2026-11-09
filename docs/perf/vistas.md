@@ -38,7 +38,9 @@ platform (6 positions, 36 yaws, 4 pitches) passes 17 162, against a `VISTA_VOXEL
 M13.11 replaced the three ranges with one range for the whole ground. `vista_bench --sweep`
 measures the sweep now: at most 15 516 triangles for the three ranges and 22 790 for the
 ground, and 16 572 at the gate, which costs 15.1 ms on one worker against 15.3 for the three
-ranges in the same run. The tables above are older and from a quieter machine.
+ranges in the same run. The tables above are older and from a quieter machine. With the
+road narrowed to 55 and seed 7 (M13.12) the sweep's most is 21 764, the gate 14 446 at
+9.5 ms.
 
 ## Levels with no vista
 

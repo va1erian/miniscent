@@ -1,10 +1,12 @@
 //! What blocks light: the BSP, and the surfaces of voxel volumes. Voxels shadow
 //! brushes and brushes shadow voxels, because every shadow ray, whoever fires
-//! it, asks this one type.
+//! it, asks this one type. It also holds the sky ([`Sky`]): the lamps of vista
+//! rooms, whose shadow rays cross a window into their room.
 
 use mscent_math::Vec3d;
 
 use super::ray::segment_clear;
+use super::sky::Sky;
 use super::voxel_rays::VolumeRays;
 use crate::bsp::Bsp;
 use crate::voxel::VoxelWorld;
@@ -14,6 +16,7 @@ pub struct Occluders<'a> {
     bsp: &'a Bsp,
     volumes: Vec<VolumeRays>,
     world: Option<&'a VoxelWorld>,
+    sky: Sky,
 }
 
 impl<'a> Occluders<'a> {
@@ -24,6 +27,7 @@ impl<'a> Occluders<'a> {
             bsp,
             volumes: Vec::new(),
             world: None,
+            sky: Sky::default(),
         }
     }
 
@@ -38,7 +42,17 @@ impl<'a> Occluders<'a> {
             bsp,
             volumes,
             world: Some(world),
+            sky: Sky::default(),
         }
+    }
+
+    /// The same occluders, with `sky` lighting the play space through its windows.
+    pub fn with_sky(self, sky: Sky) -> Self {
+        Self { sky, ..self }
+    }
+
+    pub fn sky(&self) -> &Sky {
+        &self.sky
     }
 
     pub fn has_volumes(&self) -> bool {

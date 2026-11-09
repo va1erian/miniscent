@@ -1,5 +1,6 @@
 //! The play space's lamps, carried into the rooms of vista layers, so that a
-//! miniature continuing the level is lit as the level is where the two meet.
+//! miniature continuing the level is lit as the level is where the two meet; and
+//! the rooms' lamps, carried out as sky light ([`Vistas::sky`]).
 //!
 //! A play lamp at `p` of radius `r` lights a layer's room as a lamp at
 //! `pos + (p - centre) * parallax` of radius `r * parallax`: the image of the lamp
@@ -23,8 +24,8 @@
 
 use mscent_math::epsilon::{WINDOW_PROBE_INSET, WINDOW_PROBE_OFFSET};
 use mscent_math::{Vec3, Vec3d};
-use mscent_world::lightmap::PointLight;
 use mscent_world::lightmap::ray::segment_clear;
+use mscent_world::lightmap::{PointLight, RoomMap, Sky, SkyRoom, Window};
 use mscent_world::{Bsp, Face};
 
 use super::{Layer, Vistas};
@@ -66,6 +67,51 @@ impl Vistas {
             }
         }
         lights
+    }
+
+    /// The lamps of each layer's room, lighting the play space through its
+    /// viewport faces of that layer's slots: the room's sun is the level's sun,
+    /// and the room's rock shades the level. `lights` are the level's own lamps,
+    /// before [`Self::with_carried`] adds their images, which must not come back.
+    pub(in crate::level) fn sky(
+        &self,
+        bsp: &Bsp,
+        holes: &[(Face, u8)],
+        lights: &[PointLight],
+    ) -> Sky {
+        let rooms = (self.layers.iter().enumerate())
+            .filter(|&(index, _)| self.carries_into(index))
+            .filter_map(|(_, layer)| self.sky_room(bsp, holes, lights, layer));
+        Sky::new(rooms.collect())
+    }
+
+    fn sky_room(
+        &self,
+        bsp: &Bsp,
+        holes: &[(Face, u8)],
+        lights: &[PointLight],
+        layer: &Layer,
+    ) -> Option<SkyRoom> {
+        let slots = self.slots_of(layer.island);
+        // A window of the play space: its slot shows the room, and it looks
+        // into a leaf of the play space, not into some layer's room.
+        let in_play = |f: &Face| {
+            let play = |&leaf| self.islands.island_of(leaf).is_some() && !self.in_remote(leaf);
+            f.front_leaves.iter().any(play)
+        };
+        let windows = (holes.iter())
+            .filter(|(f, slot)| slots.contains(slot) && in_play(f))
+            .filter_map(|(f, _)| Window::new(f.plane, f.polygon.vertices().to_vec()));
+        let own = |l: &&PointLight| {
+            self.islands.island_of(bsp.leaf_at_f32(l.position)) == Some(layer.island)
+        };
+        let lamps: Vec<PointLight> = lights.iter().filter(own).copied().collect();
+        let map = RoomMap {
+            pos: layer.pos.to_f64(),
+            centre: layer.centre.to_f64(),
+            scale: f64::from(layer.parallax),
+        };
+        SkyRoom::new(map, windows.collect(), &lamps)
     }
 
     /// Whether layer `index` is the first of its room with a finite scale, in a
