@@ -25,6 +25,7 @@ pub mod gpu_world;
 pub mod levels;
 pub mod lightcache;
 mod notices;
+pub mod pacer;
 pub mod scripts;
 pub mod session;
 mod ship;
