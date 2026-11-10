@@ -4,8 +4,8 @@
 //! after these. It must keep the five in [`NAMES`] where they are: the renderer
 //! checks those names when it builds a level, so a mismatch is reported there.
 //! The living materials the voxel generators grow, the four sky materials and the
-//! terrain layers' materials come after them, and their ids are held to the
-//! manifest by a test.
+//! terrain layers' materials come after them, then the industrial, alien and
+//! spaceship surfaces, and their ids are held to the manifest by a test.
 
 /// Red brick walls.
 pub const BRICK: u16 = 0;
@@ -47,12 +47,48 @@ pub const CLIFF: u16 = 16;
 /// Snow for high crests.
 pub const SNOW: u16 = 17;
 
+// Surfaces for industrial, alien and spaceship rooms, made at 256 px with
+// height, normal and specular maps and a parallax depth.
+
+/// Galvanized bar grating over a dark void.
+pub const GRATING: u16 = 18;
+/// Aluminium tread plate with raised lozenges.
+pub const TREADPLATE: u16 = 19;
+/// Corrugated sheet in flaking paint, rusting through.
+pub const RUSTPANEL: u16 = 20;
+/// Board-formed concrete with tie holes and stains.
+pub const CONCRETE: u16 = 21;
+/// Four painted pipes along a dark wall.
+pub const PIPES: u16 = 22;
+
+/// Alien hive resin with glowing pods.
+pub const HIVE: u16 = 23;
+/// Living membrane with veins and nodules.
+pub const MEMBRANE: u16 = 24;
+/// Black basalt cut with glowing alien glyphs.
+pub const RUNESTONE: u16 = 25;
+/// Faceted alien crystal, violet to cyan.
+pub const CRYSTAL: u16 = 26;
+/// Alien carapace of domed plates.
+pub const CHITIN: u16 = 27;
+
+/// Spaceship hull plating with a numbered hatch.
+pub const HULL: u16 = 28;
+/// A ship's console: screens, keys and a vent.
+pub const CONSOLE: u16 = 29;
+/// Padded cabin wall in diamond quilting.
+pub const QUILTED: u16 = 30;
+/// Black ceramic heat-shield tiles.
+pub const HEATTILE: u16 = 31;
+/// Gunmetal deck plates with guide lamps.
+pub const DECKPLATE: u16 = 32;
+
 /// The first of the four stock sky materials.
 pub const FIRST_SKY: u16 = SKY_STARS;
 /// The last of the sky materials.
 pub const LAST_SKY: u16 = SKY_PLANET;
 /// The last material the game ships: ids above it are a mapper's own.
-pub const LAST_STOCK: u16 = SNOW;
+pub const LAST_STOCK: u16 = DECKPLATE;
 
 /// A face with this material is never drawn or lit: the shell of a voxel volume,
 /// where the voxel surface closes in front of it. Not a texture.

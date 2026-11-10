@@ -1,0 +1,81 @@
+miniscent-recipe 1
+size 256 256
+gloss 150
+# Hive resin: a warped web of ribs over wet black membrane, with sunken
+# pods that glow green-yellow at the bottom.
+op 0 0 1 noise freq_x=4 freq_y=4 octaves=4 persistence=0.5 seed=401 color1=1,0,0
+op 0 1 1 store name=flow_u
+op 0 2 1 noise freq_x=4 freq_y=4 octaves=4 persistence=0.5 seed=402 color1=0,1,0
+op 0 3 1 store name=flow_v
+op 0 4 1 load name=flow_u
+op 1 4 1 load name=flow_v
+op 0 5 2 merge mode=add
+op 0 6 1 store name=flow
+op 0 7 1 cells count=49 seed=403 mode=edge
+op 0 8 1 range in_high=0.6
+op 0 9 1 invert
+op 0 10 1 store name=ribs
+op 0 11 1 load name=ribs
+op 1 11 1 load name=flow
+op 0 12 2 distort amount=0.06
+op 0 13 1 range gamma=0.6
+op 0 14 1 store name=web
+op 0 15 1 cells count=49 seed=403 mode=distance
+op 0 16 1 range in_low=0.05 in_high=0.32
+op 0 17 1 store name=pod
+op 0 18 1 load name=pod
+op 1 18 1 load name=flow
+op 0 19 2 distort amount=0.06
+op 0 20 1 store name=pods
+op 0 21 1 noise freq_x=6 freq_y=6 octaves=4 persistence=0.55 seed=404 mode=ridged
+op 0 22 1 range in_low=0.55
+op 0 23 1 store name=tendril
+op 0 24 1 load name=tendril
+op 1 24 1 load name=flow
+op 0 25 2 distort amount=0.1
+op 0 26 1 range out_high=0.35
+op 0 27 1 store name=strands
+# Height: membrane at mid level, ribs and strands over it, pods sunk.
+op 0 28 1 load name=pods
+op 0 29 1 range out_high=0.5
+op 0 30 1 store name=skin
+op 0 31 1 load name=web
+op 0 32 1 range out_high=0.5
+op 0 33 1 store name=ribs_h
+op 0 34 1 load name=skin
+op 1 34 1 load name=ribs_h
+op 2 34 1 load name=strands
+op 0 35 3 merge mode=add
+op 0 36 1 blur radius=0.002
+op 0 37 1 store name=height
+op 0 38 1 load name=height
+op 0 39 1 out-height normal_strength=7
+# Colour: near-black green skin, olive bone on the ribs, a glow in the pods.
+op 0 40 1 noise freq_x=8 freq_y=8 octaves=4 persistence=0.6 seed=405 color0=0.03,0.04,0.035 color1=0.12,0.13,0.09
+op 0 41 1 store name=skin_c
+op 0 42 1 noise freq_x=16 freq_y=16 octaves=3 seed=406 color0=0.26,0.27,0.16 color1=0.48,0.47,0.3
+op 0 43 1 store name=bone
+op 0 44 1 load name=skin_c
+op 1 44 1 load name=bone
+op 2 44 1 load name=height
+op 0 45 3 mask
+op 0 46 1 store name=ribbed
+op 0 47 1 load name=pods
+op 0 48 1 invert
+op 0 49 1 range in_low=0.45 gamma=0.7
+op 0 50 1 store name=glow
+op 0 51 1 flat color=0.62,0.95,0.22
+op 0 52 1 store name=light
+op 0 53 1 load name=ribbed
+op 1 53 1 load name=light
+op 2 53 1 load name=glow
+op 0 54 3 mask
+op 0 55 1 store name=albedo
+op 0 56 1 load name=albedo
+op 0 57 1 out-albedo
+# Wet everywhere, a little less deep in the pods.
+op 0 58 1 load name=pods
+op 0 59 1 range out_low=0.35
+op 0 60 1 store name=shine
+op 0 61 1 load name=shine
+op 0 62 1 out-specular

@@ -13,10 +13,10 @@ use super::TexStudio;
 use super::save;
 use super::worker::{BakeJob, Baked};
 
-/// The eighteen materials the game ships, in id order. Saving over one asks first.
+/// The thirty-three materials the game ships, in id order. Saving over one asks first.
 /// `mscent_world::materials::NAMES` names only the five the renderer checks, so
 /// this is the studio's own list, and a test holds it to the shipped manifest.
-pub(super) const STOCK: [&str; 18] = [
+pub(super) const STOCK: [&str; 33] = [
     "brick",
     "floor",
     "lightpanel",
@@ -35,6 +35,21 @@ pub(super) const STOCK: [&str; 18] = [
     "scree",
     "cliff",
     "snow",
+    "grating",
+    "treadplate",
+    "rustpanel",
+    "concrete",
+    "pipes",
+    "hive",
+    "membrane",
+    "runestone",
+    "crystal",
+    "chitin",
+    "hull",
+    "console",
+    "quilted",
+    "heattile",
+    "deckplate",
 ];
 
 /// What Save did with the request.

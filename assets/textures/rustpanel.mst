@@ -1,0 +1,100 @@
+miniscent-recipe 1
+size 256 256
+gloss 40
+# Corrugated sheet in flaking green paint, rusting through: blooms where the
+# paint has gone, runs of rust down from a bolted lap at the top.
+# Corrugation, and the lap where two sheets overlap with its bolts.
+op 0 0 1 gradient cycles_x=12 cycles_y=0
+op 0 1 1 range gamma=1.6
+op 0 2 1 store name=wave
+op 0 4 1 rect x=0.5 y=0.02 w=1 h=0.04 softness=0.01
+op 0 5 1 store name=lap
+op 0 7 1 dots count_x=12 count_y=1 radius=0.009 softness=0.008
+op 0 8 1 rotozoom shift_y=0.52
+op 0 9 1 store name=bolts
+# Where the paint has gone: blotches, plus runs below the lap.
+op 0 10 1 noise freq_x=6 freq_y=6 octaves=4 persistence=0.6 seed=221
+op 0 11 1 store name=bloom
+op 0 12 1 noise freq_x=40 freq_y=2 octaves=1 persistence=0.5 seed=222
+op 0 13 1 store name=runs
+op 0 14 1 gradient cycles_x=0 cycles_y=1
+op 0 15 1 rotozoom shift_y=0.54
+op 0 16 1 range in_low=0.3
+op 0 17 1 store name=fall
+op 0 18 1 load name=runs
+op 1 18 1 load name=fall
+op 0 19 2 merge mode=multiply
+op 0 20 1 range out_high=0.75
+op 0 21 1 store name=streak
+op 0 22 1 load name=bloom
+op 1 22 1 load name=streak
+op 0 23 2 merge mode=add
+op 0 24 1 range in_low=0.58 in_high=0.64
+op 0 25 1 store name=bare
+op 0 26 1 load name=bare
+op 0 27 1 blur radius=0.006
+op 0 28 1 store name=rim
+# Paint: dull green, chalky in places.
+op 0 29 1 noise freq_x=8 freq_y=8 octaves=4 persistence=0.55 seed=223 color0=0.16,0.3,0.27 color1=0.27,0.42,0.36
+op 0 30 1 store name=paint
+op 0 31 1 noise freq_x=24 freq_y=24 octaves=2 persistence=0.65 seed=224 color0=0.22,0.08,0.03 color1=0.58,0.28,0.09
+op 0 32 1 store name=rust
+op 0 33 1 load name=paint
+op 1 33 1 load name=rust
+op 2 33 1 load name=bare
+op 0 34 3 mask
+op 0 35 1 store name=coat
+# Darken the flaking edge, and the bolts take the rust colour.
+op 0 36 1 load name=rim
+op 1 36 1 load name=bare
+op 0 37 2 merge mode=subtract
+op 0 38 1 range in_high=0.25 out_low=1 out_high=0.55
+op 0 39 1 store name=edge
+op 0 40 1 load name=coat
+op 1 40 1 load name=rust
+op 2 40 1 load name=bolts
+op 0 41 3 mask
+op 0 42 1 store name=bolted
+op 0 43 1 load name=wave
+op 0 44 1 range out_low=0.72
+op 0 45 1 store name=shade
+op 0 46 1 load name=bolted
+op 1 46 1 load name=edge
+op 2 46 1 load name=shade
+op 0 47 3 merge mode=multiply
+op 0 48 1 store name=albedo
+op 0 49 1 load name=albedo
+op 0 50 1 out-albedo
+# Height: the waves, the lap and bolts on top, paint standing over rust,
+# rust pitted.
+op 0 51 1 noise freq_x=32 freq_y=32 octaves=2 seed=225
+op 0 52 1 range out_high=0.04
+op 0 53 1 store name=pits
+op 0 54 1 load name=bare
+op 0 55 1 invert
+op 0 56 1 range out_high=0.04
+op 0 57 1 store name=film
+op 0 58 1 load name=wave
+op 0 59 1 range out_high=0.6
+op 0 60 1 store name=waves
+op 0 61 1 load name=lap
+op 0 62 1 range out_high=0.2
+op 0 63 1 store name=laps
+op 0 64 1 load name=bolts
+op 0 65 1 range out_high=0.3
+op 0 66 1 store name=knobs
+op 0 67 1 load name=waves
+op 1 67 1 load name=laps
+op 2 67 1 load name=knobs
+op 3 67 1 load name=pits
+op 4 67 1 load name=film
+op 0 68 5 merge mode=add
+op 0 69 1 store name=height
+op 0 70 1 load name=height
+op 0 71 1 out-height normal_strength=6
+op 0 72 1 load name=bare
+op 0 73 1 invert
+op 0 74 1 range out_low=0.03 out_high=0.5
+op 0 75 1 store name=shine
+op 0 76 1 load name=shine
+op 0 77 1 out-specular

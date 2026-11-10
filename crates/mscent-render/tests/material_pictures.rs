@@ -42,6 +42,21 @@ fn stock_names_with_no_manifest_keep_their_gloss_and_draw_the_same() {
             (15, "scree", 12),
             (16, "cliff", 14),
             (17, "snow", 40),
+            (18, "grating", 90),
+            (19, "treadplate", 160),
+            (20, "rustpanel", 40),
+            (21, "concrete", 12),
+            (22, "pipes", 70),
+            (23, "hive", 150),
+            (24, "membrane", 110),
+            (25, "runestone", 60),
+            (26, "crystal", 220),
+            (27, "chitin", 140),
+            (28, "hull", 120),
+            (29, "console", 100),
+            (30, "quilted", 30),
+            (31, "heattile", 20),
+            (32, "deckplate", 80),
         ]
     );
     let stock = MaterialTable::load_dir(&stock_dir()).expect("stock");
@@ -172,8 +187,8 @@ fn room_picture(dir: &Fixture, material: u16, q: Quality) -> Vec<u32> {
 
 #[test]
 fn a_new_id_draws_its_own_material_and_a_retired_one_the_grey_fallback() {
-    let f = Fixture::with_stock("new_id", &format!("{STOCK}14 concrete 40\n15 retired\n"));
-    f.png("concrete.png", 128, 0xff00_ff00);
+    let f = Fixture::with_stock("new_id", &format!("{STOCK}14 plaster 40\n15 retired\n"));
+    f.png("plaster.png", 128, 0xff00_ff00);
     let green = room_picture(&f, 14, Quality::Low);
     let (r, g) = green.iter().fold((0u64, 0u64), |(r, g), p| {
         (r + u64::from(p >> 16 & 0xff), g + u64::from(p >> 8 & 0xff))

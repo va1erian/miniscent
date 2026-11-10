@@ -51,7 +51,7 @@ fn save_asks_about_every_stock_material_and_nothing_else() {
     }
     s.create("mine", 16).expect("creates");
     assert_eq!(s.save(), SaveStart::Started);
-    assert!(wait_bake(&mut s).starts_with("Saved mine (id 18)"));
+    assert!(wait_bake(&mut s).starts_with("Saved mine (id 33)"));
     let _ = std::fs::remove_dir_all(d);
 }
 

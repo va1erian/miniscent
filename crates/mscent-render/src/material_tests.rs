@@ -58,7 +58,22 @@ fn assets_load_and_texels_read_back() {
             "grass",
             "scree",
             "cliff",
-            "snow"
+            "snow",
+            "grating",
+            "treadplate",
+            "rustpanel",
+            "concrete",
+            "pipes",
+            "hive",
+            "membrane",
+            "runestone",
+            "crystal",
+            "chitin",
+            "hull",
+            "console",
+            "quilted",
+            "heattile",
+            "deckplate"
         ]
     );
 
@@ -94,13 +109,28 @@ fn assets_load_and_texels_read_back() {
 }
 
 #[test]
-fn only_brick_and_rock_ask_for_relief() {
+fn relief_is_asked_for_by_brick_rock_and_the_256_px_surfaces() {
     let table = MaterialTable::load_dir(&textures_dir()).unwrap();
     for (_, m) in table.iter() {
         let depth = m.texture.height_plane().map(|p| p.depth());
         let want = match m.name.as_str() {
             "brick" => Some(14),
             "rock" => Some(16),
+            "grating" => Some(20),
+            "treadplate" => Some(6),
+            "rustpanel" => Some(8),
+            "concrete" => Some(6),
+            "pipes" => Some(24),
+            "hive" => Some(16),
+            "membrane" => Some(10),
+            "runestone" => Some(12),
+            "crystal" => Some(18),
+            "chitin" => Some(10),
+            "hull" => Some(6),
+            "console" => Some(8),
+            "quilted" => Some(12),
+            "heattile" => Some(8),
+            "deckplate" => Some(10),
             _ => Some(0),
         };
         assert_eq!(depth, want, "{}", m.name);
@@ -157,10 +187,12 @@ fn stock_ids_match_the_constants_levels_are_built_with() {
 }
 
 #[test]
-fn only_metal_and_floor_have_a_mask() {
+fn metal_floor_and_the_room_surfaces_have_a_mask() {
+    use mscent_world::materials::{GRATING, LAST_STOCK};
     let table = MaterialTable::load_dir(&textures_dir()).unwrap();
-    for (_, m) in table.iter() {
-        let expected = matches!(m.name.as_str(), "metal" | "floor");
+    for (id, m) in table.iter() {
+        let room = (GRATING..=LAST_STOCK).contains(&id.0);
+        let expected = room || matches!(m.name.as_str(), "metal" | "floor");
         let masked = m.texture.spec_mean() < 1.0;
         if is_sky(&m.name) {
             assert!(!masked, "{} has no mask", m.name);
@@ -264,6 +296,49 @@ fn the_living_and_sky_materials_keep_their_ids_in_the_real_manifest() {
         (SNOW, "snow"),
     ] {
         assert_eq!(table.find(name), Some(MaterialId(id)), "{name}");
+    }
+}
+
+/// The industrial, alien and spaceship surfaces keep their ids too, and each
+/// one carries everything the lit renderers read: a normal map from its height,
+/// a specular mask that is not all one value, and a parallax depth.
+#[test]
+fn the_room_surfaces_keep_their_ids_and_all_their_maps() {
+    use mscent_world::materials::{
+        CHITIN, CONCRETE, CONSOLE, CRYSTAL, DECKPLATE, GRATING, HEATTILE, HIVE, HULL, MEMBRANE,
+        PIPES, QUILTED, RUNESTONE, RUSTPANEL, TREADPLATE,
+    };
+    let table = MaterialTable::load_dir(&textures_dir()).expect("loads");
+    for (id, name) in [
+        (GRATING, "grating"),
+        (TREADPLATE, "treadplate"),
+        (RUSTPANEL, "rustpanel"),
+        (CONCRETE, "concrete"),
+        (PIPES, "pipes"),
+        (HIVE, "hive"),
+        (MEMBRANE, "membrane"),
+        (RUNESTONE, "runestone"),
+        (CRYSTAL, "crystal"),
+        (CHITIN, "chitin"),
+        (HULL, "hull"),
+        (CONSOLE, "console"),
+        (QUILTED, "quilted"),
+        (HEATTILE, "heattile"),
+        (DECKPLATE, "deckplate"),
+    ] {
+        assert_eq!(table.find(name), Some(MaterialId(id)), "{name}");
+        let tex = &stock_texture(&table, name);
+        assert_eq!((tex.width(), tex.height()), (256, 256), "{name}");
+        assert!(tex.has_normals() && tex.has_heights(), "{name}");
+        let depth = tex.height_plane().map(|p| p.depth());
+        assert!(depth.is_some_and(|d| d > 0), "{name}: no parallax depth");
+        let masks: Vec<u32> = (0..256)
+            .map(|i| tex.normal_texel(i * 7 % 256, i).expect("normal") >> 24)
+            .collect();
+        assert!(
+            masks.iter().any(|&m| m != masks[0]),
+            "{name}: flat specular"
+        );
     }
 }
 
