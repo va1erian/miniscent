@@ -22,8 +22,11 @@ import sys
 # the software build to 2,201,088, 1,088 over the old 2.2 MB, so it was 2.3 MB.
 # Enemy kinds in the level (M19.1, M19.2: the blueprint reader and writer) took it to
 # 2,281,472, and drawing them as their models (M19.3: the model builder, which the
-# game had not linked) to 2,331,648, so it is 2.4 MB now (docs/enemy-designer.md).
-BUDGET_BYTES = 2_400_000
+# game had not linked) to 2,331,648, so it was 2.4 MB (docs/enemy-designer.md).
+# The pilot on foot (docs/pilot.md: the walker, landing and boarding, the scale
+# guide, and the ship and pilot models, which software now draws because the
+# parked ship is the way back) took it from 2,380,288 to 2,409,984, so it is 2.5 MB.
+BUDGET_BYTES = 2_500_000
 # wgpu and the hardware renderer (M14.7) took the default game from 2,126,336 to
 # 5,730,304 bytes; the plan expected about 5.7 MB. With projectors it is 6,088,704
 # (98% of 6.2 MB), so the budget is 6.3 MB.
