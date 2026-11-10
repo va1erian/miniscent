@@ -13,6 +13,9 @@ cargo run --release -p mscent-editor -- --software
 # play (desktop window, winit + softbuffer; WASD, mouse, Space fire, Q/E roll, Esc menu)
 cargo run --release -p miniscent-game
 cargo run --release -p miniscent-game -- --corridor --quality medium --scale 2
+# frame cap: 120 fps when the GPU draws the window, 60 with software; --fps 15..240 picks it
+# (the simulation steps at 120 Hz and the picture is interpolated, so 240 is smooth)
+cargo run --release -p miniscent-game -- --fps 240
 
 # headless screenshots and timing (no window; scripted input, see apps/game/scripts/flythrough.txt)
 cargo run --release -p miniscent-game -- --screenshot target/shots/play.png \

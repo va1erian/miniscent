@@ -10,6 +10,7 @@ use mscent_render::png_encode::encode_png;
 use mscent_render::resolution::{ResolutionConfig, ResolutionController};
 use mscent_render::{FrameInput, Framebuffer, LevelAssets};
 
+use crate::pacer::Pacer;
 use crate::scripts::ScriptWatcher;
 use crate::session::{FrameStats, GameSession};
 
@@ -155,6 +156,7 @@ pub fn run_with(
     if let Some(fps) = opts.cap_fps {
         config.budget_us = (1_000_000.0 / fps.max(1.0)) as u32;
     }
+    let min_permille = config.min_permille;
     let mut controller = ResolutionController::new(config);
     let mut costs: Vec<f64> = Vec::new();
     let mut shots = Vec::new();
@@ -269,61 +271,19 @@ pub fn run_with(
     if captured {
         platform.set_mouse_captured(false);
     }
-    let report = summarize(
-        costs,
-        controller.map_or(1000, |c| c.scale_permille()),
-        shots,
-    );
+    let final_scale = controller.map_or(1000, |c| c.scale_permille());
+    if let Some(fps) = opts.cap_fps
+        && opts.adaptive
+        && final_scale <= min_permille
+    {
+        // The cap asked for more than this machine draws, so say why the
+        // picture is as small as it can get.
+        eprintln!("could not hold {fps} fps: the resolution fell to its minimum");
+    }
+    let report = summarize(costs, final_scale, shots);
     RunReport {
         stopped: world.stop(),
         ..report
-    }
-}
-
-/// Holds frames to a steady rate. Each frame is due one period after the
-/// last one was *due*, not after it ended, so an early finish or a late wake
-/// does not shift the rhythm; only a stall longer than a few periods resets it
-/// (the schedule must not rush to catch up).
-struct Pacer {
-    period: Duration,
-    due: Instant,
-}
-
-impl Pacer {
-    /// Longest the schedule may fall behind before it starts over.
-    const MAX_LAG_PERIODS: u32 = 3;
-    /// Slept short of the deadline, since the OS sleep is coarse; the rest spins.
-    const SPIN: Duration = Duration::from_millis(2);
-
-    fn new(fps: f32) -> Self {
-        let period = Duration::from_secs_f32(1.0 / fps.clamp(1.0, 1000.0));
-        Self {
-            period,
-            due: Instant::now() + period,
-        }
-    }
-
-    /// The deadline after the one due at `due`, given that it is `now`.
-    fn next_due(&self, now: Instant) -> Instant {
-        let next = self.due + self.period;
-        if now.saturating_duration_since(next) > self.period * Self::MAX_LAG_PERIODS {
-            now + self.period
-        } else {
-            next
-        }
-    }
-
-    /// Blocks until the current frame's deadline, then schedules the next.
-    fn wait(&mut self) {
-        if let Some(left) = self.due.checked_duration_since(Instant::now())
-            && left > Self::SPIN
-        {
-            std::thread::sleep(left - Self::SPIN);
-        }
-        while Instant::now() < self.due {
-            std::hint::spin_loop();
-        }
-        self.due = self.next_due(Instant::now());
     }
 }
 
@@ -381,33 +341,6 @@ mod tests {
         );
         let huge = shown_sizes((20_000, 9_000), (640, 360), same);
         assert!(huge.0.0 <= MAX_SIDE && huge.0.1 <= MAX_SIDE, "{huge:?}");
-    }
-
-    #[test]
-    fn the_pacer_keeps_its_rhythm_through_jitter_and_resets_after_a_stall() {
-        let mut p = Pacer::new(240.0);
-        let start = p.due;
-        // A frame that woke 1 ms late does not push the next deadline back.
-        assert_eq!(
-            p.next_due(start + Duration::from_millis(1)),
-            start + p.period
-        );
-        // A long stall starts the schedule over instead of bursting to catch up.
-        let late = start + Duration::from_millis(500);
-        assert_eq!(p.next_due(late), late + p.period);
-        p.due = p.next_due(late);
-        assert!(p.due > late);
-    }
-
-    #[test]
-    fn the_pacer_holds_240_fps_to_a_few_percent() {
-        let mut p = Pacer::new(240.0);
-        let t = Instant::now();
-        for _ in 0..120 {
-            p.wait();
-        }
-        let secs = t.elapsed().as_secs_f64();
-        assert!((0.48..0.70).contains(&secs), "120 frames took {secs} s");
     }
 
     #[test]
