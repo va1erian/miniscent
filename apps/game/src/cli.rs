@@ -25,6 +25,7 @@ miniscent [options]
   --script <file>          headless: scripted input (see mscent-platform)
   --bench                  headless: print ms/frame for the run
   --no-adaptive            keep the internal resolution fixed
+  --mute                   desktop: play no sound
   --renderer auto|software|hardware
                            what draws the world: the GPU where it can (auto,
                            the default in a window), software (the default
@@ -84,6 +85,7 @@ pub struct Options {
     pub no_cache: bool,
     pub rebake: bool,
     pub adaptive: bool,
+    pub mute: bool,
     pub autoclose_ms: Option<u64>,
     pub help: bool,
     pub check: bool,
@@ -160,6 +162,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
         no_cache: false,
         rebake: false,
         adaptive: true,
+        mute: false,
         autoclose_ms: None,
         help: false,
         check: false,
@@ -213,6 +216,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
             "--no-cache" => o.no_cache = true,
             "--rebake" => o.rebake = true,
             "--no-adaptive" => o.adaptive = false,
+            "--mute" => o.mute = true,
             "--chase" => o.chase = true,
             "--renderer" => o.renderer = Some(renderer(&value("--renderer")?)?),
             "--autoclose-ms" => {

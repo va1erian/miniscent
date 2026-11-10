@@ -17,6 +17,7 @@ mscent-game = { path = "crates/mscent-game" }
 mscent-platform = { path = "crates/mscent-platform" }
 mscent-script = { path = "crates/mscent-script" }
 mscent-texgen = { path = "crates/mscent-texgen" }
+mscent-audio = { path = "crates/mscent-audio" }
 
 [workspace.lints.rust]
 # Crates that genuinely need unsafe must opt out explicitly with a reason.

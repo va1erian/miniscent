@@ -12,11 +12,14 @@ name = "miniscent"
 path = "src/main.rs"
 
 [features]
-default = ["desktop", "hardware"]
+default = ["desktop", "hardware", "audio"]
 desktop = ["mscent-platform/desktop"]
 # The world drawn on the GPU (`--renderer`). Without it the game is software
 # only, as LazyOS builds it, and that build keeps the original size budget.
 hardware = ["dep:mscent-gpu"]
+# Sound out of the default audio device (cpal). Without it the game is silent,
+# as the LazyOS build is, and keeps the software size budget.
+audio = ["mscent-audio/device"]
 
 [dependencies]
 mscent-math.workspace = true
@@ -25,6 +28,7 @@ mscent-collide.workspace = true
 mscent-render.workspace = true
 mscent-game.workspace = true
 mscent-platform.workspace = true
+mscent-audio.workspace = true
 mscent-script.workspace = true
 mscent-gpu = { workspace = true, optional = true }
 

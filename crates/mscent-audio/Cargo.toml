@@ -1,0 +1,16 @@
+[package]
+name = "mscent-audio"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[features]
+# Sound out of the machine's default output device, through cpal. Without it the
+# crate only parses and mixes, which is all a headless run or LazyOS needs.
+device = ["dep:cpal"]
+
+[dependencies]
+cpal = { version = "0.18", optional = true }
+
+[lints]
+workspace = true
