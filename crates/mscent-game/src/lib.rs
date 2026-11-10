@@ -10,7 +10,11 @@
 //! * [`Game`] (`game.rs`): `step(&Input)`, `update(elapsed_ns, &Input)`,
 //!   `run_trace`, `restart`, `take_events`; [`Phase`] is `Playing`, `Won` or
 //!   `Lost`.
-//! * [`Player`] (`player.rs`): quaternion 6DoF body with inertia.
+//! * [`Player`] (`player.rs`): quaternion 6DoF body with inertia: the ship.
+//! * [`Pilot`] (`pilot.rs`): the pilot on foot, walking, jumping and on a
+//!   jetpack; `craft.rs` lands, leaves and boards the ship, and says which body
+//!   is played ([`Game::actor_pos`], [`Game::aim`]). [`ScaleGuide`]
+//!   (`scale.rs`) gives the sizes a level must leave open for each.
 //! * [`Enemy`], [`AiState`] (`enemy.rs`): patrol, chase, attack.
 //! * [`hitscan`], [`line_of_sight`], [`ray`] (`combat.rs`): traces shared by
 //!   weapon, enemy sight and enemy fire. [`Weapon`] (`weapon.rs`).
@@ -31,6 +35,7 @@
 
 pub mod arena;
 pub mod combat;
+mod craft;
 pub mod destruct;
 pub mod enemy;
 mod facing;
@@ -41,8 +46,10 @@ pub mod input;
 pub mod kind;
 pub mod menu;
 pub mod mover;
+pub mod pilot;
 pub mod player;
 pub mod prop;
+pub mod scale;
 pub mod script;
 mod script_api;
 mod script_props;
@@ -57,13 +64,15 @@ pub use arena::{
 pub use combat::{Hitscan, Sphere, hitscan, line_of_sight, ray};
 pub use enemy::{AiState, Enemy, EnemyStats, Faction, stats_for};
 pub use game::{Event, Game, Phase, Shooter, Struck};
-pub use hud::{HudModel, draw_hud, draw_menu};
+pub use hud::{CraftHud, HudModel, draw_hud, draw_menu};
 pub use input::Input;
 pub use kind::{KindPlay, kinds_of, stats_of};
 pub use menu::{Menu, MenuAction, MenuCommand, Screen};
 pub use mover::{Mover, MoverError, WhenBlocked};
+pub use pilot::Pilot;
 pub use player::Player;
 pub use prop::{Prop, PropMesh};
+pub use scale::ScaleGuide;
 pub use script_api::natives;
 pub use script_test_api::Check;
 
@@ -87,6 +96,8 @@ mod hud_tests;
 mod kind_tests;
 #[cfg(test)]
 mod mover_tests;
+#[cfg(test)]
+mod pilot_tests;
 #[cfg(test)]
 mod player_tests;
 #[cfg(test)]

@@ -146,6 +146,9 @@ pub struct Arena {
     pub markers: Vec<MarkerSpec>,
     pub zones: Vec<ZoneSpec>,
     pub names: LevelNames,
+    /// The ship's size against the stock one, from the level's `Entity::Scale`
+    /// (1 without one). The pilot is the same size in every level.
+    pub ship_scale: f32,
 }
 
 impl Arena {
@@ -229,6 +232,8 @@ impl Arena {
                     things[i] = Some(Thing::Zone(zones.len()));
                     zones.push(ZoneSpec { pos, half });
                 }
+                // Read as a whole below: the first one counts.
+                Entity::Scale { .. } => {}
             }
         }
         let (player_start, player_yaw) = start.ok_or(LoadError::NoPlayerStart)?;
@@ -256,6 +261,7 @@ impl Arena {
             markers,
             zones,
             names: names_of(level, &things),
+            ship_scale: level.ship_scale().unwrap_or(1.0),
         })
     }
 }

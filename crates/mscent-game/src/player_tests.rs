@@ -183,6 +183,7 @@ fn hostile_input_never_poisons_the_state() {
         roll: 1e30,
         fire: true,
         use_key: false,
+        board: false,
     };
     g.run_trace(&[bad; 200]);
     assert!(g.player.pos().is_finite());

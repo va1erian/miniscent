@@ -82,6 +82,7 @@ pub fn random_trace(seed: u64, len: usize) -> Vec<Input> {
             roll: axis(),
             fire: false,
             use_key: false,
+            board: false,
         })
         .collect()
 }

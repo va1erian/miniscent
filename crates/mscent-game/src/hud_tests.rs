@@ -36,6 +36,7 @@ fn model(health: i32, hurt: bool) -> HudModel {
         hurt,
         phase: Phase::Playing,
         use_prompt: None,
+        craft: Default::default(),
     }
 }
 

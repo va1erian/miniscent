@@ -30,6 +30,8 @@ pub enum Cue {
     PropStruck,
     PropDestroyed,
     Spawn,
+    /// The pilot left the ship or boarded it.
+    Hatch,
 }
 
 impl Cue {
@@ -52,11 +54,12 @@ impl Cue {
             Self::PropStruck => "dstink",
             Self::PropDestroyed => "dsbarexp",
             Self::Spawn => "dstelept",
+            Self::Hatch => "dsstnmov",
         }
     }
 
     /// Every cue, for tests and for checking a bank has what the game needs.
-    pub const ALL: [Cue; 17] = [
+    pub const ALL: [Cue; 18] = [
         Self::PlayerShot,
         Self::EnemyShot,
         Self::EnemyHurt,
@@ -74,6 +77,7 @@ impl Cue {
         Self::PropStruck,
         Self::PropDestroyed,
         Self::Spawn,
+        Self::Hatch,
     ];
 }
 
@@ -82,11 +86,12 @@ const HALF_VOLUME_DISTANCE: f32 = 16.0;
 
 /// Where a sound is relative to the listener.
 fn spatial(game: &Game, at: Vec3) -> (f32, f32) {
-    let player = &game.player;
-    let offset = at - player.pos();
+    let offset = at - game.actor_pos();
     let gain = 1.0 / (1.0 + offset.length() / HALF_VOLUME_DISTANCE);
     // Straight ahead or behind has no side; only the right-hand part pans.
-    let pan = offset.normalized().map_or(0.0, |n| n.dot(player.right()));
+    let pan = offset
+        .normalized()
+        .map_or(0.0, |n| n.dot(game.actor_right()));
     (gain, pan)
 }
 
@@ -115,6 +120,8 @@ fn cue_for(game: &Game, event: &GameEvent) -> Option<(Cue, Option<Vec3>)> {
         GameEvent::PropUsed(i) => (Cue::PropUsed, prop_at(i)),
         GameEvent::PropHit(i) => (Cue::PropStruck, prop_at(i)),
         GameEvent::PropDestroyed(i) => (Cue::PropDestroyed, prop_at(i)),
+        GameEvent::Disembarked | GameEvent::Boarded => (Cue::Hatch, Some(game.player.pos())),
+        GameEvent::BoardRefused => (Cue::MoverBlocked, None),
         _ => return None,
     })
 }

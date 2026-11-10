@@ -68,3 +68,33 @@ fn the_monument_has_no_vista_warnings() {
     ]);
     assert!(!text.contains("warning:"), "{text}");
 }
+
+#[test]
+fn the_valley_plays_through_landing_the_base_and_back() {
+    game(&[
+        "--level".as_ref(),
+        asset("valley.msl").as_os_str(),
+        "--test".as_ref(),
+        asset("valley.test.st").as_os_str(),
+    ]);
+}
+
+#[test]
+fn the_packed_valley_matches_its_text() {
+    let packed = std::env::temp_dir().join(format!("mscent-valley-{}.msl", std::process::id()));
+    game(&[
+        "--pack-level".as_ref(),
+        asset("valley.txt").as_os_str(),
+        packed.as_os_str(),
+    ]);
+    let same = std::fs::read(&packed).unwrap() == std::fs::read(asset("valley.msl")).unwrap();
+    let _ = std::fs::remove_file(&packed);
+    assert!(same, "pack valley.txt again: see the top of that file");
+}
+
+#[test]
+fn the_scale_guide_reads_the_valley() {
+    let text = game(&["--scale-guide".as_ref(), asset("valley.msl").as_os_str()]);
+    assert!(text.contains("ship scale 5"), "{text}");
+    assert!(text.contains("sphere radius        2.50 m"), "{text}");
+}

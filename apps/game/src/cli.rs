@@ -45,6 +45,9 @@ miniscent [options]
   --script-api             print the language and every function a script can call
   --dump-level <file.msl>  print a level as text
   --pack-level <in> <out>  read a level as text and write it as a .msl
+  --scale-guide <n|file>   print what doors, ceilings and climbs a level needs for
+                           the ship at n times its stock size (or a level's own
+                           size, from its scale line) and for the pilot on foot
   --help
 ";
 
@@ -98,6 +101,8 @@ pub struct Options {
     pub shots_dir: Option<PathBuf>,
     pub script_api: bool,
     pub dump_level: Option<PathBuf>,
+    /// `--scale-guide`: a ship size, or a level to read it from.
+    pub scale_guide: Option<String>,
     pub pack_level: Option<(PathBuf, PathBuf)>,
     /// `None` for the default: `auto` in a window, `software` headless.
     pub renderer: Option<Renderer>,
@@ -180,6 +185,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
         shots_dir: None,
         script_api: false,
         dump_level: None,
+        scale_guide: None,
         pack_level: None,
         renderer: None,
         chase: false,
@@ -250,6 +256,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
             "--shots-dir" => o.shots_dir = Some(value("--shots-dir")?.into()),
             "--script-api" => o.script_api = true,
             "--dump-level" => o.dump_level = Some(value("--dump-level")?.into()),
+            "--scale-guide" => o.scale_guide = Some(value("--scale-guide")?),
             "--pack-level" => {
                 let from = value("--pack-level")?.into();
                 let to = value("--pack-level")?.into();

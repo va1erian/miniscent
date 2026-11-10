@@ -59,6 +59,10 @@ pub struct Player {
     /// World-space up used by mouse yaw and roll self-levelling; `None` is
     /// pure 6DoF with no preferred up.
     pub up_ref: Option<Vec3>,
+    /// Size against the stock ship (the level's `scale`): the collision sphere,
+    /// the thrust and so the top speed, and the hover bob all grow with it, so a
+    /// big ship handles as the stock one does, measured in its own lengths.
+    pub scale: f32,
     /// Thrust actually applied, in the body frame; follows the stick.
     thrust_applied: Vec3,
     /// Phase of the hover bob, radians.
@@ -92,12 +96,23 @@ impl Player {
             ang_vel: Vec3::ZERO,
             health: MAX_HEALTH,
             up_ref: None,
+            scale: 1.0,
             thrust_applied: Vec3::ZERO,
             bob_phase: 0.0,
             bank: 0.0,
             look_kick: 0.0,
             look_rate: 0.0,
         }
+    }
+
+    /// The same ship `scale` times its stock size. A scale that is not finite
+    /// and positive leaves it as it is.
+    pub fn scaled(mut self, scale: f32) -> Self {
+        if scale.is_finite() && scale > 0.0 {
+            self.scale = scale;
+            self.body.radius = PLAYER_RADIUS * scale;
+        }
+        self
     }
 
     pub fn pos(&self) -> Vec3 {
@@ -133,7 +148,7 @@ impl Player {
         let want = Vec3::new(i.thrust.x, i.thrust.y, -i.thrust.z);
         self.thrust_applied = approach(self.thrust_applied, want, THRUST_RAMP * STEP_DT);
         let local = self.thrust_applied;
-        let thrust = self.orientation.rotate(local) * THRUST_ACCEL;
+        let thrust = self.orientation.rotate(local) * (THRUST_ACCEL * self.scale);
         let vel = self.body.vel;
         let mut drag = vel * DRAG;
         if want.length() < 1e-3 {
@@ -183,9 +198,10 @@ impl Player {
     /// Vertical hover bob for the camera. It fades out as the drone speeds
     /// up, and is cosmetic only: collision and aim ignore it.
     pub fn bob_offset(&self) -> Vec3 {
-        let still = (1.0 - self.body.vel.length() / BOB_FADE_SPEED).clamp(0.0, 1.0);
+        let fade = BOB_FADE_SPEED * self.scale;
+        let still = (1.0 - self.body.vel.length() / fade).clamp(0.0, 1.0);
         let up = self.up_ref.unwrap_or_else(|| self.up());
-        up * (BOB_AMPLITUDE * still * self.bob_phase.sin())
+        up * (BOB_AMPLITUDE * self.scale * still * self.bob_phase.sin())
     }
 
     /// Cosmetic bank, applied to the camera about the view axis.

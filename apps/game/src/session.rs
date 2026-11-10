@@ -26,7 +26,7 @@ use mscent_world::Level;
 use crate::controls::Controls;
 use crate::feedback::Feedback;
 use crate::notices::Notices;
-use crate::ship::Ship;
+use crate::ship::Crew;
 use crate::sound::Sounds;
 use mscent_script::{ScriptError, Source};
 
@@ -116,10 +116,11 @@ pub struct GameSession {
     bank: SpriteBank,
     kick: ViewKick,
     notices: Notices,
-    /// The player's ship, for shadows and a chase view; `None` where the build or
-    /// the way the session was made has none.
-    ship: Option<Ship>,
-    /// The camera follows behind the ship, which is then drawn.
+    /// The ship's and the pilot's models, for shadows, a chase view and the
+    /// ship parked while the pilot walks; `None` where the session was made
+    /// without them.
+    crew: Option<Crew>,
+    /// The camera follows behind the body being played, which is then drawn.
     chase: bool,
     /// Sound effects, for a host that has somewhere to play them.
     sounds: Option<Sounds>,
@@ -157,22 +158,22 @@ impl GameSession {
             Arena::from_level(level)
         }
         .map_err(SessionError::Load)?;
-        let mut renderer = LevelRenderer::from_level_cached(level, materials, &cfg.build, cache)
+        let renderer = LevelRenderer::from_level_cached(level, materials, &cfg.build, cache)
             .map_err(SessionError::Build)?;
-        let ship = Ship::build(&mut renderer);
-        let mut session = Self::with_renderer(arena, renderer, cfg);
-        session.ship = ship;
-        Ok(session)
+        Ok(Self::with_renderer(arena, renderer, cfg))
     }
 
     /// Starts a level that is already compiled and lit (the editor prepares
     /// its renderer in stages). The first menu is skipped, as in
     /// [`GameSession::new`].
-    pub fn with_renderer(arena: Arena, renderer: LevelRenderer, cfg: &SessionConfig) -> Self {
+    pub fn with_renderer(arena: Arena, mut renderer: LevelRenderer, cfg: &SessionConfig) -> Self {
         let mut game = Game::new(arena);
         game.player.orientation = spawn_orientation(game.arena.player_yaw);
         game.player.up_ref = Some(Vec3::new(0.0, 0.0, 1.0));
-        Self::with_game(game, renderer, cfg)
+        let crew = Crew::build(&mut renderer);
+        let mut session = Self::with_game(game, renderer, cfg);
+        session.crew = crew;
+        session
     }
 
     /// Wraps a game already under way, as a test does to take a picture of it.
@@ -203,7 +204,7 @@ impl GameSession {
             bank: SpriteBank::new(),
             kick: ViewKick::default(),
             notices: Notices::default(),
-            ship: None,
+            crew: None,
             chase: false,
             sounds: None,
         }
@@ -225,8 +226,8 @@ impl GameSession {
     /// lighting for the same level arrives while it is being played.
     pub fn set_renderer(&mut self, renderer: LevelRenderer) {
         self.renderer = renderer;
-        if let Some(ship) = &mut self.ship {
-            ship.add_to(&mut self.renderer);
+        if let Some(crew) = &mut self.crew {
+            crew.add_to(&mut self.renderer);
         }
     }
 
@@ -353,10 +354,15 @@ impl GameSession {
             let steps = self
                 .stepper
                 .advance(u64::try_from(dt.as_nanos()).unwrap_or(u64::MAX));
-            let input = self.controls.input();
+            let input = self.controls.input(self.game.on_foot());
             for _ in 0..steps {
-                self.prev_orientation = self.game.player.orientation;
+                let was_on_foot = self.game.on_foot();
+                self.prev_orientation = self.game.view_orientation();
                 self.game.step(&input);
+                if self.game.on_foot() != was_on_foot {
+                    // A new body: nothing to turn from.
+                    self.prev_orientation = self.game.view_orientation();
+                }
             }
             self.sync_voxels();
             self.note_events();
@@ -456,13 +462,12 @@ impl GameSession {
         if dx == 0.0 && dy == 0.0 {
             return;
         }
-        let before = self.game.player.orientation;
+        let before = self.game.view_orientation();
         self.game
-            .player
             .look(-dy * self.sensitivity, -dx * self.sensitivity);
         // Mouse look is instant: shift the interpolation start by the same
         // rotation so it is never smoothed.
-        let delta = before.conjugate() * self.game.player.orientation;
+        let delta = before.conjugate() * self.game.view_orientation();
         self.prev_orientation = (self.prev_orientation * delta).normalized();
     }
 

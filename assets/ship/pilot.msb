@@ -1,0 +1,22 @@
+miniscent-blueprint 1
+# The pilot on foot, authored in the pilot's own frame: facing -Z, up +Y, the
+# origin at the centre of the feet sphere, 0.35 m above the soles, so the game
+# places it where the pilot stands. Units are 10 cm: 1.8 m from soles to crown,
+# a jetpack on the back. Drawn from outside (a chase view, or the GPU's shadows).
+name pilot
+class ship
+scale 0.1
+skin suit quilted
+skin pack metal
+skin visor glass glow
+
+part body cell=0.5
+# Legs, then the torso, the arms hanging forward a little, and the head.
+add round_cone -1 -3 0  -1 4 0  0.9 1.1 suit
+add round_cone 1 -3 0  1 4 0  0.9 1.1 suit
+add spheroid 0 7.5 0  0 1 0  3 2.2 suit
+add round_cone -2.6 10 0  -3 4.5 -0.5  0.8 0.7 suit
+add round_cone 2.6 10 0  3 4.5 -0.5  0.8 0.7 suit
+add sphere 0 12.6 0 1.6 suit
+add cuboid -1.8 5.5 1.6  1.8 10.5 3.6 pack
+paint sphere 0 12.8 -1.4 1.1 visor

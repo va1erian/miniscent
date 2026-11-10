@@ -1,0 +1,34 @@
+# Valley run (assets/levels/valley.msl), with real controls: fly up the valley,
+# land on the pad by the base, step out, walk in, shoot the guard, hold G on the
+# console to drop the force field, walk back with a jetpack hop, board and fly
+# through to the end. The ship is 5x stock (60 m/s flat out); the pilot runs at
+# 6 m/s. Mouse: 714 counts is a quarter turn. Ends in "final phase Won".
+#
+#   cargo run --release -p miniscent-game -- --level assets/levels/valley.msl \
+#       --script apps/game/scripts/valley.txt --screenshot target/shots/valley.png \
+#       --frames 3000 --shots-at 5,10.8,11.4,14.5,19,25,33.6,35.8,41
+
+# The flight in: up the valley, sidestep onto the pad's line, drop onto it.
+at 0.5s hold W for 8.08s
+at 6.0s hold A for 0.4s
+at 9.5s hold F for 0.8s
+# Out of the ship, turn east to the base door and walk in.
+at 11.0s tap B
+at 11.6s mouse 714 0 over 0.3s
+at 12.2s hold W for 4.6s
+# The guard in the west hall.
+at 17.0s mouse -526 0 over 0.3s
+at 17.4s fire for 1.5s
+# Through the inner doorway to the console, and hold the use key on it.
+at 19.2s mouse 526 0 over 0.3s
+at 19.6s hold W for 3.5s
+at 23.6s hold G for 2.4s
+# Back out to the ship, with a jetpack hop on the way.
+at 26.3s mouse 1428 0 over 0.5s
+at 27.0s hold W for 8.1s
+at 33.0s hold Space for 1.0s
+# Aboard, lift off and fly on through where the field was.
+at 35.4s tap B
+at 35.9s hold R for 0.6s
+at 36.7s hold W for 9.5s
+at 47s quit

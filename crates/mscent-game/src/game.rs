@@ -10,7 +10,8 @@ use crate::destruct::Destruction;
 use crate::enemy::{Enemy, Faction};
 use crate::input::Input;
 use crate::mover::{Mover, spawn_movers};
-use crate::player::{PLAYER_RADIUS, Player};
+use crate::pilot::Pilot;
+use crate::player::Player;
 use crate::prop::{Prop, UseState};
 use crate::script::{ScriptEnd, ScriptState};
 use crate::weapon::Weapon;
@@ -58,6 +59,13 @@ pub enum Event {
     EnemySpawned(usize),
     /// A script placed prop `i`.
     PropSpawned(usize),
+    /// The pilot stepped out of the landed ship.
+    Disembarked,
+    /// The pilot climbed back into the ship.
+    Boarded,
+    /// The board control did nothing: the ship is not down, there is no room
+    /// beside it, or the pilot is too far from it.
+    BoardRefused,
     /// The player's shot struck prop `i`.
     PropHit(usize),
     PropDestroyed(usize),
@@ -107,6 +115,10 @@ pub struct Game {
     pub ticks: u64,
     /// Steps of hurt flash remaining, for the HUD.
     pub hurt_steps: u32,
+    /// The pilot, while out of the ship; `player` is then the parked ship.
+    pub pilot: Option<Pilot>,
+    /// The board control was held last step.
+    pub(crate) board_held: bool,
     pub movers: Vec<Mover>,
     /// Parallel to `movers`: what they collide as, at their current poses.
     pub solids: Vec<MoverSolid>,
@@ -142,6 +154,8 @@ impl Game {
             phase: Phase::Playing,
             ticks: 0,
             hurt_steps: 0,
+            pilot: None,
+            board_held: false,
             movers,
             solids,
             props: Vec::new(),
@@ -163,6 +177,8 @@ impl Game {
         self.destruct.restore(&mut self.arena.voxels);
         let (player, enemies) = spawn(&self.arena);
         self.player = player;
+        self.pilot = None;
+        self.board_held = false;
         self.enemies = enemies;
         (self.movers, self.solids) = spawn_movers(&self.arena);
         self.props.clear();
@@ -215,8 +231,12 @@ impl Game {
         let mark = self.events.len();
         self.ticks = self.ticks.saturating_add(1);
         self.hurt_steps = self.hurt_steps.saturating_sub(1);
+        self.board_control(input);
         let solids = self.arena.solids(&self.solids);
-        self.player.step(solids, input);
+        match &mut self.pilot {
+            Some(pilot) => pilot.step(solids, input),
+            None => self.player.step(solids, input),
+        }
         self.fire(input);
         self.step_destruction();
         self.run_enemies();
@@ -230,7 +250,7 @@ impl Game {
         if !input.fire {
             return;
         }
-        let (origin, dir) = (self.player.pos(), self.player.forward());
+        let (origin, dir) = self.aim();
         let solids = self.arena.solids(&self.solids);
         let enemies = &mut self.enemies;
         let shot = self
@@ -272,8 +292,8 @@ impl Game {
             return self.run_enemy_factions();
         }
         let target = crate::combat::Sphere {
-            centre: self.player.pos(),
-            radius: PLAYER_RADIUS,
+            centre: self.actor_pos(),
+            radius: self.actor_radius(),
         };
         let solids = self.arena.solids(&self.solids);
         for (i, e) in self.enemies.iter_mut().enumerate() {
@@ -314,10 +334,10 @@ impl Game {
         let pos = me.pos();
         let mut best = None;
         let mut best_d = range * range;
-        let player_in_range = hostile && (self.player.pos() - pos).length_squared() <= best_d;
+        let player_in_range = hostile && (self.actor_pos() - pos).length_squared() <= best_d;
         if player_in_range {
             best = Some(None);
-            best_d = (self.player.pos() - pos).length_squared();
+            best_d = (self.actor_pos() - pos).length_squared();
         }
         for (j, other) in self.enemies.iter().enumerate() {
             if j != i && other.alive() && other.faction != me.faction {
@@ -345,15 +365,15 @@ impl Game {
             .enemies
             .get(j)
             .is_some_and(|e| !line_of_sight(solids, from, e.pos()));
-        unseen && line_of_sight(solids, from, self.player.pos())
+        unseen && line_of_sight(solids, from, self.actor_pos())
     }
 
     fn target_sphere(&self, target: Option<usize>) -> Sphere {
         match target.and_then(|j| self.enemies.get(j)) {
             Some(enemy) => enemy.sphere(),
             None => Sphere {
-                centre: self.player.pos(),
-                radius: PLAYER_RADIUS,
+                centre: self.actor_pos(),
+                radius: self.actor_radius(),
             },
         }
     }
@@ -406,16 +426,16 @@ impl Game {
     }
 
     fn at_goal(&self) -> bool {
-        let p = self.player.pos();
+        let (p, r) = (self.actor_pos(), self.actor_radius());
         self.arena.goals.iter().any(|g| {
-            let reach = g.radius + PLAYER_RADIUS;
+            let reach = g.radius + r;
             (p - g.pos).length_squared() <= reach * reach
         })
     }
 
     /// Distance to the nearest goal, for the HUD.
     pub fn goal_distance(&self) -> f32 {
-        let p = self.player.pos();
+        let p = self.actor_pos();
         self.arena
             .goals
             .iter()
@@ -457,7 +477,7 @@ fn report_enemy_shot(events: &mut Vec<Event>, i: usize, enemy: &Enemy, aimed: St
 }
 
 fn spawn(arena: &Arena) -> (Player, Vec<Enemy>) {
-    let player = Player::new(arena.player_start, arena.player_yaw);
+    let player = Player::new(arena.player_start, arena.player_yaw).scaled(arena.ship_scale);
     let enemies = arena
         .enemies
         .iter()

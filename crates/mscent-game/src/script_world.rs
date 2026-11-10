@@ -76,6 +76,10 @@ pub(crate) const NATIVES: &[(&str, Native<Game>)] = &[
     ("give:", give),
     ("has:", has),
     ("pos", pos),
+    ("onFoot", |g, _, r, _| match r {
+        Value::Handle(PLAYER, _) => val(Value::Bool(g.on_foot())),
+        _ => Err("onFoot is for the player".into()),
+    }),
     ("say:", say),
     ("win", |g, _, _, _| finish(g, ScriptEnd::Win)),
     ("lose", |g, _, _, _| finish(g, ScriptEnd::Lose)),
@@ -377,7 +381,7 @@ fn has(g: &mut Game, h: &mut Heap, r: Value, args: &[Value]) -> Res {
 
 fn pos(g: &mut Game, h: &mut Heap, r: Value, _: &[Value]) -> Res {
     let p = match r {
-        Value::Handle(PLAYER, _) => g.player.pos(),
+        Value::Handle(PLAYER, _) => g.actor_pos(),
         Value::Handle(ENEMY, i) => g.enemies.get(i as usize).ok_or("no such enemy")?.pos(),
         Value::Handle(PROP, i) => g.props.get(i as usize).ok_or("no such prop")?.pos,
         Value::Handle(MARKER, _) => point(g, h, r)?,
