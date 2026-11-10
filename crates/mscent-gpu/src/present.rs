@@ -113,6 +113,12 @@ impl Presenter {
         })
     }
 
+    /// Whether showing a frame waits for the display's refresh: `Fifo`, which
+    /// is taken only where nothing that does not wait is offered.
+    pub fn waits_for_display(&self) -> bool {
+        self.config.present_mode == wgpu::PresentMode::Fifo
+    }
+
     /// The surface at the window's size; false for a window with no area.
     fn configure(&mut self, gpu: &Gpu, (width, height): (u32, u32)) -> bool {
         if width == 0 || height == 0 {

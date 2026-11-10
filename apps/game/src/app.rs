@@ -75,6 +75,13 @@ pub trait World {
         false
     }
 
+    /// Whether showing a frame waits for the display's refresh (vsync), so a
+    /// frame costs at least a refresh however fast it is drawn. Known only
+    /// once the first frame is shown.
+    fn waits_for_display(&self) -> bool {
+        false
+    }
+
     /// Why the run must stop, for a world that may not leave frames to software.
     fn stop(&self) -> Option<String> {
         None
@@ -150,14 +157,9 @@ pub fn run_with(
     opts: &RunOptions,
     world: &mut dyn World,
 ) -> RunReport {
-    // The resolution budget is one frame of the cap, so a 120 fps run lowers
-    // the resolution at 8 ms, not at 16.
-    let mut config = ResolutionConfig::default();
-    if let Some(fps) = opts.cap_fps {
-        config.budget_us = (1_000_000.0 / fps.max(1.0)) as u32;
-    }
-    let min_permille = config.min_permille;
-    let mut controller = ResolutionController::new(config);
+    let min_permille = ResolutionConfig::default().min_permille;
+    let mut controller = ResolutionController::new(budget_config(opts.cap_fps, false));
+    let mut display_paced = false;
     let mut costs: Vec<f64> = Vec::new();
     let mut shots = Vec::new();
     let mut next_shot = 0;
@@ -233,6 +235,12 @@ pub fn run_with(
             break;
         }
         let cost = render_start.elapsed();
+        if !display_paced && world.waits_for_display() {
+            // Every frame now costs a refresh, which a budget of one frame of
+            // a high cap would read as the GPU falling behind.
+            display_paced = true;
+            controller = ResolutionController::new(budget_config(opts.cap_fps, true));
+        }
         if let Some(fb) = fb {
             platform.present(fb.pixels(), fb.width(), fb.height());
         }
@@ -285,6 +293,17 @@ pub fn run_with(
         stopped: world.stop(),
         ..report
     }
+}
+
+/// The resolution budget: one frame of the cap, so a 120 fps run lowers the
+/// resolution at 8 ms, not at 16. Where showing a frame waits for the display,
+/// the cap says nothing about the cost, so the default budget stands.
+fn budget_config(cap_fps: Option<f32>, display_paced: bool) -> ResolutionConfig {
+    let mut config = ResolutionConfig::default();
+    if let (Some(fps), false) = (cap_fps, display_paced) {
+        config.budget_us = (1_000_000.0 / fps.max(1.0)) as u32;
+    }
+    config
 }
 
 fn summarize(mut costs: Vec<f64>, final_scale: u32, shots: Vec<PathBuf>) -> RunReport {
@@ -341,6 +360,14 @@ mod tests {
         );
         let huge = shown_sizes((20_000, 9_000), (640, 360), same);
         assert!(huge.0.0 <= MAX_SIDE && huge.0.1 <= MAX_SIDE, "{huge:?}");
+    }
+
+    #[test]
+    fn the_budget_is_a_frame_of_the_cap_unless_the_display_paces_frames() {
+        let default = ResolutionConfig::default().budget_us;
+        assert_eq!(budget_config(None, false).budget_us, default);
+        assert_eq!(budget_config(Some(240.0), false).budget_us, 4_166);
+        assert_eq!(budget_config(Some(240.0), true).budget_us, default);
     }
 
     #[test]
