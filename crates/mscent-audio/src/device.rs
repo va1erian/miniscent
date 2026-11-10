@@ -86,7 +86,8 @@ fn callback(
 ) -> impl FnMut(&mut [f32], &cpal::OutputCallbackInfo) + Send + 'static {
     let channels = channels.max(1);
     let mut mixer = Mixer::new(rate);
-    let mut stereo = Vec::new();
+    // Room for the usual device buffer, so the callback does not allocate.
+    let mut stereo = Vec::with_capacity(8192);
     move |out, _| {
         while let Ok(req) = rx.try_recv() {
             mixer.play(req);

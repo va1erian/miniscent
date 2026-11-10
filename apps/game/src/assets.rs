@@ -130,13 +130,13 @@ mod tests {
     }
 
     #[test]
-    fn a_folder_without_sounds_says_where_it_looked() {
+    fn an_empty_sounds_folder_falls_through_to_the_stock_ones() {
         let root = std::env::temp_dir().join(format!("mscent-nosound-{}", std::process::id()));
         std::fs::create_dir_all(root.join("sounds")).expect("temp dir");
         let got = load_sounds(Some(&root));
         let _ = std::fs::remove_dir_all(&root);
-        // An empty folder falls through to the source tree's, never panics.
-        assert!(got.is_ok());
+        let (bank, _) = got.expect("falls through to the source tree");
+        assert!(!bank.is_empty());
     }
 
     #[test]

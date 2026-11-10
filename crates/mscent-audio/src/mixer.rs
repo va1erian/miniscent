@@ -9,7 +9,9 @@ use crate::wav::Sound;
 /// Sounds playing at once. A new one past this replaces the oldest, which in a
 /// firefight is the one nobody is listening to any more.
 pub const MAX_VOICES: usize = 24;
-/// Headroom so several loud sounds sum without clipping the output.
+/// Headroom for a couple of full-scale sounds at once. More than that are
+/// clamped at the output, which distorts a pile-up of loud sounds rather than
+/// wrapping or going non-finite.
 const MASTER: f32 = 0.5;
 
 /// A request to start a sound.
@@ -199,7 +201,7 @@ mod tests {
     }
 
     #[test]
-    fn loud_voices_sum_without_clipping_the_output() {
+    fn a_pile_up_of_loud_voices_is_clamped_in_range() {
         let mut m = Mixer::new(1000);
         for _ in 0..MAX_VOICES {
             m.play(play(tone(1000, 4, i16::MAX), 1.0, 0.0));

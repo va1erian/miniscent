@@ -49,7 +49,8 @@ skipped.
 
 * `crates/mscent-audio`: the `.wav` reader, a `SoundBank` (a folder by file
   stem), and a `Mixer` (24 voices, linear resampling to the device's rate,
-  constant-power pan; the oldest voice is replaced past the cap). It depends on
+  constant-power pan; the oldest voice is replaced past the cap, and a pile-up of
+  loud sounds is clamped, not limited). It depends on
   nothing and plays nothing. Feature `device` adds `device::Output`, which opens
   the default output with [cpal](https://crates.io/crates/cpal) (Apache-2.0),
   the crate's only dependency, and mixes in the device's callback. The game
@@ -68,7 +69,7 @@ skipped.
 `crates/mscent-audio`: the reader (8 and 16 bit, stereo averaged, unknown
 chunks, a size past the end, every truncation of a good file, hostile headers,
 the length cap), the mixer (equal power, hard pan, voices freed, resampling,
-NaN and out-of-range gain and pan, the voice cap, no clipping), and every
+NaN and out-of-range gain and pan, the voice cap, output kept in range), and every
 shipped file parses, is audible and is listed beside the license.
 `apps/game/tests/sound.rs`: the scripted corridor win makes the player's shot,
 exactly one enemy death and one win; the same run with and without sound ends
