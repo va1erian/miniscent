@@ -141,7 +141,7 @@ the running editor and on disk. If you applied another material first, Save refu
 and names it: save that one before this one. Save also refuses a new name when a
 file `<name>.mst` is already in `assets/textures/` and `materials.txt` does not list
 it, so it never writes over a file it did not make, and it asks first before saving
-over any of the ten stock materials.
+over any stock material.
 
 If you save a level that uses a material you applied but have not saved, the level
 saves all the same and the status bar warns you, naming the material. Without the

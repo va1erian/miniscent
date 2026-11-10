@@ -292,13 +292,28 @@ fn listed_gloss(name: &str) -> u8 {
         "scree" => 12,
         "cliff" => 14,
         "snow" => 40,
+        "grating" => 90,
+        "treadplate" => 160,
+        "rustpanel" => 40,
+        "concrete" => 12,
+        "pipes" => 70,
+        "hive" => 150,
+        "membrane" => 110,
+        "runestone" => 60,
+        "crystal" => 220,
+        "chitin" => 140,
+        "hull" => 120,
+        "console" => 100,
+        "quilted" => 30,
+        "heattile" => 20,
+        "deckplate" => 80,
         _ => DEFAULT_GLOSS,
     }
 }
 
 /// Where the stock names go in a directory with no manifest: the ids of
 /// `assets/textures/materials.txt`.
-const LISTING_ORDER: [&str; 18] = [
+const LISTING_ORDER: [&str; 33] = [
     "brick",
     "floor",
     "lightpanel",
@@ -317,6 +332,21 @@ const LISTING_ORDER: [&str; 18] = [
     "scree",
     "cliff",
     "snow",
+    "grating",
+    "treadplate",
+    "rustpanel",
+    "concrete",
+    "pipes",
+    "hive",
+    "membrane",
+    "runestone",
+    "crystal",
+    "chitin",
+    "hull",
+    "console",
+    "quilted",
+    "heattile",
+    "deckplate",
 ];
 
 /// The entries of a directory with no manifest: every base texture, the stock

@@ -1,0 +1,99 @@
+miniscent-recipe 1
+size 256 256
+gloss 220
+# Alien crystal: faceted points crowding each other, violet at the root and
+# cyan at the tips, with bright edges and sparks caught inside.
+# Facets: the lowest of four tilted triangle waves is a field of flat-faced
+# points; two such fields, the taller wins, give crowded crystals.
+op 0 0 1 gradient cycles_x=5 cycles_y=2
+op 0 1 1 store name=a1
+op 0 2 1 gradient cycles_x=-2 cycles_y=5
+op 0 3 1 store name=a2
+op 0 4 1 gradient cycles_x=4 cycles_y=-3
+op 0 5 1 store name=a3
+op 0 6 1 gradient cycles_x=3 cycles_y=4
+op 0 7 1 store name=a4
+op 0 8 1 load name=a1
+op 1 8 1 load name=a2
+op 2 8 1 load name=a3
+op 3 8 1 load name=a4
+op 0 9 4 merge mode=min
+op 0 10 1 store name=field_a
+op 0 11 1 gradient cycles_x=7 cycles_y=1
+op 0 12 1 store name=b1
+op 0 13 1 gradient cycles_x=-1 cycles_y=7
+op 0 14 1 store name=b2
+op 0 15 1 gradient cycles_x=5 cycles_y=-5
+op 0 16 1 store name=b3
+op 0 17 1 gradient cycles_x=6 cycles_y=4
+op 0 18 1 store name=b4
+op 0 19 1 load name=b1
+op 1 19 1 load name=b2
+op 2 19 1 load name=b3
+op 3 19 1 load name=b4
+op 0 20 4 merge mode=min
+op 0 21 1 range out_high=0.8
+op 0 22 1 store name=field_b
+op 0 23 1 noise freq_x=3 freq_y=3 octaves=3 seed=436
+op 0 24 1 range out_high=0.35
+op 0 25 1 store name=lift
+op 0 26 1 load name=field_b
+op 1 26 1 load name=lift
+op 0 27 2 merge mode=add
+op 0 28 1 store name=tall_b
+op 0 29 1 load name=field_a
+op 1 29 1 load name=tall_b
+op 0 30 2 merge mode=max
+op 0 31 1 store name=height
+op 0 32 1 load name=height
+op 0 33 1 out-height normal_strength=9
+op 0 34 1 load name=height
+op 0 35 1 slope strength=4
+op 0 36 1 range in_high=0.8
+op 0 37 1 store name=facet
+op 0 38 1 load name=height
+op 0 39 1 cavity radius=0.006 amount=6
+op 0 40 1 store name=creases
+op 0 41 1 load name=height
+op 0 42 1 sharpen amount=4 radius=0.004
+op 0 43 1 range in_low=0.55 in_high=0.75
+op 0 44 1 store name=rims
+# Colour by height, with a cloudy inside, rims bright and sparks.
+op 0 45 1 noise freq_x=6 freq_y=6 octaves=4 seed=433 color0=0.24,0.1,0.42 color1=0.46,0.22,0.72
+op 0 46 1 store name=root
+op 0 47 1 noise freq_x=6 freq_y=6 octaves=4 seed=434 color0=0.32,0.72,0.9 color1=0.62,0.95,1
+op 0 48 1 store name=tip
+op 0 49 1 load name=root
+op 1 49 1 load name=tip
+op 2 49 1 load name=height
+op 0 50 3 mask
+op 0 51 1 store name=body0
+op 0 52 1 load name=body0
+op 1 52 1 load name=facet
+op 0 53 2 merge mode=multiply
+op 0 54 1 color amount=1.6
+op 0 55 1 store name=body
+op 0 56 1 flat color=0.85,0.95,1
+op 0 57 1 store name=rim_c
+op 0 58 1 load name=body
+op 1 58 1 load name=rim_c
+op 2 58 1 load name=rims
+op 0 59 3 mask
+op 0 60 1 store name=edged
+op 0 62 1 dots count_x=24 count_y=24 radius=0.002 softness=0.004 jitter=1 seed=435
+op 0 63 1 store name=spark
+op 0 64 1 load name=edged
+op 1 64 1 load name=spark
+op 0 65 2 merge mode=screen
+op 0 66 1 store name=lit
+op 0 67 1 load name=lit
+op 1 67 1 load name=creases
+op 0 68 2 merge mode=multiply
+op 0 69 1 store name=albedo
+op 0 70 1 load name=albedo
+op 0 71 1 out-albedo
+op 0 72 1 load name=creases
+op 0 73 1 range out_low=0.2
+op 0 74 1 store name=shine
+op 0 75 1 load name=shine
+op 0 76 1 out-specular

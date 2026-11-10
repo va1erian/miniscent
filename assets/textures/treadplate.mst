@@ -1,0 +1,61 @@
+miniscent-recipe 1
+size 256 256
+gloss 160
+# Aluminium tread plate: raised lozenges in a herringbone, scuffed bright on
+# top, dirt in the flats between them.
+# Lozenges: one ellipse repeated 8 times a side, lying flat in half the
+# cells of a checker and stood up in the others.
+op 0 0 1 ellipse x=0.5 y=0.5 w=0.66 h=0.17 softness=0.05
+op 0 1 1 rotozoom zoom_x=8 zoom_y=8 shift_x=0.5 shift_y=0.5
+op 0 2 1 store name=flat
+op 0 3 1 load name=flat
+op 0 4 1 rotozoom turns=1
+op 0 5 1 store name=stood
+op 0 6 1 checker cols=8 rows=8
+op 0 7 1 store name=cells
+op 0 8 1 load name=flat
+op 1 8 1 load name=stood
+op 2 8 1 load name=cells
+op 0 9 3 mask
+op 0 10 1 store name=loz
+op 0 11 1 load name=loz
+op 0 12 1 blur radius=0.003
+op 0 13 1 range gamma=1.6
+op 0 14 1 store name=height
+op 0 15 1 load name=height
+op 0 16 1 out-height normal_strength=8
+# Metal: fine rolled grain, scratches across it, polished lozenge tops.
+op 0 17 1 noise freq_x=2 freq_y=48 octaves=1 persistence=0.5 seed=211
+op 0 18 1 range out_low=0.55 out_high=0.68
+op 0 19 1 color gain=0.97,0.98,1
+op 0 20 1 store name=grain
+op 0 21 1 load name=grain
+op 0 22 1 scratches count=220 length=0.12 width=0.0015 seed=212 color=0.82,0.83,0.85
+op 0 23 1 store name=scuffs
+op 0 24 1 load name=height
+op 0 25 1 range out_low=0.73
+op 0 26 1 color amount=1.12
+op 0 27 1 store name=tops
+op 0 28 1 load name=scuffs
+op 1 28 1 load name=tops
+op 0 29 2 merge mode=multiply
+op 0 30 1 store name=metal
+op 0 31 1 load name=height
+op 0 32 1 cavity radius=0.008 amount=3
+op 0 33 1 store name=crevice
+op 0 34 1 noise freq_x=6 freq_y=6 octaves=4 persistence=0.6 seed=213 color0=0.12,0.11,0.09 color1=0.3,0.28,0.24
+op 0 35 1 store name=dirt
+op 0 36 1 load name=dirt
+op 1 36 1 load name=metal
+op 2 36 1 load name=crevice
+op 0 37 3 mask
+op 0 38 1 store name=albedo
+op 0 39 1 load name=albedo
+op 0 40 1 out-albedo
+op 0 41 1 load name=scuffs
+op 1 41 1 load name=crevice
+op 0 42 2 merge mode=multiply
+op 0 43 1 range out_low=0.1
+op 0 44 1 store name=shine
+op 0 45 1 load name=shine
+op 0 46 1 out-specular

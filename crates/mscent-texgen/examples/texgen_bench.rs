@@ -10,7 +10,7 @@ use mscent_texgen::graph::{self, Cache, RunOptions};
 use mscent_texgen::ops::Value;
 use mscent_texgen::{Recipe, Size, bake, recipe};
 
-const STOCK: [&str; 14] = [
+const STOCK: [&str; 29] = [
     "bark",
     "brick",
     "cap",
@@ -25,6 +25,21 @@ const STOCK: [&str; 14] = [
     "sky-clouds",
     "sky-ridge",
     "sky-planet",
+    "grating",
+    "treadplate",
+    "rustpanel",
+    "concrete",
+    "pipes",
+    "hive",
+    "membrane",
+    "runestone",
+    "crystal",
+    "chitin",
+    "hull",
+    "console",
+    "quilted",
+    "heattile",
+    "deckplate",
 ];
 const RUNS: usize = 20;
 
@@ -67,20 +82,27 @@ fn one_change(recipe: &mut Recipe, size: Size, cache: &mut Cache, seed: i32) {
 
 fn main() {
     let recipes: Vec<(&str, Recipe)> = STOCK.iter().map(|n| (*n, stock(n))).collect();
-    let (mut total, mut first_ten) = (0.0, 0.0);
+    let (mut total, mut first_ten, mut rooms) = (0.0, 0.0, 0.0);
     for (name, r) in &recipes {
         let ms = best_ms(|| {
             bake(r, r.size).expect("bakes");
         });
         total += ms;
         println!("{name:<12} {ms:7.2} ms at {} px", r.size.width());
-        // The ten recipes of 128 px and the four of the sky are told apart.
-        if !name.starts_with("sky-") {
-            first_ten += ms;
+        // The ten recipes of 128 px, the four of the sky and the fifteen room
+        // surfaces of 256 px are told apart.
+        match (name.starts_with("sky-"), r.size.width()) {
+            (true, _) => {}
+            (false, 128) => first_ten += ms,
+            (false, _) => rooms += ms,
         }
     }
     println!("{:<12} {first_ten:7.2} ms, the ten at 128 px", "ten");
-    println!("{:<12} {total:7.2} ms, all fourteen", "all");
+    println!(
+        "{:<12} {rooms:7.2} ms, the fifteen room surfaces at 256 px",
+        "rooms"
+    );
+    println!("{:<12} {total:7.2} ms, all {}", "all", recipes.len());
     let size = Size::new(256, 256).expect("size");
     let mut r = stock("brick");
     let mut cache = Cache::new(256 << 20);

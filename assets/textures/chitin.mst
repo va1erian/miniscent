@@ -1,0 +1,86 @@
+miniscent-recipe 1
+size 256 256
+gloss 140
+# Alien carapace: domed plates parted by deep grooves, pitted with pores,
+# dark with an oil-slick sheen that turns teal toward each plate's edge.
+op 0 0 1 noise freq_x=2 freq_y=2 octaves=4 persistence=0.5 seed=441 color1=1,0,0
+op 0 1 1 store name=flow_u
+op 0 2 1 noise freq_x=2 freq_y=2 octaves=4 persistence=0.5 seed=442 color1=0,1,0
+op 0 3 1 store name=flow_v
+op 0 4 1 load name=flow_u
+op 1 4 1 load name=flow_v
+op 0 5 2 merge mode=add
+op 0 6 1 store name=flow
+op 0 7 1 cells count=25 seed=443 mode=distance
+op 0 8 1 store name=plate_d
+op 0 9 1 load name=plate_d
+op 1 9 1 load name=flow
+op 0 10 2 distort amount=0.03
+op 0 11 1 range in_high=0.85
+op 0 12 1 invert
+op 0 13 1 range gamma=2
+op 0 14 1 store name=dome
+op 0 15 1 cells count=25 seed=443 mode=edge
+op 0 16 1 store name=groove_e
+op 0 17 1 load name=groove_e
+op 1 17 1 load name=flow
+op 0 18 2 distort amount=0.03
+op 0 19 1 range in_high=0.15
+op 0 20 1 store name=groove
+op 0 22 1 dots count_x=40 count_y=40 radius=0.003 softness=0.003 jitter=0.8 seed=444
+op 0 23 1 store name=pore
+op 0 24 1 noise freq_x=12 freq_y=12 octaves=3 persistence=0.5 seed=445 mode=ridged
+op 0 25 1 range in_low=0.7 out_high=0.05
+op 0 26 1 store name=ridge
+# Height: domes cut by grooves, fine ridges on top, pores sunk.
+op 0 27 1 load name=dome
+op 1 27 1 load name=groove
+op 0 28 2 merge mode=multiply
+op 0 29 1 range out_high=0.85
+op 0 30 1 store name=h0
+op 0 31 1 load name=h0
+op 1 31 1 load name=ridge
+op 0 32 2 merge mode=add
+op 0 33 1 store name=h1
+op 0 34 1 load name=pore
+op 0 35 1 range out_low=1 out_high=0.6
+op 0 36 1 store name=pores
+op 0 37 1 load name=h1
+op 1 37 1 load name=pores
+op 0 38 2 merge mode=multiply
+op 0 39 1 store name=height
+op 0 40 1 load name=height
+op 0 41 1 out-height normal_strength=6
+# Colour: each plate a little different, purple-black at the crown and
+# teal where it slopes away.
+op 0 42 1 cells count=25 seed=443 mode=id
+op 0 43 1 range out_low=0.8
+op 0 44 1 store name=shade
+op 0 45 1 noise freq_x=8 freq_y=8 octaves=4 seed=446 color0=0.13,0.06,0.17 color1=0.32,0.14,0.34
+op 0 46 1 store name=crown
+op 0 47 1 noise freq_x=8 freq_y=8 octaves=4 seed=447 color0=0.06,0.32,0.32 color1=0.18,0.58,0.5
+op 0 48 1 store name=flank
+op 0 49 1 load name=height
+op 0 50 1 slope strength=6
+op 0 51 1 range in_high=0.6
+op 0 52 1 store name=steep
+op 0 53 1 load name=crown
+op 1 53 1 load name=flank
+op 2 53 1 load name=steep
+op 0 54 3 mask
+op 0 55 1 store name=sheen
+op 0 56 1 load name=groove
+op 0 57 1 range out_low=0.15
+op 0 58 1 store name=dark
+op 0 59 1 load name=sheen
+op 1 59 1 load name=shade
+op 2 59 1 load name=dark
+op 0 60 3 merge mode=multiply
+op 0 61 1 store name=albedo
+op 0 62 1 load name=albedo
+op 0 63 1 out-albedo
+op 0 64 1 load name=groove
+op 0 65 1 range out_low=0.0 out_high=0.95
+op 0 66 1 store name=shine
+op 0 67 1 load name=shine
+op 0 68 1 out-specular

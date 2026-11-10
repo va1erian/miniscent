@@ -85,17 +85,17 @@ fn a_directory_with_no_manifest_gets_sorted_ids_and_the_default_gloss() {
 fn a_png_the_manifest_does_not_list_is_ignored_and_shifts_nothing() {
     let f = Fixture::with_stock("unlisted", STOCK);
     f.png("aaa.png", 8, 0xffff_0000);
-    f.png("concrete.png", 8, 0xffff_0000);
+    f.png("plaster.png", 8, 0xffff_0000);
     let t = f.load().expect("loads");
     assert_eq!(t.len(), 14);
     assert_eq!(t.find("brick"), Some(MaterialId(0)));
     assert_eq!(t.find("aaa"), None);
-    assert_eq!(t.find("concrete"), None);
+    assert_eq!(t.find("plaster"), None);
 }
 
 #[test]
 fn a_listed_material_with_no_png_is_an_error_unless_retired() {
-    let f = Fixture::with_stock("missing", &format!("{STOCK}14 concrete 40\n"));
+    let f = Fixture::with_stock("missing", &format!("{STOCK}14 plaster 40\n"));
     assert!(matches!(f.load(), Err(TextureError::Io(_))));
     f.write(
         "materials.txt",

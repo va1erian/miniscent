@@ -7,8 +7,8 @@ the tool, follow the [tutorial](texture-studio-tutorial.md).
 
 ## As built
 
-- **All stock materials ship as recipes.** The ten stock materials are
-  `assets/textures/*.mst`, 11.4 KB against 902 KB of PNGs, and the game makes them
+- **All stock materials ship as recipes.** The stock materials (ten when this was
+  written, 33 now) are `assets/textures/*.mst`, the first ten 11.4 KB against 902 KB of PNGs, and the game makes them
   at load. `tools/gen_textures.py` is gone. So `mscent-render` depends on
   `mscent-texgen`, unlike the plan below, and every caller of `load_dir` gets
   recipes without knowing. PNG materials still load, and a recipe wins over a PNG
@@ -56,7 +56,7 @@ the tool, follow the [tutorial](texture-studio-tutorial.md).
   disk; if the disk's id differs it refuses and names the materials to save
   first, so applying A and then saving B is refused until A is saved. It also
   refuses a new name whose `.mst` file is already there unlisted, and so does
-  New. Saving over any of the ten stock materials asks first (the list is the
+  New. Saving over any stock material asks first (the list is the
   studio's own, held to the shipped `materials.txt` by a test). A read error on
   the old recipe stops the save, since only a missing file means there was none to
   put back, and files are synced before they are renamed into place.

@@ -26,3 +26,18 @@
 15 scree 12
 16 cliff 14
 17 snow 40
+18 grating 90 20
+19 treadplate 160 6
+20 rustpanel 40 8
+21 concrete 12 6
+22 pipes 70 24
+23 hive 150 16
+24 membrane 110 10
+25 runestone 60 12
+26 crystal 220 18
+27 chitin 140 10
+28 hull 120 6
+29 console 100 8
+30 quilted 30 12
+31 heattile 20 8
+32 deckplate 80 10

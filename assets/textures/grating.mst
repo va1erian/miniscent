@@ -1,0 +1,83 @@
+miniscent-recipe 1
+size 256 256
+gloss 90
+# Galvanized bar grating over a dark void: serrated bearing bars, cross rods
+# set a little lower, zinc spangle, grime and rust where water sits.
+# Shape: bearing bars along y, cross rods along x, notched tops.
+op 0 0 1 stripes cycles_x=12 cycles_y=0 duty=0.3
+op 0 1 1 store name=bear
+op 0 2 1 stripes cycles_x=0 cycles_y=3 duty=0.08
+op 0 3 1 store name=cross
+op 0 4 1 load name=bear
+op 1 4 1 load name=cross
+op 0 5 2 merge mode=max
+op 0 6 1 store name=solid
+op 0 7 1 stripes cycles_x=0 cycles_y=48 duty=0.7
+op 0 8 1 range out_low=0.86
+op 0 9 1 store name=notch
+op 0 10 1 load name=bear
+op 1 10 1 load name=notch
+op 0 11 2 merge mode=multiply
+op 0 12 1 store name=bear_h
+op 0 13 1 load name=cross
+op 0 14 1 range out_high=0.74
+op 0 15 1 store name=cross_h
+op 0 16 1 load name=bear_h
+op 1 16 1 load name=cross_h
+op 0 17 2 merge mode=max
+op 0 18 1 blur radius=0.002
+op 0 19 1 store name=height
+op 0 20 1 load name=height
+op 0 21 1 out-height normal_strength=10
+# Steel: mottled zinc with a spangle of crystals, worn bright on top.
+op 0 22 1 noise freq_x=8 freq_y=8 octaves=4 persistence=0.55 seed=201
+op 0 23 1 range out_low=0.5 out_high=0.7
+op 0 24 1 color gain=0.93,0.96,1
+op 0 25 1 store name=zinc
+op 0 26 1 cells count=256 seed=202 mode=id
+op 0 27 1 range out_low=0.86
+op 0 28 1 store name=spangle
+op 0 29 1 noise freq_x=4 freq_y=16 octaves=3 persistence=0.6 seed=203
+op 0 30 1 range in_low=0.55 in_high=0.8 out_low=0.8
+op 0 31 1 color amount=1.25
+op 0 32 1 store name=wear
+op 0 33 1 load name=zinc
+op 1 33 1 load name=spangle
+op 2 33 1 load name=wear
+op 0 34 3 merge mode=multiply
+op 0 35 1 store name=steel
+# Rust and grime gather in the crevices the height makes.
+op 0 36 1 load name=height
+op 0 37 1 cavity radius=0.012 amount=3
+op 0 38 1 store name=crevice
+op 0 39 1 noise freq_x=16 freq_y=16 octaves=3 persistence=0.5 seed=204 color0=0.2,0.08,0.03 color1=0.46,0.22,0.08
+op 0 40 1 store name=rust
+op 0 41 1 load name=rust
+op 1 41 1 load name=steel
+op 2 41 1 load name=crevice
+op 0 42 3 mask
+op 0 43 1 store name=metal
+op 0 44 1 noise freq_x=3 freq_y=3 octaves=4 persistence=0.55 seed=205
+op 0 45 1 range out_low=0.72
+op 0 46 1 store name=grime
+op 0 47 1 noise freq_x=8 freq_y=8 octaves=3 seed=206 color0=0.012,0.012,0.014 color1=0.05,0.048,0.045
+op 0 48 1 store name=void
+op 0 49 1 load name=void
+op 1 49 1 load name=metal
+op 2 49 1 load name=solid
+op 0 50 3 mask
+op 0 51 1 store name=laid
+op 0 52 1 load name=laid
+op 1 52 1 load name=grime
+op 0 53 2 merge mode=multiply
+op 0 54 1 store name=albedo
+op 0 55 1 load name=albedo
+op 0 56 1 out-albedo
+# Shine: bright on worn tops, none in the void or the rust.
+op 0 57 1 load name=height
+op 1 57 1 load name=crevice
+op 0 58 2 merge mode=multiply
+op 0 59 1 range out_low=0.05 out_high=0.9
+op 0 60 1 store name=shine
+op 0 61 1 load name=shine
+op 0 62 1 out-specular

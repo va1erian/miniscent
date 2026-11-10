@@ -217,7 +217,7 @@ Design and what was built in [enemies.md](enemies.md). M15.1, M15.2 and M15.11 a
 | M15.5 | Motion: parts, sway, debris on death | M15.2 | M | Replay unaffected; moving parts at both ends of a swing by pixel test; no per-frame allocation |
 | M15.6 | `mscent-foundry`: helpers, genes, sockets, gates, silhouette, archive; `--foundry` headless | M15.1 | L | Same seed gives the same file; a run of 2000 seeds writes a contact sheet; gates reject planted failures |
 | M15.7 | First plans: the nine spiked, with two weak plans reworked | M15.6 | L | Owner reviews a sheet of each; no two kept designs of a plan overlap by over 80% |
-| M15.8 | Skin sets: plating, chitin, flesh, glass and two factions as recipes | M15.3 | M | Directory limits still met; load time and binary size recorded; ids append-only |
+| M15.8 | Skin sets: plating, chitin, flesh, glass and two factions as recipes (stock `chitin` and `hull` exist since ids 27 and 28: reuse them or pick other names) | M15.3 | M | Directory limits still met; load time and binary size recorded; ids append-only |
 | M15.9 | Modules and the other nine plans | M15.7 | L | Eight modules of each tag; a sheet shows a module on three plans of different classes |
 | M15.10 | Editor: Foundry workspace, placing by name, Open as level | M15.6, M15.4 | L | `--selftest` rolls, locks a gene and promotes; worst UI tick during a roll held by `tick_costs` |
 | M15.11 | Models on the GPU: the same list, drawn through the voxel pipeline in model space; parity cases | M15.2, M14.5 | M | Parity cases pass on the GPU, each failing with its feature taken out; seeded GPU bugs caught; cost recorded |

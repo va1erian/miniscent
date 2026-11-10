@@ -226,6 +226,50 @@ dev machine (ratio about 8.5 against a 7.61 baseline); intermittently
 `a_100_ms_scene_does_not_slow_the_ui_ticks_and_the_newest_frame_is_shown` (a 5 ms limit, under load)
 and `bake_cache::writes_are_atomic_and_rebake_overwrites`.
 
+## Industrial, alien and spaceship surfaces
+
+Fifteen stock recipes in `assets/textures`, ids 18 to 32 in `materials.txt` and as
+constants in `mscent_world::materials` (`GRATING` to `DECKPLATE`, `LAST_STOCK` is now
+`DECKPLATE`):
+
+| Set | Materials (gloss, parallax depth in texels) |
+|---|---|
+| Industrial | `grating` (90, 20), `treadplate` (160, 6), `rustpanel` (40, 8), `concrete` (12, 6), `pipes` (70, 24) |
+| Alien | `hive` (150, 16), `membrane` (110, 10), `runestone` (60, 12), `crystal` (220, 18), `chitin` (140, 10) |
+| Spaceship | `hull` (120, 6), `console` (100, 8), `quilted` (30, 12), `heattile` (20, 8), `deckplate` (80, 10) |
+
+Each is 256 px, with noise octaves stopped at 64 cycles a tile (128 would alias), and has `out-height` (the
+normal map and the parallax march), `out-specular` and a depth, so the hardware
+renderer draws relief on all of them. `the_room_surfaces_keep_their_ids_and_all_their_maps`
+checks the ids, the size, a normal map, a specular mask that varies and a depth for
+every one. The console's screens and keys are bright albedo only: emissive is still
+`lightpanel` alone.
+
+**The sample uses them all.** `assets/levels/facility.txt` keeps its rooms, doors,
+markers, script and test, and is dressed as a pump hall (concrete, rust cladding, a
+pipe run, grating between tread-plate walkways, a ceiling raised to 6 under a rust
+band that hangs to 5), a ship's deck
+(hull, quilting, a wall console, deck plates, heat-shield frames) and a hive (resin
+walls, carapace floor and ribs, a 16-unit membrane-roofed chamber, crystal growths,
+glyph stones at the goal). Faces carry their own material, scale and shift: a tile
+every 8 units, or fitted to its face (the pipe run, the console), and a wall's u runs
+to the right of whoever faces it so text reads the right way round. `facility.test.st`
+passes unchanged; shots from both renderers were looked at. The added brushes are
+solid, and that test teleports, so it does not show the way is open; by construction
+a channel at |y| < 4.5 and z from -3.5 to 3.25 is clear from start to goal (walkways,
+pillars, pipes, console, frames, ribs, crystals and stones all lie outside it), and
+`wave_2` has 3.5 units to the nearest crystal. Software frame cost from the start, 640x360,
+`--bench --frames 300`, three runs each: 1.39 to 1.40 ms before, 1.70 to 1.74 after.
+The `facility` timings in `docs/perf/hardware.md`, `docs/perf/dynamic-lights.md`,
+`docs/hardware-renderer.md` and `docs/dynamic-lights.md` are of the undressed level
+with one light (it has seven now).
+
+**Cost**: `texgen_bench` on the dev machine makes the fifteen in 643 ms (28 to 53 ms
+each), against 42 ms for the ten 128 px stock recipes and 221 ms for the sky. Every
+level load pays this, on one thread. Not done: making stock recipes in parallel or
+only when a level uses them. Not verified: the i3-7100U, a real window, and how they
+look on the software renderer in a level (looked at as baked maps and a CPU-lit tile).
+
 ## Per-face texture mapping (TexInfo)
 
 Each brush plane has a Hammer-style `TexInfo` (`crates/mscent-world/src/texinfo.rs`, `texinfo/align.rs`):
