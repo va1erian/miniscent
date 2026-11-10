@@ -61,11 +61,26 @@ fn script_of(o: &Options) -> Result<Script, String> {
     Script::parse(&text).map_err(|e| e.to_string())
 }
 
-fn run_options(o: &Options, cap: bool) -> RunOptions {
+/// Frame cap of a window the software renderer draws.
+const SOFTWARE_FPS: f32 = 60.0;
+/// Frame cap of a window the GPU draws: the simulation already steps at 120 Hz,
+/// and high-refresh displays show every frame.
+const ACCELERATED_FPS: f32 = 120.0;
+
+/// The frame cap for a window: as asked with `--fps`, else by what draws it.
+fn frame_cap(asked: Option<u32>, accelerated: bool) -> f32 {
+    match asked {
+        Some(fps) => fps as f32,
+        None if accelerated => ACCELERATED_FPS,
+        None => SOFTWARE_FPS,
+    }
+}
+
+fn run_options(o: &Options, cap: Option<f32>) -> RunOptions {
     RunOptions {
         base: o.res,
         adaptive: o.adaptive && !o.headless(),
-        cap_fps: cap.then_some(60.0),
+        cap_fps: cap,
         autoclose: o.autoclose_ms.map(Duration::from_millis),
         shot_times: o.shots_at.clone(),
         shot_stem: o.screenshot.clone().or_else(|| {
@@ -133,7 +148,7 @@ fn run_headless(o: &Options, session: &mut GameSession) -> Result<RunReport, Str
     let mut platform =
         HeadlessPlatform::new(o.res.0, o.res.1, HEADLESS_DT, script).with_frame_limit(frames);
     let mut world = world(o)?;
-    let opts = run_options(o, false);
+    let opts = run_options(o, None);
     let report = finished(app::run_with(&mut platform, session, &opts, world.as_mut()))?;
     if let (Some(path), Some(frame)) = (&o.screenshot, platform.last_frame()) {
         let png = encode_png(frame.width, frame.height, &frame.pixels)
@@ -156,11 +171,12 @@ fn run_desktop(o: &Options, session: &mut GameSession) -> Result<RunReport, Stri
         height: o.res.1 * o.scale,
     })
     .map_err(|e| format!("cannot open a window: {e}"))?;
+    let mut world = desktop_world(o, &platform)?;
+    // A world that shows itself in the window is the GPU's.
     let opts = RunOptions {
         watch: o.level.as_deref().map(ScriptWatcher::new),
-        ..run_options(o, true)
+        ..run_options(o, Some(frame_cap(o.fps, world.shows())))
     };
-    let mut world = desktop_world(o, &platform)?;
     finished(app::run_with(&mut platform, session, &opts, world.as_mut()))
 }
 

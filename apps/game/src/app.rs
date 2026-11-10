@@ -10,6 +10,7 @@ use mscent_render::png_encode::encode_png;
 use mscent_render::resolution::{ResolutionConfig, ResolutionController};
 use mscent_render::{FrameInput, Framebuffer, LevelAssets};
 
+use crate::pacer::Pacer;
 use crate::scripts::ScriptWatcher;
 use crate::session::{FrameStats, GameSession};
 
@@ -71,6 +72,13 @@ pub trait World {
     /// Shows `frame` of `assets` in the window with what `over` says over it.
     /// False leaves the frame to software and the platform.
     fn show(&mut self, _: &LevelAssets, _: &FrameInput, _: &Shown) -> bool {
+        false
+    }
+
+    /// Whether showing a frame waits for the display's refresh (vsync), so a
+    /// frame costs at least a refresh however fast it is drawn. Known only
+    /// once the first frame is shown.
+    fn waits_for_display(&self) -> bool {
         false
     }
 
@@ -149,7 +157,9 @@ pub fn run_with(
     opts: &RunOptions,
     world: &mut dyn World,
 ) -> RunReport {
-    let mut controller = ResolutionController::new(ResolutionConfig::default());
+    let min_permille = ResolutionConfig::default().min_permille;
+    let mut controller = ResolutionController::new(budget_config(opts.cap_fps, false));
+    let mut display_paced = false;
     let mut costs: Vec<f64> = Vec::new();
     let mut shots = Vec::new();
     let mut next_shot = 0;
@@ -158,9 +168,7 @@ pub fn run_with(
     let mut smooth_ms = 16.6f32;
     let mut watch = opts.watch.clone();
     let mut next_watch = 0.0;
-    let target = opts
-        .cap_fps
-        .map(|f| Duration::from_secs_f32(1.0 / f.max(1.0)));
+    let mut pacer = opts.cap_fps.map(Pacer::new);
     while !platform.should_quit() {
         let frame_start = Instant::now();
         let events = platform.poll_events();
@@ -227,6 +235,12 @@ pub fn run_with(
             break;
         }
         let cost = render_start.elapsed();
+        if !display_paced && world.waits_for_display() {
+            // Every frame now costs a refresh, which a budget of one frame of
+            // a high cap would read as the GPU falling behind.
+            display_paced = true;
+            controller = ResolutionController::new(budget_config(opts.cap_fps, true));
+        }
         if let Some(fb) = fb {
             platform.present(fb.pixels(), fb.width(), fb.height());
         }
@@ -248,14 +262,14 @@ pub fn run_with(
         if let Some(c) = controller.as_mut() {
             c.update(u32::try_from(cost.as_micros()).unwrap_or(u32::MAX));
         }
-        if let Some(target) = target {
-            pace(frame_start, target);
+        if let Some(pacer) = pacer.as_mut() {
+            pacer.wait();
         }
         let total_ms = frame_start.elapsed().as_secs_f32() * 1000.0;
         smooth_ms += (total_ms - smooth_ms) * 0.1;
         // Wall-clock timings in the HUD would make unpaced (scripted,
         // headless) runs differ pixel for pixel, so only paced runs show them.
-        if target.is_some() {
+        if pacer.is_some() {
             session.set_stats(FrameStats {
                 fps: 1000.0 / smooth_ms.max(0.01),
                 frame_ms: ms as f32,
@@ -265,29 +279,31 @@ pub fn run_with(
     if captured {
         platform.set_mouse_captured(false);
     }
-    let report = summarize(
-        costs,
-        controller.map_or(1000, |c| c.scale_permille()),
-        shots,
-    );
+    let final_scale = controller.map_or(1000, |c| c.scale_permille());
+    if let Some(fps) = opts.cap_fps
+        && opts.adaptive
+        && final_scale <= min_permille
+    {
+        // The cap asked for more than this machine draws, so say why the
+        // picture is as small as it can get.
+        eprintln!("could not hold {fps} fps: the resolution fell to its minimum");
+    }
+    let report = summarize(costs, final_scale, shots);
     RunReport {
         stopped: world.stop(),
         ..report
     }
 }
 
-/// Sleeps most of the remaining frame time, then spins the last bit, since
-/// the OS sleep is coarse.
-fn pace(start: Instant, target: Duration) {
-    let spin = Duration::from_millis(2);
-    if let Some(left) = target.checked_sub(start.elapsed())
-        && left > spin
-    {
-        std::thread::sleep(left - spin);
+/// The resolution budget: one frame of the cap, so a 120 fps run lowers the
+/// resolution at 8 ms, not at 16. Where showing a frame waits for the display,
+/// the cap says nothing about the cost, so the default budget stands.
+fn budget_config(cap_fps: Option<f32>, display_paced: bool) -> ResolutionConfig {
+    let mut config = ResolutionConfig::default();
+    if let (Some(fps), false) = (cap_fps, display_paced) {
+        config.budget_us = (1_000_000.0 / fps.max(1.0)) as u32;
     }
-    while start.elapsed() < target {
-        std::hint::spin_loop();
-    }
+    config
 }
 
 fn summarize(mut costs: Vec<f64>, final_scale: u32, shots: Vec<PathBuf>) -> RunReport {
@@ -344,6 +360,14 @@ mod tests {
         );
         let huge = shown_sizes((20_000, 9_000), (640, 360), same);
         assert!(huge.0.0 <= MAX_SIDE && huge.0.1 <= MAX_SIDE, "{huge:?}");
+    }
+
+    #[test]
+    fn the_budget_is_a_frame_of_the_cap_unless_the_display_paces_frames() {
+        let default = ResolutionConfig::default().budget_us;
+        assert_eq!(budget_config(None, false).budget_us, default);
+        assert_eq!(budget_config(Some(240.0), false).budget_us, 4_166);
+        assert_eq!(budget_config(Some(240.0), true).budget_us, default);
     }
 
     #[test]

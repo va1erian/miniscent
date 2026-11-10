@@ -181,6 +181,13 @@ impl World for GpuWorld {
         false
     }
 
+    #[cfg(feature = "desktop")]
+    fn waits_for_display(&self) -> bool {
+        self.presenter
+            .as_ref()
+            .is_some_and(Presenter::waits_for_display)
+    }
+
     fn stop(&self) -> Option<String> {
         self.failed.clone().filter(|_| self.strict)
     }
