@@ -13,10 +13,12 @@ jobs:
       - run: rustup show
       # Reuses compiled dependencies and workspace crates between runs.
       - uses: Swatinem/rust-cache@v2
+      # libasound2-dev: cpal's ALSA backend (the game's `audio` feature) links it, so
+      # clippy and the tests need it. Mesa's CPU Vulkan driver: the parity test
+      # needs a GPU, and runners have none.
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev mesa-vulkan-drivers
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings -D clippy::undocumented_unsafe_blocks
-      # The parity test needs a GPU, and runners have none: Mesa's CPU Vulkan driver.
-      - run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
       - run: cargo test --workspace --exclude mscent-gpu
         env:
           MSCENT_REQUIRE_GPU: "1" # no adapter is a failure here, a skip elsewhere

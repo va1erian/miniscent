@@ -29,6 +29,7 @@ pub mod pacer;
 pub mod scripts;
 pub mod session;
 mod ship;
+pub mod sound;
 pub mod trace;
 
 pub use session::{FrameStats, GameSession, SessionConfig, SessionError, StepOutcome};

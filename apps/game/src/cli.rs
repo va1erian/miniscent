@@ -25,6 +25,7 @@ miniscent [options]
   --script <file>          headless: scripted input (see mscent-platform)
   --bench                  headless: print ms/frame for the run
   --no-adaptive            keep the internal resolution fixed
+  --mute                   desktop: play no sound
   --fps <n>                desktop: frame rate cap, 15..240 (default 120 when
                            the GPU draws the window, 60 otherwise)
   --renderer auto|software|hardware
@@ -86,6 +87,7 @@ pub struct Options {
     pub no_cache: bool,
     pub rebake: bool,
     pub adaptive: bool,
+    pub mute: bool,
     /// `--fps`: the desktop frame cap; `None` for the renderer's default.
     pub fps: Option<u32>,
     pub autoclose_ms: Option<u64>,
@@ -168,6 +170,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
         no_cache: false,
         rebake: false,
         adaptive: true,
+        mute: false,
         fps: None,
         autoclose_ms: None,
         help: false,
@@ -222,6 +225,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
             "--no-cache" => o.no_cache = true,
             "--rebake" => o.rebake = true,
             "--no-adaptive" => o.adaptive = false,
+            "--mute" => o.mute = true,
             "--fps" => {
                 o.fps = Some(
                     value("--fps")?

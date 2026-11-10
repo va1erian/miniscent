@@ -27,6 +27,7 @@ use crate::controls::Controls;
 use crate::feedback::Feedback;
 use crate::notices::Notices;
 use crate::ship::Ship;
+use crate::sound::Sounds;
 use mscent_script::{ScriptError, Source};
 
 mod frame;
@@ -120,6 +121,8 @@ pub struct GameSession {
     ship: Option<Ship>,
     /// The camera follows behind the ship, which is then drawn.
     chase: bool,
+    /// Sound effects, for a host that has somewhere to play them.
+    sounds: Option<Sounds>,
 }
 
 /// The game library keeps the camera frame (view along -Z); the level is
@@ -202,7 +205,14 @@ impl GameSession {
             notices: Notices::default(),
             ship: None,
             chase: false,
+            sounds: None,
         }
+    }
+
+    /// Plays the game's sound effects. Presentation only: the simulation does
+    /// not hear them.
+    pub fn set_sounds(&mut self, sounds: Sounds) {
+        self.sounds = Some(sounds);
     }
 
     /// Puts the camera behind the player's ship and draws the ship, to look at it.
@@ -476,6 +486,9 @@ impl GameSession {
                 _ => {}
             }
             self.feedback.note(&self.game, &e);
+            if let Some(sounds) = &mut self.sounds {
+                sounds.on_event(&self.game, &e);
+            }
         }
     }
 }

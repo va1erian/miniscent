@@ -27,7 +27,10 @@ BUDGET_BYTES = 2_400_000
 # wgpu and the hardware renderer (M14.7) took the default game from 2,126,336 to
 # 5,730,304 bytes; the plan expected about 5.7 MB. With projectors it is 6,088,704
 # (98% of 6.2 MB), so the budget is 6.3 MB.
-HARDWARE_BUDGET_BYTES = 6_300_000
+# Sound (docs/audio.md: cpal for the output device and the WAVE reader and mixer)
+# took it from 6,186,496 to 6,324,736, so it is 6.5 MB. The software build has no
+# sound and is unchanged in its dependencies.
+HARDWARE_BUDGET_BYTES = 6_500_000
 WARN_FRACTION = 0.8
 
 # Each build: its name, its cargo feature arguments, its own target directory so

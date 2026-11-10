@@ -177,6 +177,12 @@ fn run_desktop(o: &Options, session: &mut GameSession) -> Result<RunReport, Stri
         watch: o.level.as_deref().map(ScriptWatcher::new),
         ..run_options(o, Some(frame_cap(o.fps, world.shows())))
     };
+    if !o.mute {
+        match miniscent_game::sound::open(o.assets.as_deref()) {
+            Ok(sounds) => session.set_sounds(sounds),
+            Err(why) => eprintln!("no sound: {why}"),
+        }
+    }
     finished(app::run_with(&mut platform, session, &opts, world.as_mut()))
 }
 

@@ -5,23 +5,27 @@ use std::path::{Path, PathBuf};
 use mscent_render::{MaterialTable, recipe_texture};
 use mscent_world::Level;
 
-/// Directories that may hold `textures/`, most specific first: the explicit
+/// Directories that may hold `<sub>/`, most specific first: the explicit
 /// root, next to the executable, two levels above it (a cargo `target/<profile>`
 /// directory), the working directory and the source tree this was built from.
-fn candidates(explicit: Option<&Path>) -> Vec<PathBuf> {
+fn candidates(explicit: Option<&Path>, sub: &str) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Some(root) = explicit {
-        dirs.push(root.join("textures"));
+        dirs.push(root.join(sub));
     }
     if let Some(exe_dir) = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(Path::to_path_buf))
     {
-        dirs.push(exe_dir.join("assets/textures"));
-        dirs.push(exe_dir.join("../../assets/textures"));
+        dirs.push(exe_dir.join("assets").join(sub));
+        dirs.push(exe_dir.join("../../assets").join(sub));
     }
-    dirs.push(PathBuf::from("assets/textures"));
-    dirs.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/textures"));
+    dirs.push(Path::new("assets").join(sub));
+    dirs.push(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets")
+            .join(sub),
+    );
     dirs
 }
 
@@ -54,7 +58,7 @@ pub fn load_materials(assets_root: Option<&Path>) -> Result<MaterialTable, Strin
 /// As [`load_materials`], and the directory the table came from, which is where
 /// a material made in the editor is saved.
 pub fn load_materials_from(assets_root: Option<&Path>) -> Result<(MaterialTable, PathBuf), String> {
-    let dirs = candidates(assets_root);
+    let dirs = candidates(assets_root, "textures");
     for dir in &dirs {
         if holds_materials(dir) {
             return MaterialTable::load_dir(dir)
@@ -65,6 +69,27 @@ pub fn load_materials_from(assets_root: Option<&Path>) -> Result<(MaterialTable,
     let looked: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
     Err(format!(
         "assets/textures not found; looked in: {}. Run from the Miniscent folder,          or give the game --assets <dir>",
+        looked.join(", ")
+    ))
+}
+
+/// Loads the sound effects from the first candidate directory that has any,
+/// and the files in it that could not be read. A missing directory is not an
+/// error the game should stop for, so the caller decides what to do with it.
+pub fn load_sounds(
+    assets_root: Option<&Path>,
+) -> Result<(mscent_audio::SoundBank, Vec<String>), String> {
+    let dirs = candidates(assets_root, "sounds");
+    for dir in dirs.iter().filter(|d| d.is_dir()) {
+        let (bank, skipped) = mscent_audio::SoundBank::load_dir(dir)
+            .map_err(|e| format!("cannot read sounds in {}: {e}", dir.display()))?;
+        if !bank.is_empty() {
+            return Ok((bank, skipped));
+        }
+    }
+    let looked: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
+    Err(format!(
+        "assets/sounds not found; looked in: {}",
         looked.join(", ")
     ))
 }
@@ -94,6 +119,24 @@ mod tests {
         assert!(dir.join(mscent_render::manifest::FILE).is_file());
         let again = MaterialTable::load_dir(&dir).expect("loads");
         assert_eq!(again.len(), table.len());
+    }
+
+    #[test]
+    fn source_tree_sounds_cover_every_cue() {
+        let (bank, skipped) = load_sounds(None).expect("sounds");
+        assert!(skipped.is_empty(), "{skipped:?}");
+        let sounds = crate::sound::Sounds::new(bank, |_| {});
+        assert_eq!(sounds.missing(), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn an_empty_sounds_folder_falls_through_to_the_stock_ones() {
+        let root = std::env::temp_dir().join(format!("mscent-nosound-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("sounds")).expect("temp dir");
+        let got = load_sounds(Some(&root));
+        let _ = std::fs::remove_dir_all(&root);
+        let (bank, _) = got.expect("falls through to the source tree");
+        assert!(!bank.is_empty());
     }
 
     #[test]
