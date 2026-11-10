@@ -16,7 +16,7 @@ use super::quiet;
 use super::voxelpanel::{VoxelPanel, VoxelProp, apply as apply_voxel};
 use crate::model::entity::{clamp_kind, entity_name, params, pos, set_param, with_pos};
 use crate::model::fields::{Limit, limits};
-use crate::model::{EditorState, Shape, Tool};
+use crate::model::{EditorState, Tool};
 
 /// The container a list is remade in.
 type Host = xui::widget::Panel<Msg>;
@@ -364,7 +364,7 @@ impl Panel {
         self.face.sync(st, |id, visible| self.show(id, visible));
 
         self.sync_bounds(st);
-        let editable = brush.is_some_and(|b| b.is_box());
+        let editable = brush.is_some_and(|b| b.is_resizable());
         self.op.get().set_enabled(brush.is_some());
         self.material.get().set_enabled(brush.is_some());
         if let Some(b) = brush {
@@ -426,16 +426,8 @@ pub fn apply(st: &mut EditorState, prop: Prop) -> bool {
         }),
         Prop::Material(Some(id)) => st.edit_selected_brush(|b| b.set_material(id)),
         Prop::Material(None) => false,
-        Prop::Min(a, v) => st.edit_selected_brush(|b| {
-            if let Shape::Box { min, .. } = &mut b.shape {
-                min[a] = v;
-            }
-        }),
-        Prop::Max(a, v) => st.edit_selected_brush(|b| {
-            if let Shape::Box { max, .. } = &mut b.shape {
-                max[a] = v;
-            }
-        }),
+        Prop::Min(a, v) => st.set_selected_edge(a, false, v),
+        Prop::Max(a, v) => st.set_selected_edge(a, true, v),
         Prop::Pos(a, v) => st.edit_selected_entity(|e: &mut Entity| {
             let mut p = pos(e);
             p[a] = v;

@@ -32,6 +32,32 @@ impl BrushDef {
         matches!(self.shape, Shape::Box { .. })
     }
 
+    /// Whether the bounds can be set: a box, or a volume, which snaps them to
+    /// its chunk grid.
+    pub fn is_resizable(&self) -> bool {
+        self.is_box() || self.is_volume()
+    }
+
+    /// The same entry with its bounds `lo..hi`, as near as its kind allows: a
+    /// box takes them as given, a volume keeps its chunks that stay inside and
+    /// snaps each side to the nearest chunk edge. `None` for what cannot be
+    /// resized, or a size a volume may not have.
+    pub fn with_bounds(&self, lo: [f64; 3], hi: [f64; 3]) -> Option<BrushDef> {
+        let mut out = self.clone();
+        match &mut out.shape {
+            Shape::Box { min, max } => (*min, *max) = (lo, hi),
+            Shape::Volume(v) => {
+                let (a, b) = (
+                    Vec3d::new(lo[0], lo[1], lo[2]),
+                    Vec3d::new(hi[0], hi[1], hi[2]),
+                );
+                *v = v.resized_to(a, b).ok()?;
+            }
+            Shape::Convex(_) => return None,
+        }
+        Some(out)
+    }
+
     /// Moves the brush by `d`. A face whose texture is not locked to the
     /// world keeps its place on the brush (see [`TexInfo::follow_translation`]).
     pub fn translate(&mut self, d: [f64; 3]) {

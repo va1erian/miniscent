@@ -61,6 +61,66 @@ fn growing_keeps_sculpting_where_it_was() {
 }
 
 #[test]
+fn resizing_snaps_to_chunks_and_keeps_what_stays() {
+    let ball = with_ball(add_volume(), v(2.0, 2.0, 2.0), 1.0);
+    // A chunk is 4 units: 9 rounds to 8 and -1.5 to -0 (the nearest edge, 0).
+    let longer = ball
+        .resized_to(v(-1.5, 0.0, 0.0), v(9.0, 4.0, 4.0))
+        .expect("fits");
+    assert_eq!(longer.chunks(), [2, 1, 1]);
+    assert_eq!(longer.bounds(), (v(0.0, 0.0, 0.0), v(8.0, 4.0, 4.0)));
+    assert_eq!(triangles(&ball), triangles(&longer));
+    let before = ball
+        .resized_to(v(-8.0, 0.0, 0.0), v(4.0, 4.0, 4.0))
+        .expect("fits");
+    assert_eq!(before.bounds().0, v(-8.0, 0.0, 0.0));
+    assert_eq!(triangles(&ball), triangles(&before));
+    // Back to where it was is the same volume.
+    let back = longer
+        .resized_to(v(0.0, 0.0, 0.0), v(4.0, 4.0, 4.0))
+        .expect("fits");
+    assert!(back.same_box(&ball) && back.same_shape(&ball));
+}
+
+#[test]
+fn shrinking_cuts_off_the_chunks_outside() {
+    let ball = with_ball(add_volume(), v(2.0, 2.0, 2.0), 1.0);
+    let wide = ball
+        .resized_to(v(-4.0, 0.0, 0.0), v(8.0, 4.0, 4.0))
+        .expect("fits");
+    let right = wide
+        .resized_to(v(0.0, 0.0, 0.0), v(8.0, 4.0, 4.0))
+        .expect("fits");
+    assert_eq!(triangles(&right), triangles(&ball));
+    let left = wide
+        .resized_to(v(-4.0, 0.0, 0.0), v(0.0, 4.0, 4.0))
+        .expect("fits");
+    assert_eq!(triangles(&left), 0);
+}
+
+#[test]
+fn a_resize_that_leaves_no_chunk_or_too_many_is_refused() {
+    let volume = add_volume();
+    let box_of = |lo: Vec3d, hi: Vec3d| volume.resized_to(lo, hi);
+    assert!(
+        box_of(v(0.0, 0.0, 0.0), v(0.0, 4.0, 4.0)).is_err(),
+        "no width"
+    );
+    assert!(
+        box_of(v(4.0, 0.0, 0.0), v(0.0, 4.0, 4.0)).is_err(),
+        "inverted"
+    );
+    assert!(
+        box_of(v(0.0, 0.0, 0.0), v(4000.0, 4.0, 4.0)).is_err(),
+        "too many"
+    );
+    let nan = f64::NAN;
+    assert!(box_of(v(nan, 0.0, 0.0), v(4.0, 4.0, 4.0)).is_err());
+    let far = f64::INFINITY;
+    assert!(box_of(v(-far, 0.0, 0.0), v(far, 4.0, 4.0)).is_err());
+}
+
+#[test]
 fn a_box_that_holds_it_already_does_not_grow() {
     let volume = add_volume();
     let inside = volume.grown_to_hold(v(0.5, 0.5, 0.5), v(1.0, 1.0, 1.0));

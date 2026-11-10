@@ -148,7 +148,11 @@ pub(crate) fn sweep_sphere_d(solids: Solids, from: Vec3d, to: Vec3d, radius: f64
     if !from.is_finite() || !to.is_finite() || !radius.is_finite() || radius < 0.0 {
         return TraceD::blocked(from);
     }
-    if solids.is_solid(from) {
+    // Only BSP solid traps a sphere. Voxel rock is judged by the side of the
+    // nearest surface, a guess that a thin fold of the mesh can get wrong, and a
+    // body that a wrong guess froze would stay frozen for good. The triangles
+    // are one-sided, so a sphere inside rock is free to leave it as it is.
+    if bsp.is_solid(from) {
         return TraceD::blocked(from);
     }
     let mut walk = Walk {

@@ -6,6 +6,7 @@
 //! answer is a pure function of them, so replays agree bit for bit. Far from
 //! every surface the chunk's recorded verdict is used instead.
 
+use mscent_math::epsilon::{VOXEL_TIE_FLOOR, VOXEL_TIE_RELATIVE};
 use mscent_math::{Aabb, Vec3, Vec3d};
 
 use super::index::CellIndex;
@@ -189,12 +190,24 @@ impl VoxelWorld {
     }
 }
 
+/// How far apart two squared distances may be and still be one distance.
+fn tie(d2: f64) -> f64 {
+    d2 * VOXEL_TIE_RELATIVE + VOXEL_TIE_FLOOR
+}
+
 /// The nearest surface point found so far and which side `p` is on.
 pub(super) struct Hit {
     pub d2: f64,
     rock: bool,
     /// Normal of the triangle nearest, facing out of the rock (not unit).
     normal: Vec3d,
+    /// Sum of the face normals of every triangle that has the nearest point,
+    /// weighted so that the sign of `p - q` against it is the side of the
+    /// surface `p` lies on, even where `q` is a vertex or an edge. Zero when
+    /// those triangles have no area.
+    side: Vec3d,
+    /// The nearest point itself.
+    at: Vec3d,
 }
 
 impl Hit {
@@ -202,24 +215,73 @@ impl Hit {
         d2: f64::INFINITY,
         rock: false,
         normal: Vec3d::ZERO,
+        side: Vec3d::ZERO,
+        at: Vec3d::ZERO,
     };
+
+    /// The distance that still counts as the nearest, for pruning.
+    fn reach(&self) -> f64 {
+        self.d2 + tie(self.d2)
+    }
 
     fn search(&mut self, chunk: &VoxelChunk, p: Vec3d) {
         let mesh = &chunk.lods[0];
-        if mesh.bounds.is_empty() || distance_squared_to(&mesh.bounds, p) >= self.d2 {
+        if mesh.bounds.is_empty() || distance_squared_to(&mesh.bounds, p) > self.reach() {
             return;
         }
         let at = [p.x, p.y, p.z];
-        chunk.index.nearest(mesh, at, &mut self.d2, |tri, bound| {
-            let (q, w) = closest_on_triangle(p, tri.map(|v| v.pos.to_f64()));
+        let mut bound = self.reach();
+        chunk.index.nearest(mesh, at, &mut bound, |tri, bound| {
+            let corners = tri.map(|v| v.pos.to_f64());
+            let (q, w) = closest_on_triangle(p, corners);
             let d2 = (p - q).length_squared();
-            if d2 < *bound {
-                *bound = d2;
-                self.normal = facing(&tri, w);
-                self.rock = (p - q).dot(self.normal) <= 0.0;
+            if d2 > self.reach() {
+                return;
             }
+            let push = pseudo_normal(corners, w);
+            if self.d2.is_infinite() || d2 < self.d2 - tie(self.d2) {
+                self.d2 = d2;
+                self.normal = facing(&tri, w);
+                self.side = push;
+                self.at = q;
+            } else if (q - self.at).length_squared() <= tie(self.d2) {
+                // The same point, reached from another triangle around it.
+                self.side = self.side + push;
+                self.d2 = self.d2.min(d2);
+            } else {
+                // As near, but elsewhere: another surface, with its own side.
+                return;
+            }
+            self.rock = (p - self.at).dot(self.sign_normal()) <= 0.0;
+            *bound = self.reach();
         });
     }
+
+    /// The normal that decides which side of the surface `p` is on.
+    fn sign_normal(&self) -> Vec3d {
+        if self.side.length_squared() > 0.0 {
+            self.side
+        } else {
+            self.normal
+        }
+    }
+}
+
+/// What the triangle with corners `c` adds to the pseudo-normal at the point
+/// with weights `w`: its unit face normal, times the angle it makes at a
+/// vertex (Baerentzen and Aanaes), or once for an edge or its inside.
+fn pseudo_normal(c: [Vec3d; 3], w: [f64; 3]) -> Vec3d {
+    let Some(n) = (c[1] - c[0]).cross(c[2] - c[0]).normalized() else {
+        return Vec3d::ZERO;
+    };
+    let live = w.iter().filter(|&&x| x > 0.0).count();
+    if live != 1 {
+        return n;
+    }
+    let i = w.iter().position(|&x| x > 0.0).unwrap_or(0);
+    let (a, b) = (c[(i + 1) % 3] - c[i], c[(i + 2) % 3] - c[i]);
+    let cos = a.dot(b) / (a.length() * b.length());
+    n * cos.clamp(-1.0, 1.0).acos()
 }
 
 fn distance_squared_to(b: &Aabb, p: Vec3d) -> f64 {
