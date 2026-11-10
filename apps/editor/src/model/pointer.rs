@@ -4,11 +4,14 @@
 use mscent_math::Vec3d;
 
 use super::command::Command;
-use super::document::{BrushDef, EntityDef, Shape};
+use super::document::{BrushDef, EntityDef};
 use super::entity::{pos, with_pos};
 use super::state::{EditorState, LIMIT, Selection, Tool, box_ok};
 use super::view::View;
 
+/// Why a volume's drag stopped: its chunks would have gone out of range.
+const CANNOT_RESIZE: &str =
+    "A volume keeps between 1 and 16 chunks on an axis: it stays as it last fitted";
 /// Why a drag stopped at the edge of the map.
 const OFF_MAP: &str = "That would leave the map (past 4096 on an axis): it stays at the edge";
 
@@ -149,7 +152,7 @@ impl EditorState {
     }
 
     fn handle_at(&self, p: Pointer) -> Option<Handle> {
-        let br = self.selected_brush().filter(|b| b.is_box())?;
+        let br = self.selected_brush().filter(|b| b.is_resizable())?;
         let (a, b) = p.view.axes();
         let (lo, hi) = br.bounds();
         let tol = HIT_PIXELS * p.px;
@@ -294,24 +297,28 @@ impl EditorState {
                 before,
             }) => {
                 let (a, b) = view.axes();
-                let mut resized = before;
-                if let Shape::Box { min, max } = &mut resized.shape {
-                    match handle.dx {
-                        -1 => min[a] = snapped[0].min(max[a] - grid),
-                        1 => max[a] = snapped[0].max(min[a] + grid),
-                        _ => {}
-                    }
-                    match handle.dy {
-                        -1 => min[b] = snapped[1].min(max[b] - grid),
-                        1 => max[b] = snapped[1].max(min[b] + grid),
-                        _ => {}
-                    }
+                let (mut lo, mut hi) = before.bounds();
+                match handle.dx {
+                    -1 => lo[a] = snapped[0].min(hi[a] - grid),
+                    1 => hi[a] = snapped[0].max(lo[a] + grid),
+                    _ => {}
                 }
-                let (lo, hi) = resized.bounds();
-                self.held_back = (!box_ok(lo, hi)).then_some(OFF_MAP);
-                if self.held_back.is_none() {
-                    self.doc.replace_brush(&resized);
+                match handle.dy {
+                    -1 => lo[b] = snapped[1].min(hi[b] - grid),
+                    1 => hi[b] = snapped[1].max(lo[b] + grid),
+                    _ => {}
                 }
+                // A volume snaps to its chunks, and may find none left to hold.
+                self.held_back = match before.with_bounds(lo, hi) {
+                    Some(resized) => {
+                        let why = self.misfit(&resized);
+                        if why.is_none() {
+                            self.doc.replace_brush(&resized);
+                        }
+                        why
+                    }
+                    None => Some(CANNOT_RESIZE),
+                };
                 true
             }
         }
@@ -407,7 +414,7 @@ impl EditorState {
         }
     }
 
-    fn volume_overlaps(&self, def: &BrushDef) -> bool {
+    pub(super) fn volume_overlaps(&self, def: &BrushDef) -> bool {
         def.volume().is_some_and(|v| {
             (self.doc.volumes()).any(|(other, o)| other.id != def.id && o.overlaps(v))
         })

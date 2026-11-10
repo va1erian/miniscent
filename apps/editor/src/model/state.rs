@@ -429,6 +429,10 @@ impl EditorState {
         if after == before {
             return false;
         }
+        if self.volume_overlaps(&after) {
+            self.message = "Voxel volumes cannot overlap".into();
+            return false;
+        }
         self.run_brush_edit(before, after);
         true
     }

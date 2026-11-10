@@ -57,6 +57,32 @@ impl Volume {
         self.extended(before, after).map(Some)
     }
 
+    /// This volume with its box moved to `lo..hi`, each side snapped to the
+    /// nearest edge of its chunk grid. Chunks that stay keep what they hold, new
+    /// ones start untouched, and chunks cut off are gone. A side that would be
+    /// left with no chunks, or more than a volume may have, is refused, as is a
+    /// bound that is not a number.
+    pub fn resized_to(&self, lo: Vec3d, hi: Vec3d) -> Result<Self, VolumeError> {
+        let l = self.lattice;
+        let size = l.cell.units() * CHUNK_EDGE as f64;
+        let (lo, hi) = ([lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]);
+        let (mut before, mut after) = ([0i64; 3], [0i64; 3]);
+        for a in 0..3 {
+            if !(lo[a].is_finite() && hi[a].is_finite()) {
+                return Err(VolumeError::BadSize);
+            }
+            let start = f64::from(l.origin[a]) * l.cell.units();
+            // Far past the largest size every number is refused all the same,
+            // and the limit keeps the sums below from overflowing.
+            let most = f64::from(MAX_CHUNKS_PER_AXIS) + f64::from(l.chunks[a]) + 1.0;
+            let edge = |v: f64| ((v - start) / size).round().clamp(-most, most) as i64;
+            let (first, last) = (edge(lo[a]), edge(hi[a]));
+            before[a] = -first;
+            after[a] = last - i64::from(l.chunks[a]);
+        }
+        self.extended(before, after)
+    }
+
     /// This volume with `before` and `after` more chunks along each axis.
     pub fn extended(&self, before: [i64; 3], after: [i64; 3]) -> Result<Self, VolumeError> {
         let l = self.lattice;

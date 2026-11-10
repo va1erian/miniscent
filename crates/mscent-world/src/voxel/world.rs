@@ -5,8 +5,8 @@
 
 use std::sync::Arc;
 
-use mscent_math::epsilon::VOXEL_BURIED_MARGIN;
-use mscent_math::{Aabb, Vec3};
+use mscent_math::epsilon::{VOXEL_BURIED_MARGIN, VOXEL_FLUSH_MARGIN_CELLS};
+use mscent_math::{Aabb, Vec3, Vec3d};
 
 use super::connectivity::AirMask;
 use super::context::Context;
@@ -229,6 +229,13 @@ fn mesh_chunks(
     coords: &[[u16; 3]],
 ) -> Vec<Meshed> {
     let margin = buried_margin(volume);
+    let mut ordered: Vec<&Brush> = brushes.iter().collect();
+    ordered.sort_by_key(|b| b.order());
+    let margins = Margins {
+        buried: margin,
+        flush: volume.cell().units() * VOXEL_FLUSH_MARGIN_CELLS,
+        brushes: &ordered,
+    };
     let bands: Vec<&[[u16; 3]]> = coords.chunks(BAND).collect();
     let done = par_map(workers, bands.len(), |b| {
         let mut mesher = Mesher::new();
@@ -238,7 +245,7 @@ fn mesh_chunks(
             .map(|&c| {
                 let mesh = mesher.mesh(volume, &mut ctx, c)?;
                 let rock = probe_rock(volume, &mesher, bsp, c);
-                Some((mesh.air, rock, finish_chunk(&mesh, bsp, margin)))
+                Some((mesh.air, rock, finish_chunk(&mesh, bsp, margins)))
             })
             .collect::<Vec<Meshed>>()
     });
@@ -274,10 +281,22 @@ fn empty_chunk() -> VoxelChunk {
     }
 }
 
+/// What decides which triangles a chunk keeps.
+#[derive(Clone, Copy)]
+struct Margins<'a> {
+    /// See [`buried_margin`].
+    buried: f64,
+    /// See [`flush_with_brushes`].
+    flush: f64,
+    /// The static brushes in CSG order, which the BSP was compiled from but for
+    /// the shells of volumes.
+    brushes: &'a [&'a Brush],
+}
+
 /// A chunk's levels of detail and leaves, or `None` when air can see none of it.
-fn finish_chunk(mesh: &ChunkMesh, bsp: &Bsp, margin: f64) -> Option<VoxelChunk> {
+fn finish_chunk(mesh: &ChunkMesh, bsp: &Bsp, margins: Margins<'_>) -> Option<VoxelChunk> {
     let mut leaves = Vec::new();
-    let full = without_buried(mesh, bsp, margin, &mut leaves);
+    let full = without_buried(mesh, bsp, margins, &mut leaves);
     if full.triangles.is_empty() {
         return None;
     }
@@ -303,7 +322,12 @@ fn buried_margin(volume: &Volume) -> f64 {
 
 /// `mesh` with only the triangles air can see, and only their vertices. Adds the
 /// empty leaves those triangles touch to `leaves`.
-fn without_buried(mesh: &ChunkMesh, bsp: &Bsp, margin: f64, leaves: &mut Vec<LeafId>) -> ChunkMesh {
+fn without_buried(
+    mesh: &ChunkMesh,
+    bsp: &Bsp,
+    margins: Margins<'_>,
+    leaves: &mut Vec<LeafId>,
+) -> ChunkMesh {
     const UNUSED: u16 = u16::MAX;
     let mut remap = vec![UNUSED; mesh.vertices.len()];
     let mut vertices: Vec<VoxelVertex> = Vec::with_capacity(mesh.vertices.len());
@@ -311,7 +335,9 @@ fn without_buried(mesh: &ChunkMesh, bsp: &Bsp, margin: f64, leaves: &mut Vec<Lea
     let mut materials = Vec::with_capacity(mesh.materials.len());
     for (t, &material) in mesh.triangles.iter().zip(&mesh.materials) {
         let corners = t.map(|i| mesh.vertices[usize::from(i)].pos);
-        if !touch_air(bsp, bsp.root(), &corners, margin, leaves) {
+        if flush_with_brushes(bsp, &corners, margins)
+            || !touch_air(bsp, bsp.root(), &corners, margins.buried, leaves)
+        {
             continue;
         }
         triangles.push(t.map(|i| {
@@ -333,6 +359,47 @@ fn without_buried(mesh: &ChunkMesh, bsp: &Bsp, margin: f64, leaves: &mut Vec<Lea
         materials,
         air: mesh.air,
     }
+}
+
+/// Whether a triangle lies on a face of a static brush, within `margins.flush`,
+/// with the same side facing air: rock behind and air in front, at its corners,
+/// edges and middle. Drawn, it would only fight that face for its pixels, and
+/// touched, it is the same floor twice.
+///
+/// Both the BSP and the brushes alone must agree. The BSP says the face is still
+/// there and not carved away by the volume's own box; the brushes say it is a
+/// face that is drawn, and not the undrawn wall of that box, which the surface
+/// of a cave closing at its edge is the only picture of.
+fn flush_with_brushes(bsp: &Bsp, corners: &[Vec3; 3], margins: Margins<'_>) -> bool {
+    let [a, b, c] = corners.map(Vec3::to_f64);
+    let Some(n) = (b - a).cross(c - a).normalized() else {
+        return false;
+    };
+    let depth = margins.flush;
+    let probes = [
+        a,
+        b,
+        c,
+        (a + b + c) * (1.0 / 3.0),
+        (a + b) * 0.5,
+        (b + c) * 0.5,
+        (c + a) * 0.5,
+    ];
+    let on_bsp = |p: Vec3d| bsp.is_solid(p - n * depth) && !bsp.is_solid(p + n * depth);
+    probes.into_iter().all(on_bsp)
+        && probes.into_iter().all(|p| {
+            brush_solid(margins.brushes, p - n * depth)
+                && !brush_solid(margins.brushes, p + n * depth)
+        })
+}
+
+/// Whether the static brushes, taken in order, leave `p` in rock. Everything is
+/// rock until a subtract brush carves it.
+fn brush_solid(brushes: &[&Brush], p: Vec3d) -> bool {
+    brushes
+        .iter()
+        .filter(|b| b.contains(p))
+        .fold(true, |_, b| b.op() == Op::Add)
 }
 
 /// Whether a triangle reaches an empty leaf below `child`, adding each it reaches

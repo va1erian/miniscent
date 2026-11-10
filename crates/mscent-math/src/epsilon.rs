@@ -36,6 +36,21 @@ pub const VOXEL_SEAM_BIAS_CELLS: f64 = 1.0 / 16.0;
 /// bias of the smallest cell, so a surface sunk behind a brush face stays buried.
 pub const VOXEL_BURIED_MARGIN: f64 = 1.0e-3;
 
+/// How far, in cells, a voxel triangle may lie off a BSP surface and still count
+/// as flush with it. Such a triangle adds nothing the brush face does not show
+/// and only fights it for the pixel, so it is dropped. More than the seam bias
+/// and the wander of a surface-nets vertex across a flat field, less than a
+/// feature of the field worth drawing.
+pub const VOXEL_FLUSH_MARGIN_CELLS: f64 = 0.25;
+
+/// Squared distances to a voxel surface within this relative amount (plus
+/// `VOXEL_TIE_FLOOR` for distances near zero) are one distance: the triangles
+/// around a vertex or edge all report the same nearest point, to within rounding.
+pub const VOXEL_TIE_RELATIVE: f64 = 1.0e-9;
+
+/// See [`VOXEL_TIE_RELATIVE`].
+pub const VOXEL_TIE_FLOOR: f64 = 1.0e-12;
+
 /// Fraction of a shadow ray, at each end, where a voxel triangle does not count
 /// as a hit. A ray starts a fixed bias off the surface it lights and ends at a
 /// lamp, so only a surface touching an end could reach into this band.

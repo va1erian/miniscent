@@ -201,14 +201,15 @@ fn a_sphere_embedded_in_a_voxel_surface_can_leave_it_and_cannot_dig_in() {
     );
     assert!(down.hit && down.fraction == 0.0, "cannot sink: {down:?}");
     assert!((down.normal.z - 1.0).abs() < 1.0e-3);
-    // A centre inside the rock itself cannot move at all.
+    // A centre inside the rock itself is not trapped either: which side of the
+    // surface it is on is a guess, and a body must never be frozen by one.
     let inside = sweep_sphere(
         scene.solids(),
         Vec3::new(8.0, 0.0, -2.0),
         Vec3::new(8.0, 0.0, 3.0),
         RADIUS,
     );
-    assert!(inside.start_solid && inside.fraction == 0.0, "{inside:?}");
+    assert!(!inside.start_solid, "{inside:?}");
 }
 
 /// Everything a replay would compare, as bits.
@@ -409,14 +410,14 @@ fn a_flat_triangle_is_a_one_sided_floor() {
         "{from_above:?}"
     );
     assert!((from_above.normal.z - 1.0).abs() < 1.0e-6);
-    // Behind the triangle is rock, which a sphere cannot start in.
+    // Behind the triangle is rock, which a one-sided triangle lets a sphere leave.
     let from_below = sweep_sphere(
         solids,
         Vec3::new(0.0, 0.0, 1.0),
         Vec3::new(0.0, 0.0, 4.0),
         RADIUS,
     );
-    assert!(from_below.start_solid, "{from_below:?}");
+    assert!(!from_below.start_solid && !from_below.hit, "{from_below:?}");
     // Past its edge the plane's extension is not a wall.
     let beside = sweep_sphere(
         solids,

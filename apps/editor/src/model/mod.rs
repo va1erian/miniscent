@@ -13,6 +13,7 @@ pub mod labels;
 pub mod outline;
 pub mod pick;
 pub mod pointer;
+mod resize;
 mod sculptor;
 pub mod shape_ops;
 pub mod state;
@@ -36,6 +37,8 @@ mod kind_tests;
 mod outline_tests;
 #[cfg(test)]
 mod projector_tests;
+#[cfg(test)]
+mod resize_tests;
 #[cfg(test)]
 mod review_tests;
 #[cfg(test)]
