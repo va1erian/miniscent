@@ -25,6 +25,8 @@ miniscent [options]
   --script <file>          headless: scripted input (see mscent-platform)
   --bench                  headless: print ms/frame for the run
   --no-adaptive            keep the internal resolution fixed
+  --fps <n>                desktop: frame rate cap, 15..240 (default 120 when
+                           the GPU draws the window, 60 otherwise)
   --renderer auto|software|hardware
                            what draws the world: the GPU where it can (auto,
                            the default in a window), software (the default
@@ -84,6 +86,8 @@ pub struct Options {
     pub no_cache: bool,
     pub rebake: bool,
     pub adaptive: bool,
+    /// `--fps`: the desktop frame cap; `None` for the renderer's default.
+    pub fps: Option<u32>,
     pub autoclose_ms: Option<u64>,
     pub help: bool,
     pub check: bool,
@@ -142,6 +146,10 @@ fn res(s: &str) -> Result<(u32, u32), String> {
 /// size the HUD is drawn for.
 pub const BASE_RES: (u32, u32) = (640, 360);
 
+/// The slowest and fastest frame cap `--fps` takes.
+pub const MIN_FPS: u32 = 15;
+pub const MAX_FPS: u32 = 240;
+
 /// Parses the arguments after the program name.
 pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String> {
     let mut o = Options {
@@ -160,6 +168,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
         no_cache: false,
         rebake: false,
         adaptive: true,
+        fps: None,
         autoclose_ms: None,
         help: false,
         check: false,
@@ -213,6 +222,15 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
             "--no-cache" => o.no_cache = true,
             "--rebake" => o.rebake = true,
             "--no-adaptive" => o.adaptive = false,
+            "--fps" => {
+                o.fps = Some(
+                    value("--fps")?
+                        .parse()
+                        .ok()
+                        .filter(|n| (MIN_FPS..=MAX_FPS).contains(n))
+                        .ok_or("--fps must be 15..240")?,
+                );
+            }
             "--chase" => o.chase = true,
             "--renderer" => o.renderer = Some(renderer(&value("--renderer")?)?),
             "--autoclose-ms" => {
@@ -304,9 +322,20 @@ mod tests {
             &["--shots-at", "inf"],
             &["--renderer", "vulkan"],
             &["--renderer"],
+            &["--fps", "14"],
+            &["--fps", "241"],
+            &["--fps", "fast"],
+            &["--fps"],
         ] {
             assert!(p(args).is_err(), "{args:?}");
         }
+    }
+
+    #[test]
+    fn fps_takes_the_range_and_defaults_to_the_renderer() {
+        assert_eq!(p(&[]).unwrap().fps, None);
+        assert_eq!(p(&["--fps", "240"]).unwrap().fps, Some(240));
+        assert_eq!(p(&["--fps", "15"]).unwrap().fps, Some(15));
     }
 
     #[test]
