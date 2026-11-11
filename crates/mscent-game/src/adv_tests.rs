@@ -14,6 +14,7 @@ fn extreme_model(health: i32, max_health: i32) -> HudModel {
         hurt: true,
         phase: Phase::Playing,
         use_prompt: None,
+        craft: Default::default(),
     }
 }
 

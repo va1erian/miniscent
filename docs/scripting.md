@@ -338,10 +338,10 @@ player -> fire -> enemies -> movers -> zones
 | Spawned thing | `onPickup:`, `onUse:hold:`, `onHit:`, `onDestroyed:`, `destroy` |
 | Spawning | `spawn:at:tag:`, `spawnAll:at:tag:` |
 | Tuning | `defineProp:`, `defineEnemy:base:`, then a setter per field: `hp:`, `speed:`, `radius:`, `damage:`, `cooldown:`, `sightRange:`, `attackRange:`; `mesh:` on a prop |
-| Player | `give:`, `has:`, `hp`, `heal:`, `pos` |
+| Player | `give:`, `has:`, `hp`, `heal:`, `pos`, `onFoot` (the pilot is out of the ship, [pilot.md](pilot.md)) |
 | Game | `say:`, `win`, `lose`, `randomFrom:to:`, `x:y:z:` |
 | Time | `wait:`, `fork:`; in the library: `waitUntil:`, `waitArrived:`, `waitDestroyed:`, `every:do:`, `after:do:` |
-| Test only | `assert:because:`, `teleport:distance:`, `flyTo:`, `aimAt:`, `fireFor:`, `shot:`, `phase` |
+| Test only | `assert:because:`, `teleport:distance:`, `flyTo:`, `aimAt:`, `fireFor:`, `useFor:`, `walkFor:`, `jumpFor:`, `pressBoard`, `shot:`, `phase` |
 
 A handler that takes a parameter is given what its event was about: `[:enemy | ... ]` for a death, the
 mover for `onArrived:` and `onHit:`, the player for a zone.

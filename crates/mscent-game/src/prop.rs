@@ -6,7 +6,6 @@
 use crate::combat::{Sphere, line_of_sight};
 use crate::game::{Event, Game};
 use crate::input::Input;
-use crate::player::PLAYER_RADIUS;
 use mscent_collide::STEP_DT;
 use mscent_math::Vec3;
 
@@ -130,9 +129,9 @@ impl Game {
         if self.props.is_empty() {
             return;
         }
-        let p = self.player.pos();
+        let (p, r) = (self.actor_pos(), self.actor_radius());
         for (i, prop) in self.props.iter_mut().enumerate() {
-            let reach = prop.radius + PLAYER_RADIUS;
+            let reach = prop.radius + r;
             let touching = (prop.pos - p).length_squared() <= reach * reach;
             if prop.present && prop.enabled && prop.pickup && touching {
                 prop.present = false;
@@ -144,7 +143,7 @@ impl Game {
 
     /// The nearest usable prop the player can reach, is looking at and can see.
     fn usable_in_reach(&self) -> Option<usize> {
-        let (p, forward) = (self.player.pos(), self.player.forward());
+        let (p, forward) = self.aim();
         let solids = self.arena.solids(&self.solids);
         let mut best: Option<(usize, f32)> = None;
         for (i, prop) in self.props.iter().enumerate() {

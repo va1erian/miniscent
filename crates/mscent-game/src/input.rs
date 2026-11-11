@@ -15,6 +15,9 @@ pub struct Input {
     pub fire: bool,
     /// Held down on something usable.
     pub use_key: bool,
+    /// Pressed to leave the landed ship or to board it again; one press is one
+    /// change, however long it is held.
+    pub board: bool,
 }
 
 fn unit(v: f32) -> f32 {
@@ -46,6 +49,7 @@ impl Input {
             roll: unit(self.roll),
             fire: self.fire,
             use_key: self.use_key,
+            board: self.board,
         }
     }
 }
@@ -63,6 +67,7 @@ mod tests {
             roll: f32::NAN,
             fire: true,
             use_key: false,
+            board: false,
         }
         .sanitized();
         assert!(i.thrust.length() <= 1.0 + 1e-6);

@@ -27,7 +27,7 @@ impl GameSession {
     ) {
         let by_player = shooter == Shooter::Player;
         let muzzle = if by_player {
-            origin + self.game.player.orientation.rotate(GUN_OFFSET)
+            origin + self.game.view_orientation().rotate(GUN_OFFSET)
         } else {
             enemy_muzzle(origin, end)
         };

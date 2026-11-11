@@ -1,9 +1,8 @@
 //! Drawing of one orthographic view: grid, brush outlines, entities and
 //! selection handles.
 
-use std::cell::RefCell;
-
 use mscent_world::{Entity, Op};
+use std::cell::RefCell;
 use xui::Color;
 use xui::backend::{Canvas, Rgba, TextStyle};
 use xui::geometry::{Point, Rect};
@@ -39,6 +38,8 @@ pub struct Scene<'a> {
 
 #[path = "paint2d_cone.rs"]
 mod paint2d_cone;
+#[path = "paint2d_scale.rs"]
+mod paint2d_scale;
 
 fn clamp(v: f64) -> i32 {
     v.clamp(-1.0e6, 1.0e6) as i32
@@ -338,7 +339,9 @@ fn entities(pen: &mut Pen, scene: &Scene) {
                 let shown = (selected == Some(e.id)).then_some((a, b));
                 paint2d_cone::projector(pen, (c, r), &e.entity, shown);
             }
+            Entity::Scale { ship, .. } => paint2d_scale::figures(pen, scene, q, ship),
             Entity::PlayerStart { yaw, .. } => {
+                paint2d_scale::figures(pen, scene, q, paint2d_scale::ship_scale(scene));
                 let g = Color::rgb(60, 190, 90);
                 pen.canvas.fill_ellipse(c, r, r, g);
                 if scene.view == View::Top {

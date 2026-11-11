@@ -241,8 +241,10 @@ impl Game {
             let Some(pose) = self.movers[i].next() else {
                 continue;
             };
-            // The player first, then the living enemies, as `hurt_body` expects.
-            let mut bodies: Vec<&mut Body> = vec![&mut self.player.body];
+            // The player first (the pilot on foot, and the ship parked or not),
+            // then the living enemies, as `hurt_body` expects.
+            let mut bodies: Vec<&mut Body> = self.pilot.iter_mut().map(|p| &mut p.body).collect();
+            bodies.push(&mut self.player.body);
             let alive = self.enemies.iter_mut().filter(|e| e.alive());
             bodies.extend(alive.map(|e| &mut e.body));
             match push_mover(
@@ -289,7 +291,9 @@ impl Game {
         if damage <= 0 {
             return;
         }
-        let Some(enemy_nth) = body.checked_sub(1) else {
+        // The pilot and the ship are both the player's: either one hurts.
+        let players = 1 + usize::from(self.pilot.is_some());
+        let Some(enemy_nth) = body.checked_sub(players) else {
             self.player.damage(damage);
             self.hurt_steps = HURT_FLASH_STEPS;
             self.events.push(Event::PlayerHurt(damage));

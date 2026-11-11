@@ -194,3 +194,11 @@ pub const FINE_EDGES_NEARER: f64 = 0.85;
 /// reference's, to [`PARITY_DEPTH_RELATIVE`]: only silhouettes may differ, and
 /// 98% to 99% agree.
 pub const FINE_DEPTH_AGREEMENT: f64 = 0.95;
+
+/// How far below a walker's feet the ground may be and still hold it up: past the
+/// collision skin, so a walker resting on a floor reads as standing on it.
+pub const GROUND_PROBE: f32 = 0.06;
+
+/// The least extra distance a stepped move must gain over a plain slide to be
+/// taken, so the two never trade places from rounding noise on a flat floor.
+pub const STEP_GAIN: f32 = 1.0e-3;

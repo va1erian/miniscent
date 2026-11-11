@@ -4,7 +4,8 @@
 
 use mscent_world::Entity;
 use mscent_world::entity::{
-    MAX_ENTITY_COORD, MAX_FOG_DEPTH, MAX_VISTA_FOG, MAX_VISTA_LAYERS, MAX_VISTA_PAN, MAX_VISTA_SPIN,
+    MAX_ENTITY_COORD, MAX_FOG_DEPTH, MAX_SHIP_SCALE, MAX_VISTA_FOG, MAX_VISTA_LAYERS,
+    MAX_VISTA_PAN, MAX_VISTA_SPIN, MIN_SHIP_SCALE,
 };
 use mscent_world::materials::VIEW_SLOTS;
 
@@ -52,6 +53,11 @@ pub fn limits(e: &Entity) -> Vec<Limit> {
             limit(0.5, 90.0, 1.0),
         ],
         Entity::Goal { .. } => vec![SIZE],
+        Entity::Scale { .. } => vec![limit(
+            f64::from(MIN_SHIP_SCALE),
+            f64::from(MAX_SHIP_SCALE),
+            0.25,
+        )],
         Entity::World { .. } => {
             let depth = f64::from(MAX_FOG_DEPTH);
             vec![limit(0.0, depth - 1.0, 10.0), limit(1.0, depth, 10.0)]

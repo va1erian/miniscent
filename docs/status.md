@@ -37,6 +37,11 @@ cargo run --release -p mscent-editor -- --live-timing
 # and open the editor manual (Help, F1) on every page; PNGs in <dir>/script-pane/manual-*.png
 cargo run --release -p mscent-editor -- --selftest target/shots/editor
 
+# the pilot on foot (docs/pilot.md): fly the valley, land, walk into the base, drop the
+# force field, walk back, board, fly on; with real controls, headless (ends "final phase Won")
+cargo run --release -p miniscent-game -- --level assets/levels/valley.msl     --script apps/game/scripts/valley.txt --screenshot target/shots/valley.png --frames 3000
+cargo run --release -p miniscent-game -- --scale-guide assets/levels/valley.msl
+
 # gate
 cargo test --workspace
 ```
@@ -225,6 +230,29 @@ selftest check "a click on the picture picked the framed wall"; `tools/check_fra
 dev machine (ratio about 8.5 against a 7.61 baseline); intermittently
 `a_100_ms_scene_does_not_slow_the_ui_ticks_and_the_newest_frame_is_shown` (a 5 ms limit, under load)
 and `bake_cache::writes_are_atomic_and_rebake_overwrites`.
+
+## The pilot on foot ([pilot.md](pilot.md))
+
+The ship can land anywhere and the pilot step out (B): a walker with Quake-style ground and air
+control, jumps, steps, a head that stops at low ceilings, and a jetpack, who boards again (B)
+near the ship. Any level mixes both; enemies, zones, pickups, the use key, shots and the goal
+follow whichever body is played. A level's `scale` line (`Entity::Scale`, level format version 8)
+makes the ship bigger than stock, with its speed; units are the pilot's metres everywhere. Scale
+aids: `--scale-guide`, `mscent_game::ScaleGuide`, and the ship and pilot figures in the editor's
+2D views. Demo level `assets/levels/valley.msl` with its script, its level test and a real-input
+run (`apps/game/scripts/valley.txt`).
+
+Verified: `pilot_tests.rs` (16: standing, run speed and friction, jump height against the guide,
+one jump per press, a step climbed and a ledge not, a low beam stops the head and a tall one does
+not, the jetpack and its refill, the guide's jetpack climb against the game to 5%, leave and board,
+refusals, a size-4 ship's sphere and speed, an exact replay through leaving, walking and jumping,
+shots and enemies follow the pilot); `valley.test.st` through `tests/sample_level.rs` (11 checks);
+the level format's round trip and refusals of a bad size and of a scale in a version 7 file; the
+real-input demo ends `final phase Won` in release, on the software renderer, and with `--chase
+--renderer hardware` showing the ship and the pilot models. Every replay test of the ship is
+unchanged. `facility.msl` and `facing.msl` were repacked for the version number only.
+
+Not verified: a real window, keyboard and mouse; the LazyOS box. Not done: see [pilot.md](pilot.md).
 
 ## Industrial, alien and spaceship surfaces
 

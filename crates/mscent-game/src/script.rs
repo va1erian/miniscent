@@ -87,6 +87,11 @@ pub(crate) struct ScriptState {
     pub fire_until: u64,
     /// Test scripts only: the use key is held until this tick.
     pub use_until: u64,
+    /// Test scripts only: forward, up (jump and jetpack) and the board control
+    /// are held until these ticks.
+    pub walk_until: u64,
+    pub jump_until: u64,
+    pub board_until: u64,
     pub checks: Vec<crate::script_test_api::Check>,
     pub shots: Vec<String>,
     /// The tasks running each source's top level. The last is the test's.
@@ -121,6 +126,9 @@ impl ScriptState {
             end: None,
             fire_until: 0,
             use_until: 0,
+            walk_until: 0,
+            jump_until: 0,
+            board_until: 0,
             checks: Vec::new(),
             shots: Vec::new(),
             entry_tasks: Vec::new(),
@@ -318,7 +326,7 @@ impl Game {
     }
 
     fn update_zones(&mut self) {
-        let p = self.player.pos();
+        let p = self.actor_pos();
         for (i, zone) in self.arena.zones.iter().enumerate() {
             let d = p - zone.pos;
             let now =

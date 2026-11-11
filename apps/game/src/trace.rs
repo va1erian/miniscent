@@ -69,6 +69,9 @@ fn event_fields(game: &Game, event: &Event) -> Option<String> {
         Event::PropDestroyed(i) => named("destroyed", "who", "prop", i),
         Event::PropPicked(i) => named("pickup", "who", "prop", i),
         Event::PropUsed(i) => named("used", "who", "prop", i),
+        Event::Disembarked => "\"ev\":\"disembarked\"".to_string(),
+        Event::Boarded => "\"ev\":\"boarded\"".to_string(),
+        Event::BoardRefused => "\"ev\":\"board_refused\"".to_string(),
     })
 }
 

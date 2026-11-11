@@ -15,6 +15,7 @@
 //! world 0 0 0  4 26                               # x y z, fog start, fog end
 //! marker 3 0 0  0  name trap_hinge                # x y z yaw
 //! zone 0 10 0  2 2 2  name hall  tag alarm        # x y z, half sizes
+//! scale 0 0 0  6                                  # x y z, ship size (see below)
 //! vista 0 0 0  0 0 0  0 0 0.0625  0 0 0.1  0 0  0 1e5  0x8090a0  # see below
 //! mover vault_door  tag doors  brushes 1 2        # brush lines, counted from 0
 //! kind hornet hp=40 radius=0.75 ...  then | blueprint lines, then end
@@ -22,6 +23,10 @@
 //!
 //! A `kind` block is an enemy kind, in `level_text/kinds.rs`; an `enemy` line's kind
 //! counts them from 0, and a level with none plays the stock drone and hunter.
+//!
+//! A `scale` line makes the ship that many times its stock size. Units are the
+//! pilot's metres in every level, and the pilot can land and walk in any of them;
+//! the game's scale guide (`--scale-guide`) gives the clearances for both.
 //!
 //! A `projector` line is a spot light: yaw and pitch in radians (pitch -1.57 shines
 //! straight down), then the cone's inner and outer half angles in radians, full
@@ -220,6 +225,7 @@ fn entity_text(e: &Entity) -> String {
         } => format!("world {} {fog_start} {fog_end}", v32(pos)),
         Entity::Marker { pos, yaw } => format!("marker {} {yaw}", v32(pos)),
         Entity::Zone { pos, half } => format!("zone {} {}", v32(pos), v32(half)),
+        Entity::Scale { pos, ship } => format!("scale {} {ship}", v32(pos)),
         Entity::VistaLayer {
             pos,
             centre,
@@ -338,6 +344,10 @@ fn read_entity(kind: &str, w: &mut Words) -> Res<Option<Entity>> {
         "zone" => Entity::Zone {
             pos: pos(w)?,
             half: w.v3("the half sizes")?,
+        },
+        "scale" => Entity::Scale {
+            pos: pos(w)?,
+            ship: w.f32("the ship size")?,
         },
         "vista" => Entity::VistaLayer {
             pos: pos(w)?,

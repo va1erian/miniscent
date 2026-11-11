@@ -73,6 +73,26 @@ pub fn dump_level(path: &Path) -> Result<String, String> {
     Ok(level_text::to_text(&level))
 }
 
+/// `--scale-guide`: the sizes a level must leave open for the ship and the
+/// pilot. `what` is a ship size, or a level whose scale line gives one.
+pub fn scale_guide(what: &str) -> Result<String, String> {
+    let scale = match what.parse::<f32>() {
+        Ok(n) => n,
+        Err(_) => assets::load_level(Path::new(what))?
+            .ship_scale()
+            .unwrap_or(1.0),
+    };
+    let range = mscent_world::MIN_SHIP_SCALE..=mscent_world::MAX_SHIP_SCALE;
+    if !range.contains(&scale) {
+        return Err(format!(
+            "the ship size must be {} to {}",
+            range.start(),
+            range.end()
+        ));
+    }
+    Ok(mscent_game::ScaleGuide::new(scale).to_string())
+}
+
 /// `--pack-level`: reads text and writes the binary level. Anything refused is
 /// reported with its line, and nothing is written.
 pub fn pack_level(from: &Path, to: &Path) -> Result<String, String> {

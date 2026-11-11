@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! magic   "MSLV"           4 bytes
-//! version u16              currently 7 (1 to 6 are still read)
+//! version u16              currently 8 (1 to 7 are still read)
 //! flags   u16              reserved, must be 0
 //! count   u32              number of sections (<= MAX_SECTIONS)
 //! section*: id u32, len u32, payload[len]
@@ -16,7 +16,8 @@
 //! there are any); `5` voxel volumes (`voxel/wire.rs`, version 4, likewise); `6`
 //! enemy kinds (`format_kinds.rs`, version 7, likewise: none means the stock table).
 //! Unknown section ids are skipped for forward compatibility. Entity tag `7`, a
-//! vista layer, is version 5; an older file with it is rejected.
+//! vista layer, is version 5; an older file with it is rejected. Entity tag `9`,
+//! a scale, is version 8.
 //! Brushes are stored as raw planes and rebuilt through [`Brush::new`], so a
 //! hostile file cannot smuggle in an invalid brush. Version 2 follows each
 //! brush's planes with one TexInfo record per plane (`texinfo.rs`, 47 bytes);
@@ -38,7 +39,7 @@ use crate::voxel::wire::{check_orders, read_volumes, write_volumes};
 use mscent_math::{DPlane, Vec3d};
 
 pub const MAGIC: [u8; 4] = *b"MSLV";
-pub const VERSION: u16 = 7;
+pub const VERSION: u16 = 8;
 /// Oldest version [`read`] still accepts.
 const MIN_VERSION: u16 = 1;
 pub const MAX_FILE_BYTES: usize = 64 << 20;
@@ -61,6 +62,8 @@ const VISTA_VERSION: u16 = 5;
 const PROJECTOR_VERSION: u16 = 6;
 /// First version whose kinds section the reader understands.
 const KINDS_VERSION: u16 = 7;
+/// First version with [`Entity::Scale`], entity tag 9.
+const SCALE_VERSION: u16 = 8;
 
 /// Smallest brush record: op, order, material, plane count.
 const BRUSH_HEAD: usize = 1 + 4 + 2 + 4;
@@ -165,6 +168,7 @@ fn write_entities(entities: &[Entity]) -> Vec<u8> {
             Entity::Zone { .. } => 6,
             Entity::VistaLayer { .. } => 7,
             Entity::Projector { .. } => 8,
+            Entity::Scale { .. } => 9,
         });
         put_vec3(&mut out, e.pos());
         match *e {
@@ -196,7 +200,9 @@ fn write_entities(entities: &[Entity]) -> Vec<u8> {
                 }
             }
             Entity::Enemy { kind, .. } => out.push(kind),
-            Entity::Goal { radius, .. } => put_f32(&mut out, radius),
+            Entity::Goal { radius, .. } | Entity::Scale { ship: radius, .. } => {
+                put_f32(&mut out, radius);
+            }
             Entity::World {
                 fog_start, fog_end, ..
             } => {
@@ -424,6 +430,10 @@ fn read_entity(c: &mut Cursor, version: u16) -> Result<Entity, FormatError> {
             fog_start: c.f32()?,
             fog_end: c.f32()?,
             fog_color: c.u32()?,
+        },
+        9 if version >= SCALE_VERSION => Entity::Scale {
+            pos,
+            ship: c.f32()?,
         },
         other => return Err(FormatError::BadEntityTag(other)),
     })

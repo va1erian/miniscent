@@ -9,6 +9,8 @@ use mscent_collide::STEP_HZ;
 use mscent_math::{Quat, Vec3};
 use mscent_script::{Flow, Heap, Native, Value};
 
+/// From the pilot's feet sphere up to the chest, which is where the pilot is.
+const CHEST: Vec3 = Vec3::new(0.0, 0.0, crate::pilot::HEAD_RISE * 0.5);
 /// Most failed or passed checks kept. A test in a loop should not fill memory.
 const MAX_CHECKS: usize = 4096;
 /// Most screenshots one test can ask for.
@@ -48,6 +50,17 @@ pub(crate) const NATIVES: &[(&str, Native<Game>)] = &[
     ("aimAt:", aim_at),
     ("fireFor:", fire_for),
     ("useFor:", use_for),
+    ("walkFor:", |g, h, _, a| {
+        let (until, seconds) = hold_ticks(g, h, a, "walkFor:")?;
+        g.script.walk_until = until;
+        Ok(Flow::Wait(seconds))
+    }),
+    ("jumpFor:", |g, h, _, a| {
+        let (until, seconds) = hold_ticks(g, h, a, "jumpFor:")?;
+        g.script.jump_until = until;
+        Ok(Flow::Wait(seconds))
+    }),
+    ("pressBoard", press_board),
     ("shot:", shot),
     ("phase", phase),
 ];
@@ -58,6 +71,12 @@ impl Game {
         crate::Input {
             fire: self.ticks < self.script.fire_until,
             use_key: self.ticks < self.script.use_until,
+            thrust: Vec3::new(
+                0.0,
+                f32::from(u8::from(self.ticks < self.script.jump_until)),
+                f32::from(u8::from(self.ticks < self.script.walk_until)),
+            ),
+            board: self.ticks < self.script.board_until,
             ..crate::Input::default()
         }
     }
@@ -116,10 +135,26 @@ fn check(g: &mut Game, h: &mut Heap, _: Value, args: &[Value]) -> Res {
     nil()
 }
 
+/// Moves the body being played: the pilot's chest, or the ship's centre.
 fn put_player(g: &mut Game, pos: Vec3) {
-    g.player.body.pos = pos;
-    g.player.body.prev_pos = pos;
-    g.player.body.vel = Vec3::ZERO;
+    let (body, pos) = match &mut g.pilot {
+        Some(p) => {
+            p.grounded = false;
+            (&mut p.body, pos - CHEST)
+        }
+        None => (&mut g.player.body, pos),
+    };
+    body.pos = pos;
+    body.prev_pos = pos;
+    body.vel = Vec3::ZERO;
+}
+
+/// Presses the board control for a few steps, as a key press does: the pilot
+/// leaves a landed ship, or boards it.
+fn press_board(g: &mut Game, _: &mut Heap, _: Value, _: &[Value]) -> Res {
+    const PRESS: f32 = 2.0 / STEP_HZ as f32;
+    g.script.board_until = g.ticks.saturating_add(2);
+    Ok(Flow::Wait(PRESS * 2.0))
 }
 
 /// Puts the player `distance` from a thing, in the first direction with room
@@ -169,10 +204,14 @@ fn looking_along(dir: Vec3) -> Quat {
 
 fn aim_at(g: &mut Game, h: &mut Heap, _: Value, args: &[Value]) -> Res {
     let at = g.place_of(h, one(args)?)?;
-    let dir = (at - g.player.pos())
+    let (from, _) = g.aim();
+    let dir = (at - from)
         .normalized()
         .ok_or("aimAt: the player is at that very place")?;
-    g.player.orientation = looking_along(dir);
+    match &mut g.pilot {
+        Some(p) => p.face(dir),
+        None => g.player.orientation = looking_along(dir),
+    }
     nil()
 }
 

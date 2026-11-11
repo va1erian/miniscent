@@ -103,6 +103,7 @@ pub fn entity_name(e: &Entity) -> &'static str {
         Entity::Enemy { .. } => EntityKind::Enemy.name(),
         Entity::Goal { .. } => EntityKind::Goal.name(),
         Entity::World { .. } => "World",
+        Entity::Scale { .. } => "Scale",
         Entity::Marker { .. } => EntityKind::Marker.name(),
         Entity::Zone { .. } => EntityKind::Zone.name(),
         Entity::VistaLayer { .. } => EntityKind::VistaLayer.name(),
@@ -132,6 +133,7 @@ pub fn with_pos(e: &Entity, p: [f64; 3]) -> Entity {
         | Entity::World { pos, .. }
         | Entity::Marker { pos, .. }
         | Entity::Zone { pos, .. }
+        | Entity::Scale { pos, .. }
         | Entity::VistaLayer { pos, .. } => *pos = np,
     }
     out
@@ -173,6 +175,7 @@ pub fn params(e: &Entity) -> Vec<(&'static str, f64)> {
             ("Outer angle (deg)", short(outer.to_degrees())),
         ],
         Entity::Goal { radius, .. } => vec![("Radius", short(radius))],
+        Entity::Scale { ship, .. } => vec![("Ship size", short(ship))],
         Entity::World {
             fog_start, fog_end, ..
         } => vec![("Fog start", short(fog_start)), ("Fog end", short(fog_end))],
@@ -260,7 +263,9 @@ fn set_held(e: &mut Entity, i: usize, v: f64) {
             _ => {}
         },
         Entity::Projector { .. } => set_projector_param(e, i, v),
-        Entity::Goal { radius, .. } if i == 0 => *radius = v as f32,
+        Entity::Goal { radius, .. } | Entity::Scale { ship: radius, .. } if i == 0 => {
+            *radius = v as f32
+        }
         // The end must stay above the start, so each pushes the other.
         Entity::World {
             fog_start, fog_end, ..

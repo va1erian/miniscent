@@ -200,6 +200,9 @@ fn agent_command(o: &Options) -> Option<Result<String, String>> {
     if let Some(path) = &o.dump_level {
         return Some(agent::dump_level(path));
     }
+    if let Some(what) = &o.scale_guide {
+        return Some(agent::scale_guide(what));
+    }
     if let Some((from, to)) = &o.pack_level {
         return Some(agent::pack_level(from, to));
     }
@@ -268,7 +271,7 @@ fn real_main() -> Result<(), String> {
     for shot in &report.shots {
         println!("wrote {}", shot.display());
     }
-    let at = session.game().player.pos();
+    let at = session.game().actor_pos();
     println!(
         "final phase {:?} at ({:.1}, {:.1}, {:.1})",
         session.phase(),

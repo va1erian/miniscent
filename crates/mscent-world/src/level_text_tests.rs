@@ -275,3 +275,34 @@ fn viewport_materials_survive_in_box_and_brush_lines() {
     assert!(text.starts_with("miniscent-level 1\nbrush"));
     assert_eq!(from_text(&text).unwrap(), level);
 }
+
+#[test]
+fn a_scale_line_reads_writes_and_reads_back() {
+    let text =
+        "miniscent-level 1\nbox subtract 0 1  -8 -8 -8  8 8 8\nplayer 0 0 0 0\nscale 1 2 3  5\n";
+    let level = from_text(text).unwrap();
+    assert_eq!(level.ship_scale(), Some(5.0));
+    assert!(to_text(&level).contains("scale 1 2 3 5"));
+    let again = crate::format::read(&crate::format::write(&level)).unwrap();
+    assert_eq!(again, level);
+}
+
+#[test]
+fn a_ship_size_out_of_range_is_refused() {
+    for bad in ["0", "-2", "100", "nan", "inf"] {
+        let text = format!("miniscent-level 1\nplayer 0 0 0 0\nscale 0 0 0  {bad}\n");
+        assert!(from_text(&text).is_err(), "{bad} was taken");
+    }
+}
+
+#[test]
+fn a_scale_in_an_old_file_is_refused() {
+    let level = from_text("miniscent-level 1\nplayer 0 0 0 0\nscale 0 0 0 2\n").unwrap();
+    let mut bytes = crate::format::write(&level);
+    // The version follows the four magic bytes.
+    bytes[4..6].copy_from_slice(&7u16.to_le_bytes());
+    assert_eq!(
+        crate::format::read(&bytes),
+        Err(crate::format::FormatError::BadEntityTag(9))
+    );
+}

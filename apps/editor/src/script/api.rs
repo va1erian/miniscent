@@ -318,6 +318,12 @@ pub const API: &[Entry] = &[
     e("hp", Recv::Player, "hp", "Health left"),
     e("heal:", Recv::Player, "heal: 25", "Give health back"),
     e("pos", Recv::Player, "pos", "Where it is"),
+    e(
+        "onFoot",
+        Recv::Player,
+        "onFoot",
+        "Whether the pilot is out of the ship",
+    ),
     e("hp:", Recv::Kind, "hp: 80", "Health of this kind"),
     e(
         "speed:",

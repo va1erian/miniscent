@@ -4,6 +4,7 @@
 use mscent_collide::STEP_HZ;
 use mscent_game::Screen;
 use mscent_game::fx::combat::ViewKick;
+use mscent_game::pilot::{EYE_RISE, heading_of};
 use mscent_math::{Quat, Vec3};
 use mscent_render::model::{ModelInstance, ModelTable};
 
@@ -24,7 +25,8 @@ const WHITE: u32 = 0xffff_ffff;
 /// flat cost 0.16 ms at 160x90, 0.52 at 320x180 and 4.0 at 960x540.
 const ESTIMATE_SHARE: u32 = 4;
 const ESTIMATE_WIDTH: u32 = 160;
-/// How far behind and above the ship a chase view stands.
+/// How far behind and above the played body a chase view stands: for the stock
+/// ship (a bigger one pushes it back as far as it is bigger) and for the pilot.
 const CHASE_BACK: f32 = 3.0;
 const CHASE_UP: f32 = 0.8;
 
@@ -46,32 +48,58 @@ fn nlerp(a: Quat, b: Quat, t: f32) -> Quat {
 }
 
 impl GameSession {
-    /// Where the camera is, before anything cosmetic moves it.
+    /// Where the camera is, before anything cosmetic moves it: the pilot's
+    /// eyes, or the ship's centre bobbing as it hovers.
     fn eye(&self) -> Vec3 {
+        let alpha = self.stepper.alpha();
+        if let Some(p) = &self.game.pilot {
+            return p.body.prev_pos.lerp(p.body.pos, alpha) + Vec3::new(0.0, 0.0, EYE_RISE);
+        }
         let p = &self.game.player;
-        p.body.prev_pos.lerp(p.body.pos, self.stepper.alpha()) + p.bob_offset()
+        p.body.prev_pos.lerp(p.body.pos, alpha) + p.bob_offset()
     }
 
     /// The camera for this frame, interpolated between the last two steps.
     pub fn view(&self) -> View {
         let alpha = self.stepper.alpha();
-        let p = &self.game.player;
-        let orientation =
-            (nlerp(self.prev_orientation, p.orientation, alpha) * p.bank_rotation()).normalized();
+        let turn = nlerp(self.prev_orientation, self.game.view_orientation(), alpha);
+        let (orientation, reach) = match self.game.pilot {
+            Some(_) => (turn, 1.0),
+            None => {
+                let ship = &self.game.player;
+                ((turn * ship.bank_rotation()).normalized(), ship.scale)
+            }
+        };
         let mut pos = self.eye() + self.kick.shake;
         if self.chase {
             let (back, up) = (Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 1.0, 0.0));
-            pos = pos + orientation.rotate(back) * CHASE_BACK + orientation.rotate(up) * CHASE_UP;
+            pos = pos
+                + orientation.rotate(back) * (CHASE_BACK * reach)
+                + orientation.rotate(up) * (CHASE_UP * reach);
         }
         View { pos, orientation }
     }
 
-    /// The ship where the player is this frame, turned as the view is.
-    fn ship_now(&self) -> Option<ModelInstance> {
-        let p = &self.game.player;
-        let pos = p.body.prev_pos.lerp(p.body.pos, self.stepper.alpha());
-        let turn = self.view().orientation;
-        Some(self.ship.as_ref()?.instance(pos, turn, self.chase))
+    /// The ship and the pilot this frame: first what every renderer draws (the
+    /// ship parked while the pilot walks), then the body being played, which
+    /// only the hardware renderer draws (in a chase view) or shadows.
+    fn crew_now(&self, view: &View) -> (Option<ModelInstance>, Option<ModelInstance>) {
+        let Some(crew) = &self.crew else {
+            return (None, None);
+        };
+        let ship = &self.game.player;
+        let Some(pilot) = &self.game.pilot else {
+            let pos = ship.body.prev_pos.lerp(ship.body.pos, self.stepper.alpha());
+            let flying = crew.ship(pos, view.orientation, ship.scale, self.chase);
+            return (None, Some(flying));
+        };
+        let parked = crew.ship(ship.pos(), ship.orientation, ship.scale, true);
+        let feet = pilot
+            .body
+            .prev_pos
+            .lerp(pilot.body.pos, self.stepper.alpha());
+        let walking = crew.pilot(feet, heading_of(view.orientation), self.chase);
+        (Some(parked), Some(walking))
     }
 
     /// Seconds of play for what a vista does over time: the fixed steps simulated
@@ -118,7 +146,7 @@ impl GameSession {
             Some(())
         } else {
             self.renderer
-                .draw_frame(&mut fb, &software_input(&input, at.enemies))
+                .draw_frame(&mut fb, &software_input(&input, at.software))
                 .map(|_| ())
         };
         if drawn.is_some() {
@@ -171,7 +199,7 @@ impl GameSession {
             let mut frame = take_sized(&mut self.fb, layer_size)?;
             if self
                 .renderer
-                .draw_frame(&mut frame, &software_input(&input, at.enemies))
+                .draw_frame(&mut frame, &software_input(&input, at.software))
                 .is_some()
             {
                 if self.kick.white > 0 {
@@ -218,15 +246,17 @@ impl GameSession {
         }
         self.estimate = estimate;
         let mut models = enemy_models(&self.game, alpha, self.renderer.assets());
-        let enemies = models.len();
-        models.extend(self.ship_now());
+        let (shared, played) = self.crew_now(&view);
+        models.extend(shared);
+        let software = models.len();
+        models.extend(played);
         Prepared {
             view,
             actors: actors_of(&self.game),
             poses: mover_poses_of(&self.game, alpha),
             vista_time: self.vista_time(),
             models,
-            enemies,
+            software,
         }
     }
 
@@ -267,10 +297,11 @@ struct Prepared {
     actors: Vec<Actor>,
     poses: Vec<MoverPose>,
     vista_time: f32,
-    /// The enemies, then the player's ship if there is one.
+    /// The enemies, the parked ship if the pilot is out, then the body being
+    /// played, if the session has their models.
     models: Vec<ModelInstance>,
-    /// How many of `models` are enemies.
-    enemies: usize,
+    /// How many of `models` every renderer draws: all but the played body.
+    software: usize,
 }
 
 /// The framebuffer in `slot`, made again at `size` if it is not that size.
@@ -282,26 +313,26 @@ fn take_sized(slot: &mut Option<Framebuffer>, (width, height): (u32, u32)) -> Op
     }
 }
 
-/// `input` as software draws it: its first `enemies` models, without the
-/// player's ship after them, which only the hardware renderer draws (and
-/// shadows), so that a chase view's ship is not drawn by whichever renderer
-/// happens to be in use.
-fn software_input<'a>(input: &FrameInput<'a>, enemies: usize) -> FrameInput<'a> {
+/// `input` as software draws it: its first `shared` models, without the played
+/// body after them, which only the hardware renderer draws (and shadows), so
+/// that a chase view's body is not drawn by whichever renderer happens to be in
+/// use. The parked ship is among the shared ones.
+fn software_input<'a>(input: &FrameInput<'a>, shared: usize) -> FrameInput<'a> {
     let models = input.effects.models;
     FrameInput {
         view: input.view,
         quality: input.quality,
         actors: input.actors,
         effects: Effects {
-            models: models.map(|(table, all)| (table, &all[..enemies.min(all.len())])),
+            models: models.map(|(table, all)| (table, &all[..shared.min(all.len())])),
             ..input.effects
         },
         wants_depth: input.wants_depth,
     }
 }
 
-/// What a frame draws models with: the level's table, and the enemies and the
-/// ship where `at` has them.
+/// What a frame draws models with: the level's table, and the enemies, the
+/// ship and the pilot where `at` has them.
 fn models_of<'a>(
     renderer: &'a LevelRenderer,
     at: &'a Prepared,

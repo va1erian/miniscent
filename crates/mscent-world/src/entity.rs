@@ -59,6 +59,12 @@ pub enum Entity {
     /// A box a script is told the player entered or left. `half` is the
     /// half-size on each axis.
     Zone { pos: Vec3, half: Vec3 },
+    /// How big the ship is in this level. Units are the pilot's metres in every
+    /// level, and the ship is `ship` times its stock size (a little over a unit
+    /// across), so one level can hold places built for the ship and places built
+    /// for the pilot on foot. The first one counts; `pos` is where the editor
+    /// draws its scale figures.
+    Scale { pos: Vec3, ship: f32 },
     /// One layer of a viewport vista, placed in a sealed room. The layer's eye is
     /// `pos + (player - centre) * parallax`, turned by `spin` over time.
     /// `centre` is the point of the play space that maps to `pos`. `slot` picks
@@ -94,6 +100,10 @@ pub const MAX_VISTA_PAN: f32 = 1.0e4;
 
 /// Largest fog distance a level may ask for.
 pub const MAX_FOG_DEPTH: f32 = 1000.0;
+
+/// The range of [`Entity::Scale`]'s ship size, as a multiple of the stock ship.
+pub const MIN_SHIP_SCALE: f32 = 0.25;
+pub const MAX_SHIP_SCALE: f32 = 32.0;
 
 /// Unit vector a projector at `yaw` and `pitch` shines along.
 pub fn projector_dir(yaw: f32, pitch: f32) -> Vec3 {
@@ -193,6 +203,9 @@ impl Entity {
             Entity::Zone { pos, half } => {
                 coord_ok(pos) && radius_ok(half.x) && radius_ok(half.y) && radius_ok(half.z)
             }
+            Entity::Scale { pos, ship } => {
+                coord_ok(pos) && (MIN_SHIP_SCALE..=MAX_SHIP_SCALE).contains(&ship)
+            }
             Entity::VistaLayer {
                 pos,
                 centre,
@@ -223,6 +236,7 @@ impl Entity {
             | Entity::World { pos, .. }
             | Entity::Marker { pos, .. }
             | Entity::Zone { pos, .. }
+            | Entity::Scale { pos, .. }
             | Entity::VistaLayer { pos, .. } => pos,
         }
     }
@@ -241,6 +255,15 @@ impl Level {
 }
 
 impl Level {
+    /// The ship size of the level's first [`Entity::Scale`]; `None` is the
+    /// stock size.
+    pub fn ship_scale(&self) -> Option<f32> {
+        self.entities.iter().find_map(|e| match *e {
+            Entity::Scale { ship, .. } => Some(ship),
+            _ => None,
+        })
+    }
+
     /// Where the first player start is, which is the one that counts.
     pub fn player_start(&self) -> Option<Vec3> {
         self.entities.iter().find_map(|e| match *e {
